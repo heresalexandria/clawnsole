@@ -1,9 +1,9 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
+import 'generation_status.dart';
 import 'gateway.dart';
 import 'local_data_store.dart';
 import 'models.dart';
@@ -31,19 +31,22 @@ class NativeGateway implements AppGateway {
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = current.generations.map((item) {
-      if (item.deliveryExpiresAt == null ||
-          item.deliveryExpiresAt!.isAfter(now) ||
-          (item.resultUrl == null && item.draftCacheUrl == null)) {
-        return item;
+      var next = item.recoverInterruptedSubmission(now);
+      if (!identical(next, item)) changed = true;
+      if (next.deliveryExpiresAt == null ||
+          next.deliveryExpiresAt!.isAfter(now) ||
+          (next.resultUrl == null && next.draftCacheUrl == null)) {
+        return next;
       }
       changed = true;
-      return Generation.fromJson(<String, Object?>{
-        ...item.toJson(),
+      next = Generation.fromJson(<String, Object?>{
+        ...next.toJson(),
         'resultUrl': null,
         'draftCacheUrl': null,
         'deliveryExpired':
-            item.resultAsset == null || item.draftCacheUrl != null,
+            next.resultAsset == null || next.draftCacheUrl != null,
       });
+      return next;
     }).toList();
     if (!changed) return current;
     final next = current.copyWith(generations: generations);
@@ -216,6 +219,9 @@ class NativeGateway implements AppGateway {
         clearCost: cost == null,
         creditsBefore: creditsBefore,
         creditsAfter: creditsAfter,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(response),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
@@ -223,7 +229,10 @@ class NativeGateway implements AppGateway {
     } on Object catch (error) {
       record = record.copyWith(
         status: 'Error',
-        error: error.toString(),
+        error: generationExceptionMessage(error),
+        lastProviderStatusCode: providerHttpStatus(error),
+        lastProviderResponse: providerErrorResponse(error),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
@@ -233,68 +242,99 @@ class NativeGateway implements AppGateway {
 
   @override
   Future<Generation> poll(Generation generation) async {
-    final key = (await _store.read()).apiKey.trim();
-    if (key.isEmpty) throw StateError('The saved BFL API key is missing.');
-    if (generation.pollingUrl == null) {
-      throw StateError('This generation has no polling URL.');
-    }
-    final payload = await _api.poll(key, generation.pollingUrl!);
-    final rawStatus = payload['status'] as String? ?? 'Pending';
-    final status =
-        rawStatus == 'Ready' ||
-            const <String>{
-              'Error',
-              'Failed',
-              'Request Moderated',
-              'Content Moderated',
-            }.contains(rawStatus)
-        ? rawStatus
-        : 'Pending';
-    final resultUrl = status == 'Ready'
-        ? findResultUrl(payload['result'], draft: false)
-        : null;
-    final draftUrl = status == 'Ready'
-        ? findResultUrl(payload['result'], draft: true)
-        : null;
-    AssetReference? resultAsset = generation.resultAsset;
-    if (resultUrl != null && resultAsset == null) {
-      try {
-        final response = await _client.get(validatedBflUrl(resultUrl));
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resultAsset = await _store.writeAsset(
-            response.bodyBytes,
-            label: 'clawnsole-${generation.localId}.mp4',
-            contentType: response.headers['content-type'] ?? 'video/mp4',
-          );
+    final checkedAt = DateTime.now().toUtc();
+    late Generation next;
+    try {
+      final key = (await _store.read()).apiKey.trim();
+      if (key.isEmpty) throw StateError('The saved BFL API key is missing.');
+      if (!generation.canCheckStatus) {
+        throw StateError('This generation has no polling URL.');
+      }
+      final payload = await _api.poll(key, generation.pollingUrl!);
+      var status = normalizeGenerationStatus(payload['status']);
+      final resultUrl = status == 'Ready'
+          ? findResultUrl(payload['result'], draft: false)
+          : null;
+      final draftUrl = status == 'Ready'
+          ? findResultUrl(payload['result'], draft: true)
+          : null;
+      var failureMessage = isGenerationFailureStatus(status)
+          ? providerFailureMessage(payload, fallback: status)
+          : null;
+      if (status == 'Ready' && resultUrl == null) {
+        status = 'Error';
+        failureMessage =
+            'BFL reported that the generation was ready but did not include a video URL.';
+      }
+      AssetReference? resultAsset = generation.resultAsset;
+      if (resultUrl != null && resultAsset == null) {
+        try {
+          final response = await _client.get(validatedBflUrl(resultUrl));
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            resultAsset = await _store.writeAsset(
+              response.bodyBytes,
+              label: 'clawnsole-${generation.localId}.mp4',
+              contentType: response.headers['content-type'] ?? 'video/mp4',
+            );
+          }
+        } on Object {
+          // The temporary provider URL remains available if local retention fails.
         }
-      } on Object {
-        // The temporary provider URL remains available if local retention fails.
+      }
+      final failed = isGenerationFailureStatus(status);
+      next = generation.copyWith(
+        status: status,
+        progress: status == 'Ready'
+            ? 100
+            : normalizedProgress(payload['progress']),
+        resultUrl: resultUrl,
+        resultAsset: resultAsset,
+        deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
+        draftCacheUrl: draftUrl,
+        deliveryExpiresAt: status == 'Ready'
+            ? checkedAt.add(const Duration(minutes: 10))
+            : null,
+        error: failureMessage,
+        clearError: !failed,
+        lastCheckedAt: checkedAt,
+        statusCheckCount: generation.statusCheckCount + 1,
+        consecutiveCheckFailures: 0,
+        clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(payload),
+        lastProviderResponseAt: checkedAt,
+        updatedAt: checkedAt,
+      );
+    } on Object catch (error) {
+      final payload = providerErrorPayload(error);
+      final providerStatus = normalizeGenerationStatus(payload?['status']);
+      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+        next = generation.copyWith(
+          status: providerStatus,
+          progress: normalizedProgress(payload['progress']),
+          error: providerFailureMessage(payload, fallback: providerStatus),
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else {
+        next = generation.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
+          lastCheckError: generationExceptionMessage(error),
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
       }
     }
-    final failed = const <String>{
-      'Error',
-      'Failed',
-      'Request Moderated',
-      'Content Moderated',
-    }.contains(status);
-    final next = generation.copyWith(
-      status: status,
-      progress: status == 'Ready'
-          ? 100
-          : normalizedProgress(payload['progress']),
-      resultUrl: resultUrl,
-      resultAsset: resultAsset,
-      deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
-      draftCacheUrl: draftUrl,
-      deliveryExpiresAt: status == 'Ready'
-          ? DateTime.now().toUtc().add(const Duration(minutes: 10))
-          : null,
-      error: failed
-          ? jsonEncode(payload['details'] ?? payload['result'] ?? status)
-          : null,
-      clearError: !failed,
-      updatedAt: DateTime.now().toUtc(),
-    );
     await _replaceGeneration(next);
     return next;
   }

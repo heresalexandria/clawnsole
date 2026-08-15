@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'generation_status.dart';
+
 enum AppSection { create, library, settings }
 
 enum LibraryFilter { all, working, ready, failed }
@@ -207,6 +209,13 @@ class Generation {
     this.creditsAfter,
     this.cost,
     this.error,
+    this.lastCheckedAt,
+    this.statusCheckCount = 0,
+    this.consecutiveCheckFailures = 0,
+    this.lastCheckError,
+    this.lastProviderStatusCode,
+    this.lastProviderResponse,
+    this.lastProviderResponseAt,
   });
 
   final String localId;
@@ -233,15 +242,52 @@ class Generation {
   final double? creditsAfter;
   final double? cost;
   final String? error;
+  final DateTime? lastCheckedAt;
+  final int statusCheckCount;
+  final int consecutiveCheckFailures;
+  final String? lastCheckError;
+  final int? lastProviderStatusCode;
+  final String? lastProviderResponse;
+  final DateTime? lastProviderResponseAt;
 
-  bool get isWorking => status == 'submitting' || status == 'Pending';
-  bool get isReady => status == 'Ready';
-  bool get isFailed => const <String>{
-    'Error',
-    'Failed',
-    'Request Moderated',
-    'Content Moderated',
-  }.contains(status);
+  bool get canCheckStatus => pollingUrl?.trim().isNotEmpty == true;
+  bool get isWorking =>
+      isGenerationWorkingStatus(status, canPoll: canCheckStatus);
+  bool get isReady => normalizeGenerationStatus(status) == 'Ready';
+  bool get isFailed => isGenerationFailureStatus(status);
+  bool get isStatusUnavailable =>
+      isWorking && lastCheckError?.trim().isNotEmpty == true;
+  bool get hasProviderDetails =>
+      error?.trim().isNotEmpty == true ||
+      lastCheckError?.trim().isNotEmpty == true ||
+      lastProviderResponse?.trim().isNotEmpty == true;
+  bool get isLongRunning =>
+      isWorking &&
+      DateTime.now().toUtc().difference(createdAt) >
+          const Duration(minutes: 30);
+  String get statusLabel => isStatusUnavailable
+      ? 'Status unavailable'
+      : generationStatusLabel(status);
+
+  bool isStatusCheckDue(DateTime now) =>
+      lastCheckedAt == null ||
+      !now.isBefore(
+        lastCheckedAt!.add(automaticPollDelay(consecutiveCheckFailures)),
+      );
+
+  Generation recoverInterruptedSubmission(DateTime now) {
+    if (normalizeGenerationStatus(status) != 'submitting' ||
+        canCheckStatus ||
+        now.difference(updatedAt) < const Duration(minutes: 2)) {
+      return this;
+    }
+    return copyWith(
+      status: 'Error',
+      error:
+          'Clawnsole was interrupted before it received a provider status URL. Check the BFL dashboard before submitting again.',
+      updatedAt: now,
+    );
+  }
 
   Generation copyWith({
     GenerationConfig? config,
@@ -265,6 +311,14 @@ class Generation {
     bool clearCost = false,
     String? error,
     bool clearError = false,
+    DateTime? lastCheckedAt,
+    int? statusCheckCount,
+    int? consecutiveCheckFailures,
+    String? lastCheckError,
+    bool clearLastCheckError = false,
+    int? lastProviderStatusCode,
+    String? lastProviderResponse,
+    DateTime? lastProviderResponseAt,
   }) => Generation(
     localId: localId,
     provider: provider,
@@ -290,6 +344,18 @@ class Generation {
     creditsAfter: creditsAfter ?? this.creditsAfter,
     cost: clearCost ? null : cost ?? this.cost,
     error: clearError ? null : error ?? this.error,
+    lastCheckedAt: lastCheckedAt ?? this.lastCheckedAt,
+    statusCheckCount: statusCheckCount ?? this.statusCheckCount,
+    consecutiveCheckFailures:
+        consecutiveCheckFailures ?? this.consecutiveCheckFailures,
+    lastCheckError: clearLastCheckError
+        ? null
+        : lastCheckError ?? this.lastCheckError,
+    lastProviderStatusCode:
+        lastProviderStatusCode ?? this.lastProviderStatusCode,
+    lastProviderResponse: lastProviderResponse ?? this.lastProviderResponse,
+    lastProviderResponseAt:
+        lastProviderResponseAt ?? this.lastProviderResponseAt,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -318,6 +384,20 @@ class Generation {
     if (creditsAfter != null) 'creditsAfter': creditsAfter,
     if (cost != null) 'cost': cost,
     if (error != null) 'error': error,
+    if (lastCheckedAt != null)
+      'lastCheckedAt': lastCheckedAt!.toUtc().toIso8601String(),
+    if (statusCheckCount > 0) 'statusCheckCount': statusCheckCount,
+    if (consecutiveCheckFailures > 0)
+      'consecutiveCheckFailures': consecutiveCheckFailures,
+    if (lastCheckError != null) 'lastCheckError': lastCheckError,
+    if (lastProviderStatusCode != null)
+      'lastProviderStatusCode': lastProviderStatusCode,
+    if (lastProviderResponse != null)
+      'lastProviderResponse': lastProviderResponse,
+    if (lastProviderResponseAt != null)
+      'lastProviderResponseAt': lastProviderResponseAt!
+          .toUtc()
+          .toIso8601String(),
   };
 
   factory Generation.fromJson(Map<String, Object?> json) => Generation(
@@ -361,6 +441,16 @@ class Generation {
     creditsAfter: (json['creditsAfter'] as num?)?.toDouble(),
     cost: (json['cost'] as num?)?.toDouble(),
     error: json['error'] as String?,
+    lastCheckedAt: DateTime.tryParse(json['lastCheckedAt'] as String? ?? ''),
+    statusCheckCount: (json['statusCheckCount'] as num?)?.toInt() ?? 0,
+    consecutiveCheckFailures:
+        (json['consecutiveCheckFailures'] as num?)?.toInt() ?? 0,
+    lastCheckError: json['lastCheckError'] as String?,
+    lastProviderStatusCode: (json['lastProviderStatusCode'] as num?)?.toInt(),
+    lastProviderResponse: json['lastProviderResponse'] as String?,
+    lastProviderResponseAt: DateTime.tryParse(
+      json['lastProviderResponseAt'] as String? ?? '',
+    ),
   );
 }
 
@@ -412,7 +502,7 @@ class StoredData {
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 2,
+    'schemaVersion': 4,
     'apiKeys': <String, Object?>{if (apiKey.isNotEmpty) 'bfl': apiKey},
     'preferences': preferences.toJson(),
     'generations': generations.map((item) => item.toJson()).toList(),

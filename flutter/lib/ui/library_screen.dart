@@ -291,7 +291,7 @@ class _GenerationCardState extends State<GenerationCard> {
                       item: item,
                     ),
                   Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
-                  if (item.isWorking)
+                  if (item.isWorking && !item.isStatusUnavailable)
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -357,14 +357,12 @@ class _GenerationCardState extends State<GenerationCard> {
                 ),
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
-                if (item.error != null) ...<Widget>[
+                if (item.error != null ||
+                    item.lastCheckError != null ||
+                    item.lastCheckedAt != null ||
+                    item.isLongRunning) ...<Widget>[
                   const SizedBox(height: 9),
-                  Text(
-                    item.error!,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: context.colors.error, fontSize: 9),
-                  ),
+                  GenerationStatusDetails(item: item),
                 ],
                 if (item.deliveryExpired) ...<Widget>[
                   const SizedBox(height: 9),
@@ -403,8 +401,13 @@ class _GenerationCardState extends State<GenerationCard> {
                     OutlinedButton.icon(
                       onPressed: () => unawaited(widget.controller.reuse(item)),
                       icon: const Icon(Icons.replay_rounded, size: 16),
-                      label: const Text('Reuse'),
+                      label: Text(item.isFailed ? 'Retry generation' : 'Reuse'),
                     ),
+                    GenerationStatusButton(
+                      controller: widget.controller,
+                      item: item,
+                    ),
+                    GenerationDetailsButton(item: item),
                     IconButton.outlined(
                       tooltip: 'Delete history record',
                       onPressed: () => unawaited(_remove()),

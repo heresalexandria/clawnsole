@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/provider_catalog.dart';
+import 'claw_mark.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
 
@@ -501,7 +502,7 @@ class _SettingsSide extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Icon(Icons.pets_rounded, color: Color(0xFFA8B9FF), size: 30),
+            const ClawMark(size: 30, color: Color(0xFFA8B9FF)),
             const SizedBox(height: 13),
             Text(
               'Room to stretch.',

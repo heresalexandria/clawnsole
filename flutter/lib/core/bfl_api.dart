@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+
+import 'generation_status.dart';
 
 class ProviderException implements Exception {
   const ProviderException(this.message, {this.status, this.details});
@@ -21,6 +24,19 @@ class BflApi {
   final http.Client _client;
   final Uri _baseUrl;
 
+  Future<http.Response> _request(
+    Future<http.Response> request,
+    String operation,
+  ) async {
+    try {
+      return await request.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      throw ProviderException(
+        'BFL did not respond while Clawnsole tried to $operation. You can check again without resubmitting.',
+      );
+    }
+  }
+
   Map<String, String> _headers(String apiKey, {bool json = false}) =>
       <String, String>{
         'Accept': 'application/json',
@@ -30,9 +46,9 @@ class BflApi {
 
   Future<double> getCredits(String apiKey) async {
     final payload = await _read(
-      await _client.get(
-        _baseUrl.resolve('/v1/credits'),
-        headers: _headers(apiKey),
+      await _request(
+        _client.get(_baseUrl.resolve('/v1/credits'), headers: _headers(apiKey)),
+        'check your credits',
       ),
     );
     final credits = payload is Map<String, Object?> ? payload['credits'] : null;
@@ -50,10 +66,13 @@ class BflApi {
     Map<String, Object?> input,
   ) async {
     final payload = await _read(
-      await _client.post(
-        _baseUrl.resolve('/v1/flux-3-video'),
-        headers: _headers(apiKey, json: true),
-        body: jsonEncode(input),
+      await _request(
+        _client.post(
+          _baseUrl.resolve('/v1/flux-3-video'),
+          headers: _headers(apiKey, json: true),
+          body: jsonEncode(input),
+        ),
+        'submit the generation',
       ),
     );
     if (payload is! Map<String, Object?>) {
@@ -68,7 +87,10 @@ class BflApi {
   Future<Map<String, Object?>> poll(String apiKey, String pollingUrl) async {
     final url = validatedBflUrl(pollingUrl);
     final payload = await _read(
-      await _client.get(url, headers: _headers(apiKey)),
+      await _request(
+        _client.get(url, headers: _headers(apiKey)),
+        'check the generation status',
+      ),
     );
     if (payload is! Map<String, Object?>) {
       throw const ProviderException(
@@ -93,16 +115,32 @@ class BflApi {
       401 || 403 => 'BFL rejected this API key.',
       402 => 'This BFL project does not have enough credits.',
       429 => 'BFL is at its active request limit. Try again shortly.',
+      500 || 502 || 503 || 504 =>
+        'BFL is temporarily unavailable (HTTP ${response.statusCode}). Retry shortly.',
       _ => 'BFL returned ${response.statusCode}.',
     };
-    final detail = payload is Map<Object?, Object?> ? payload['detail'] : null;
     throw ProviderException(
-      detail?.toString() ?? fallback,
+      providerFailureMessage(payload, fallback: fallback),
       status: response.statusCode,
       details: payload,
     );
   }
 }
+
+int? providerHttpStatus(Object error) =>
+    error is ProviderException ? error.status : null;
+
+Map<String, Object?>? providerErrorPayload(Object error) {
+  final details = error is ProviderException ? error.details : null;
+  if (details is! Map<Object?, Object?>) return null;
+  return details.map((key, value) => MapEntry(key.toString(), value));
+}
+
+String providerErrorResponse(Object error) => compactProviderResponse(
+  error is ProviderException
+      ? error.details ?? <String, Object?>{'error': error.message}
+      : <String, Object?>{'error': generationExceptionMessage(error)},
+);
 
 Uri validatedBflUrl(String value) {
   final url = Uri.tryParse(value);

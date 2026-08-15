@@ -11,7 +11,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clawnsole-preview-dark.png">
+    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview in light mode">
+  </picture>
 </p>
 
 Clawnsole is a local-first Flutter video generation workspace with a premium,
@@ -23,7 +26,8 @@ video API and keeps provider boundaries explicit for future video services.
 - Text-to-video, image-to-video, video continuation, and draft enhancement
 - One to ten start, end, and intermediate keyframes with even or exact timing
 - All documented durations, aspect ratios, resolutions, audio, draft, and safety controls
-- Live polling, progress, provider credit balance, and setting-aware estimates
+- Live polling, manual status refresh, surfaced provider errors, and progress
+- Provider credit balance and setting-aware estimates
 - Exact per-generation credit and USD history
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - System-aware light and dark themes with an explicit appearance switcher
