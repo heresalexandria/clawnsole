@@ -10,95 +10,94 @@
   <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview">
 </p>
 
-Clawnsole is a local-first video generation workspace with a premium, midcentury-inspired interface. It currently supports Black Forest Labs’ FLUX 3 video API and keeps provider boundaries explicit so more video APIs can be added without rewriting the library or generation UI.
+Clawnsole is a local-first Flutter video generation workspace with a premium,
+midcentury-inspired interface. It currently supports Black Forest Labs' FLUX 3
+video API and keeps provider boundaries explicit for future video services.
 
 ## What it does
 
 - Text-to-video, image-to-video, video continuation, and draft enhancement
-- One to ten start, end, and intermediate keyframes
-- Evenly spaced frames or explicit per-frame timing
-- Auto or 5–20 second duration, all documented aspect ratios, HD/FHD, synchronized audio, drafts, and safety tolerance
-- Live polling with progress bars using the `polling_url` returned by BFL
-- Live provider credit balance with manual and automatic refresh
-- Per-generation estimates from BFL’s published rate card, reconciled to the exact API charge after submission
-- Credit and USD spend history, including available balance before and after each submitted job
-- Completed-video playback through a same-origin media proxy
-- Browser save picker (“Save to Finder”) with a normal download fallback
-- Uncapped compact generation history, reusable settings, file-size accounting, and granular clear controls
-- API-key setup in the UI, stored only in Clawnsole’s local data file
+- One to ten start, end, and intermediate keyframes with even or exact timing
+- All documented durations, aspect ratios, resolutions, audio, draft, and safety controls
+- Live polling, progress, provider credit balance, and setting-aware estimates
+- Exact per-generation credit and USD history
+- Reload-safe input previews, completed-video playback, download, and full input reuse
+- Uncapped compact history with retained media files and granular clear controls
+- Local API-key setup with no database, `localStorage`, or IndexedDB history
 
-## Run locally
+## One product, four targets
 
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000), go to Settings, and paste a BFL project key. The Next.js process must remain running while you use the app.
-
-## macOS desktop app
-
-Clawnsole also ships as a standalone Electron app that packages this same Next.js
-UI and server—there is no second desktop implementation or external companion to
-run in production.
+Flutter owns all product behavior. Electron is only the macOS lifecycle and
+self-update shell around Flutter's web build and local Dart companion. The old
+root Next.js implementation has been removed.
 
 ```bash
-# development app (starts or reuses the local Next server)
-npm run electron:start
-
-# standalone .app, DMG, and ZIP
-npm run electron:build
+# from the repository root
+./flutter/scripts/start_web
+./flutter/scripts/start_ios
+./flutter/scripts/start_android
+./flutter/scripts/start_macos
 ```
 
-Build artifacts land in `electron/dist/release`. The packaged app stores its local
-data at `~/Library/Application Support/Clawnsole/clawnsole.json`. See
-[`electron/README.md`](electron/README.md) for architectures, signing, and
-notarization notes.
+The matching deployable builds are:
 
-The separate [`flutter/`](flutter/) implementation targets Flutter web, iOS, and
-Android. Repository-wide platform-parity and code-sharing rules live in
-[`AGENTS.md`](AGENTS.md).
+```bash
+./flutter/scripts/build_web
+./flutter/scripts/build_ios
+./flutter/scripts/build_android
+./flutter/scripts/build_macos
+```
 
-## Persistence policy
+See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/README.md).
 
-Clawnsole has no database and uses no browser storage. Its local project data is:
+## Persistence
 
-- `.clawnsole/clawnsole.json` for compact metadata and the API key
-- `.clawnsole/assets/` for retained reference inputs and completed videos
+Clawnsole has no database and uses no browser storage for history. Native apps
+store `clawnsole.json` inside their application support sandbox. Companion-backed
+web and Electron store the same compact schema in a local file, with retained
+inputs and videos in an adjacent `assets/` directory.
 
-That directory is gitignored. Set `CLAWNSOLE_DATA_FILE` before starting the app if you want the file elsewhere, which will also make it easy to move into an Electron or Flutter application-data directory later.
+- History is not capped.
+- Base64 request payloads and video blobs are never stored in JSON.
+- Removing history prunes media no longer referenced by another generation.
+- BFL delivery links are temporary; completed videos are retained locally first.
+- The BFL key is plaintext inside the locally protected JSON file and is never
+  returned to the web renderer.
 
-- Generation history is not capped.
-- History JSON stores prompts, request IDs, polling URLs, compact settings, status, and small references to asset files. Base64 request payloads are never written to JSON.
-- Uploaded reference images/source clips and completed videos are retained as separate local asset files so previews, playback, and reuse survive reloads. Removing a record prunes assets no longer referenced by any other generation.
-- History also stores the estimate shown at submission, BFL’s returned credit charge, and the available-credit snapshots around the request. USD cost is derived using BFL’s published conversion of one credit to $0.01.
-- Completed videos are copied locally before BFL’s temporary delivery URL expires. Temporary URLs are pruned after expiry; the local copy remains.
-- The BFL API key is stored as plaintext in the local JSON file with owner-only file permissions (`0600`). API routes use it server-side and return only whether a key exists to the browser.
-- Settings shows metadata size, retained-asset size/count, generation count, and the exact JSON path. It can clear history and its assets, reset preferences, remove the API key, or delete all project data.
+## Architecture
 
-“Save to Finder” exports another user-directed copy from Clawnsole’s retained local video.
+- `flutter/lib/core/`: provider contracts, pricing, models, gateways, and storage
+- `flutter/lib/app/`: application state and composition
+- `flutter/lib/ui/`: shared responsive screens and widgets
+- `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
+- `electron/`: macOS shell, packaging, checksum-verified GitHub updater
+- `.github/workflows/`: PR checks and parallel iOS/macOS releases
 
-## Provider architecture
+## Releases and desktop updates
 
-- `lib/providers/` contains provider-neutral request contracts and UI capability metadata.
-- `lib/providers/pricing.ts` dispatches provider-specific cost estimates and currency conversion.
-- `lib/server/providers/` contains server-only adapters and error normalization.
-- `lib/server/data-store.ts` owns the atomic local JSON-file reads and writes.
-- `lib/server/asset-store.ts` owns retained inputs/videos and reference-aware cleanup.
-- `/api/generations` and `/api/generations/status` are provider-dispatched API routes.
-- `/api/local-state` exposes sanitized local state and data-management actions.
-- `/api/media` validates BFL delivery hosts and proxies range requests for playback and saving.
-- `/api/assets` serves retained local media with range support and can retry result retention.
+Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
+drives the release workflow. iOS and macOS build in parallel, then a GitHub
+release is published with checksums. A manual workflow dispatch can cut the
+first release or a release without a PR.
 
-Add future providers by extending the provider ID and catalog, implementing a server adapter, and registering it in the server provider map.
+Packaged Electron builds check GitHub at most once per day and expose
+**Clawnsole → Check for Updates…**. An accepted update downloads the architecture
+matched ZIP, verifies `SHA256SUMS.txt`, replaces the installed app with rollback,
+and reopens it. iOS remains under normal App Store distribution semantics.
+
+See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 
 ## Verification
 
 ```bash
+cd flutter
+dart format --output=none --set-exit-if-changed lib tool test
+flutter analyze
+flutter test
+flutter build web
+
+cd ../electron
 npm test
-npm run lint
-npm run typecheck
-npm run build
 ```
 
-The implementation follows BFL’s official [FLUX 3 video documentation](https://docs.bfl.ai/flux_3/flux3_video), [API reference](https://docs.bfl.ai/api-reference/utility/generate-a-video-with-flux-3), [pricing calculator](https://bfl.ai/pricing), and [polling integration guidance](https://docs.bfl.ai/api_integration/integration_guidelines).
+The implementation follows BFL's official [FLUX 3 video documentation](https://docs.bfl.ai/flux_3/flux3_video), [API reference](https://docs.bfl.ai/api-reference/utility/generate-a-video-with-flux-3), [pricing calculator](https://bfl.ai/pricing), and [polling guidance](https://docs.bfl.ai/api_integration/integration_guidelines).

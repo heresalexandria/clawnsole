@@ -1,38 +1,55 @@
 # Clawnsole for macOS
 
-The Electron app is deliberately a thin desktop shell around Clawnsole's existing
-Next.js application. Development loads the local Next dev server. Release builds
-package Next's standalone server and start it on a private loopback port, so the
-finished app has no external runtime or companion-process requirement.
+Electron is a thin native shell around the canonical Flutter implementation. A
+desktop build packages `flutter/build/web` and the compiled Dart companion. The
+companion serves the Flutter bundle and owns local BFL requests, persistence,
+and media on one private loopback origin. No root Next.js app or external runtime
+is required.
 
-## Start in development
+## Canonical commands
 
 From the repository root:
 
 ```bash
-./electron/scripts/start_macos
-# or: npm run electron:start
+./flutter/scripts/start_macos
+./flutter/scripts/build_macos
 ```
 
-The script installs missing root and Electron dependencies, reuses a healthy
-Clawnsole server on port 3000, or starts and owns one for the Electron session.
-Set `CLAWNSOLE_WEB_PORT` to use another port.
+The direct `electron/scripts/start_macos` and `electron/scripts/build_macos`
+commands remain implementation-level aliases. Development builds Flutter web,
+runs the companion from source, and opens Electron. Release builds compile the
+companion, package the Flutter output, and produce a `.app`, DMG, and ZIP in
+`electron/dist/release`.
 
-## Build the standalone app
+Set `CLAWNSOLE_ELECTRON_ARCH` to `arm64` or `x64`. A matching Dart companion is
+compiled on that machine, so each architecture should be built on its matching
+runner. The current release workflow ships Apple silicon and can add Intel later.
 
-```bash
-./electron/scripts/build_macos
-# or: npm run electron:build
-```
+Desktop data lives at
+`~/Library/Application Support/Clawnsole/clawnsole.json`, with retained media in
+the adjacent `assets/` directory.
 
-Artifacts land in `electron/dist/release`: a `.app`, DMG, and ZIP for the current
-Mac architecture. Set `CLAWNSOLE_ELECTRON_ARCH` to `arm64`, `x64`, or `universal`.
+## Signing and notarization
 
-The default build is unsigned and usable locally. Set
-`CLAWNSOLE_ELECTRON_SIGN=true` and provide the Apple signing/notarization
-environment expected by `electron-builder` for distribution to other Macs;
-unsigned apps will trigger Gatekeeper warnings away from the build machine.
+Local builds default to ad-hoc/unsigned packaging. Set
+`CLAWNSOLE_ELECTRON_SIGN=true` and provide Electron Builder's certificate
+environment for Developer ID signing. CI supports these optional secrets:
 
-Desktop metadata lives at `~/Library/Application Support/Clawnsole/clawnsole.json`,
-with retained inputs and completed videos in the adjacent `assets/` directory.
-It follows the same reference-aware cleanup policy as the local web app.
+- `MACOS_CERTIFICATE_P12`
+- `MACOS_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+The last three enable notarization when a signing certificate is present.
+
+## Self-update
+
+The app checks the latest release at most once every 24 hours and provides
+**Clawnsole → Check for Updates…** for an explicit check. It downloads the
+matching `Clawnsole-<version>-mac-<arch>.zip`, requires a matching digest in
+`SHA256SUMS.txt`, unpacks with `ditto`, and performs a rollback-safe app swap
+after the running process exits. User data is outside the app bundle and is not
+touched.
+
+See [desktop update design](../docs/updates.md).

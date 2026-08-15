@@ -1,8 +1,8 @@
 # Clawnsole for Flutter
 
-This directory is a standalone Flutter implementation of Clawnsole for web,
-iOS, and Android. It does not import, rewrite, or change the sibling Next.js
-application.
+This directory is the canonical Clawnsole implementation for web, iOS, Android,
+and the Electron macOS renderer. Product behavior belongs here; Electron owns
+only desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
@@ -36,12 +36,15 @@ and keep Flutter attached for hot reload:
 ./scripts/start_web
 ./scripts/start_ios
 ./scripts/start_android
+./scripts/start_macos
 ```
 
 `start_web` starts the loopback companion, waits for its health check, opens
 Chrome, and stops the companion when Flutter exits. `start_ios` reuses a booted
 iPhone simulator or boots the newest available one. `start_android` reuses a
 running Android emulator or launches the first configured Android AVD.
+`start_macos` builds Flutter web, serves it through the Dart companion, and
+opens the thin Electron shell.
 
 Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or
 `CLAWNSOLE_ANDROID_DEVICE_ID` to choose a specific emulator. Every script also
@@ -79,8 +82,9 @@ Normally, use the single command:
 The script owns both the companion and Flutter process. The manual two-terminal
 workflow remains available when debugging the companion itself.
 
-The default companion address is `http://127.0.0.1:8787`, and its default data
-file is `flutter/.clawnsole/clawnsole-flutter.json`. Both are local-only.
+The default companion address is `http://127.0.0.1:8787`. The start script uses
+the repository's `.clawnsole/clawnsole.json`, preserving history from the retired
+root application. Both are local-only.
 
 Override them when needed:
 
@@ -102,17 +106,21 @@ the saved key itself.
 ./scripts/build_web
 ./scripts/build_ios
 ./scripts/build_android
+./scripts/build_macos
 ```
 
 - `build_web` creates `build/web` and compiles the companion into the standalone
-  `build/clawnsole_companion` executable. The static web bundle still needs that
-  local companion while it is used.
+  `build/clawnsole_companion` executable. By default the companion serves that
+  directory on the same origin; pass `CLAWNSOLE_PROXY_URL` only when hosting the
+  two separately.
 - `build_ios` creates a signed Xcode archive and IPA. It defaults to App Store
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate. Xcode signing must already be configured.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
+- `build_macos` packages the Flutter web output and companion in Electron,
+  producing the standalone app, DMG, and updater ZIP.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.
