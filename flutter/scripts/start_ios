@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/start_ios [additional flutter run arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_IOS_SIMULATOR_ID  Simulator UDID override"
+  exit 0
+fi
+
+print_heading "iOS simulator development"
+prepare_flutter
+require_command xcrun
+require_command open
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "iOS simulators require macOS and Xcode." >&2
+  exit 1
+fi
+
+SIMULATOR_ID="${CLAWNSOLE_IOS_SIMULATOR_ID:-}"
+
+if [[ -z "$SIMULATOR_ID" ]]; then
+  SIMULATOR_ID="$(xcrun simctl list devices booted | sed -nE 's/^[[:space:]]*iPhone.*\(([0-9A-Fa-f-]{36})\)[[:space:]]+\(Booted\).*$/\1/p' | head -n 1)"
+fi
+
+if [[ -z "$SIMULATOR_ID" ]]; then
+  SIMULATOR_ID="$(xcrun simctl list devices available | sed -nE 's/^[[:space:]]*iPhone.*\(([0-9A-Fa-f-]{36})\)[[:space:]]+\(Shutdown\).*$/\1/p' | tail -n 1)"
+  if [[ -z "$SIMULATOR_ID" ]]; then
+    echo "No available iPhone simulator was found. Install one from Xcode Settings → Platforms." >&2
+    exit 1
+  fi
+fi
+
+if ! xcrun simctl list devices booted | grep --quiet --fixed-strings "$SIMULATOR_ID"; then
+  echo "Booting iPhone simulator $SIMULATOR_ID…"
+  xcrun simctl boot "$SIMULATOR_ID"
+fi
+
+open -a Simulator
+xcrun simctl bootstatus "$SIMULATOR_ID" -b
+
+echo "Launching Clawnsole on iOS simulator $SIMULATOR_ID…"
+exec flutter run -d "$SIMULATOR_ID" "$@"

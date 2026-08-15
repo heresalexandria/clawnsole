@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/build_android [additional flutter build appbundle arguments]"
+  echo
+  echo "Requires android/key.properties with storeFile, storePassword, keyAlias,"
+  echo "and keyPassword. See android/key.properties.example."
+  exit 0
+fi
+
+print_heading "Android deployable build"
+prepare_flutter
+
+if [[ ! -f android/key.properties ]]; then
+  echo "android/key.properties is required for a deployable signed bundle." >&2
+  echo "Copy android/key.properties.example, point storeFile at your upload keystore, and fill in its credentials." >&2
+  exit 1
+fi
+
+flutter build appbundle --release "$@"
+
+echo
+echo "Android App Bundle: $FLUTTER_DIRECTORY/build/app/outputs/bundle/release/app-release.aab"

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/start_android [additional flutter run arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_ANDROID_DEVICE_ID  Running emulator device ID override"
+  echo "  CLAWNSOLE_ANDROID_AVD_ID     AVD to launch when none is running"
+  exit 0
+fi
+
+print_heading "Android emulator development"
+prepare_flutter
+
+find_android_device() {
+  flutter devices --device-timeout 5 2>/dev/null \
+    | awk -F ' • ' '/emulator-[0-9]+/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}'
+}
+
+ANDROID_DEVICE="${CLAWNSOLE_ANDROID_DEVICE_ID:-}"
+
+if [[ -z "$ANDROID_DEVICE" ]]; then
+  ANDROID_DEVICE="$(find_android_device)"
+fi
+
+if [[ -z "$ANDROID_DEVICE" ]]; then
+  ANDROID_AVD="${CLAWNSOLE_ANDROID_AVD_ID:-}"
+  if [[ -z "$ANDROID_AVD" ]]; then
+    ANDROID_AVD="$(flutter emulators | awk -F ' • ' '/ • android[[:space:]]*$/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); print $1; exit}')"
+  fi
+  if [[ -z "$ANDROID_AVD" ]]; then
+    echo "No Android AVD was found. Create one in Android Studio’s Device Manager." >&2
+    exit 1
+  fi
+
+  echo "Launching Android emulator $ANDROID_AVD…"
+  flutter emulators --launch "$ANDROID_AVD"
+
+  for _attempt in {1..90}; do
+    ANDROID_DEVICE="$(find_android_device)"
+    if [[ -n "$ANDROID_DEVICE" ]]; then
+      break
+    fi
+    sleep 2
+  done
+fi
+
+if [[ -z "$ANDROID_DEVICE" ]]; then
+  echo "The Android emulator did not become available within three minutes." >&2
+  exit 1
+fi
+
+echo "Launching Clawnsole on Android emulator $ANDROID_DEVICE…"
+exec flutter run -d "$ANDROID_DEVICE" "$@"

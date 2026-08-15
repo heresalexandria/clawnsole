@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/build_ios [additional flutter build ipa arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_IOS_EXPORT_METHOD  app-store, ad-hoc, development, or enterprise"
+  echo "                                (default: app-store)"
+  exit 0
+fi
+
+print_heading "iOS deployable build"
+prepare_flutter
+require_command xcrun
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "iOS archives require macOS and Xcode." >&2
+  exit 1
+fi
+
+EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
+
+flutter build ipa \
+  --release \
+  --export-method "$EXPORT_METHOD" \
+  "$@"
+
+echo
+echo "iOS archive: $FLUTTER_DIRECTORY/build/ios/archive/Runner.xcarchive"
+echo "IPA output: $FLUTTER_DIRECTORY/build/ios/ipa"

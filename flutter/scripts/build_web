@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/build_web [additional flutter build web arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_PROXY_URL  Runtime companion URL (default: http://127.0.0.1:8787)"
+  exit 0
+fi
+
+print_heading "web release build"
+prepare_flutter
+require_command dart
+
+PROXY_URL="${CLAWNSOLE_PROXY_URL:-http://127.0.0.1:8787}"
+
+flutter build web \
+  --release \
+  --dart-define "CLAWNSOLE_PROXY_URL=$PROXY_URL" \
+  "$@"
+
+dart compile exe \
+  tool/clawnsole_companion.dart \
+  -o build/clawnsole_companion
+
+echo
+echo "Web release: $FLUTTER_DIRECTORY/build/web"
+echo "Companion executable: $FLUTTER_DIRECTORY/build/clawnsole_companion"
+echo "Serve the web directory locally and run the companion beside it."

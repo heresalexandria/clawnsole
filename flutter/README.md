@@ -27,6 +27,26 @@ cd flutter
 flutter pub get
 ```
 
+## One-command local starts
+
+The scripts install missing Dart packages, select or launch a local emulator,
+and keep Flutter attached for hot reload:
+
+```bash
+./scripts/start_web
+./scripts/start_ios
+./scripts/start_android
+```
+
+`start_web` starts the loopback companion, waits for its health check, opens
+Chrome, and stops the companion when Flutter exits. `start_ios` reuses a booted
+iPhone simulator or boots the newest available one. `start_android` reuses a
+running Android emulator or launches the first configured Android AVD.
+
+Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or
+`CLAWNSOLE_ANDROID_DEVICE_ID` to choose a specific emulator. Every script also
+accepts extra `flutter run` arguments.
+
 ## Run on iOS or Android
 
 Native builds call `https://api.bfl.ai` directly. The API key and compact
@@ -50,17 +70,14 @@ loopback-only Dart companion that owns the API key, BFL requests, polling,
 media proxy, and the local JSON file. No `localStorage` or IndexedDB history is
 used.
 
-Start the companion and Flutter web app in separate terminals:
+Normally, use the single command:
 
 ```bash
-cd flutter
-dart run tool/clawnsole_companion.dart
+./scripts/start_web
 ```
 
-```bash
-cd flutter
-flutter run -d chrome --web-port 7357
-```
+The script owns both the companion and Flutter process. The manual two-terminal
+workflow remains available when debugging the companion itself.
 
 The default companion address is `http://127.0.0.1:8787`, and its default data
 file is `flutter/.clawnsole/clawnsole-flutter.json`. Both are local-only.
@@ -82,15 +99,23 @@ the saved key itself.
 ## Build targets
 
 ```bash
-flutter build web
-flutter build apk
-flutter build appbundle
-flutter build ios --no-codesign
+./scripts/build_web
+./scripts/build_ios
+./scripts/build_android
 ```
 
-The web release bundle still needs the local companion while it is being used.
-If the static web files are served from another local port, point them at the
-companion with `CLAWNSOLE_PROXY_URL` at build time.
+- `build_web` creates `build/web` and compiles the companion into the standalone
+  `build/clawnsole_companion` executable. The static web bundle still needs that
+  local companion while it is used.
+- `build_ios` creates a signed Xcode archive and IPA. It defaults to App Store
+  export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
+  `enterprise` when appropriate. Xcode signing must already be configured.
+- `build_android` creates the Play Store AAB. It intentionally refuses to build
+  until `android/key.properties` points at a real upload keystore; copy
+  `android/key.properties.example` to get started.
+
+All build scripts accept extra Flutter build arguments such as `--build-name`
+and `--build-number`.
 
 ## Persistence policy
 

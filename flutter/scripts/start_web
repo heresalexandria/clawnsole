@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/start_web [additional flutter run arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_PROXY_PORT        Companion port (default: 8787)"
+  echo "  CLAWNSOLE_FLUTTER_DATA_FILE  Companion JSON file override"
+  echo "  CLAWNSOLE_WEB_PORT          Flutter web port (default: 7357)"
+  exit 0
+fi
+
+print_heading "web development"
+prepare_flutter
+require_command dart
+require_command curl
+
+PROXY_PORT="${CLAWNSOLE_PROXY_PORT:-8787}"
+WEB_PORT="${CLAWNSOLE_WEB_PORT:-7357}"
+PROXY_URL="http://127.0.0.1:$PROXY_PORT"
+COMPANION_PROCESS=""
+
+stop_companion() {
+  if [[ -n "$COMPANION_PROCESS" ]] && kill -0 "$COMPANION_PROCESS" 2>/dev/null; then
+    echo
+    echo "Stopping the Clawnsole companion…"
+    kill "$COMPANION_PROCESS" 2>/dev/null || true
+    wait "$COMPANION_PROCESS" 2>/dev/null || true
+  fi
+}
+
+trap stop_companion EXIT INT TERM
+
+if curl --silent --fail "$PROXY_URL/health" >/dev/null 2>&1; then
+  echo "Using the companion already running at $PROXY_URL."
+else
+  echo "Starting the local companion at $PROXY_URL…"
+  dart run tool/clawnsole_companion.dart --port "$PROXY_PORT" &
+  COMPANION_PROCESS=$!
+
+  for _attempt in {1..40}; do
+    if curl --silent --fail "$PROXY_URL/health" >/dev/null 2>&1; then
+      break
+    fi
+    if ! kill -0 "$COMPANION_PROCESS" 2>/dev/null; then
+      wait "$COMPANION_PROCESS"
+      exit 1
+    fi
+    sleep 0.25
+  done
+
+  if ! curl --silent --fail "$PROXY_URL/health" >/dev/null 2>&1; then
+    echo "The companion did not become ready at $PROXY_URL." >&2
+    exit 1
+  fi
+fi
+
+echo "Opening Flutter web at http://localhost:$WEB_PORT/…"
+flutter run \
+  -d chrome \
+  --web-port "$WEB_PORT" \
+  --dart-define "CLAWNSOLE_PROXY_URL=$PROXY_URL" \
+  "$@"
