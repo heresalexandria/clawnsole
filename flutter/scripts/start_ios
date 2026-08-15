@@ -43,5 +43,7 @@ fi
 open -a Simulator
 xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
+"$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
+
 echo "Launching Clawnsole on iOS simulator $SIMULATOR_ID…"
 exec flutter run -d "$SIMULATOR_ID" "$@"

@@ -23,6 +23,8 @@ fi
 
 EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
 
+"$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
+
 flutter build ipa \
   --release \
   --export-method "$EXPORT_METHOD" \
