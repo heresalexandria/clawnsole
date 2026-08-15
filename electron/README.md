@@ -39,14 +39,21 @@ environment for Developer ID signing. Published CI builds require:
 - `MACOS_CERTIFICATE_PASSWORD`
 
 CI rejects a release unless the completed app has a strict, valid Developer ID
-bundle signature for Team ID `KMZ785G889`. Notarization is enabled when all of
-these optional secrets are present:
+bundle signature for Team ID `KMZ785G889`. It also requires these notarization
+secrets:
 
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-Partial notarization configuration is treated as an error.
+Local signed builds use the `clawnsole-notarization` notarytool profile from the
+login Keychain by default, keeping the app-specific password out of the shell:
+
+```bash
+CLAWNSOLE_ELECTRON_SIGN=true ./flutter/scripts/build_macos
+```
+
+Set `CLAWNSOLE_NOTARY_KEYCHAIN_PROFILE` to select a different local profile.
 
 ## Self-update
 

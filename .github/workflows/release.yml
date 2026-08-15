@@ -110,28 +110,14 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          for value in CSC_LINK CSC_KEY_PASSWORD; do
-            if [ -z "${!value}" ]; then echo "::error::$value is required for published macOS builds"; exit 1; fi
+          for value in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!value}" ]; then echo "::error::$value is required for signed and notarized macOS releases"; exit 1; fi
           done
           export CLAWNSOLE_ELECTRON_SIGN=true
-          args=()
-          notarization_values=0
-          for value in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [ -n "${!value}" ]; then notarization_values=$((notarization_values + 1)); fi
-          done
-          if [ "$notarization_values" -eq 3 ]; then
-            args+=(--config.mac.notarize=true)
-          elif [ "$notarization_values" -ne 0 ]; then
-            echo "::error::APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID must be configured together"
-            exit 1
-          fi
-          CLAWNSOLE_ELECTRON_ARCH=arm64 ./electron/scripts/build_macos "${args[@]}"
+          CLAWNSOLE_ELECTRON_ARCH=arm64 ./electron/scripts/build_macos --config.mac.notarize=true
 
-      - name: Verify Developer ID signature
+      - name: Verify signature and notarization
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           EXPECTED_TEAM_ID: KMZ785G889
         run: |
           app=$(find electron/dist/release -path '*/Clawnsole.app' -type d | head -1)
@@ -141,10 +127,8 @@ jobs:
           printf '%s\n' "$signature"
           grep -F 'Authority=Developer ID Application:' <<< "$signature"
           grep -F "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$signature"
-          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
-            spctl --assess --type execute --verbose=4 "$app"
-            xcrun stapler validate "$app"
-          fi
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
 
       - name: Collect desktop artifacts
         run: |

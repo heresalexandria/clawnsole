@@ -9,7 +9,10 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_ELECTRON_ARCH  arm64, x64, or universal (default: current Mac)"
   echo "  CLAWNSOLE_ELECTRON_SIGN  Set to true to enable Developer ID signing"
-  echo "                            and electron-builder notarization detection"
+  echo "                            and notarization"
+  echo "  CLAWNSOLE_NOTARY_KEYCHAIN_PROFILE"
+  echo "                            notarytool profile for local signed builds"
+  echo "                            (default: clawnsole-notarization)"
   exit 0
 fi
 
@@ -28,6 +31,13 @@ if [[ "${CLAWNSOLE_ELECTRON_SIGN:-false}" != "true" ]]; then
   # interprets an empty CSC_LINK as a relative certificate path, so remove both
   # signing variables entirely for an unsigned build.
   unset CSC_LINK CSC_KEY_PASSWORD
+elif [[ -z "${APPLE_ID:-}" &&
+        -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" &&
+        -z "${APPLE_API_KEY:-}" &&
+        -z "${APPLE_KEYCHAIN_PROFILE:-}" ]]; then
+  # Local distribution builds use a notarytool profile so the app-specific
+  # password stays in the login Keychain instead of the shell environment.
+  export APPLE_KEYCHAIN_PROFILE="${CLAWNSOLE_NOTARY_KEYCHAIN_PROFILE:-clawnsole-notarization}"
 fi
 
 cd "$REPOSITORY_ROOT"

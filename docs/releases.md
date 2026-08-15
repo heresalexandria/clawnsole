@@ -68,10 +68,9 @@ Published macOS builds must be Developer ID signed. Configure:
 | `APPLE_APP_SPECIFIC_PASSWORD` | notarization app password |
 | `APPLE_TEAM_ID` | Apple team ID |
 
-The first two secrets are required. CI performs strict bundle verification and
-confirms the `KMZ785G889` Team ID before it uploads any desktop artifact. The last
-three secrets are optional as a group; when all three are present, CI also
-notarizes the app and requires Gatekeeper and stapler verification to pass.
+All five secrets are required. CI performs strict bundle verification, confirms
+the `KMZ785G889` Team ID, notarizes the app, and requires Gatekeeper and stapler
+verification before it uploads any desktop artifact.
 
 ## What is published
 

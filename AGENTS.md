@@ -59,8 +59,8 @@ desktop entry points live beside the other Flutter scripts:
   `scripts/release/bump_version.py`; do not bump one package independently.
 - macOS updater asset names, GitHub Actions output names, and Electron Builder's
   `artifactName` form one tested contract.
-- Published macOS bundles must be Developer ID signed and pass strict signature
-  verification before their DMG or updater ZIP is uploaded.
+- Published macOS bundles must be Developer ID signed, notarized, stapled, and
+  pass Gatekeeper plus strict signature verification before upload.
 - Every published release must contain `SHA256SUMS.txt`. The desktop updater
   refuses unverified downloads.
 - iOS and macOS build in parallel in `.github/workflows/release.yml`. Android and
