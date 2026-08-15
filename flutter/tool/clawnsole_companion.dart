@@ -305,15 +305,17 @@ class CompanionApp {
     try {
       final path = request.uri.path;
       if (request.method == 'GET' && path == '/health') {
-        return _json(request.response, 200, <String, Object?>{'ok': true});
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
       }
       if (request.method == 'GET' && path == '/state') {
-        return _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, (await _snapshot()).toJson());
       }
       if (request.method == 'PATCH' && path == '/state') {
         final body = await _bodyMap(request);
         await _stateAction(body['action']?.toString() ?? '', body['value']);
-        return _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, (await _snapshot()).toJson());
       }
       if (request.method == 'POST' && path == '/credits') {
         final body = await _bodyMap(request);
@@ -322,19 +324,19 @@ class CompanionApp {
         final key = candidate?.isNotEmpty == true ? candidate! : saved;
         if (key.isEmpty) throw StateError('An API key is required.');
         final credits = await _api.getCredits(key);
-        return _json(request.response, 200, <String, Object?>{
+        return await _json(request.response, 200, <String, Object?>{
           'credits': credits,
         });
       }
       if (request.method == 'POST' && path == '/generations') {
         final generation = await _submit(await _bodyMap(request));
-        return _json(request.response, 201, <String, Object?>{
+        return await _json(request.response, 201, <String, Object?>{
           'generation': generation.toJson(),
         });
       }
       if (request.method == 'POST' && path == '/generations/status') {
         final generation = await _poll(await _bodyMap(request));
-        return _json(request.response, 200, <String, Object?>{
+        return await _json(request.response, 200, <String, Object?>{
           'generation': generation.toJson(),
         });
       }
@@ -355,19 +357,19 @@ class CompanionApp {
           return StoreChange<void>(next, null);
         });
         await _store.pruneAssets((await _store.read()).generations);
-        return _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, (await _snapshot()).toJson());
       }
       if (request.method == 'GET' && path == '/assets') {
-        return _asset(request);
+        return await _asset(request);
       }
       if (request.method == 'GET' && path == '/media') {
-        return _media(request);
+        return await _media(request);
       }
       if ((request.method == 'GET' || request.method == 'HEAD') &&
           _webRoot != null) {
-        return _staticFile(request);
+        return await _staticFile(request);
       }
-      return _json(request.response, 404, <String, Object?>{
+      return await _json(request.response, 404, <String, Object?>{
         'error': 'The requested companion route does not exist.',
       });
     } on ProviderException catch (error) {
@@ -563,7 +565,7 @@ class CompanionApp {
       await for (final chunk in upstream) {
         builder.add(chunk);
       }
-      return _store.writeAsset(
+      return await _store.writeAsset(
         builder.takeBytes(),
         label: label,
         contentType: upstream.headers.contentType?.mimeType ?? 'video/mp4',
