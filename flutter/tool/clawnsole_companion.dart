@@ -11,7 +11,11 @@ import 'package:clawnsole/core/pricing.dart';
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
   final store = CompanionStore(File(config.dataFile));
-  final app = CompanionApp(store: store, api: BflApi());
+  final app = CompanionApp(
+    store: store,
+    api: BflApi(),
+    webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
+  );
   final server = await HttpServer.bind(
     InternetAddress.loopbackIPv4,
     config.port,
@@ -20,6 +24,7 @@ Future<void> main(List<String> arguments) async {
     'Clawnsole companion is listening on http://127.0.0.1:${server.port}',
   );
   stdout.writeln('Local data: ${config.dataFile}');
+  if (config.webRoot != null) stdout.writeln('Web root: ${config.webRoot}');
   stdout.writeln('Press Ctrl+C to stop.');
   await for (final request in server) {
     unawaited(app.handle(request));
@@ -27,10 +32,15 @@ Future<void> main(List<String> arguments) async {
 }
 
 class CompanionConfig {
-  const CompanionConfig({required this.port, required this.dataFile});
+  const CompanionConfig({
+    required this.port,
+    required this.dataFile,
+    this.webRoot,
+  });
 
   final int port;
   final String dataFile;
+  final String? webRoot;
 
   factory CompanionConfig.from(
     List<String> arguments,
@@ -38,12 +48,16 @@ class CompanionConfig {
   ) {
     var port = int.tryParse(environment['CLAWNSOLE_PROXY_PORT'] ?? '') ?? 8787;
     var dataFile = environment['CLAWNSOLE_FLUTTER_DATA_FILE']?.trim() ?? '';
+    var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
         port = int.parse(arguments[++index]);
       } else if (arguments[index] == '--data-file' &&
           index + 1 < arguments.length) {
         dataFile = arguments[++index];
+      } else if (arguments[index] == '--web-root' &&
+          index + 1 < arguments.length) {
+        webRoot = arguments[++index];
       }
     }
     if (dataFile.isEmpty) {
@@ -51,7 +65,11 @@ class CompanionConfig {
           '${Directory.current.path}${Platform.pathSeparator}.clawnsole'
           '${Platform.pathSeparator}clawnsole-flutter.json';
     }
-    return CompanionConfig(port: port, dataFile: File(dataFile).absolute.path);
+    return CompanionConfig(
+      port: port,
+      dataFile: File(dataFile).absolute.path,
+      webRoot: webRoot.isEmpty ? null : Directory(webRoot).absolute.path,
+    );
   }
 }
 
@@ -260,12 +278,17 @@ class StoreChange<T> {
 }
 
 class CompanionApp {
-  CompanionApp({required CompanionStore store, required BflApi api})
-    : _store = store,
-      _api = api;
+  CompanionApp({
+    required CompanionStore store,
+    required BflApi api,
+    Directory? webRoot,
+  }) : _store = store,
+       _api = api,
+       _webRoot = webRoot;
 
   final CompanionStore _store;
   final BflApi _api;
+  final Directory? _webRoot;
 
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
@@ -339,6 +362,10 @@ class CompanionApp {
       }
       if (request.method == 'GET' && path == '/media') {
         return _media(request);
+      }
+      if ((request.method == 'GET' || request.method == 'HEAD') &&
+          _webRoot != null) {
+        return _staticFile(request);
       }
       return _json(request.response, 404, <String, Object?>{
         'error': 'The requested companion route does not exist.',
@@ -804,6 +831,54 @@ class CompanionApp {
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<void> _staticFile(HttpRequest request) async {
+    final root = _webRoot!.absolute;
+    final segments = request.uri.pathSegments;
+    if (segments.any(
+      (segment) =>
+          segment == '.' ||
+          segment == '..' ||
+          segment.contains('/') ||
+          segment.contains('\\'),
+    )) {
+      throw const ProviderException('Invalid web asset path.', status: 400);
+    }
+    final relative = segments.isEmpty ? 'index.html' : segments.join('/');
+    final file = File(
+      '${root.path}${Platform.pathSeparator}'
+      '${relative.replaceAll('/', Platform.pathSeparator)}',
+    ).absolute;
+    final rootPrefix = '${root.path}${Platform.pathSeparator}';
+    if (!file.path.startsWith(rootPrefix) || !await file.exists()) {
+      return _json(request.response, 404, <String, Object?>{
+        'error': 'The requested web asset does not exist.',
+      });
+    }
+
+    final extension = file.uri.pathSegments.last.split('.').last.toLowerCase();
+    final type = switch (extension) {
+      'html' => ContentType.html,
+      'js' ||
+      'mjs' => ContentType('application', 'javascript', charset: 'utf-8'),
+      'css' => ContentType('text', 'css', charset: 'utf-8'),
+      'json' || 'map' => ContentType.json,
+      'svg' => ContentType('image', 'svg+xml'),
+      'png' => ContentType('image', 'png'),
+      'jpg' || 'jpeg' => ContentType('image', 'jpeg'),
+      'webp' => ContentType('image', 'webp'),
+      'ico' => ContentType('image', 'x-icon'),
+      'wasm' => ContentType('application', 'wasm'),
+      'ttf' => ContentType('font', 'ttf'),
+      _ => ContentType.binary,
+    };
+    request.response.headers
+      ..contentType = type
+      ..contentLength = await file.length()
+      ..set(HttpHeaders.cacheControlHeader, 'private, no-store');
+    if (request.method == 'HEAD') return request.response.close();
+    await file.openRead().pipe(request.response);
   }
 
   Future<void> _json(

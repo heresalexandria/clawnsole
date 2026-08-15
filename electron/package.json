@@ -31,6 +31,10 @@
       {
         "from": "dist/renderer",
         "to": "renderer"
+      },
+      {
+        "from": "dist/companion",
+        "to": "companion"
       }
     ],
     "directories": {
@@ -42,13 +46,14 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "icon": "assets/icon.icns",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "dmg": {
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "title": "${productName} ${version}"
     }
   }

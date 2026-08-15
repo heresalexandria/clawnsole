@@ -6,8 +6,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_web [additional flutter build web arguments]"
   echo
-  echo "Environment:"
-  echo "  CLAWNSOLE_PROXY_URL  Runtime companion URL (default: http://127.0.0.1:8787)"
+  echo "The release bundle expects the companion to serve it from the same origin."
+  echo "Set CLAWNSOLE_PROXY_URL to build for a separately hosted companion."
   exit 0
 fi
 
@@ -15,7 +15,7 @@ print_heading "web release build"
 prepare_flutter
 require_command dart
 
-PROXY_URL="${CLAWNSOLE_PROXY_URL:-http://127.0.0.1:8787}"
+PROXY_URL="${CLAWNSOLE_PROXY_URL-}"
 
 flutter build web \
   --release \
@@ -29,4 +29,4 @@ dart compile exe \
 echo
 echo "Web release: $FLUTTER_DIRECTORY/build/web"
 echo "Companion executable: $FLUTTER_DIRECTORY/build/clawnsole_companion"
-echo "Serve the web directory locally and run the companion beside it."
+echo "Run the companion with --web-root $FLUTTER_DIRECTORY/build/web."

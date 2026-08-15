@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ELECTRON_DIRECTORY="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 REPOSITORY_ROOT="$(cd "$ELECTRON_DIRECTORY/.." && pwd)"
+FLUTTER_DIRECTORY="$REPOSITORY_ROOT/flutter"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -14,9 +15,9 @@ require_command() {
 }
 
 prepare_dependencies() {
-  require_command node
+  require_command flutter
   require_command npm
-  npm install --prefix "$REPOSITORY_ROOT"
+  (cd "$FLUTTER_DIRECTORY" && flutter pub get)
   npm install --prefix "$ELECTRON_DIRECTORY"
 }
 

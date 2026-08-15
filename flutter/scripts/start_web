@@ -9,6 +9,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_PROXY_PORT        Companion port (default: 8787)"
   echo "  CLAWNSOLE_FLUTTER_DATA_FILE  Companion JSON file override"
+  echo "                               (default: <repo>/.clawnsole/clawnsole.json)"
   echo "  CLAWNSOLE_WEB_PORT          Flutter web port (default: 7357)"
   exit 0
 fi
@@ -21,6 +22,7 @@ require_command curl
 PROXY_PORT="${CLAWNSOLE_PROXY_PORT:-8787}"
 WEB_PORT="${CLAWNSOLE_WEB_PORT:-7357}"
 PROXY_URL="http://127.0.0.1:$PROXY_PORT"
+DATA_FILE="${CLAWNSOLE_FLUTTER_DATA_FILE:-$REPOSITORY_ROOT/.clawnsole/clawnsole.json}"
 COMPANION_PROCESS=""
 
 stop_companion() {
@@ -38,7 +40,9 @@ if curl --silent --fail "$PROXY_URL/health" >/dev/null 2>&1; then
   echo "Using the companion already running at $PROXY_URL."
 else
   echo "Starting the local companion at $PROXY_URL…"
-  dart run tool/clawnsole_companion.dart --port "$PROXY_PORT" &
+  dart run tool/clawnsole_companion.dart \
+    --port "$PROXY_PORT" \
+    --data-file "$DATA_FILE" &
   COMPANION_PROCESS=$!
 
   for _attempt in {1..40}; do

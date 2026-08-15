@@ -7,7 +7,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./electron/scripts/start_macos [additional Electron arguments]"
   echo
   echo "Environment:"
-  echo "  CLAWNSOLE_WEB_PORT  Local Next.js port (default: 3000)"
+  echo "  CLAWNSOLE_WEB_PORT           Local companion/web port override"
+  echo "  CLAWNSOLE_FLUTTER_DATA_FILE  Local data file override"
   exit 0
 fi
 
@@ -18,4 +19,8 @@ fi
 
 print_heading "macOS desktop development"
 prepare_dependencies
+require_command dart
+
+cd "$FLUTTER_DIRECTORY"
+flutter build web --debug --dart-define "CLAWNSOLE_PROXY_URL="
 exec node "$ELECTRON_DIRECTORY/scripts/start.mjs" "$@"

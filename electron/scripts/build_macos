@@ -20,13 +20,14 @@ fi
 
 print_heading "macOS deployable build"
 prepare_dependencies
+node "$ELECTRON_DIRECTORY/scripts/clean-output.mjs"
 
 if [[ "${CLAWNSOLE_ELECTRON_SIGN:-false}" != "true" ]]; then
   export CSC_IDENTITY_AUTO_DISCOVERY=false
 fi
 
 cd "$REPOSITORY_ROOT"
-npm run build
+CLAWNSOLE_PROXY_URL= "$FLUTTER_DIRECTORY/scripts/build_web"
 node "$ELECTRON_DIRECTORY/scripts/prepare-renderer.mjs"
 "$ELECTRON_DIRECTORY/scripts/prepare_icon"
 

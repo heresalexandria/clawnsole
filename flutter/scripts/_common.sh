@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLUTTER_DIRECTORY="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+REPOSITORY_ROOT="$(cd "$FLUTTER_DIRECTORY/.." && pwd)"
 
 cd "$FLUTTER_DIRECTORY"
 

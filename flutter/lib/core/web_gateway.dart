@@ -7,17 +7,19 @@ import 'bfl_api.dart';
 import 'gateway.dart';
 import 'models.dart';
 
+Uri _configuredBaseUrl(Uri? override) {
+  if (override != null) return override;
+  const configured = String.fromEnvironment(
+    'CLAWNSOLE_PROXY_URL',
+    defaultValue: 'http://127.0.0.1:8787',
+  );
+  return configured.trim().isEmpty ? Uri.base : Uri.parse(configured);
+}
+
 class WebGateway implements AppGateway {
   WebGateway({http.Client? client, Uri? baseUrl})
     : _client = client ?? http.Client(),
-      _baseUrl =
-          baseUrl ??
-          Uri.parse(
-            const String.fromEnvironment(
-              'CLAWNSOLE_PROXY_URL',
-              defaultValue: 'http://127.0.0.1:8787',
-            ),
-          );
+      _baseUrl = _configuredBaseUrl(baseUrl);
 
   final http.Client _client;
   final Uri _baseUrl;
