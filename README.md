@@ -36,6 +36,29 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000), go to Settings, and paste a BFL project key. The Next.js process must remain running while you use the app.
 
+## macOS desktop app
+
+Clawnsole also ships as a standalone Electron app that packages this same Next.js
+UI and server—there is no second desktop implementation or external companion to
+run in production.
+
+```bash
+# development app (starts or reuses the local Next server)
+npm run electron:start
+
+# standalone .app, DMG, and ZIP
+npm run electron:build
+```
+
+Build artifacts land in `electron/dist/release`. The packaged app stores its local
+data at `~/Library/Application Support/Clawnsole/clawnsole.json`. See
+[`electron/README.md`](electron/README.md) for architectures, signing, and
+notarization notes.
+
+The separate [`flutter/`](flutter/) implementation targets Flutter web, iOS, and
+Android. Repository-wide platform-parity and code-sharing rules live in
+[`AGENTS.md`](AGENTS.md).
+
 ## Persistence policy
 
 Clawnsole has no database and uses no browser storage. Its single source of truth is:
