@@ -1,0 +1,272 @@
+name: Release
+
+# A release-labelled PR merge or a manual dispatch bumps both app versions,
+# builds iOS and macOS concurrently, then publishes only after both succeed.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: How to move the version
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: bump version
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      build: ${{ steps.bump.outputs.build }}
+      tag: ${{ steps.bump.outputs.tag }}
+      sha: ${{ steps.push.outputs.sha }}
+      skip: ${{ steps.kind.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Select release kind
+        id: kind
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          DISPATCH: ${{ inputs.bump }}
+        run: |
+          if [ -n "$DISPATCH" ]; then
+            kind="$DISPATCH"
+          else
+            kind="$(python3 scripts/release/select_bump.py)"
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          if [ "$kind" = none ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump Flutter and Electron together
+        id: bump
+        if: steps.kind.outputs.skip != 'true'
+        run: python3 scripts/release/bump_version.py "${{ steps.kind.outputs.kind }}"
+
+      - name: Commit and push version
+        id: push
+        if: steps.kind.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add electron/package.json electron/package-lock.json flutter/pubspec.yaml
+          git commit -m "Release ${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  macos:
+    name: build macOS desktop
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm ci --no-audit --no-fund
+
+      - name: Build desktop artifacts
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          args=()
+          if [ -n "$CSC_LINK" ]; then
+            export CLAWNSOLE_ELECTRON_SIGN=true
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              args+=(--config.mac.notarize=true)
+            fi
+          else
+            echo "::warning::MACOS_CERTIFICATE_P12 is unset; publishing an unsigned build"
+          fi
+          CLAWNSOLE_ELECTRON_ARCH=arm64 ./electron/scripts/build_macos "${args[@]}"
+
+      - name: Collect desktop artifacts
+        run: |
+          mkdir -p outgoing
+          find electron/dist/release -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.zip' \) -exec cp {} outgoing/ \;
+          test -n "$(ls -A outgoing)"
+          ls -lh outgoing
+
+      - name: Smoke test packaged desktop app
+        run: |
+          executable=$(find electron/dist/release -path '*/Clawnsole.app/Contents/MacOS/Clawnsole' | head -1)
+          test -n "$executable"
+          "$executable" --smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-macos-arm64
+          path: outgoing/*
+          retention-days: 7
+          if-no-files-found: error
+
+  ios:
+    name: build iOS app
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install App Store signing identity
+        env:
+          IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          for value in IOS_CERTIFICATE_P12 IOS_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE IOS_TEAM_ID; do
+            if [ -z "${!value}" ]; then echo "::error::$value is required"; exit 1; fi
+          done
+          certificate="$RUNNER_TEMP/clawnsole.p12"
+          profile="$RUNNER_TEMP/clawnsole.mobileprovision"
+          keychain="$RUNNER_TEMP/clawnsole-signing.keychain-db"
+          printf '%s' "$IOS_CERTIFICATE_P12" | base64 -D > "$certificate"
+          printf '%s' "$IOS_PROVISIONING_PROFILE" | base64 -D > "$profile"
+          security create-keychain -p actions "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          security import "$certificate" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k actions "$keychain"
+          security list-keychain -d user -s "$keychain" login.keychain-db
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          profile_plist="$RUNNER_TEMP/profile.plist"
+          security cms -D -i "$profile" > "$profile_plist"
+          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$profile_plist")
+          profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$profile_plist")
+          cp "$profile" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+          sed -i '' -E "s/DEVELOPMENT_TEAM = [A-Z0-9]+;/DEVELOPMENT_TEAM = $IOS_TEAM_ID;/g" flutter/ios/Runner.xcodeproj/project.pbxproj
+          export_options="$RUNNER_TEMP/ExportOptions.plist"
+          cat > "$export_options" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>$IOS_TEAM_ID</string>
+            <key>provisioningProfiles</key><dict>
+              <key>app.clawnsole.clawnsole</key><string>$profile_name</string>
+            </dict>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          echo "CLAWNSOLE_IOS_EXPORT_OPTIONS=$export_options" >> "$GITHUB_ENV"
+          echo "CLAWNSOLE_IOS_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Build signed IPA
+        working-directory: flutter
+        run: |
+          flutter pub get
+          flutter build ipa \
+            --release \
+            --build-name "${{ needs.prepare.outputs.version }}" \
+            --build-number "${{ needs.prepare.outputs.build }}" \
+            --export-options-plist "$CLAWNSOLE_IOS_EXPORT_OPTIONS"
+          ipa=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' | head -1)
+          test -n "$ipa"
+          mkdir -p ../outgoing-ios
+          cp "$ipa" "../outgoing-ios/Clawnsole-${{ needs.prepare.outputs.version }}-ios.ipa"
+
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          if [ -n "${CLAWNSOLE_IOS_KEYCHAIN:-}" ]; then
+            security delete-keychain "$CLAWNSOLE_IOS_KEYCHAIN" || true
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-ios
+          path: outgoing-ios/*
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub release
+    needs: [prepare, macos, ios]
+    if: needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: incoming
+          pattern: build-*
+
+      - name: Gather and checksum
+        run: |
+          mkdir release
+          find incoming -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.ipa' \) \
+            -exec mv {} release/ \;
+          test -n "$(ls -A release)"
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ needs.prepare.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ needs.prepare.outputs.sha }}" \
+            --title "Clawnsole ${{ needs.prepare.outputs.version }}" \
+            --generate-notes \
+            --latest \
+            release/*
+
+      - name: Move rolling latest tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "${{ needs.prepare.outputs.sha }}"
+          git push -f origin latest

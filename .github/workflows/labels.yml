@@ -1,0 +1,25 @@
+name: Create release labels
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for spec in \
+            'major|B60205|Breaking release' \
+            'minor|1D76DB|Feature release' \
+            'patch|0E8A16|Fix release' \
+            'no-release|6E7781|Merge without a release'; do
+            IFS='|' read -r name color description <<< "$spec"
+            gh label create "$name" --repo "${{ github.repository }}" \
+              --color "$color" --description "$description" --force
+          done
