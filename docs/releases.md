@@ -44,6 +44,18 @@ The signed iOS job requires base64-encoded certificate/profile data:
 The profile must cover `app.clawnsole.clawnsole`. The workflow imports it into a
 temporary keychain, exports a signed IPA, then deletes the keychain.
 
+Uploading that IPA to App Store Connect requires a scoped API key:
+
+| secret | value |
+|---|---|
+| `APP_STORE_CONNECT_KEY_ID` | App Store Connect API key ID |
+| `APP_STORE_CONNECT_ISSUER_ID` | API issuer UUID |
+| `APP_STORE_CONNECT_API_KEY_P8` | `AuthKey_*.p8`, base64 encoded |
+
+The release job uploads the build to App Store Connect. Processing, TestFlight
+selection, review submission, and public App Store release remain Apple-side
+approval steps.
+
 macOS signing is optional so the pipeline can cut an initial release like
 Aesthetician does. Add these secrets when Developer ID distribution is ready:
 
@@ -73,5 +85,5 @@ The ZIP is the Electron updater asset. Artifact naming, architecture selection,
 and digest parsing are covered by Electron tests. Android and hosted web jobs can
 be added to this fan-out later.
 
-The GitHub release publishes the IPA but does not submit it to App Store Connect.
-Store upload remains a separate deployment step until that policy is added.
+The same IPA is attached to the GitHub release for build provenance after App
+Store Connect accepts the upload.

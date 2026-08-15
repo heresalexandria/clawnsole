@@ -212,9 +212,35 @@ jobs:
           mkdir -p ../outgoing-ios
           cp "$ipa" "../outgoing-ios/Clawnsole-${{ needs.prepare.outputs.version }}-ios.ipa"
 
-      - name: Remove temporary signing keychain
+      - name: Upload IPA to App Store Connect
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+        run: |
+          for value in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_P8; do
+            if [ -z "${!value}" ]; then echo "::error::$value is required"; exit 1; fi
+          done
+          private_keys="$HOME/private_keys"
+          key_file="$private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          mkdir -p "$private_keys"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_P8" | base64 -D > "$key_file"
+          chmod 600 "$key_file"
+          echo "CLAWNSOLE_ASC_KEY_FILE=$key_file" >> "$GITHUB_ENV"
+          ipa=$(find outgoing-ios -maxdepth 1 -name '*.ipa' | head -1)
+          test -n "$ipa"
+          xcrun altool --upload-app \
+            --type ios \
+            -f "$ipa" \
+            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
+            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Remove temporary Apple credentials
         if: always()
         run: |
+          if [ -n "${CLAWNSOLE_ASC_KEY_FILE:-}" ]; then
+            rm -f "$CLAWNSOLE_ASC_KEY_FILE"
+          fi
           if [ -n "${CLAWNSOLE_IOS_KEYCHAIN:-}" ]; then
             security delete-keychain "$CLAWNSOLE_IOS_KEYCHAIN" || true
           fi
