@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+SOURCE_ICON="$REPOSITORY_ROOT/icon.png"
+RENDERER="$SCRIPT_DIRECTORY/render_platform_icon.swift"
+WORK_DIRECTORY="$REPOSITORY_ROOT/flutter/build/platform-icons"
+MODE="${1:-all}"
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Clawnsole needs '$1' on PATH." >&2
+    exit 1
+  fi
+}
+
+case "$MODE" in
+  all|ios|android|macos) ;;
+  *)
+    echo "Usage: ./scripts/prepare_platform_icons [all|ios|android|macos]" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "Platform icon preparation requires macOS." >&2
+  exit 1
+fi
+
+require_command node
+require_command sips
+require_command swift
+
+node -e 'require("node:fs").rmSync(process.argv[1], { recursive: true, force: true })' "$WORK_DIRECTORY"
+mkdir -p "$WORK_DIRECTORY"
+
+make_resized_icon() {
+  local master="$1"
+  local pixels="$2"
+  local destination="$3"
+  mkdir -p "$(dirname "$destination")"
+  sips -z "$pixels" "$pixels" "$master" --out "$destination" >/dev/null
+}
+
+prepare_ios() {
+  local master="$WORK_DIRECTORY/ios-master.png"
+  local destination="$REPOSITORY_ROOT/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset"
+  "$RENDERER" "$SOURCE_ICON" "$master" 1024 opaque
+
+  make_resized_icon "$master" 20 "$destination/Icon-App-20x20@1x.png"
+  make_resized_icon "$master" 40 "$destination/Icon-App-20x20@2x.png"
+  make_resized_icon "$master" 60 "$destination/Icon-App-20x20@3x.png"
+  make_resized_icon "$master" 29 "$destination/Icon-App-29x29@1x.png"
+  make_resized_icon "$master" 58 "$destination/Icon-App-29x29@2x.png"
+  make_resized_icon "$master" 87 "$destination/Icon-App-29x29@3x.png"
+  make_resized_icon "$master" 40 "$destination/Icon-App-40x40@1x.png"
+  make_resized_icon "$master" 80 "$destination/Icon-App-40x40@2x.png"
+  make_resized_icon "$master" 120 "$destination/Icon-App-40x40@3x.png"
+  make_resized_icon "$master" 120 "$destination/Icon-App-60x60@2x.png"
+  make_resized_icon "$master" 180 "$destination/Icon-App-60x60@3x.png"
+  make_resized_icon "$master" 76 "$destination/Icon-App-76x76@1x.png"
+  make_resized_icon "$master" 152 "$destination/Icon-App-76x76@2x.png"
+  make_resized_icon "$master" 167 "$destination/Icon-App-83.5x83.5@2x.png"
+  cp "$master" "$destination/Icon-App-1024x1024@1x.png"
+
+  echo "Prepared the iOS AppIcon asset catalog."
+}
+
+prepare_android() {
+  local master="$WORK_DIRECTORY/android-master.png"
+  local destination="$REPOSITORY_ROOT/flutter/android/app/src/main/res"
+  "$RENDERER" "$SOURCE_ICON" "$master" 512 opaque
+
+  make_resized_icon "$master" 48 "$destination/mipmap-mdpi/ic_launcher.png"
+  make_resized_icon "$master" 72 "$destination/mipmap-hdpi/ic_launcher.png"
+  make_resized_icon "$master" 96 "$destination/mipmap-xhdpi/ic_launcher.png"
+  make_resized_icon "$master" 144 "$destination/mipmap-xxhdpi/ic_launcher.png"
+  make_resized_icon "$master" 192 "$destination/mipmap-xxxhdpi/ic_launcher.png"
+
+  echo "Prepared the Android launcher icons."
+}
+
+prepare_macos() {
+  require_command iconutil
+  local master="$WORK_DIRECTORY/macos-master.png"
+  local iconset="$WORK_DIRECTORY/Clawnsole.iconset"
+  local destination="$REPOSITORY_ROOT/electron/assets/icon.icns"
+  "$RENDERER" "$SOURCE_ICON" "$master" 1024 transparent
+  mkdir -p "$iconset" "$(dirname "$destination")"
+
+  make_resized_icon "$master" 16 "$iconset/icon_16x16.png"
+  make_resized_icon "$master" 32 "$iconset/icon_16x16@2x.png"
+  make_resized_icon "$master" 32 "$iconset/icon_32x32.png"
+  make_resized_icon "$master" 64 "$iconset/icon_32x32@2x.png"
+  make_resized_icon "$master" 128 "$iconset/icon_128x128.png"
+  make_resized_icon "$master" 256 "$iconset/icon_128x128@2x.png"
+  make_resized_icon "$master" 256 "$iconset/icon_256x256.png"
+  make_resized_icon "$master" 512 "$iconset/icon_256x256@2x.png"
+  make_resized_icon "$master" 512 "$iconset/icon_512x512.png"
+  cp "$master" "$iconset/icon_512x512@2x.png"
+
+  iconutil -c icns "$iconset" -o "$destination"
+  echo "Prepared the macOS icon at $destination."
+}
+
+if [[ "$MODE" == "all" || "$MODE" == "ios" ]]; then
+  prepare_ios
+fi
+if [[ "$MODE" == "all" || "$MODE" == "android" ]]; then
+  prepare_android
+fi
+if [[ "$MODE" == "all" || "$MODE" == "macos" ]]; then
+  prepare_macos
+fi

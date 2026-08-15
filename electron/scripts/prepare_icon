@@ -3,33 +3,4 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
-require_command iconutil
-require_command sips
-
-SOURCE_ICON="$REPOSITORY_ROOT/icon.png"
-WORK_DIRECTORY="$ELECTRON_DIRECTORY/dist/icon-work"
-ICONSET_DIRECTORY="$WORK_DIRECTORY/Clawnsole.iconset"
-OUTPUT_ICON="$ELECTRON_DIRECTORY/assets/icon.icns"
-
-node -e 'require("node:fs").rmSync(process.argv[1], { recursive: true, force: true })' "$WORK_DIRECTORY"
-mkdir -p "$ICONSET_DIRECTORY" "$ELECTRON_DIRECTORY/assets"
-
-make_icon() {
-  local pixels="$1"
-  local filename="$2"
-  sips -z "$pixels" "$pixels" "$SOURCE_ICON" --out "$ICONSET_DIRECTORY/$filename" >/dev/null
-}
-
-make_icon 16 icon_16x16.png
-make_icon 32 icon_16x16@2x.png
-make_icon 32 icon_32x32.png
-make_icon 64 icon_32x32@2x.png
-make_icon 128 icon_128x128.png
-make_icon 256 icon_128x128@2x.png
-make_icon 256 icon_256x256.png
-make_icon 512 icon_256x256@2x.png
-make_icon 512 icon_512x512.png
-make_icon 1024 icon_512x512@2x.png
-
-iconutil -c icns "$ICONSET_DIRECTORY" -o "$OUTPUT_ICON"
-echo "Prepared the macOS icon at $OUTPUT_ICON."
+exec "$REPOSITORY_ROOT/scripts/prepare_platform_icons" macos
