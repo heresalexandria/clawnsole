@@ -98,6 +98,12 @@ and reopens it. iOS remains under normal App Store distribution semantics.
 
 See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 
+## Privacy and support
+
+Read the [privacy policy](PRIVACY.md) or use the
+[issue tracker](https://github.com/heresalexandria/clawnsole/issues) for support.
+Do not post API keys, private prompts, or personal media in a public issue.
+
 ## Verification
 
 ```bash
