@@ -1,13 +1,12 @@
 # Cutting a release
 
 Clawnsole follows the same release shape as Aesthetician: a release decision is
-made on the PR, the version is bumped once, target builds run independently, and
-the tag is created only after every required artifact exists.
+made on the PR, the shared app version is bumped once, and the tag is created
+only after the signed macOS artifacts exist.
 
 ```text
 PR labelled minor -> merge -> bump Flutter and Electron together
-                              |-> build signed iOS IPA
-                              |-> build macOS DMG + updater ZIP
+                              -> build macOS DMG + updater ZIP
                               -> checksum -> publish GitHub release
 ```
 
@@ -25,10 +24,8 @@ Every PR needs exactly one:
 The labels are created in repository setup and can be repaired at any time by
 running **Create release labels** from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
-kind directly and is useful for the first release. Manual dispatches can target
-macOS only while iOS signing is being provisioned; labelled PR releases continue
-to require and build both platforms in parallel. Select `current` to rebuild and
-publish the already-synchronized version after a recoverable CI or signing
+kind directly and is useful for the first release. Select `current` to rebuild
+and publish the already-synchronized version after a recoverable CI or signing
 failure, without creating another version bump.
 
 ## Required repository setup
@@ -37,21 +34,10 @@ Enable **Read and write permissions** under Settings → Actions → General. Th
 workflow commits the synchronized version bump to `main`, so branch protection
 must allow `github-actions[bot]` to make that commit.
 
-The signed iOS job requires base64-encoded certificate/profile data:
-
-| secret | value |
-|---|---|
-| `IOS_CERTIFICATE_P12` | App Store distribution certificate `.p12`, base64 encoded |
-| `IOS_CERTIFICATE_PASSWORD` | password for that `.p12` |
-| `IOS_PROVISIONING_PROFILE` | App Store `.mobileprovision`, base64 encoded |
-| `IOS_TEAM_ID` | Apple Developer team ID |
-
-The profile must cover `app.clawnsole.clawnsole`. The workflow imports it into a
-temporary keychain, exports a signed IPA, uploads it directly to App Store
-Connect with `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`, then deletes the
-temporary keychain. The IPA is never stored as a public Actions artifact or
-attached to a GitHub release. Processing, TestFlight selection, review
-submission, and public App Store release remain Apple-side approval steps.
+iOS is intentionally local-only. GitHub Actions never receives an iOS signing
+certificate or provisioning profile and never builds, stores, or publishes an
+IPA. Use `./flutter/scripts/build_ios` on a configured Mac when an iOS archive is
+needed.
 
 Published macOS builds must be Developer ID signed. Configure:
 
@@ -69,10 +55,8 @@ verification before it uploads any desktop artifact.
 
 ## What is published
 
-For a full release, the iOS and macOS jobs depend only on `prepare`, so they
-build in parallel on separate `macos-15` runners and `publish` waits for both.
-A macOS-only manual release skips iOS and publishes after the desktop build.
-Release assets can include:
+GitHub releases contain only the notarized macOS application and its updater
+metadata. Release assets can include:
 
 - `Clawnsole-<version>-mac-arm64.dmg`
 - `Clawnsole-mac-arm64.dmg` (stable alias used by the README's latest-download link)
@@ -80,8 +64,5 @@ Release assets can include:
 - `SHA256SUMS.txt`
 
 The ZIP is the Electron updater asset. Artifact naming, architecture selection,
-and digest parsing are covered by Electron tests. Android and hosted web jobs can
-be added to this fan-out later.
-
-Only notarized macOS artifacts are published publicly. The signed iOS build is
-delivered privately to App Store Connect during the workflow.
+and digest parsing are covered by Electron tests. iOS, Android, and hosted web
+distribution remain outside this workflow.

@@ -115,7 +115,9 @@ the saved key itself.
   two separately.
 - `build_ios` creates a signed Xcode archive and IPA. It defaults to App Store
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
-  `enterprise` when appropriate. Xcode signing must already be configured.
+  `enterprise` when appropriate. Xcode signing must already be configured. iOS
+  builds are deliberately local-only and are not run or published by GitHub
+  Actions.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
