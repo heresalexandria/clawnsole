@@ -11,7 +11,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clawnsole-preview-dark.png">
+    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview in light mode">
+  </picture>
 </p>
 
 Clawnsole is a local-first Flutter video generation workspace with a premium,
