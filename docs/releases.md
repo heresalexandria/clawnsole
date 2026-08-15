@@ -58,8 +58,7 @@ The release job uploads the build to App Store Connect. Processing, TestFlight
 selection, review submission, and public App Store release remain Apple-side
 approval steps.
 
-macOS signing is optional so the pipeline can cut an initial release like
-Aesthetician does. Add these secrets when Developer ID distribution is ready:
+Published macOS builds must be Developer ID signed. Configure:
 
 | secret | value |
 |---|---|
@@ -69,9 +68,10 @@ Aesthetician does. Add these secrets when Developer ID distribution is ready:
 | `APPLE_APP_SPECIFIC_PASSWORD` | notarization app password |
 | `APPLE_TEAM_ID` | Apple team ID |
 
-Without the macOS certificate, the release is unsigned and GitHub Actions emits
-a warning. The checksum-verified in-app updater still works, but the first manual
-download can trigger Gatekeeper.
+The first two secrets are required. CI performs strict bundle verification and
+confirms the `KMZ785G889` Team ID before it uploads any desktop artifact. The last
+three secrets are optional as a group; when all three are present, CI also
+notarizes the app and requires Gatekeeper and stapler verification to pass.
 
 ## What is published
 

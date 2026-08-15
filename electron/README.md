@@ -33,15 +33,20 @@ the adjacent `assets/` directory.
 
 Local builds default to ad-hoc/unsigned packaging. Set
 `CLAWNSOLE_ELECTRON_SIGN=true` and provide Electron Builder's certificate
-environment for Developer ID signing. CI supports these optional secrets:
+environment for Developer ID signing. Published CI builds require:
 
 - `MACOS_CERTIFICATE_P12`
 - `MACOS_CERTIFICATE_PASSWORD`
+
+CI rejects a release unless the completed app has a strict, valid Developer ID
+bundle signature for Team ID `KMZ785G889`. Notarization is enabled when all of
+these optional secrets are present:
+
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
 
-The last three enable notarization when a signing certificate is present.
+Partial notarization configuration is treated as an error.
 
 ## Self-update
 
