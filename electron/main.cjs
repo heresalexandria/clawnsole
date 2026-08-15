@@ -5,6 +5,7 @@ const {
   BrowserWindow,
   dialog,
   Menu,
+  nativeTheme,
   session,
   shell,
 } = require("electron");
@@ -207,7 +208,7 @@ async function createMainWindow(localRendererUrl) {
     height: 980,
     minWidth: 1040,
     minHeight: 700,
-    backgroundColor: "#efe7d8",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0D0E18" : "#F3F4FA",
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -229,6 +230,12 @@ async function createMainWindow(localRendererUrl) {
 async function startApplication() {
   installApplicationMenu();
 
+  session.defaultSession.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({
+      title: "Save Clawnsole video",
+      defaultPath: item.getFilename(),
+    });
+  });
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);

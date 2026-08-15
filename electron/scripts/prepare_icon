@@ -4,24 +4,20 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 
 require_command iconutil
-require_command qlmanage
 require_command sips
 
-SOURCE_ICON="$REPOSITORY_ROOT/docs/assets/clawnsole-icon.svg"
+SOURCE_ICON="$REPOSITORY_ROOT/icon.png"
 WORK_DIRECTORY="$ELECTRON_DIRECTORY/dist/icon-work"
-PREVIEW_DIRECTORY="$WORK_DIRECTORY/preview"
 ICONSET_DIRECTORY="$WORK_DIRECTORY/Clawnsole.iconset"
 OUTPUT_ICON="$ELECTRON_DIRECTORY/assets/icon.icns"
 
 node -e 'require("node:fs").rmSync(process.argv[1], { recursive: true, force: true })' "$WORK_DIRECTORY"
-mkdir -p "$PREVIEW_DIRECTORY" "$ICONSET_DIRECTORY" "$ELECTRON_DIRECTORY/assets"
-qlmanage -t -s 1024 -o "$PREVIEW_DIRECTORY" "$SOURCE_ICON" >/dev/null 2>&1
-SOURCE_PNG="$PREVIEW_DIRECTORY/$(basename "$SOURCE_ICON").png"
+mkdir -p "$ICONSET_DIRECTORY" "$ELECTRON_DIRECTORY/assets"
 
 make_icon() {
   local pixels="$1"
   local filename="$2"
-  sips -z "$pixels" "$pixels" "$SOURCE_PNG" --out "$ICONSET_DIRECTORY/$filename" >/dev/null
+  sips -z "$pixels" "$pixels" "$SOURCE_ICON" --out "$ICONSET_DIRECTORY/$filename" >/dev/null
 }
 
 make_icon 16 icon_16x16.png

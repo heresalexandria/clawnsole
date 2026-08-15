@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/clawnsole-icon.svg" alt="Clawnsole icon" width="96" height="96">
+  <img src="icon.png" alt="Clawnsole icon" width="96" height="96">
 </p>
 
 <h1 align="center">Clawnsole</h1>
@@ -25,7 +25,8 @@ video API and keeps provider boundaries explicit for future video services.
 - All documented durations, aspect ratios, resolutions, audio, draft, and safety controls
 - Live polling, progress, provider credit balance, and setting-aware estimates
 - Exact per-generation credit and USD history
-- Reload-safe input previews, completed-video playback, download, and full input reuse
+- Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
+- System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
 - Local API-key setup with no database, `localStorage`, or IndexedDB history
 

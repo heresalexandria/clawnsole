@@ -129,11 +129,11 @@ class _LibraryToolbar extends StatelessWidget {
                 (filter) => ChoiceChip(
                   label: Text(_filterLabel(filter)),
                   selected: controller.libraryFilter == filter,
-                  selectedColor: ClawnsoleColors.forest,
+                  selectedColor: context.colors.primary,
                   labelStyle: TextStyle(
                     color: controller.libraryFilter == filter
                         ? Colors.white
-                        : ClawnsoleColors.ink,
+                        : context.colors.onSurface,
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                   ),
@@ -181,10 +181,10 @@ class _LibraryEmpty extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 55),
       child: Column(
         children: <Widget>[
-          const Icon(
+          Icon(
             Icons.collections_outlined,
             size: 48,
-            color: ClawnsoleColors.clay,
+            color: context.colors.primary,
           ),
           const SizedBox(height: 14),
           Text(
@@ -249,7 +249,7 @@ class _GenerationCardState extends State<GenerationCard> {
       builder: (context) => AlertDialog(
         title: const Text('Remove this record?'),
         content: const Text(
-          'This removes compact history only. It does not cancel work already submitted to BFL.',
+          'This removes compact history only. It does not cancel work already submitted to the provider.',
         ),
         actions: <Widget>[
           TextButton(
@@ -302,7 +302,7 @@ class _GenerationCardState extends State<GenerationCard> {
                             : item.progress! / 100,
                         minHeight: 5,
                         backgroundColor: Colors.white24,
-                        color: ClawnsoleColors.mustard,
+                        color: context.colors.tertiary,
                       ),
                     ),
                 ],
@@ -318,11 +318,11 @@ class _GenerationCardState extends State<GenerationCard> {
                   children: <Widget>[
                     Text(
                       item.mode.label.toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 8,
                         letterSpacing: 1.1,
                         fontWeight: FontWeight.w900,
-                        color: ClawnsoleColors.clayDark,
+                        color: context.colors.primary,
                       ),
                     ),
                     const Spacer(),
@@ -363,17 +363,17 @@ class _GenerationCardState extends State<GenerationCard> {
                     item.error!,
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: ClawnsoleColors.danger,
-                      fontSize: 9,
-                    ),
+                    style: TextStyle(color: context.colors.error, fontSize: 9),
                   ),
                 ],
                 if (item.deliveryExpired) ...<Widget>[
                   const SizedBox(height: 9),
-                  const Text(
-                    'BFL’s delivery link expired; the generation record remains.',
-                    style: TextStyle(fontSize: 9, color: ClawnsoleColors.muted),
+                  Text(
+                    'The provider’s delivery link expired; the generation record remains.',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: context.colors.onSurfaceVariant,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 13),
@@ -408,7 +408,7 @@ class _GenerationCardState extends State<GenerationCard> {
                     IconButton.outlined(
                       tooltip: 'Delete history record',
                       onPressed: () => unawaited(_remove()),
-                      color: ClawnsoleColors.danger,
+                      color: context.colors.error,
                       icon: const Icon(Icons.delete_outline_rounded, size: 18),
                     ),
                   ],
@@ -432,9 +432,9 @@ class _ConfigTag extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
     decoration: BoxDecoration(
-      color: ClawnsoleColors.cream,
+      color: context.colors.surfaceContainerLow,
       borderRadius: BorderRadius.circular(7),
-      border: Border.all(color: ClawnsoleColors.line),
+      border: Border.all(color: context.colors.outlineVariant),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,

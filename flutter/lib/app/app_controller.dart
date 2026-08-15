@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:file_saver/file_saver.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
@@ -713,7 +712,7 @@ class AppController extends ChangeNotifier {
     unawaited(navigate(AppSection.create));
   }
 
-  Future<String> saveVideo(Generation item) async {
+  Future<String?> saveVideo(Generation item) async {
     if (item.resultAsset == null && item.resultUrl == null) {
       throw StateError('This video is not available.');
     }
@@ -723,12 +722,21 @@ class AppController extends ChangeNotifier {
     final baseName =
         'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
         '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
-    final location = await FileSaver.instance.saveFile(
-      name: baseName,
+    final location = await FilePicker.saveFile(
+      dialogTitle: 'Save Clawnsole video',
+      fileName: '$baseName.mp4',
       bytes: bytes,
-      fileExtension: 'mp4',
-      mimeType: MimeType.mp4Video,
+      type: FileType.custom,
+      allowedExtensions: const <String>['mp4'],
     );
+    if (location == null) {
+      showNotice(
+        kIsWeb
+            ? 'Download started. Choose a location when your browser or desktop app asks.'
+            : 'Save canceled.',
+      );
+      return null;
+    }
     showNotice('Video saved to $location');
     return location;
   }

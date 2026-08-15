@@ -2,6 +2,7 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -138,8 +139,17 @@ void main() {
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
     await tester.pumpWidget(const ClawnsoleApp());
-    expect(find.text('Clawnsole®'), findsOneWidget);
+    expect(find.text('Clawnsole'), findsOneWidget);
     expect(find.text('Create'), findsWidgets);
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+    expect(app.themeMode, ThemeMode.system);
+    expect(app.darkTheme, isNotNull);
+
+    await tester.tap(find.byTooltip('Appearance: system'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('System'), findsOneWidget);
+    expect(find.text('Light'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
   });
 
   test('form exposes every FLUX 3 generation mode', () {

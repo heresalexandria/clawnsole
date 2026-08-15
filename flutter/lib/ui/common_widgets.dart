@@ -21,13 +21,13 @@ class Eyebrow extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: <Widget>[
       if (icon != null) ...<Widget>[
-        Icon(icon, size: 14, color: ClawnsoleColors.clay),
+        Icon(icon, size: 14, color: context.colors.primary),
         const SizedBox(width: 7),
       ],
       Text(
         text.toUpperCase(),
-        style: const TextStyle(
-          color: ClawnsoleColors.clayDark,
+        style: TextStyle(
+          color: context.colors.primary,
           fontSize: 10,
           letterSpacing: 1.6,
           fontWeight: FontWeight.w900,
@@ -42,23 +42,23 @@ class SurfaceCard extends StatelessWidget {
     required this.child,
     super.key,
     this.padding = const EdgeInsets.all(18),
-    this.color = ClawnsoleColors.paper,
+    this.color,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
-  final Color color;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) => Container(
     padding: padding,
     decoration: BoxDecoration(
-      color: color,
+      color: color ?? context.colors.surface,
       borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: ClawnsoleColors.line),
-      boxShadow: const <BoxShadow>[
+      border: Border.all(color: context.colors.outlineVariant),
+      boxShadow: <BoxShadow>[
         BoxShadow(
-          color: Color(0x0A20241F),
+          color: context.colors.shadow.withValues(alpha: .07),
           blurRadius: 16,
           offset: Offset(0, 5),
         ),
@@ -76,10 +76,22 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (background, foreground, label) = item.isWorking
-        ? (const Color(0xFFE9D8A6), const Color(0xFF614B13), 'In progress')
+        ? (
+            context.colors.secondaryContainer,
+            context.colors.onSecondaryContainer,
+            'In progress',
+          )
         : item.isFailed
-        ? (const Color(0xFFF6DCD5), ClawnsoleColors.danger, 'Needs attention')
-        : (const Color(0xFFDCE9DE), ClawnsoleColors.forest, 'Ready');
+        ? (
+            context.colors.errorContainer,
+            context.colors.onErrorContainer,
+            'Needs attention',
+          )
+        : (
+            context.colors.primaryContainer,
+            context.colors.onPrimaryContainer,
+            'Ready',
+          );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
@@ -114,9 +126,16 @@ class StatusBadge extends StatelessWidget {
 }
 
 class GenerationVideo extends StatefulWidget {
-  const GenerationVideo({required this.uri, super.key});
+  const GenerationVideo({
+    required this.uri,
+    required this.onDownload,
+    super.key,
+    this.fullscreen = false,
+  });
 
   final Uri uri;
+  final Future<void> Function() onDownload;
+  final bool fullscreen;
 
   @override
   State<GenerationVideo> createState() => _GenerationVideoState();
@@ -172,7 +191,16 @@ class _GenerationMediaState extends State<GenerationMedia> {
           label: 'Loading film',
         );
       }
-      return GenerationVideo(uri: snapshot.data!);
+      return GenerationVideo(
+        uri: snapshot.data!,
+        onDownload: () async {
+          try {
+            await widget.controller.saveVideo(widget.item);
+          } on Object catch (error) {
+            widget.controller.showNotice(error.toString());
+          }
+        },
+      );
     },
   );
 }
@@ -256,6 +284,7 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
 class _GenerationVideoState extends State<GenerationVideo> {
   late VideoPlayerController _controller;
   Future<void>? _initializing;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -280,6 +309,36 @@ class _GenerationVideoState extends State<GenerationVideo> {
 
   void _refresh() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _download() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onDownload();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _openFullscreen() async {
+    await _controller.pause();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: GenerationVideo(
+              uri: widget.uri,
+              onDownload: widget.onDownload,
+              fullscreen: true,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -321,12 +380,10 @@ class _GenerationVideoState extends State<GenerationVideo> {
             VideoProgressIndicator(
               _controller,
               allowScrubbing: true,
-              colors: const VideoProgressColors(
-                playedColor: ClawnsoleColors.clay,
-              ),
+              colors: VideoProgressColors(playedColor: context.colors.primary),
             ),
             Container(
-              color: const Color(0xFF161A17),
+              color: ClawnsoleColors.rail,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
                 children: <Widget>[
@@ -344,6 +401,35 @@ class _GenerationVideoState extends State<GenerationVideo> {
                   const Text(
                     'Clawnsole preview',
                     style: TextStyle(color: Colors.white70, fontSize: 10),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Download video…',
+                    color: Colors.white,
+                    onPressed: _saving ? null : () => unawaited(_download()),
+                    icon: _saving
+                        ? const SizedBox.square(
+                            dimension: 17,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.download_rounded),
+                  ),
+                  IconButton(
+                    tooltip: widget.fullscreen
+                        ? 'Exit fullscreen'
+                        : 'Enter fullscreen',
+                    color: Colors.white,
+                    onPressed: widget.fullscreen
+                        ? () => Navigator.of(context).pop()
+                        : () => unawaited(_openFullscreen()),
+                    icon: Icon(
+                      widget.fullscreen
+                          ? Icons.fullscreen_exit_rounded
+                          : Icons.fullscreen_rounded,
+                    ),
                   ),
                 ],
               ),
@@ -363,12 +449,12 @@ class _MediaPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.forest,
+    color: ClawnsoleColors.rail,
     child: Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, color: ClawnsoleColors.sage, size: 30),
+          Icon(icon, color: ClawnsoleColors.railMuted, size: 30),
           const SizedBox(height: 8),
           Text(
             label,
@@ -395,8 +481,8 @@ class GenerationCost extends StatelessWidget {
       padding: EdgeInsets.all(compact ? 9 : 12),
       decoration: BoxDecoration(
         color: item.cost != null
-            ? const Color(0xFFE4EEE5)
-            : const Color(0xFFF1E8D8),
+            ? context.colors.primaryContainer
+            : context.colors.secondaryContainer,
         borderRadius: BorderRadius.circular(11),
       ),
       child: Column(
@@ -407,12 +493,12 @@ class GenerationCost extends StatelessWidget {
               Icon(
                 Icons.toll_rounded,
                 size: compact ? 13 : 15,
-                color: ClawnsoleColors.clayDark,
+                color: context.colors.primary,
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '${item.cost != null ? 'BFL charge' : 'Estimated'} · '
+                  '${item.cost != null ? 'Provider charge' : 'Estimated'} · '
                   '${formatCreditRange(minimum, maximum)} cr',
                   style: TextStyle(
                     fontSize: compact ? 10 : 11,
@@ -435,7 +521,10 @@ class GenerationCost extends StatelessWidget {
             const SizedBox(height: 5),
             Text(
               '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
-              style: const TextStyle(fontSize: 9, color: ClawnsoleColors.muted),
+              style: TextStyle(
+                fontSize: 9,
+                color: context.colors.onSurfaceVariant,
+              ),
             ),
           ],
         ],
@@ -517,8 +606,8 @@ class ActivityCard extends StatelessWidget {
                     value: item.progress == null ? null : item.progress! / 100,
                     minHeight: 5,
                     borderRadius: BorderRadius.circular(99),
-                    backgroundColor: ClawnsoleColors.line,
-                    color: ClawnsoleColors.clay,
+                    backgroundColor: context.colors.outlineVariant,
+                    color: context.colors.primary,
                   ),
                 ],
                 const SizedBox(height: 9),
