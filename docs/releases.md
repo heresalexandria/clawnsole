@@ -27,7 +27,9 @@ running **Create release labels** from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
 kind directly and is useful for the first release. Manual dispatches can target
 macOS only while iOS signing is being provisioned; labelled PR releases continue
-to require and build both platforms in parallel.
+to require and build both platforms in parallel. Select `current` to rebuild and
+publish the already-synchronized version after a recoverable CI or signing
+failure, without creating another version bump.
 
 ## Required repository setup
 
@@ -45,19 +47,11 @@ The signed iOS job requires base64-encoded certificate/profile data:
 | `IOS_TEAM_ID` | Apple Developer team ID |
 
 The profile must cover `app.clawnsole.clawnsole`. The workflow imports it into a
-temporary keychain, exports a signed IPA, then deletes the keychain.
-
-Uploading that IPA to App Store Connect requires a scoped API key:
-
-| secret | value |
-|---|---|
-| `APP_STORE_CONNECT_KEY_ID` | App Store Connect API key ID |
-| `APP_STORE_CONNECT_ISSUER_ID` | API issuer UUID |
-| `APP_STORE_CONNECT_API_KEY_P8` | `AuthKey_*.p8`, base64 encoded |
-
-The release job uploads the build to App Store Connect. Processing, TestFlight
-selection, review submission, and public App Store release remain Apple-side
-approval steps.
+temporary keychain, exports a signed IPA, uploads it directly to App Store
+Connect with `APPLE_ID` and `APPLE_APP_SPECIFIC_PASSWORD`, then deletes the
+temporary keychain. The IPA is never stored as a public Actions artifact or
+attached to a GitHub release. Processing, TestFlight selection, review
+submission, and public App Store release remain Apple-side approval steps.
 
 Published macOS builds must be Developer ID signed. Configure:
 
@@ -80,7 +74,6 @@ build in parallel on separate `macos-15` runners and `publish` waits for both.
 A macOS-only manual release skips iOS and publishes after the desktop build.
 Release assets can include:
 
-- `Clawnsole-<version>-ios.ipa`
 - `Clawnsole-<version>-mac-arm64.dmg`
 - `Clawnsole-mac-arm64.dmg` (stable alias used by the README's latest-download link)
 - `Clawnsole-<version>-mac-arm64.zip`
@@ -90,5 +83,5 @@ The ZIP is the Electron updater asset. Artifact naming, architecture selection,
 and digest parsing are covered by Electron tests. Android and hosted web jobs can
 be added to this fan-out later.
 
-The same IPA is attached to the GitHub release for build provenance after App
-Store Connect accepts the upload.
+Only notarized macOS artifacts are published publicly. The signed iOS build is
+delivered privately to App Store Connect during the workflow.

@@ -84,8 +84,9 @@ Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
 drives the release workflow. iOS and macOS build in parallel, then a GitHub
 release is published with checksums. A manual workflow dispatch can cut the
 first release or a release without a PR, including a macOS-only bootstrap before
-iOS signing is configured. The iOS job also uploads its signed IPA to App Store
-Connect; Apple review and public release remain explicit approvals.
+iOS signing is configured. The iOS job uploads its signed IPA directly to App
+Store Connect without publishing it as a GitHub artifact; Apple review and
+public release remain explicit approvals.
 
 Packaged Electron builds check GitHub at most once per day and expose
 **Clawnsole → Check for Updates…**. An accepted update downloads the architecture
