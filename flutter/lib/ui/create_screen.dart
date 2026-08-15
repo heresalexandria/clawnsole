@@ -8,6 +8,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
+import 'claw_mark.dart';
 import 'formatters.dart';
 
 class CreateScreen extends StatelessWidget {
@@ -276,13 +277,14 @@ class _Composer extends StatelessWidget {
                   Expanded(
                     child: Row(
                       children: <Widget>[
-                        Icon(
-                          controller.hasApiKey
-                              ? Icons.pets_rounded
-                              : Icons.key_off_rounded,
-                          color: context.colors.primary,
-                          size: 20,
-                        ),
+                        if (controller.hasApiKey)
+                          ClawMark(size: 20, color: context.colors.primary)
+                        else
+                          Icon(
+                            Icons.key_off_rounded,
+                            color: context.colors.primary,
+                            size: 20,
+                          ),
                         const SizedBox(width: 9),
                         Flexible(
                           child: Text(
@@ -1064,7 +1066,7 @@ class _RecentWork extends StatelessWidget {
         SurfaceCard(
           child: Column(
             children: <Widget>[
-              Icon(Icons.pets_rounded, size: 34, color: context.colors.primary),
+              ClawMark(size: 42, color: context.colors.primary),
               const SizedBox(height: 12),
               Text(
                 'A quiet branch.',

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core/models.dart';
 import '../ui/create_screen.dart';
+import '../ui/claw_mark.dart';
 import '../ui/library_screen.dart';
 import '../ui/settings_screen.dart';
 import 'app_controller.dart';
@@ -54,7 +55,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
                 SnackBar(
                   content: Row(
                     children: <Widget>[
-                      Icon(Icons.pets_rounded, color: context.colors.tertiary),
+                      ClawMark(size: 20, color: context.colors.tertiary),
                       const SizedBox(width: 10),
                       Expanded(child: Text(controller.notice!)),
                     ],
@@ -163,11 +164,7 @@ class _SideRail extends StatelessWidget {
           onTap: () => unawaited(controller.navigate(AppSection.library)),
         ),
         const Spacer(),
-        const Icon(
-          Icons.pets_rounded,
-          color: ClawnsoleColors.railMuted,
-          size: 21,
-        ),
+        const ClawMark(color: ClawnsoleColors.railMuted, size: 21),
         const SizedBox(height: 14),
         _RailButton(
           icon: Icons.tune_rounded,
