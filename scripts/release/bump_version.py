@@ -45,14 +45,28 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def emit(version: str, build: int) -> None:
+    output = os.environ.get("GITHUB_OUTPUT")
+    if output:
+        with Path(output).open("a") as stream:
+            stream.write(f"version={version}\n")
+            stream.write(f"tag=v{version}\n")
+            stream.write(f"build={build}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kind", nargs="?", choices=("major", "minor", "patch"))
+    parser.add_argument("--current", action="store_true")
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args()
     current, build = versions()
     if args.show:
         print(current)
+        return
+    if args.current:
+        emit(current, build)
+        print(f"{current}+{build}")
         return
     if not args.kind:
         parser.error("a bump kind is required")
@@ -72,12 +86,7 @@ def main() -> None:
     source = VERSION_PATTERN.sub(f"version: {version}+{build + 1}", source, count=1)
     FLUTTER_PACKAGE.write_text(source)
 
-    output = os.environ.get("GITHUB_OUTPUT")
-    if output:
-        with Path(output).open("a") as stream:
-            stream.write(f"version={version}\n")
-            stream.write(f"tag=v{version}\n")
-            stream.write(f"build={build + 1}\n")
+    emit(version, build + 1)
     print(f"{version}+{build + 1}")
 
 

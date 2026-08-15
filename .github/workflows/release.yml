@@ -11,7 +11,7 @@ on:
       bump:
         description: How to move the version
         type: choice
-        options: [patch, minor, major]
+        options: [current, patch, minor, major]
         default: patch
       targets:
         description: Which release targets to build
@@ -32,10 +32,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.bump.outputs.version }}
-      build: ${{ steps.bump.outputs.build }}
-      tag: ${{ steps.bump.outputs.tag }}
-      sha: ${{ steps.push.outputs.sha }}
+      version: ${{ steps.bump.outputs.version || steps.current.outputs.version }}
+      build: ${{ steps.bump.outputs.build || steps.current.outputs.build }}
+      tag: ${{ steps.bump.outputs.tag || steps.current.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
       skip: ${{ steps.kind.outputs.skip }}
     steps:
       - uses: actions/checkout@v7
@@ -63,19 +63,28 @@ jobs:
 
       - name: Bump Flutter and Electron together
         id: bump
-        if: steps.kind.outputs.skip != 'true'
+        if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
         run: python3 scripts/release/bump_version.py "${{ steps.kind.outputs.kind }}"
+
+      - name: Use current synchronized version
+        id: current
+        if: steps.kind.outputs.kind == 'current'
+        run: python3 scripts/release/bump_version.py --current
 
       - name: Commit and push version
         id: push
-        if: steps.kind.outputs.skip != 'true'
+        if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add electron/package.json electron/package-lock.json flutter/pubspec.yaml
           git commit -m "Release ${{ steps.bump.outputs.tag }}"
           git push origin HEAD:main
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Select release commit
+        id: release
+        if: steps.kind.outputs.skip != 'true'
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   macos:
     name: build macOS desktop
@@ -109,6 +118,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # This workflow is triggered by a merged PR, but checks out the trusted
+          # release commit from main. Electron Builder otherwise skips signing.
+          CSC_FOR_PULL_REQUEST: true
         run: |
           for value in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!value}" ]; then echo "::error::$value is required for signed and notarized macOS releases"; exit 1; fi
@@ -228,43 +240,26 @@ jobs:
 
       - name: Upload IPA to App Store Connect
         env:
-          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          for value in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_P8; do
+          for value in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
             if [ -z "${!value}" ]; then echo "::error::$value is required"; exit 1; fi
           done
-          private_keys="$HOME/private_keys"
-          key_file="$private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-          mkdir -p "$private_keys"
-          printf '%s' "$APP_STORE_CONNECT_API_KEY_P8" | base64 -D > "$key_file"
-          chmod 600 "$key_file"
-          echo "CLAWNSOLE_ASC_KEY_FILE=$key_file" >> "$GITHUB_ENV"
           ipa=$(find outgoing-ios -maxdepth 1 -name '*.ipa' | head -1)
           test -n "$ipa"
           xcrun altool --upload-app \
             --type ios \
             -f "$ipa" \
-            --apiKey "$APP_STORE_CONNECT_KEY_ID" \
-            --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+            --username "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD"
 
       - name: Remove temporary Apple credentials
         if: always()
         run: |
-          if [ -n "${CLAWNSOLE_ASC_KEY_FILE:-}" ]; then
-            rm -f "$CLAWNSOLE_ASC_KEY_FILE"
-          fi
           if [ -n "${CLAWNSOLE_IOS_KEYCHAIN:-}" ]; then
             security delete-keychain "$CLAWNSOLE_IOS_KEYCHAIN" || true
           fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: build-ios
-          path: outgoing-ios/*
-          retention-days: 7
-          if-no-files-found: error
 
   publish:
     name: publish GitHub release
@@ -285,7 +280,7 @@ jobs:
       - name: Gather and checksum
         run: |
           mkdir release
-          find incoming -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.ipa' \) \
+          find incoming -type f \( -name '*.dmg' -o -name '*.zip' \) \
             -exec mv {} release/ \;
           versioned_dmg="release/Clawnsole-${{ needs.prepare.outputs.version }}-mac-arm64.dmg"
           test -f "$versioned_dmg"
