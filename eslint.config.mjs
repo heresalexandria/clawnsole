@@ -13,6 +13,10 @@ const eslintConfig = defineConfig([
     "dist/**",
     "out/**",
     "build/**",
+    "electron/dist/**",
+    "electron/node_modules/**",
+    "flutter/.dart_tool/**",
+    "flutter/build/**",
     "next-env.d.ts",
   ]),
   eslint.configs.recommended,
@@ -34,6 +38,12 @@ const eslintConfig = defineConfig([
       react: {
         version: "detect",
       },
+    },
+  },
+  {
+    files: ["electron/**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 ]);

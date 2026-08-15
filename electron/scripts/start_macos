@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./electron/scripts/start_macos [additional Electron arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_WEB_PORT  Local Next.js port (default: 3000)"
+  exit 0
+fi
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The Clawnsole macOS app requires macOS." >&2
+  exit 1
+fi
+
+print_heading "macOS desktop development"
+prepare_dependencies
+exec node "$ELECTRON_DIRECTORY/scripts/start.mjs" "$@"

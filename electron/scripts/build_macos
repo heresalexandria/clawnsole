@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./electron/scripts/build_macos [additional electron-builder arguments]"
+  echo
+  echo "Environment:"
+  echo "  CLAWNSOLE_ELECTRON_ARCH  arm64, x64, or universal (default: current Mac)"
+  echo "  CLAWNSOLE_ELECTRON_SIGN  Set to true to enable Developer ID signing"
+  echo "                            and electron-builder notarization detection"
+  exit 0
+fi
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The Clawnsole macOS build requires macOS." >&2
+  exit 1
+fi
+
+print_heading "macOS deployable build"
+prepare_dependencies
+
+if [[ "${CLAWNSOLE_ELECTRON_SIGN:-false}" != "true" ]]; then
+  export CSC_IDENTITY_AUTO_DISCOVERY=false
+fi
+
+cd "$REPOSITORY_ROOT"
+npm run build
+node "$ELECTRON_DIRECTORY/scripts/prepare-renderer.mjs"
+"$ELECTRON_DIRECTORY/scripts/prepare_icon"
+
+ARCHITECTURE="${CLAWNSOLE_ELECTRON_ARCH:-$(uname -m)}"
+case "$ARCHITECTURE" in
+  arm64) ARCH_FLAG="--arm64" ;;
+  x64|x86_64) ARCH_FLAG="--x64" ;;
+  universal) ARCH_FLAG="--universal" ;;
+  *)
+    echo "CLAWNSOLE_ELECTRON_ARCH must be arm64, x64, or universal." >&2
+    exit 1
+    ;;
+esac
+
+cd "$ELECTRON_DIRECTORY"
+./node_modules/.bin/electron-builder --mac dmg zip "$ARCH_FLAG" "$@"
+
+echo
+echo "macOS release artifacts: $ELECTRON_DIRECTORY/dist/release"
+echo "Local .app bundles are inside the mac-* release directory."

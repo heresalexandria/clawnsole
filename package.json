@@ -9,6 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "electron:start": "./electron/scripts/start_macos",
+    "electron:build": "./electron/scripts/build_macos",
     "test": "node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern .next",
     "typecheck": "next typegen && tsc --noEmit"

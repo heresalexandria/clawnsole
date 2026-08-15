@@ -41,8 +41,10 @@ yarn-error.log*
 /work/
 *.tsbuildinfo
 /.clawnsole/
+/electron/assets/icon.icns
+/electron/dist/
+/electron/node_modules/
 
 # local machine setup: never commit
-/AGENTS.md
 /use_heresalexandria.sh
 /use-heresalexandria.sh

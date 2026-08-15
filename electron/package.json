@@ -1,0 +1,55 @@
+{
+  "name": "clawnsole-electron",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "description": "Clawnsole macOS desktop shell",
+  "author": "Clawnsole contributors",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "./scripts/start_macos",
+    "build:mac": "./scripts/build_macos",
+    "prepare:renderer": "node ./scripts/prepare-renderer.mjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "ai.clawnsole.desktop",
+    "productName": "Clawnsole",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "lib/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/renderer",
+        "to": "renderer"
+      }
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist/release"
+    },
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "title": "${productName} ${version}"
+    }
+  }
+}
