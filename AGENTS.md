@@ -2,6 +2,24 @@
 
 These instructions apply to the whole repository.
 
+## Repository identity
+
+- Every Git transport, GitHub API call, pull request, label, release, workflow
+  action, and repository administration action for a repository owned by
+  `heresalexandria` must authenticate as `heresalexandria`.
+- Never use any alternate identity for a `heresalexandria` repository,
+  including through a fork, contributor remote, browser session, global `gh`
+  login, or fallback authentication path.
+- Before committing, pushing, or using GitHub APIs, run
+  `./use-heresalexandria.sh` and verify with
+  `./use-heresalexandria.sh --check`.
+- Open pull requests with `./use-heresalexandria.sh --pr ...`. Run all other
+  GitHub CLI operations with `./use-heresalexandria.sh --gh ...`; do not invoke
+  the globally authenticated `gh` session directly for this repository.
+- Do not add forks or remotes owned by another account as a workaround for an
+  authentication or permission failure. Stop and repair the
+  `heresalexandria` authentication path instead.
+
 ## Supported surfaces
 
 Clawnsole is one Flutter product delivered through four targets:
