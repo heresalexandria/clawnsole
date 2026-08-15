@@ -24,6 +24,10 @@ node "$ELECTRON_DIRECTORY/scripts/clean-output.mjs"
 
 if [[ "${CLAWNSOLE_ELECTRON_SIGN:-false}" != "true" ]]; then
   export CSC_IDENTITY_AUTO_DISCOVERY=false
+  # GitHub exposes unset secrets as empty environment variables. electron-builder
+  # interprets an empty CSC_LINK as a relative certificate path, so remove both
+  # signing variables entirely for an unsigned build.
+  unset CSC_LINK CSC_KEY_PASSWORD
 fi
 
 cd "$REPOSITORY_ROOT"
