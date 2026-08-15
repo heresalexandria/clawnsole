@@ -1,7 +1,7 @@
 name: Release
 
-# A release-labelled PR merge or a manual dispatch bumps both app versions,
-# builds iOS and macOS concurrently, then publishes only after both succeed.
+# A release-labelled PR merge bumps both app versions and builds iOS and macOS
+# concurrently. Manual dispatch can bootstrap macOS before iOS signing exists.
 on:
   pull_request:
     types: [closed]
@@ -13,6 +13,11 @@ on:
         type: choice
         options: [patch, minor, major]
         default: patch
+      targets:
+        description: Which release targets to build
+        type: choice
+        options: [all, macos]
+        default: all
 
 permissions:
   contents: write
@@ -140,7 +145,7 @@ jobs:
   ios:
     name: build iOS app
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
+    if: needs.prepare.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.targets == 'all')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -255,7 +260,7 @@ jobs:
   publish:
     name: publish GitHub release
     needs: [prepare, macos, ios]
-    if: needs.prepare.result == 'success' && needs.prepare.outputs.skip != 'true'
+    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'skipped') && needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

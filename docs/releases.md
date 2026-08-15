@@ -24,7 +24,9 @@ Every PR needs exactly one:
 
 Run **Create release labels** once from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
-kind directly and is useful for the first release.
+kind directly and is useful for the first release. Manual dispatches can target
+macOS only while iOS signing is being provisioned; labelled PR releases continue
+to require and build both platforms in parallel.
 
 ## Required repository setup
 
@@ -73,8 +75,10 @@ download can trigger Gatekeeper.
 
 ## What is published
 
-The iOS and macOS jobs depend only on `prepare`, so they build in parallel on
-separate `macos-15` runners. `publish` waits for both and attaches:
+For a full release, the iOS and macOS jobs depend only on `prepare`, so they
+build in parallel on separate `macos-15` runners and `publish` waits for both.
+A macOS-only manual release skips iOS and publishes after the desktop build.
+Release assets can include:
 
 - `Clawnsole-<version>-ios.ipa`
 - `Clawnsole-<version>-mac-arm64.dmg`
