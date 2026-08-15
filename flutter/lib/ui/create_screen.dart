@@ -387,6 +387,18 @@ class _KeyframeEditor extends StatelessWidget {
                                   frame.asset!.bytes,
                                   fit: BoxFit.cover,
                                 )
+                              : Uri.tryParse(frame.source)?.scheme == 'https'
+                              ? Image.network(
+                                  frame.source,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => Container(
+                                    color: ClawnsoleColors.forest,
+                                    child: const Icon(
+                                      Icons.link_rounded,
+                                      color: ClawnsoleColors.sage,
+                                    ),
+                                  ),
+                                )
                               : Container(
                                   color: ClawnsoleColors.forest,
                                   child: const Icon(

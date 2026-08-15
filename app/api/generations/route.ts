@@ -6,6 +6,7 @@ import type {
   VideoMode,
 } from "../../../lib/providers/contracts";
 import { estimateGenerationCredits } from "../../../lib/providers/pricing";
+import { persistGenerationInputs } from "../../../lib/server/asset-store";
 import { getBflApiKey, readLocalData, upsertGeneration } from "../../../lib/server/data-store";
 import { getServerProvider } from "../../../lib/server/providers";
 import { ProviderRequestError } from "../../../lib/server/providers/errors";
@@ -34,13 +35,32 @@ function compactStoredConfig(config: StoredGenerationConfig): StoredGenerationCo
     generateAudio: Boolean(config.generateAudio),
     safetyTolerance: config.safetyTolerance,
     draft: Boolean(config.draft),
+    exactTiming: Boolean(config.exactTiming),
     keyframes: Array.isArray(config.keyframes)
       ? config.keyframes.slice(0, 10).map((frame) => ({
           label: shortText(frame?.label, 240),
           seconds: typeof frame?.seconds === "number" ? frame.seconds : undefined,
+          source: frame?.source?.kind === "local"
+            ? {
+                kind: "local" as const,
+                value: shortText(frame.source.value, 80),
+                label: shortText(frame.source.label, 240),
+                contentType: shortText(frame.source.contentType, 120),
+                bytes: typeof frame.source.bytes === "number" ? frame.source.bytes : undefined,
+              }
+            : undefined,
         }))
       : undefined,
     sourceLabel: /^data:/i.test(sourceLabel) ? "Embedded source (not stored)" : sourceLabel || undefined,
+    source: config.source?.kind === "local"
+      ? {
+          kind: "local",
+          value: shortText(config.source.value, 80),
+          label: shortText(config.source.label, 240),
+          contentType: shortText(config.source.contentType, 120),
+          bytes: typeof config.source.bytes === "number" ? config.source.bytes : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -65,7 +85,10 @@ export async function POST(request: Request) {
     }
 
     const now = new Date().toISOString();
-    const config = compactStoredConfig(body.record.config);
+    const config = await persistGenerationInputs(
+      body.input,
+      compactStoredConfig(body.record.config),
+    );
     const existingHistory = (await readLocalData()).generations;
     const estimate = estimateGenerationCredits(body.provider, { mode: body.record.mode, config }, existingHistory);
     generation = {

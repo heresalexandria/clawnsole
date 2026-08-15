@@ -20,6 +20,8 @@ abstract interface class AppGateway {
   Future<LocalSnapshot> clearPreferences();
   Future<LocalSnapshot> clearApiKey();
   Future<LocalSnapshot> clearAll();
+  Future<Uri> assetUri(AssetReference reference);
+  Future<Uint8List> readAsset(AssetReference reference);
   Uri mediaUri(String source);
   Future<Uint8List> downloadMedia(String source);
 }

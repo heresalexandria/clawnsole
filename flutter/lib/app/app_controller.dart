@@ -16,11 +16,13 @@ class PickedAsset {
     required this.name,
     required this.bytes,
     required this.mimeType,
+    this.retained,
   });
 
   final String name;
   final Uint8List bytes;
   final String mimeType;
+  final AssetReference? retained;
 
   String get dataUrl => 'data:$mimeType;base64,${base64Encode(bytes)}';
 }
@@ -32,6 +34,7 @@ class KeyframeDraft {
     required this.source,
     required this.seconds,
     this.asset,
+    this.retained,
   });
 
   final String id;
@@ -39,6 +42,7 @@ class KeyframeDraft {
   final String source;
   final double seconds;
   final PickedAsset? asset;
+  final AssetReference? retained;
 
   String get requestSource => asset?.dataUrl ?? source.trim();
 
@@ -49,6 +53,7 @@ class KeyframeDraft {
         source: source ?? this.source,
         seconds: seconds ?? this.seconds,
         asset: asset,
+        retained: source == null ? retained : null,
       );
 }
 
@@ -94,6 +99,7 @@ class AppController extends ChangeNotifier {
   Timer? _creditTimer;
   Timer? _noticeTimer;
   bool _polling = false;
+  final Set<String> _retentionAttempts = <String>{};
   int _idCounter = 0;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
@@ -120,33 +126,65 @@ class AppController extends ChangeNotifier {
     }).toList();
   }
 
-  GenerationConfig get currentConfig => GenerationConfig(
-    aspectRatio: form.aspectRatio,
-    duration: form.duration,
-    resolution: form.resolution,
-    generateAudio: form.generateAudio,
-    safetyTolerance: form.safetyTolerance,
-    draft: form.draft,
-    keyframes: form.mode == VideoMode.i2v
-        ? form.keyframes
-              .map(
-                (frame) => KeyframeLabel(
-                  label: frame.label,
-                  seconds: form.exactTiming ? frame.seconds : null,
-                ),
-              )
-              .toList()
-        : null,
-    sourceLabel: switch (form.mode) {
-      VideoMode.v2v =>
-        form.videoAsset?.name ??
-            (form.videoUrl.trim().isEmpty ? null : form.videoUrl.trim()),
-      VideoMode.draftEnhance =>
-        form.draftAsset?.name ??
-            (form.draftUrl.trim().isEmpty ? null : form.draftUrl.trim()),
-      _ => null,
-    },
-  );
+  AssetReference? _reference(PickedAsset? asset, String url, String label) {
+    if (asset?.retained != null) return asset!.retained;
+    final remote = Uri.tryParse(url.trim());
+    return remote?.scheme == 'https'
+        ? AssetReference(kind: 'remote', value: url.trim(), label: label)
+        : null;
+  }
+
+  GenerationConfig get currentConfig {
+    final orderedFrames = List<KeyframeDraft>.from(form.keyframes);
+    if (form.exactTiming) {
+      orderedFrames.sort((a, b) => a.seconds.compareTo(b.seconds));
+    }
+    return GenerationConfig(
+      aspectRatio: form.aspectRatio,
+      duration: form.duration,
+      resolution: form.resolution,
+      generateAudio: form.generateAudio,
+      safetyTolerance: form.safetyTolerance,
+      draft: form.draft,
+      exactTiming: form.exactTiming,
+      keyframes: form.mode == VideoMode.i2v
+          ? orderedFrames
+                .map(
+                  (frame) => KeyframeLabel(
+                    label: frame.label,
+                    seconds: form.exactTiming ? frame.seconds : null,
+                    source:
+                        frame.asset?.retained ??
+                        frame.retained ??
+                        _reference(null, frame.source, frame.label),
+                  ),
+                )
+                .toList()
+          : null,
+      sourceLabel: switch (form.mode) {
+        VideoMode.v2v =>
+          form.videoAsset?.name ??
+              (form.videoUrl.trim().isEmpty ? null : form.videoUrl.trim()),
+        VideoMode.draftEnhance =>
+          form.draftAsset?.name ??
+              (form.draftUrl.trim().isEmpty ? null : form.draftUrl.trim()),
+        _ => null,
+      },
+      source: switch (form.mode) {
+        VideoMode.v2v => _reference(
+          form.videoAsset,
+          form.videoUrl,
+          form.videoAsset?.name ?? 'Starting video',
+        ),
+        VideoMode.draftEnhance => _reference(
+          form.draftAsset,
+          form.draftUrl,
+          form.draftAsset?.name ?? 'FLUX 3 draft cache',
+        ),
+        _ => null,
+      },
+    );
+  }
 
   CreditEstimate get currentEstimate =>
       estimateCredits(form.mode, currentConfig, generations);
@@ -154,7 +192,10 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _apply(await gateway.load());
-      if (hasApiKey) unawaited(refreshCredits());
+      if (hasApiKey) {
+        unawaited(refreshCredits());
+        unawaited(pollWorking());
+      }
     } on Object catch (error) {
       loadError = _message(error);
     } finally {
@@ -505,12 +546,20 @@ class AppController extends ChangeNotifier {
   Future<void> pollWorking() async {
     if (_polling || !hasApiKey) return;
     final working = generations
-        .where((item) => item.isWorking && item.pollingUrl != null)
+        .where(
+          (item) =>
+              item.pollingUrl != null &&
+              (item.isWorking ||
+                  (item.isReady &&
+                      item.resultAsset == null &&
+                      !_retentionAttempts.contains(item.localId))),
+        )
         .toList();
     if (working.isEmpty) return;
     _polling = true;
     try {
       for (final item in working) {
+        if (item.isReady) _retentionAttempts.add(item.localId);
         try {
           final updated = await gateway.poll(item);
           _replaceInMemory(updated);
@@ -586,7 +635,43 @@ class AppController extends ChangeNotifier {
     showNotice('Clawnsole’s local data was removed.');
   }
 
-  void reuse(Generation item) {
+  Future<PickedAsset> _retainedAsset(AssetReference reference) async =>
+      PickedAsset(
+        name: reference.label,
+        bytes: await gateway.readAsset(reference),
+        mimeType: reference.contentType ?? 'application/octet-stream',
+        retained: reference,
+      );
+
+  Future<void> reuse(Generation item) async {
+    final retainedFrames = <KeyframeDraft>[];
+    try {
+      for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
+        final reference = frame.source;
+        retainedFrames.add(
+          KeyframeDraft(
+            id: _uid(),
+            label: frame.label,
+            source: reference?.kind == 'remote' ? reference!.value : '',
+            seconds: frame.seconds ?? 0,
+            asset: reference?.isLocal == true
+                ? await _retainedAsset(reference!)
+                : null,
+            retained: reference,
+          ),
+        );
+      }
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+    PickedAsset? retainedVideo;
+    if (item.mode == VideoMode.v2v && item.config.source?.isLocal == true) {
+      try {
+        retainedVideo = await _retainedAsset(item.config.source!);
+      } on Object catch (error) {
+        showNotice(_message(error));
+      }
+    }
     form
       ..mode = item.mode == VideoMode.draftEnhance ? VideoMode.t2v : item.mode
       ..prompt = item.mode == VideoMode.draftEnhance ? '' : item.prompt
@@ -599,11 +684,17 @@ class AppController extends ChangeNotifier {
       ..generateAudio = item.config.generateAudio
       ..safetyTolerance = item.config.safetyTolerance
       ..draft = item.config.draft
-      ..keyframes = <KeyframeDraft>[]
-      ..videoAsset = null
-      ..videoUrl = '';
-    unawaited(navigate(AppSection.create));
-    showNotice('Settings copied. Re-add private reference files.');
+      ..exactTiming = item.config.exactTiming
+      ..keyframes = retainedFrames
+      ..videoAsset = retainedVideo
+      ..videoUrl =
+          item.mode == VideoMode.v2v && item.config.source?.kind == 'remote'
+          ? item.config.source!.value
+          : ''
+      ..draftAsset = null
+      ..draftUrl = '';
+    await navigate(AppSection.create);
+    showNotice('Prompt, settings, and retained references copied.');
   }
 
   void enhance(Generation item) {
@@ -623,10 +714,12 @@ class AppController extends ChangeNotifier {
   }
 
   Future<String> saveVideo(Generation item) async {
-    if (item.resultUrl == null) {
-      throw StateError('This video has no delivery URL.');
+    if (item.resultAsset == null && item.resultUrl == null) {
+      throw StateError('This video is not available.');
     }
-    final bytes = await gateway.downloadMedia(item.resultUrl!);
+    final bytes = item.resultAsset != null
+        ? await gateway.readAsset(item.resultAsset!)
+        : await gateway.downloadMedia(item.resultUrl!);
     final baseName =
         'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
         '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
@@ -638,6 +731,11 @@ class AppController extends ChangeNotifier {
     );
     showNotice('Video saved to $location');
     return location;
+  }
+
+  Future<Uri?> generationMediaUri(Generation item) async {
+    if (item.resultAsset != null) return gateway.assetUri(item.resultAsset!);
+    return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
   }
 
   @override

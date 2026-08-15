@@ -377,18 +377,20 @@ class _StorageSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'Local data file',
+                    'Local project data',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 3),
                   const Text(
-                    'Compact metadata only—never video blobs, uploaded frames, or source clips.',
+                    'Compact JSON plus retained reference inputs and finished videos.',
                   ),
                 ],
               ),
             ),
             Text(
-              formatBytes(controller.storage.bytes),
+              formatBytes(
+                controller.storage.bytes + controller.storage.assetBytes,
+              ),
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
           ],
@@ -399,7 +401,13 @@ class _StorageSection extends StatelessWidget {
             Expanded(
               child: _Stat(
                 value: formatBytes(controller.storage.bytes),
-                label: 'File size',
+                label: 'Metadata',
+              ),
+            ),
+            Expanded(
+              child: _Stat(
+                value: formatBytes(controller.storage.assetBytes),
+                label: '${controller.storage.assets} assets',
               ),
             ),
             Expanded(
@@ -504,7 +512,7 @@ class _SettingsSide extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'History is uncapped. Expired delivery URLs are pruned automatically while generation metadata remains.',
+              'History is uncapped. Uploaded references and completed videos remain local until their records are removed.',
               style: TextStyle(color: Colors.white70),
             ),
             if (controller.gateway.usesCompanion) ...<Widget>[
@@ -539,13 +547,13 @@ class _SettingsSide extends StatelessWidget {
             ),
             const SizedBox(height: 5),
             const Text(
-              'These actions update only the Flutter app’s data on this device.',
+              'These actions update only Clawnsole data on this device.',
             ),
             const SizedBox(height: 12),
             _ClearButton(
               icon: Icons.delete_sweep_outlined,
               title: 'Clear history',
-              subtitle: 'Generation records and delivery links',
+              subtitle: 'Records, retained inputs, and videos',
               onTap: () async {
                 if (await confirm(
                   'Clear generation history?',
@@ -564,7 +572,7 @@ class _SettingsSide extends StatelessWidget {
             _ClearButton(
               icon: Icons.warning_amber_rounded,
               title: 'Delete all local data',
-              subtitle: 'History, preferences, and API key',
+              subtitle: 'History, assets, preferences, and API key',
               danger: true,
               onTap: () async {
                 if (await confirm(

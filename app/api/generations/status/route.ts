@@ -3,7 +3,8 @@ import type {
   GenerationResultPayload,
   PollGenerationRequest,
 } from "../../../../lib/providers/contracts";
-import { getBflApiKey, updateGeneration } from "../../../../lib/server/data-store";
+import { storeRemoteResult } from "../../../../lib/server/asset-store";
+import { getBflApiKey, readLocalData, updateGeneration } from "../../../../lib/server/data-store";
 import { getServerProvider } from "../../../../lib/server/providers";
 import { ProviderRequestError } from "../../../../lib/server/providers/errors";
 
@@ -57,12 +58,26 @@ export async function POST(request: Request) {
     const status = storedStatus(payload);
     const resultUrl = status === "Ready" ? findUrl(payload.result, "media") : undefined;
     const draftCacheUrl = status === "Ready" ? findUrl(payload.result, "draft") : undefined;
+    const current = (await readLocalData()).generations.find((item) => item.localId === body.localId);
+    let resultAsset = current?.resultAsset;
+    if (status === "Ready" && resultUrl && !resultAsset) {
+      try {
+        resultAsset = await storeRemoteResult(
+          resultUrl,
+          `clawnsole-${body.localId.slice(0, 8)}.mp4`,
+        );
+      } catch (error) {
+        console.error("Clawnsole could not retain a local copy of a completed video.", error);
+      }
+    }
     const generation = await updateGeneration(body.localId, (current) => ({
       ...current,
       status,
       progress: status === "Ready" ? 100 : normalizeProgress(payload.progress),
       updatedAt: new Date().toISOString(),
       resultUrl: resultUrl ?? current.resultUrl,
+      resultAsset: resultAsset ?? current.resultAsset,
+      deliveryExpired: status === "Ready" ? false : current.deliveryExpired,
       draftCacheUrl: draftCacheUrl ?? current.draftCacheUrl,
       deliveryExpiresAt: status === "Ready"
         ? new Date(Date.now() + 10 * 60 * 1000).toISOString()

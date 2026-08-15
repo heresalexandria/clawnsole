@@ -34,6 +34,40 @@ extension VideoModeValue on VideoMode {
   );
 }
 
+class AssetReference {
+  const AssetReference({
+    required this.kind,
+    required this.value,
+    required this.label,
+    this.contentType,
+    this.bytes,
+  });
+
+  final String kind;
+  final String value;
+  final String label;
+  final String? contentType;
+  final int? bytes;
+
+  bool get isLocal => kind == 'local';
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'kind': kind,
+    'value': value,
+    'label': label,
+    if (contentType != null) 'contentType': contentType,
+    if (bytes != null) 'bytes': bytes,
+  };
+
+  factory AssetReference.fromJson(Map<String, Object?> json) => AssetReference(
+    kind: json['kind'] == 'local' ? 'local' : 'remote',
+    value: json['value'] as String? ?? '',
+    label: json['label'] as String? ?? 'Clawnsole asset',
+    contentType: json['contentType'] as String?,
+    bytes: (json['bytes'] as num?)?.toInt(),
+  );
+}
+
 class GenerationConfig {
   const GenerationConfig({
     required this.aspectRatio,
@@ -42,8 +76,10 @@ class GenerationConfig {
     required this.generateAudio,
     required this.safetyTolerance,
     required this.draft,
+    this.exactTiming = false,
     this.keyframes,
     this.sourceLabel,
+    this.source,
   });
 
   final String aspectRatio;
@@ -52,8 +88,26 @@ class GenerationConfig {
   final bool generateAudio;
   final int safetyTolerance;
   final bool draft;
+  final bool exactTiming;
   final List<KeyframeLabel>? keyframes;
   final String? sourceLabel;
+  final AssetReference? source;
+
+  GenerationConfig copyWith({
+    List<KeyframeLabel>? keyframes,
+    AssetReference? source,
+  }) => GenerationConfig(
+    aspectRatio: aspectRatio,
+    duration: duration,
+    resolution: resolution,
+    generateAudio: generateAudio,
+    safetyTolerance: safetyTolerance,
+    draft: draft,
+    exactTiming: exactTiming,
+    keyframes: keyframes ?? this.keyframes,
+    sourceLabel: sourceLabel,
+    source: source ?? this.source,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'aspectRatio': aspectRatio,
@@ -62,9 +116,11 @@ class GenerationConfig {
     'generateAudio': generateAudio,
     'safetyTolerance': safetyTolerance,
     'draft': draft,
+    if (exactTiming) 'exactTiming': true,
     if (keyframes != null)
       'keyframes': keyframes!.map((frame) => frame.toJson()).toList(),
     if (sourceLabel != null) 'sourceLabel': sourceLabel,
+    if (source != null) 'source': source!.toJson(),
   };
 
   factory GenerationConfig.fromJson(Map<String, Object?> json) {
@@ -78,6 +134,7 @@ class GenerationConfig {
       generateAudio: json['generateAudio'] != false,
       safetyTolerance: (json['safetyTolerance'] as num?)?.toInt() ?? 2,
       draft: json['draft'] == true,
+      exactTiming: json['exactTiming'] == true,
       keyframes: (json['keyframes'] as List<Object?>?)
           ?.whereType<Map<Object?, Object?>>()
           .map(
@@ -87,24 +144,40 @@ class GenerationConfig {
           )
           .toList(),
       sourceLabel: json['sourceLabel'] as String?,
+      source: json['source'] is Map<Object?, Object?>
+          ? AssetReference.fromJson(
+              (json['source']! as Map<Object?, Object?>).map(
+                (key, value) => MapEntry(key.toString(), value),
+              ),
+            )
+          : null,
     );
   }
 }
 
 class KeyframeLabel {
-  const KeyframeLabel({required this.label, this.seconds});
+  const KeyframeLabel({required this.label, this.seconds, this.source});
 
   final String label;
   final double? seconds;
+  final AssetReference? source;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
     if (seconds != null) 'seconds': seconds,
+    if (source != null) 'source': source!.toJson(),
   };
 
   factory KeyframeLabel.fromJson(Map<String, Object?> json) => KeyframeLabel(
     label: json['label'] as String? ?? 'Reference frame',
     seconds: (json['seconds'] as num?)?.toDouble(),
+    source: json['source'] is Map<Object?, Object?>
+        ? AssetReference.fromJson(
+            (json['source']! as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          )
+        : null,
   );
 }
 
@@ -123,6 +196,7 @@ class Generation {
     this.pollingUrl,
     this.progress,
     this.resultUrl,
+    this.resultAsset,
     this.draftCacheUrl,
     this.deliveryExpiresAt,
     this.deliveryExpired = false,
@@ -148,6 +222,7 @@ class Generation {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? resultUrl;
+  final AssetReference? resultAsset;
   final String? draftCacheUrl;
   final DateTime? deliveryExpiresAt;
   final bool deliveryExpired;
@@ -169,6 +244,7 @@ class Generation {
   }.contains(status);
 
   Generation copyWith({
+    GenerationConfig? config,
     String? requestId,
     String? pollingUrl,
     String? status,
@@ -176,6 +252,7 @@ class Generation {
     bool clearProgress = false,
     DateTime? updatedAt,
     String? resultUrl,
+    AssetReference? resultAsset,
     String? draftCacheUrl,
     DateTime? deliveryExpiresAt,
     bool? deliveryExpired,
@@ -198,10 +275,11 @@ class Generation {
     progress: clearProgress ? null : progress ?? this.progress,
     prompt: prompt,
     mode: mode,
-    config: config,
+    config: config ?? this.config,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     resultUrl: resultUrl ?? this.resultUrl,
+    resultAsset: resultAsset ?? this.resultAsset,
     draftCacheUrl: draftCacheUrl ?? this.draftCacheUrl,
     deliveryExpiresAt: deliveryExpiresAt ?? this.deliveryExpiresAt,
     deliveryExpired: deliveryExpired ?? this.deliveryExpired,
@@ -228,6 +306,7 @@ class Generation {
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (resultUrl != null) 'resultUrl': resultUrl,
+    if (resultAsset != null) 'resultAsset': resultAsset!.toJson(),
     if (draftCacheUrl != null) 'draftCacheUrl': draftCacheUrl,
     if (deliveryExpiresAt != null)
       'deliveryExpiresAt': deliveryExpiresAt!.toUtc().toIso8601String(),
@@ -263,6 +342,13 @@ class Generation {
         DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
         DateTime.now().toUtc(),
     resultUrl: json['resultUrl'] as String?,
+    resultAsset: json['resultAsset'] is Map<Object?, Object?>
+        ? AssetReference.fromJson(
+            (json['resultAsset']! as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          )
+        : null,
     draftCacheUrl: json['draftCacheUrl'] as String?,
     deliveryExpiresAt: DateTime.tryParse(
       json['deliveryExpiresAt'] as String? ?? '',
@@ -326,7 +412,7 @@ class StoredData {
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 1,
+    'schemaVersion': 2,
     'apiKeys': <String, Object?>{if (apiKey.isNotEmpty) 'bfl': apiKey},
     'preferences': preferences.toJson(),
     'generations': generations.map((item) => item.toJson()).toList(),
@@ -372,18 +458,24 @@ class StorageStats {
     required this.path,
     required this.bytes,
     required this.records,
+    this.assetBytes = 0,
+    this.assets = 0,
     this.lastUpdated,
   });
 
   final String path;
   final int bytes;
   final int records;
+  final int assetBytes;
+  final int assets;
   final DateTime? lastUpdated;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'path': path,
     'bytes': bytes,
     'records': records,
+    'assetBytes': assetBytes,
+    'assets': assets,
     if (lastUpdated != null)
       'lastUpdated': lastUpdated!.toUtc().toIso8601String(),
   };
@@ -392,6 +484,8 @@ class StorageStats {
     path: json['path'] as String? ?? '',
     bytes: (json['bytes'] as num?)?.toInt() ?? 0,
     records: (json['records'] as num?)?.toInt() ?? 0,
+    assetBytes: (json['assetBytes'] as num?)?.toInt() ?? 0,
+    assets: (json['assets'] as num?)?.toInt() ?? 0,
     lastUpdated: DateTime.tryParse(json['lastUpdated'] as String? ?? ''),
   );
 }

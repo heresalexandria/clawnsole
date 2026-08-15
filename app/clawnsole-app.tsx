@@ -63,6 +63,7 @@ import type {
 import {
   type LocalDataStats,
   type PublicLocalState,
+  type StoredAssetReference,
   type StoredGeneration,
   type StoredGenerationConfig,
 } from "../lib/generations";
@@ -79,13 +80,15 @@ interface KeyframeDraft {
   label: string;
   source: string;
   seconds: number;
-  kind: "file" | "url";
+  kind: "file" | "url" | "local";
+  storedSource?: StoredAssetReference;
 }
 
 interface SourceDraft {
   file?: File;
   url: string;
   previewUrl?: string;
+  storedSource?: StoredAssetReference;
 }
 
 interface GenerationForm {
@@ -133,6 +136,8 @@ const INITIAL_FORM: GenerationForm = {
 const EMPTY_STORAGE: LocalDataStats = {
   path: "",
   bytes: 0,
+  assetBytes: 0,
+  assets: 0,
   records: 0,
   lastUpdated: null,
 };
@@ -145,7 +150,7 @@ function uid() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function fileToDataUrl(file: File) {
+function fileToDataUrl(file: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
@@ -211,6 +216,31 @@ function mediaProxyUrl(url: string) {
   return `/api/media?url=${encodeURIComponent(url)}`;
 }
 
+function assetUrl(reference: StoredAssetReference) {
+  return reference.kind === "local"
+    ? `/api/assets?id=${encodeURIComponent(reference.value)}`
+    : reference.value;
+}
+
+function generationMediaUrl(item: StoredGeneration) {
+  if (item.resultAsset) return assetUrl(item.resultAsset);
+  return item.resultUrl ? mediaProxyUrl(item.resultUrl) : "";
+}
+
+function generationInputPreview(item: StoredGeneration) {
+  const firstFrame = item.config.keyframes?.find((frame) => frame.source)?.source;
+  if (firstFrame) return assetUrl(firstFrame);
+  if (item.config.source?.contentType?.startsWith("image/")) return assetUrl(item.config.source);
+  return "";
+}
+
+async function requestSource(source: string, stored?: StoredAssetReference) {
+  if (stored?.kind !== "local") return source.trim();
+  const response = await fetch(assetUrl(stored), { cache: "no-store" });
+  if (!response.ok) throw new Error(`The retained input “${stored.label}” is missing.`);
+  return fileToDataUrl(await response.blob());
+}
+
 function isWorking(item: StoredGeneration) {
   return item.status === "submitting" || item.status === "Pending";
 }
@@ -240,6 +270,7 @@ export function ClawnsoleApp() {
   const [toast, setToast] = useState("");
   const historyRef = useRef(history);
   const pollingRef = useRef(new Set<string>());
+  const retentionAttemptsRef = useRef(new Set<string>());
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -383,6 +414,30 @@ export function ClawnsoleApp() {
     };
   }, [hasApiKey, pollGeneration]);
 
+  useEffect(() => {
+    for (const item of history) {
+      if (item.status !== "Ready" || item.resultAsset
+        || retentionAttemptsRef.current.has(item.localId)) continue;
+      retentionAttemptsRef.current.add(item.localId);
+      if (item.resultUrl) {
+        void fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ localId: item.localId }),
+        }).then(async (response) => {
+          const payload = (await response.json()) as { generation?: StoredGeneration };
+          if (response.ok && payload.generation) {
+            updateHistory((items) => items.map((entry) => entry.localId === item.localId
+              ? payload.generation!
+              : entry));
+          }
+        }).catch(() => undefined);
+      } else if (hasApiKey && item.pollingUrl) {
+        void pollGeneration(item);
+      }
+    }
+  }, [hasApiKey, history, pollGeneration, updateHistory]);
+
   const navigate = (next: AppSection) => {
     setSection(next);
     void fetch("/api/local-state", {
@@ -434,7 +489,9 @@ export function ClawnsoleApp() {
   };
 
   const updateFrame = (id: string, patch: Partial<KeyframeDraft>) => {
-    setKeyframes((current) => current.map((frame) => frame.id === id ? { ...frame, ...patch } : frame));
+    setKeyframes((current) => current.map((frame) => frame.id === id
+      ? { ...frame, ...patch, storedSource: patch.source === undefined ? frame.storedSource : undefined }
+      : frame));
   };
 
   const removeFrame = (id: string) => {
@@ -480,7 +537,9 @@ export function ClawnsoleApp() {
     if (form.mode === "draft_enhance") {
       return {
         mode: "draft_enhance",
-        draft_cache: draftSource.file ? await fileToDataUrl(draftSource.file) : draftSource.url.trim(),
+        draft_cache: draftSource.file
+          ? await fileToDataUrl(draftSource.file)
+          : await requestSource(draftSource.url, draftSource.storedSource),
         resolution: form.resolution,
         safety_tolerance: form.safetyTolerance,
       };
@@ -497,39 +556,58 @@ export function ClawnsoleApp() {
       draft: form.draft,
     };
     if (form.mode === "i2v") {
-      const frames = form.exactTiming
-        ? [...keyframes]
-            .sort((a, b) => a.seconds - b.seconds)
-            .map((frame) => [frame.seconds, frame.source] as Flux3Keyframe)
-        : keyframes.map((frame) => frame.source);
+      const ordered = form.exactTiming
+        ? [...keyframes].sort((a, b) => a.seconds - b.seconds)
+        : keyframes;
+      const frames = await Promise.all(ordered.map(async (frame) => {
+        const source = await requestSource(frame.source, frame.storedSource);
+        return form.exactTiming ? [frame.seconds, source] as Flux3Keyframe : source;
+      }));
       return { ...common, mode: "i2v", keyframes: frames };
     }
     if (form.mode === "v2v") {
       return {
         ...common,
         mode: "v2v",
-        start_video: videoSource.file ? await fileToDataUrl(videoSource.file) : videoSource.url.trim(),
+        start_video: videoSource.file
+          ? await fileToDataUrl(videoSource.file)
+          : await requestSource(videoSource.url, videoSource.storedSource),
       };
     }
     return { ...common, mode: "t2v" };
   };
 
-  const compactConfig = (): StoredGenerationConfig => ({
-    aspectRatio: form.aspectRatio,
-    duration: form.duration === "auto" ? "auto" : form.durationSeconds,
-    resolution: form.resolution,
-    generateAudio: form.generateAudio,
-    safetyTolerance: form.safetyTolerance,
-    draft: form.draft,
-    keyframes: form.mode === "i2v"
-      ? keyframes.map((frame) => ({ label: frame.label, seconds: form.exactTiming ? frame.seconds : undefined }))
-      : undefined,
-    sourceLabel: form.mode === "v2v"
-      ? videoSource.file?.name || videoSource.url || undefined
-      : form.mode === "draft_enhance"
-        ? draftSource.file?.name || draftSource.url || undefined
+  const compactConfig = (): StoredGenerationConfig => {
+    const orderedFrames = form.exactTiming
+      ? [...keyframes].sort((a, b) => a.seconds - b.seconds)
+      : keyframes;
+    return {
+      aspectRatio: form.aspectRatio,
+      duration: form.duration === "auto" ? "auto" : form.durationSeconds,
+      resolution: form.resolution,
+      generateAudio: form.generateAudio,
+      safetyTolerance: form.safetyTolerance,
+      draft: form.draft,
+      exactTiming: form.exactTiming,
+      keyframes: form.mode === "i2v"
+        ? orderedFrames.map((frame) => ({
+            label: frame.label,
+            seconds: form.exactTiming ? frame.seconds : undefined,
+            source: frame.storedSource,
+          }))
         : undefined,
-  });
+      sourceLabel: form.mode === "v2v"
+        ? videoSource.file?.name || videoSource.url || undefined
+        : form.mode === "draft_enhance"
+          ? draftSource.file?.name || draftSource.url || undefined
+          : undefined,
+      source: form.mode === "v2v"
+        ? videoSource.storedSource
+        : form.mode === "draft_enhance"
+          ? draftSource.storedSource
+          : undefined,
+    };
+  };
 
   const submitGeneration = async (event: FormEvent) => {
     event.preventDefault();
@@ -646,7 +724,8 @@ export function ClawnsoleApp() {
   };
 
   const saveMedia = async (item: StoredGeneration) => {
-    if (!item.resultUrl) return;
+    const mediaUrl = generationMediaUrl(item);
+    if (!mediaUrl) return;
     const filename = filenameFor(item);
     const picker = (window as FilePickerWindow).showSaveFilePicker;
     if (picker) {
@@ -655,8 +734,8 @@ export function ClawnsoleApp() {
           suggestedName: filename,
           types: [{ description: "MP4 video", accept: { "video/mp4": [".mp4"] } }],
         });
-        const response = await fetch(mediaProxyUrl(item.resultUrl));
-        if (!response.ok || !response.body) throw new Error("The delivery link has expired.");
+        const response = await fetch(mediaUrl);
+        if (!response.ok || !response.body) throw new Error("The retained video is unavailable.");
         const writable = await handle.createWritable();
         await response.body.pipeTo(writable);
         showToastMessage("Saved. Finder knows exactly where it lives.");
@@ -668,7 +747,9 @@ export function ClawnsoleApp() {
       }
     }
     const anchor = document.createElement("a");
-    anchor.href = `${mediaProxyUrl(item.resultUrl)}&download=1&filename=${encodeURIComponent(filename)}`;
+    anchor.href = item.resultAsset
+      ? `${assetUrl(item.resultAsset)}&download=1`
+      : `${mediaUrl}&download=1&filename=${encodeURIComponent(filename)}`;
     anchor.download = filename;
     anchor.click();
     showToastMessage("Download started. Use your browser’s downloads to show it in Finder.");
@@ -697,9 +778,27 @@ export function ClawnsoleApp() {
       generateAudio: item.config.generateAudio,
       safetyTolerance: item.config.safetyTolerance,
       draft: item.config.draft,
+      exactTiming: Boolean(item.config.exactTiming),
     }));
+    setKeyframes((item.config.keyframes ?? []).map((frame) => ({
+      id: uid(),
+      label: frame.label,
+      source: frame.source ? assetUrl(frame.source) : "",
+      seconds: frame.seconds ?? 0,
+      kind: frame.source?.kind === "local" ? "local" : "url",
+      storedSource: frame.source,
+    })));
+    const retainedSource = item.config.source;
+    setVideoSource(item.mode === "v2v" && retainedSource
+      ? {
+          url: assetUrl(retainedSource),
+          previewUrl: retainedSource.contentType?.startsWith("video/") ? assetUrl(retainedSource) : undefined,
+          storedSource: retainedSource,
+        }
+      : { url: "" });
+    setDraftSource({ url: "" });
     navigate("create");
-    showToastMessage("Settings copied. Reference files stay private and must be re-added.");
+    showToastMessage("Prompt, settings, and retained references copied.");
   };
 
   const enhanceDraft = (item: StoredGeneration) => {
@@ -901,7 +1000,7 @@ export function ClawnsoleApp() {
                     icon={<FileVideo size={22} />}
                     source={videoSource}
                     onFile={onVideoFile}
-                    onUrl={(url) => setVideoSource((current) => ({ ...current, url, file: undefined, previewUrl: undefined }))}
+                    onUrl={(url) => setVideoSource({ url })}
                     onClear={() => setVideoSource({ url: "" })}
                   />
                 )}
@@ -1071,8 +1170,8 @@ export function ClawnsoleApp() {
                   <ActivityCard
                     key={item.localId}
                     item={item}
-                    onOpen={() => navigate("library")}
                     onSave={() => void saveMedia(item)}
+                    onReuse={() => reuseGeneration(item)}
                     onEnhance={() => enhanceDraft(item)}
                   />
                 ))}
@@ -1156,7 +1255,7 @@ function KeyframeEditor({
       <div className="keyframe-strip">
         {frames.map((frame, index) => (
           <div className="keyframe-card" key={frame.id}>
-            {frame.source && frame.kind === "file" ? (
+            {frame.source ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={frame.source} alt="" />
             ) : (
@@ -1211,14 +1310,14 @@ function SourceEditor({
   onUrl(value: string): void;
   onClear(): void;
 }) {
-  const selected = source.file;
+  const selected = source.file || source.storedSource;
   return (
     <div className="source-editor">
       <div className="source-copy"><span>{icon}</span><div><strong>{title}</strong><small>{description}</small></div></div>
       {selected ? (
         <div className="source-selected">
           {source.previewUrl ? <video src={source.previewUrl} muted playsInline /> : <div className="source-file-icon"><HardDrive size={22} /></div>}
-          <div><strong>{source.file?.name || "Linked source"}</strong><small>{source.file ? formatBytes(source.file.size) : source.url}</small></div>
+          <div><strong>{source.file?.name || source.storedSource?.label || "Linked source"}</strong><small>{source.file ? formatBytes(source.file.size) : source.storedSource?.bytes ? `${formatBytes(source.storedSource.bytes)} · retained locally` : source.url}</small></div>
           <button type="button" onClick={onClear} aria-label="Remove source"><X size={16} /></button>
         </div>
       ) : (
@@ -1232,16 +1331,22 @@ function SourceEditor({
   );
 }
 
-function ActivityCard({ item, onOpen, onSave, onEnhance }: { item: StoredGeneration; onOpen(): void; onSave(): void; onEnhance(): void }) {
+function ActivityCard({ item, onSave, onReuse, onEnhance }: { item: StoredGeneration; onSave(): void; onReuse(): void; onEnhance(): void }) {
   const working = isWorking(item);
   const failed = STATUS_FAILURES.has(item.status);
-  const hasMedia = item.status === "Ready" && item.resultUrl;
+  const mediaUrl = generationMediaUrl(item);
+  const inputPreview = generationInputPreview(item);
   const creditRange = storedCreditRange(item);
   return (
     <article className={`activity-card ${working ? "working" : ""} ${failed ? "failed" : ""}`}>
       <div className="activity-preview">
-        {hasMedia ? (
-          <video src={mediaProxyUrl(item.resultUrl!)} muted playsInline preload="metadata" />
+        {mediaUrl ? (
+          // Generated media does not include a provider-supplied caption track.
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video aria-label="Generated video" src={mediaUrl} controls playsInline preload="metadata" />
+        ) : inputPreview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={inputPreview} alt="Retained generation input" />
         ) : (
           <div className="preview-placeholder"><Film size={23} /><span>{item.config.aspectRatio}</span></div>
         )}
@@ -1252,7 +1357,7 @@ function ActivityCard({ item, onOpen, onSave, onEnhance }: { item: StoredGenerat
       </div>
       <div className="activity-copy">
         <div className="activity-meta"><span>{modeLabel(item.mode)}</span><time>{formatRelativeTime(item.createdAt)}</time></div>
-        <button onClick={onOpen}><h3>{item.prompt}</h3></button>
+        <h3>{item.prompt}</h3>
         {creditRange && (
           <div className={`activity-cost ${creditRange.actual ? "actual" : "estimated"}`}>
             <Coins size={12} />
@@ -1267,13 +1372,11 @@ function ActivityCard({ item, onOpen, onSave, onEnhance }: { item: StoredGenerat
           </div>
         )}
         {failed && <p className="compact-error"><AlertTriangle size={13} /> {item.error || item.status}</p>}
-        {item.status === "Ready" && (
-          <div className="activity-actions">
-            <button onClick={onOpen}><Eye size={14} /> Watch</button>
-            {item.resultUrl && <button onClick={onSave}><FolderDown size={14} /> Save</button>}
-            {item.draftCacheUrl && <button onClick={onEnhance}><Sparkles size={14} /> Enhance</button>}
-          </div>
-        )}
+        <div className="activity-actions">
+          {mediaUrl && <button onClick={onSave}><FolderDown size={14} /> Save</button>}
+          {item.draftCacheUrl && <button onClick={onEnhance}><Sparkles size={14} /> Enhance</button>}
+          <button onClick={onReuse}><RotateCcw size={14} /> Reuse inputs</button>
+        </div>
       </div>
     </article>
   );
@@ -1313,7 +1416,7 @@ function LibraryView({
   return (
     <section className="library-view">
       <div className="page-heading">
-        <div><p className="eyebrow"><LibraryBig size={14} /> Local history</p><h1>Your films<span>.</span></h1><p>Compact generation records live in your local data file. Media stays with BFL until you save it.</p></div>
+        <div><p className="eyebrow"><LibraryBig size={14} /> Local history</p><h1>Your films<span>.</span></h1><p>Generation metadata, reference inputs, and completed videos stay together on this machine.</p></div>
         <button className="primary-action" onClick={onCreate}><Plus size={17} /> New generation</button>
       </div>
       <div className="library-toolbar">
@@ -1342,13 +1445,18 @@ function GenerationCard({ item, onSave, onReuse, onEnhance, onRemove }: { item: 
   const working = isWorking(item);
   const failed = STATUS_FAILURES.has(item.status);
   const creditRange = storedCreditRange(item);
+  const mediaUrl = generationMediaUrl(item);
+  const inputPreview = generationInputPreview(item);
   return (
     <article className="generation-card">
       <div className="generation-media">
-        {item.resultUrl ? (
+        {mediaUrl ? (
           // Generated media does not include a provider-supplied caption track.
           // eslint-disable-next-line jsx-a11y/media-has-caption
-          <video aria-label="Generated video" controls playsInline preload="metadata" src={mediaProxyUrl(item.resultUrl)} />
+          <video aria-label="Generated video" controls playsInline preload="metadata" src={mediaUrl} />
+        ) : inputPreview ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={inputPreview} alt="Retained generation input" />
         ) : (
           <div className="generation-placeholder">
             {working ? <LoaderCircle size={32} /> : failed ? <AlertTriangle size={30} /> : <Film size={31} />}
@@ -1374,9 +1482,9 @@ function GenerationCard({ item, onSave, onReuse, onEnhance, onRemove }: { item: 
           </div>
         )}
         {item.error && <p className="card-error"><AlertTriangle size={14} /> {item.error}</p>}
-        {item.deliveryExpired && <p className="expiry-note"><Clock3 size={13} /> BFL’s delivery link expired; the generation record remains.</p>}
+        {item.deliveryExpired && <p className="expiry-note"><Clock3 size={13} /> {item.resultAsset ? "BFL’s source link expired; your local video remains." : "BFL’s delivery link expired; the generation record remains."}</p>}
         <div className="generation-actions">
-          {item.resultUrl && <button className="save-button" onClick={onSave}><FolderDown size={15} /> Save to Finder</button>}
+          {mediaUrl && <button className="save-button" onClick={onSave}><FolderDown size={15} /> Save to Finder</button>}
           {item.draftCacheUrl && <button onClick={onEnhance}><Sparkles size={15} /> Enhance</button>}
           <button onClick={onReuse}><RotateCcw size={15} /> Reuse</button>
           <button className="icon-danger" onClick={onRemove} aria-label="Delete history record"><Trash2 size={15} /></button>
@@ -1415,6 +1523,7 @@ function SettingsView({
   onClearPreferences(): void;
   onClearAll(): void;
 }) {
+  const totalBytes = storage.bytes + storage.assetBytes;
   return (
     <section className="settings-view">
       <div className="page-heading">
@@ -1441,9 +1550,10 @@ function SettingsView({
           </section>
 
           <section className="settings-section storage-section">
-            <div className="settings-section-heading"><span className="settings-icon clay"><HardDrive size={20} /></span><div><h2>Local data file</h2><p>Compact metadata only—never video blobs, uploaded frames, or source clips.</p></div><span className="storage-total">{formatBytes(storage.bytes)}</span></div>
+            <div className="settings-section-heading"><span className="settings-icon clay"><HardDrive size={20} /></span><div><h2>Local project data</h2><p>Compact JSON plus retained reference inputs and finished videos.</p></div><span className="storage-total">{formatBytes(totalBytes)}</span></div>
             <div className="file-stats-grid">
-              <div><strong>{formatBytes(storage.bytes)}</strong><span>File size</span></div>
+              <div><strong>{formatBytes(storage.bytes)}</strong><span>Metadata</span></div>
+              <div><strong>{formatBytes(storage.assetBytes)}</strong><span>{storage.assets.toLocaleString()} retained assets</span></div>
               <div><strong>{storage.records.toLocaleString()}</strong><span>Generations</span></div>
               <div><strong>{storage.lastUpdated ? formatRelativeTime(storage.lastUpdated) : "Not yet"}</strong><span>Last write</span></div>
             </div>
@@ -1454,14 +1564,14 @@ function SettingsView({
           <section>
             <PawPrint size={25} />
             <h3>Room to stretch.</h3>
-            <p>History is no longer capped. Expired delivery URLs are pruned automatically while generation metadata remains.</p>
+            <p>History is uncapped. Completed videos and uploaded references stay local until their records are removed.</p>
           </section>
           <section className="clear-section">
             <h3>Clear local data</h3>
-            <p>These actions update only the data file on this machine.</p>
-            <button onClick={onClearHistory}><Trash2 size={15} /><span><strong>Clear history</strong><small>Generation records and delivery links</small></span></button>
+            <p>These actions update only Clawnsole data on this machine.</p>
+            <button onClick={onClearHistory}><Trash2 size={15} /><span><strong>Clear history</strong><small>Records, retained inputs, and videos</small></span></button>
             <button onClick={onClearPreferences}><RefreshCw size={15} /><span><strong>Reset preferences</strong><small>Navigation and filter state</small></span></button>
-            <button className="danger-row" onClick={onClearAll}><AlertTriangle size={15} /><span><strong>Delete data file</strong><small>History, settings, and API key</small></span></button>
+            <button className="danger-row" onClick={onClearAll}><AlertTriangle size={15} /><span><strong>Delete all local data</strong><small>History, assets, settings, and API key</small></span></button>
           </section>
           <a className="docs-link" href={VIDEO_PROVIDERS.bfl.docsUrl} target="_blank" rel="noreferrer"><span><ExternalLink size={16} /><strong>FLUX 3 documentation</strong></span><ChevronDown size={15} /></a>
         </aside>

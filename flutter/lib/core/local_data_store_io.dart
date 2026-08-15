@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -14,6 +17,130 @@ class LocalDataStore {
       '${documents.path}${Platform.pathSeparator}Clawnsole${Platform.pathSeparator}clawnsole.json',
     );
     return _cachedFile!;
+  }
+
+  Future<Directory> _assets() async => Directory(
+    '${(await _file()).parent.path}${Platform.pathSeparator}assets',
+  );
+
+  String _assetId() {
+    final random = Random.secure();
+    final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    final suffix = List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return '$timestamp-$suffix';
+  }
+
+  Future<File> _assetFile(String id) async {
+    if (!RegExp(r'^[a-f0-9-]{16,80}$').hasMatch(id)) {
+      throw StateError('The local asset id is invalid.');
+    }
+    return File('${(await _assets()).path}${Platform.pathSeparator}$id.asset');
+  }
+
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+  }) async {
+    final id = _assetId();
+    final assets = await _assets();
+    await assets.create(recursive: true);
+    await (await _assetFile(id)).writeAsBytes(bytes, flush: true);
+    return AssetReference(
+      kind: 'local',
+      value: id,
+      label: label,
+      contentType: contentType,
+      bytes: bytes.length,
+    );
+  }
+
+  Future<AssetReference?> persistSource(
+    String source, {
+    required String label,
+    AssetReference? retained,
+  }) async {
+    if (retained?.isLocal == true) {
+      final file = await _assetFile(retained!.value);
+      if (await file.exists()) {
+        return AssetReference(
+          kind: 'local',
+          value: retained.value,
+          label: label,
+          contentType: retained.contentType,
+          bytes: await file.length(),
+        );
+      }
+    }
+    if (source.startsWith('data:')) {
+      final comma = source.indexOf(',');
+      if (comma < 0) throw StateError('A selected local asset is malformed.');
+      final metadata = source.substring(5, comma).split(';');
+      final contentType = metadata.firstOrNull?.isNotEmpty == true
+          ? metadata.first
+          : 'application/octet-stream';
+      final encoded = source.substring(comma + 1);
+      final bytes = metadata.contains('base64')
+          ? base64Decode(encoded)
+          : Uint8List.fromList(utf8.encode(Uri.decodeComponent(encoded)));
+      return writeAsset(bytes, label: label, contentType: contentType);
+    }
+    final remote = Uri.tryParse(source);
+    if (remote?.scheme == 'https') {
+      return AssetReference(kind: 'remote', value: source, label: label);
+    }
+    return null;
+  }
+
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    if (!reference.isLocal) {
+      throw StateError('The asset is not stored locally.');
+    }
+    return (await _assetFile(reference.value)).readAsBytes();
+  }
+
+  Future<Uri> assetUri(AssetReference reference) async {
+    if (!reference.isLocal) return Uri.parse(reference.value);
+    return (await _assetFile(reference.value)).uri;
+  }
+
+  Set<String> _referencedAssets(List<Generation> generations) {
+    final retained = <String>{};
+    void add(AssetReference? reference) {
+      if (reference?.isLocal == true) retained.add(reference!.value);
+    }
+
+    for (final generation in generations) {
+      add(generation.resultAsset);
+      add(generation.config.source);
+      for (final frame
+          in generation.config.keyframes ?? const <KeyframeLabel>[]) {
+        add(frame.source);
+      }
+    }
+    return retained;
+  }
+
+  Future<void> pruneAssets(List<Generation> generations) async {
+    final assets = await _assets();
+    if (!await assets.exists()) return;
+    final retained = _referencedAssets(generations);
+    await for (final entry in assets.list()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      final id = name.endsWith('.asset')
+          ? name.substring(0, name.length - 6)
+          : '';
+      if (!retained.contains(id)) await entry.delete();
+    }
+  }
+
+  Future<void> clearAssets() async {
+    final assets = await _assets();
+    if (await assets.exists()) await assets.delete(recursive: true);
   }
 
   Future<StoredData> read() async {
@@ -42,19 +169,42 @@ class LocalDataStore {
   Future<void> delete() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
+    await clearAssets();
   }
 
   Future<StorageStats> stats(int records) async {
     final file = await _file();
+    final assets = await _assets();
+    var assetBytes = 0;
+    var assetCount = 0;
+    if (await assets.exists()) {
+      await for (final entry in assets.list()) {
+        if (entry is! File || !entry.path.endsWith('.asset')) continue;
+        assetBytes += await entry.length();
+        assetCount += 1;
+      }
+    }
     if (!await file.exists()) {
-      return StorageStats(path: file.path, bytes: 0, records: records);
+      return StorageStats(
+        path: file.path,
+        bytes: 0,
+        records: records,
+        assetBytes: assetBytes,
+        assets: assetCount,
+      );
     }
     final current = await file.stat();
     return StorageStats(
       path: file.path,
       bytes: current.size,
       records: records,
+      assetBytes: assetBytes,
+      assets: assetCount,
       lastUpdated: current.modified,
     );
   }
+}
+
+extension<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

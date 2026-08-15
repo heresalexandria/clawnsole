@@ -4,14 +4,39 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("stores uncapped compact history in one owner-only local file", async () => {
+test("stores uncapped compact history with durable referenced assets", async () => {
   const tempDirectory = await mkdtemp(path.join(tmpdir(), "clawnsole-test-"));
   const dataFile = path.join(tempDirectory, "nested", "clawnsole.json");
   process.env.CLAWNSOLE_DATA_FILE = dataFile;
 
   try {
     const store = await import(`../lib/server/data-store.ts?test=${Date.now()}`);
+    const assets = await import("../lib/server/asset-store.ts");
     await store.setBflApiKey("bfl_local-test-secret");
+
+    const retainedConfig = await assets.persistGenerationInputs(
+      {
+        mode: "i2v",
+        prompt: "A retained reference",
+        aspect_ratio: "16:9",
+        duration: 8,
+        resolution: "hd",
+        version: "latest",
+        generate_audio: true,
+        safety_tolerance: 2,
+        draft: false,
+        keyframes: ["data:image/png;base64,aGVsbG8="],
+      },
+      {
+        aspectRatio: "16:9",
+        duration: 8,
+        resolution: "hd",
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+        keyframes: [{ label: "start.png" }],
+      },
+    );
 
     for (let index = 0; index < 55; index += 1) {
       const createdAt = new Date(Date.now() - index * 1000).toISOString();
@@ -21,8 +46,8 @@ test("stores uncapped compact history in one owner-only local file", async () =>
         model: "flux-3-video",
         status: index === 0 ? "Ready" : "Pending",
         prompt: `A compact prompt ${index}`,
-        mode: "t2v",
-        config: {
+        mode: index === 0 ? "i2v" : "t2v",
+        config: index === 0 ? retainedConfig : {
           aspectRatio: "16:9",
           duration: 8,
           resolution: "hd",
@@ -50,6 +75,8 @@ test("stores uncapped compact history in one owner-only local file", async () =>
     const publicState = await store.toPublicLocalState();
     assert.equal(publicState.generations.length, 55);
     assert.equal(publicState.storage.records, 55);
+    assert.equal(publicState.storage.assets, 1);
+    assert.equal(publicState.storage.assetBytes, 5);
     assert.equal(publicState.hasBflApiKey, true);
     assert.equal("apiKeys" in publicState, false);
     assert.equal(publicState.generations.at(-1)?.localId, "generation-0");
@@ -58,18 +85,26 @@ test("stores uncapped compact history in one owner-only local file", async () =>
     assert.equal(publicState.generations.at(-1)?.cost, 136);
     assert.equal(publicState.generations.at(-1)?.creditsBefore, 500);
     assert.equal(publicState.generations.at(-1)?.creditsAfter, 364);
+    const retained = publicState.generations.at(-1)?.config.keyframes?.[0].source;
+    assert.equal(retained?.kind, "local");
+    assert.equal(retained?.label, "start.png");
+    assert.equal((await readFile((await assets.openLocalAsset(retained.value)).filePath, "utf8")), "hello");
 
     const raw = await readFile(dataFile, "utf8");
     assert.match(raw, /bfl_local-test-secret/);
     assert.doesNotMatch(JSON.stringify(publicState), /bfl_local-test-secret/);
+    assert.doesNotMatch(raw, /data:image|aGVsbG8=/);
     assert.equal((await stat(dataFile)).mode & 0o777, 0o600);
+
+    await store.deleteGeneration("generation-0");
+    await assert.rejects(assets.openLocalAsset(retained.value));
   } finally {
     await rm(tempDirectory, { recursive: true, force: true });
     delete process.env.CLAWNSOLE_DATA_FILE;
   }
 });
 
-test("keeps browser storage and media payloads out of persistence", async () => {
+test("keeps browser storage and binary payloads out of JSON persistence", async () => {
   const [app, store, readme, packageJson] = await Promise.all([
     readFile(new URL("../app/clawnsole-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/server/data-store.ts", import.meta.url), "utf8"),
@@ -80,6 +115,9 @@ test("keeps browser storage and media payloads out of persistence", async () => 
   assert.doesNotMatch(`${app}\n${store}`, /localStorage|sessionStorage|indexedDB|HISTORY_LIMIT|HISTORY_BUDGET/);
   assert.match(app, /record: \{ localId, prompt, mode: form\.mode, config, createdAt: now \}/);
   assert.doesNotMatch(store, /slice\(0,\s*40\)|220_000/);
+  assert.match(app, /Reuse inputs/);
+  assert.match(app, /resultAsset/);
+  assert.doesNotMatch(app, /Reference files stay private and must be re-added/);
   assert.match(readme, /\.clawnsole\/clawnsole\.json/);
 
   const scripts = JSON.parse(packageJson).scripts;

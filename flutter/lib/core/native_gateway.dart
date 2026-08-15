@@ -41,7 +41,8 @@ class NativeGateway implements AppGateway {
         ...item.toJson(),
         'resultUrl': null,
         'draftCacheUrl': null,
-        'deliveryExpired': true,
+        'deliveryExpired':
+            item.resultAsset == null || item.draftCacheUrl != null,
       });
     }).toList();
     if (!changed) return current;
@@ -117,12 +118,60 @@ class NativeGateway implements AppGateway {
     }
   }
 
+  String _keyframeSource(Object? value) {
+    if (value is String) return value;
+    if (value is List<Object?> && value.length > 1 && value[1] is String) {
+      return value[1]! as String;
+    }
+    return '';
+  }
+
+  Future<GenerationConfig> _persistInputs(
+    GenerationConfig config,
+    Map<String, Object?> input,
+  ) async {
+    final mode = input['mode'];
+    if (mode == 'i2v') {
+      final rawFrames = input['keyframes'] as List<Object?>? ?? const [];
+      final frames = <KeyframeLabel>[];
+      for (var index = 0; index < (config.keyframes?.length ?? 0); index += 1) {
+        final frame = config.keyframes![index];
+        frames.add(
+          KeyframeLabel(
+            label: frame.label,
+            seconds: frame.seconds,
+            source: await _store.persistSource(
+              index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
+              label: frame.label,
+              retained: frame.source,
+            ),
+          ),
+        );
+      }
+      return config.copyWith(keyframes: frames);
+    }
+    if (mode == 'v2v' || mode == 'draft_enhance') {
+      final source = input[mode == 'v2v' ? 'start_video' : 'draft_cache'];
+      return config.copyWith(
+        source: await _store.persistSource(
+          source?.toString() ?? '',
+          label: config.sourceLabel ?? 'Clawnsole source',
+          retained: config.source,
+        ),
+      );
+    }
+    return config;
+  }
+
   @override
   Future<Generation> submit(GenerationSubmission submission) async {
     var record = submission.record;
     final data = await _readFresh();
     final key = data.apiKey.trim();
     if (key.isEmpty) throw StateError('Add a BFL API key before generating.');
+    record = record.copyWith(
+      config: await _persistInputs(record.config, submission.input),
+    );
     final estimate = estimateCredits(
       record.mode,
       record.config,
@@ -207,6 +256,21 @@ class NativeGateway implements AppGateway {
     final draftUrl = status == 'Ready'
         ? findResultUrl(payload['result'], draft: true)
         : null;
+    AssetReference? resultAsset = generation.resultAsset;
+    if (resultUrl != null && resultAsset == null) {
+      try {
+        final response = await _client.get(validatedBflUrl(resultUrl));
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resultAsset = await _store.writeAsset(
+            response.bodyBytes,
+            label: 'clawnsole-${generation.localId}.mp4',
+            contentType: response.headers['content-type'] ?? 'video/mp4',
+          );
+        }
+      } on Object {
+        // The temporary provider URL remains available if local retention fails.
+      }
+    }
     final failed = const <String>{
       'Error',
       'Failed',
@@ -219,6 +283,8 @@ class NativeGateway implements AppGateway {
           ? 100
           : normalizedProgress(payload['progress']),
       resultUrl: resultUrl,
+      resultAsset: resultAsset,
+      deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
       draftCacheUrl: draftUrl,
       deliveryExpiresAt: status == 'Ready'
           ? DateTime.now().toUtc().add(const Duration(minutes: 10))
@@ -242,6 +308,7 @@ class NativeGateway implements AppGateway {
           .toList(),
     );
     await _store.write(next);
+    await _store.pruneAssets(next.generations);
     return _snapshot(next);
   }
 
@@ -249,6 +316,7 @@ class NativeGateway implements AppGateway {
   Future<LocalSnapshot> clearHistory() async {
     final next = (await _store.read()).copyWith(generations: <Generation>[]);
     await _store.write(next);
+    await _store.clearAssets();
     return _snapshot(next);
   }
 
@@ -268,6 +336,19 @@ class NativeGateway implements AppGateway {
   Future<LocalSnapshot> clearAll() async {
     await _store.delete();
     return _snapshot(const StoredData());
+  }
+
+  @override
+  Future<Uri> assetUri(AssetReference reference) => _store.assetUri(reference);
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    if (reference.isLocal) return _store.readAsset(reference);
+    final response = await _client.get(Uri.parse(reference.value));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('The retained remote input is unavailable.');
+    }
+    return response.bodyBytes;
   }
 
   @override

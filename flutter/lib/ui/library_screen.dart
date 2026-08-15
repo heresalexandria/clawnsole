@@ -93,7 +93,7 @@ class _LibraryHeading extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Compact generation records stay local. Media remains with BFL until you save it to this device.',
+              'Generation metadata, reference inputs, and completed videos stay together on this device.',
             ),
           ],
         ),
@@ -283,41 +283,12 @@ class _GenerationCardState extends State<GenerationCard> {
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
-                  if (item.resultUrl != null)
-                    GenerationVideo(
-                      uri: widget.controller.gateway.mediaUri(item.resultUrl!),
-                    )
+                  if (item.resultAsset != null || item.resultUrl != null)
+                    GenerationMedia(controller: widget.controller, item: item)
                   else
-                    Container(
-                      color: ClawnsoleColors.forest,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: <Widget>[
-                          Icon(
-                            item.isWorking
-                                ? Icons.hourglass_bottom_rounded
-                                : item.isFailed
-                                ? Icons.warning_amber_rounded
-                                : Icons.movie_creation_outlined,
-                            color: ClawnsoleColors.sage,
-                            size: 34,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            item.deliveryExpired
-                                ? 'Delivery expired'
-                                : item.isWorking
-                                ? 'Rendering'
-                                : item.isFailed
-                                ? 'No output'
-                                : 'Saved metadata',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ],
-                      ),
+                    GenerationInputPreview(
+                      controller: widget.controller,
+                      item: item,
                     ),
                   Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
                   if (item.isWorking)
@@ -410,7 +381,7 @@ class _GenerationCardState extends State<GenerationCard> {
                   spacing: 7,
                   runSpacing: 7,
                   children: <Widget>[
-                    if (item.resultUrl != null)
+                    if (item.resultAsset != null || item.resultUrl != null)
                       FilledButton.tonalIcon(
                         onPressed: saving ? null : () => unawaited(_save()),
                         icon: saving
@@ -430,7 +401,7 @@ class _GenerationCardState extends State<GenerationCard> {
                         label: const Text('Enhance'),
                       ),
                     OutlinedButton.icon(
-                      onPressed: () => widget.controller.reuse(item),
+                      onPressed: () => unawaited(widget.controller.reuse(item)),
                       icon: const Icon(Icons.replay_rounded, size: 16),
                       label: const Text('Reuse'),
                     ),

@@ -161,6 +161,23 @@ class WebGateway implements AppGateway {
   Future<LocalSnapshot> clearAll() => _action('clearAll');
 
   @override
+  Future<Uri> assetUri(AssetReference reference) async => reference.isLocal
+      ? _url('/assets', <String, String>{'id': reference.value})
+      : Uri.parse(reference.value);
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    final response = await _client.get(await assetUri(reference));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ProviderException(
+        'The retained input is unavailable.',
+        status: response.statusCode,
+      );
+    }
+    return response.bodyBytes;
+  }
+
+  @override
   Uri mediaUri(String source) =>
       _url('/media', <String, String>{'url': source});
 

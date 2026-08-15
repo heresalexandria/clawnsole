@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -7,6 +8,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'formatters.dart';
+import 'video_controller.dart';
 
 class Eyebrow extends StatelessWidget {
   const Eyebrow(this.text, {super.key, this.icon});
@@ -120,6 +122,137 @@ class GenerationVideo extends StatefulWidget {
   State<GenerationVideo> createState() => _GenerationVideoState();
 }
 
+class GenerationMedia extends StatefulWidget {
+  const GenerationMedia({
+    required this.controller,
+    required this.item,
+    super.key,
+  });
+
+  final AppController controller;
+  final Generation item;
+
+  @override
+  State<GenerationMedia> createState() => _GenerationMediaState();
+}
+
+class _GenerationMediaState extends State<GenerationMedia> {
+  late Future<Uri?> _uri;
+
+  @override
+  void initState() {
+    super.initState();
+    _uri = widget.controller.generationMediaUri(widget.item);
+  }
+
+  @override
+  void didUpdateWidget(covariant GenerationMedia oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.resultUrl != widget.item.resultUrl ||
+        oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value) {
+      _uri = widget.controller.generationMediaUri(widget.item);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uri?>(
+    future: _uri,
+    builder: (context, snapshot) {
+      if (snapshot.hasError ||
+          (snapshot.connectionState == ConnectionState.done &&
+              snapshot.data == null)) {
+        return const _MediaPlaceholder(
+          icon: Icons.link_off_rounded,
+          label: 'Video unavailable',
+        );
+      }
+      if (!snapshot.hasData) {
+        return const _MediaPlaceholder(
+          icon: Icons.hourglass_bottom_rounded,
+          label: 'Loading film',
+        );
+      }
+      return GenerationVideo(uri: snapshot.data!);
+    },
+  );
+}
+
+class GenerationInputPreview extends StatefulWidget {
+  const GenerationInputPreview({
+    required this.controller,
+    required this.item,
+    super.key,
+  });
+
+  final AppController controller;
+  final Generation item;
+
+  @override
+  State<GenerationInputPreview> createState() => _GenerationInputPreviewState();
+}
+
+class _GenerationInputPreviewState extends State<GenerationInputPreview> {
+  late AssetReference? _reference;
+  Future<Uint8List>? _bytes;
+
+  AssetReference? _findReference() {
+    for (final frame
+        in widget.item.config.keyframes ?? const <KeyframeLabel>[]) {
+      if (frame.source != null) return frame.source;
+    }
+    return widget.item.config.source?.contentType?.startsWith('image/') == true
+        ? widget.item.config.source
+        : null;
+  }
+
+  void _load() {
+    _reference = _findReference();
+    _bytes = _reference == null
+        ? null
+        : widget.controller.gateway.readAsset(_reference!);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant GenerationInputPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_findReference()?.value != _reference?.value) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_reference == null || _bytes == null) {
+      return const _MediaPlaceholder(
+        icon: Icons.movie_creation_outlined,
+        label: 'Saved generation',
+      );
+    }
+    return FutureBuilder<Uint8List>(
+      future: _bytes,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const _MediaPlaceholder(
+            icon: Icons.broken_image_outlined,
+            label: 'Reference unavailable',
+          );
+        }
+        if (!snapshot.hasData) {
+          return const _MediaPlaceholder(
+            icon: Icons.image_outlined,
+            label: 'Loading reference',
+          );
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
+    );
+  }
+}
+
 class _GenerationVideoState extends State<GenerationVideo> {
   late VideoPlayerController _controller;
   Future<void>? _initializing;
@@ -140,7 +273,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
   }
 
   void _createController() {
-    _controller = VideoPlayerController.networkUrl(widget.uri);
+    _controller = createVideoController(widget.uri);
     _initializing = _controller.initialize();
     _controller.addListener(_refresh);
   }
@@ -318,77 +451,105 @@ class ActivityCard extends StatelessWidget {
   final Generation item;
 
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.all(12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Container(
-          width: 86,
-          height: 72,
-          decoration: BoxDecoration(
-            color: ClawnsoleColors.forest,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Stack(
-            children: <Widget>[
-              const Center(
-                child: Icon(
-                  Icons.movie_creation_outlined,
-                  color: ClawnsoleColors.sage,
-                ),
-              ),
-              Positioned(left: 6, top: 6, child: StatusBadge(item: item)),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Text(
-                    item.mode.label,
-                    style: const TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                    ),
+  Widget build(BuildContext context) {
+    final hasMedia = item.resultAsset != null || item.resultUrl != null;
+    return SurfaceCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          SizedBox(
+            height: hasMedia ? 180 : 110,
+            child: Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(17),
                   ),
-                  const Spacer(),
-                  Text(
-                    relativeTime(item.createdAt),
-                    style: const TextStyle(fontSize: 9),
+                  child: hasMedia
+                      ? GenerationMedia(controller: controller, item: item)
+                      : GenerationInputPreview(
+                          controller: controller,
+                          item: item,
+                        ),
+                ),
+                Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Text(
+                      item.mode.label,
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      relativeTime(item.createdAt),
+                      style: const TextStyle(fontSize: 9),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  item.prompt,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                GenerationCost(item: item, compact: true),
+                if (item.isWorking) ...<Widget>[
+                  const SizedBox(height: 7),
+                  LinearProgressIndicator(
+                    value: item.progress == null ? null : item.progress! / 100,
+                    minHeight: 5,
+                    borderRadius: BorderRadius.circular(99),
+                    backgroundColor: ClawnsoleColors.line,
+                    color: ClawnsoleColors.clay,
                   ),
                 ],
-              ),
-              const SizedBox(height: 5),
-              Text(
-                item.prompt,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              GenerationCost(item: item, compact: true),
-              if (item.isWorking) ...<Widget>[
-                const SizedBox(height: 7),
-                LinearProgressIndicator(
-                  value: item.progress == null ? null : item.progress! / 100,
-                  minHeight: 5,
-                  borderRadius: BorderRadius.circular(99),
-                  backgroundColor: ClawnsoleColors.line,
-                  color: ClawnsoleColors.clay,
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: <Widget>[
+                    if (hasMedia)
+                      FilledButton.tonalIcon(
+                        onPressed: () async {
+                          try {
+                            await controller.saveVideo(item);
+                          } on Object catch (error) {
+                            controller.showNotice(error.toString());
+                          }
+                        },
+                        icon: const Icon(Icons.download_rounded, size: 15),
+                        label: const Text('Save'),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: () => unawaited(controller.reuse(item)),
+                      icon: const Icon(Icons.replay_rounded, size: 15),
+                      label: const Text('Reuse inputs'),
+                    ),
+                  ],
                 ),
               ],
-            ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }

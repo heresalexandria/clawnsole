@@ -14,6 +14,14 @@ export type StoredGenerationStatus =
   | "Request Moderated"
   | "Content Moderated";
 
+export interface StoredAssetReference {
+  kind: "local" | "remote";
+  value: string;
+  label: string;
+  contentType?: string;
+  bytes?: number;
+}
+
 export interface StoredGenerationConfig {
   aspectRatio: Flux3AspectRatio;
   duration: Flux3Duration;
@@ -21,8 +29,14 @@ export interface StoredGenerationConfig {
   generateAudio: boolean;
   safetyTolerance: number;
   draft: boolean;
-  keyframes?: Array<{ label: string; seconds?: number }>;
+  exactTiming?: boolean;
+  keyframes?: Array<{
+    label: string;
+    seconds?: number;
+    source?: StoredAssetReference;
+  }>;
   sourceLabel?: string;
+  source?: StoredAssetReference;
 }
 
 export interface StoredGeneration {
@@ -39,6 +53,7 @@ export interface StoredGeneration {
   createdAt: string;
   updatedAt: string;
   resultUrl?: string;
+  resultAsset?: StoredAssetReference;
   draftCacheUrl?: string;
   deliveryExpiresAt?: string;
   deliveryExpired?: boolean;
@@ -59,6 +74,8 @@ export interface LocalPreferences {
 export interface LocalDataStats {
   path: string;
   bytes: number;
+  assetBytes: number;
+  assets: number;
   records: number;
   lastUpdated: string | null;
 }

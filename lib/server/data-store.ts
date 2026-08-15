@@ -5,9 +5,14 @@ import type {
   PublicLocalState,
   StoredGeneration,
 } from "../generations";
+import {
+  clearLocalAssets,
+  localAssetStats,
+  pruneLocalAssets,
+} from "./asset-store.ts";
 
 interface LocalDataFile {
-  schemaVersion: 1;
+  schemaVersion: 2;
   apiKeys: { bfl?: string };
   preferences: LocalPreferences;
   generations: StoredGeneration[];
@@ -19,7 +24,7 @@ const DEFAULT_PREFERENCES: LocalPreferences = {
 };
 
 const DEFAULT_DATA: LocalDataFile = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   apiKeys: {},
   preferences: DEFAULT_PREFERENCES,
   generations: [],
@@ -36,7 +41,7 @@ function cleanData(value: unknown): LocalDataFile {
   if (typeof value !== "object" || value === null) return structuredClone(DEFAULT_DATA);
   const data = value as Partial<LocalDataFile>;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     apiKeys: typeof data.apiKeys === "object" && data.apiKeys !== null
       ? { bfl: typeof data.apiKeys.bfl === "string" ? data.apiKeys.bfl : undefined }
       : {},
@@ -66,7 +71,7 @@ function expireDeliveryUrls(data: LocalDataFile) {
       ...item,
       resultUrl: undefined,
       draftCacheUrl: undefined,
-      deliveryExpired: true,
+      deliveryExpired: Boolean(!item.resultAsset || item.draftCacheUrl),
     };
   });
   return { data: changed ? { ...data, generations } : data, changed };
@@ -165,15 +170,18 @@ export async function updateGeneration(
 }
 
 export async function deleteGeneration(localId: string) {
-  return mutate((data) => {
+  const generations = await mutate((data) => {
     data.generations = data.generations.filter((item) => item.localId !== localId);
+    return structuredClone(data.generations);
   });
+  await pruneLocalAssets(generations);
 }
 
 export async function clearGenerationHistory() {
-  return mutate((data) => {
+  await mutate((data) => {
     data.generations = [];
   });
+  await clearLocalAssets();
 }
 
 export async function resetPreferences() {
@@ -189,6 +197,7 @@ export async function deleteLocalDataFile() {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    await clearLocalAssets();
   });
   mutationQueue = task.catch(() => undefined);
   return task;
@@ -203,6 +212,7 @@ export async function toPublicLocalState(input?: LocalDataFile): Promise<PublicL
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  const assetStats = await localAssetStats();
   return {
     generations: data.generations,
     preferences: data.preferences,
@@ -210,6 +220,8 @@ export async function toPublicLocalState(input?: LocalDataFile): Promise<PublicL
     storage: {
       path: LOCAL_DATA_FILE,
       bytes: fileStats?.size ?? 0,
+      assetBytes: assetStats.bytes,
+      assets: assetStats.assets,
       records: data.generations.length,
       lastUpdated: fileStats?.mtime.toISOString() ?? null,
     },

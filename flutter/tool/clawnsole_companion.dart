@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/models.dart';
@@ -59,6 +61,114 @@ class CompanionStore {
   final File file;
   Future<void> _queue = Future<void>.value();
 
+  Directory get assets =>
+      Directory('${file.parent.path}${Platform.pathSeparator}assets');
+
+  String _assetId() {
+    final random = Random.secure();
+    final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+    final suffix = List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return '$timestamp-$suffix';
+  }
+
+  File assetFile(String id) {
+    if (!RegExp(r'^[a-f0-9-]{16,80}$').hasMatch(id)) {
+      throw StateError('The local asset id is invalid.');
+    }
+    return File('${assets.path}${Platform.pathSeparator}$id.asset');
+  }
+
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+  }) async {
+    final id = _assetId();
+    await assets.create(recursive: true);
+    await assetFile(id).writeAsBytes(bytes, flush: true);
+    return AssetReference(
+      kind: 'local',
+      value: id,
+      label: label,
+      contentType: contentType.split(';').first,
+      bytes: bytes.length,
+    );
+  }
+
+  Future<AssetReference?> persistSource(
+    String source, {
+    required String label,
+    AssetReference? retained,
+  }) async {
+    if (retained?.isLocal == true) {
+      final existing = assetFile(retained!.value);
+      if (await existing.exists()) {
+        return AssetReference(
+          kind: 'local',
+          value: retained.value,
+          label: label,
+          contentType: retained.contentType,
+          bytes: await existing.length(),
+        );
+      }
+    }
+    if (source.startsWith('data:')) {
+      final comma = source.indexOf(',');
+      if (comma < 0) throw StateError('A selected local asset is malformed.');
+      final metadata = source.substring(5, comma).split(';');
+      final contentType = metadata.firstOrNull?.isNotEmpty == true
+          ? metadata.first
+          : 'application/octet-stream';
+      final encoded = source.substring(comma + 1);
+      final bytes = metadata.contains('base64')
+          ? base64Decode(encoded)
+          : Uint8List.fromList(utf8.encode(Uri.decodeComponent(encoded)));
+      return writeAsset(bytes, label: label, contentType: contentType);
+    }
+    final remote = Uri.tryParse(source);
+    if (remote?.scheme == 'https') {
+      return AssetReference(kind: 'remote', value: source, label: label);
+    }
+    return null;
+  }
+
+  Set<String> _references(List<Generation> generations) {
+    final retained = <String>{};
+    void add(AssetReference? reference) {
+      if (reference?.isLocal == true) retained.add(reference!.value);
+    }
+
+    for (final generation in generations) {
+      add(generation.resultAsset);
+      add(generation.config.source);
+      for (final frame
+          in generation.config.keyframes ?? const <KeyframeLabel>[]) {
+        add(frame.source);
+      }
+    }
+    return retained;
+  }
+
+  Future<void> pruneAssets(List<Generation> generations) async {
+    if (!await assets.exists()) return;
+    final retained = _references(generations);
+    await for (final entry in assets.list()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      final id = name.endsWith('.asset')
+          ? name.substring(0, name.length - 6)
+          : '';
+      if (!retained.contains(id)) await entry.delete();
+    }
+  }
+
+  Future<void> clearAssets() async {
+    if (await assets.exists()) await assets.delete(recursive: true);
+  }
+
   Future<StoredData> _readRaw() async {
     if (!await file.exists()) return const StoredData();
     try {
@@ -104,6 +214,7 @@ class CompanionStore {
   Future<void> delete() {
     final operation = _queue.then((_) async {
       if (await file.exists()) await file.delete();
+      await clearAssets();
     });
     _queue = operation.then<void>((_) {}, onError: (_) {});
     return operation;
@@ -111,14 +222,31 @@ class CompanionStore {
 
   Future<StorageStats> stats(int records) async {
     await _queue;
+    var assetBytes = 0;
+    var assetCount = 0;
+    if (await assets.exists()) {
+      await for (final entry in assets.list()) {
+        if (entry is! File || !entry.path.endsWith('.asset')) continue;
+        assetBytes += await entry.length();
+        assetCount += 1;
+      }
+    }
     if (!await file.exists()) {
-      return StorageStats(path: file.path, bytes: 0, records: records);
+      return StorageStats(
+        path: file.path,
+        bytes: 0,
+        records: records,
+        assetBytes: assetBytes,
+        assets: assetCount,
+      );
     }
     final value = await file.stat();
     return StorageStats(
       path: file.path,
       bytes: value.size,
       records: records,
+      assetBytes: assetBytes,
+      assets: assetCount,
       lastUpdated: value.modified,
     );
   }
@@ -203,7 +331,11 @@ class CompanionApp {
           );
           return StoreChange<void>(next, null);
         });
+        await _store.pruneAssets((await _store.read()).generations);
         return _json(request.response, 200, (await _snapshot()).toJson());
+      }
+      if (request.method == 'GET' && path == '/assets') {
+        return _asset(request);
       }
       if (request.method == 'GET' && path == '/media') {
         return _media(request);
@@ -290,6 +422,7 @@ class CompanionApp {
       }
       return StoreChange<void>(next, null);
     });
+    if (action == 'clearHistory') await _store.clearAssets();
   }
 
   Future<LocalSnapshot> _snapshot() async {
@@ -306,7 +439,8 @@ class CompanionApp {
       final json = item.toJson()
         ..remove('resultUrl')
         ..remove('draftCacheUrl')
-        ..['deliveryExpired'] = true;
+        ..['deliveryExpired'] =
+            item.resultAsset == null || item.draftCacheUrl != null;
       return Generation.fromJson(json);
     }).toList();
     if (changed) {
@@ -347,6 +481,71 @@ class CompanionApp {
     }
   }
 
+  String _keyframeSource(Object? value) {
+    if (value is String) return value;
+    if (value is List<Object?> && value.length > 1 && value[1] is String) {
+      return value[1]! as String;
+    }
+    return '';
+  }
+
+  Future<GenerationConfig> _persistInputs(
+    GenerationConfig config,
+    Map<String, Object?> input,
+  ) async {
+    final mode = input['mode'];
+    if (mode == 'i2v') {
+      final rawFrames = input['keyframes'] as List<Object?>? ?? const [];
+      final frames = <KeyframeLabel>[];
+      for (var index = 0; index < (config.keyframes?.length ?? 0); index += 1) {
+        final frame = config.keyframes![index];
+        frames.add(
+          KeyframeLabel(
+            label: frame.label,
+            seconds: frame.seconds,
+            source: await _store.persistSource(
+              index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
+              label: frame.label,
+              retained: frame.source,
+            ),
+          ),
+        );
+      }
+      return config.copyWith(keyframes: frames);
+    }
+    if (mode == 'v2v' || mode == 'draft_enhance') {
+      return config.copyWith(
+        source: await _store.persistSource(
+          input[mode == 'v2v' ? 'start_video' : 'draft_cache']?.toString() ??
+              '',
+          label: config.sourceLabel ?? 'Clawnsole source',
+          retained: config.source,
+        ),
+      );
+    }
+    return config;
+  }
+
+  Future<AssetReference?> _retainResult(String source, String label) async {
+    final target = validatedBflUrl(source);
+    final client = HttpClient();
+    try {
+      final upstream = await (await client.getUrl(target)).close();
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) return null;
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in upstream) {
+        builder.add(chunk);
+      }
+      return _store.writeAsset(
+        builder.takeBytes(),
+        label: label,
+        contentType: upstream.headers.contentType?.mimeType ?? 'video/mp4',
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<Generation> _submit(Map<String, Object?> body) async {
     final input = body['input'];
     final rawRecord = body['record'];
@@ -362,6 +561,12 @@ class CompanionApp {
     if (key.isEmpty) throw StateError('Add a BFL API key before generating.');
     var generation = Generation.fromJson(
       rawRecord.map((key, value) => MapEntry(key.toString(), value)),
+    );
+    final cleanInput = input.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    generation = generation.copyWith(
+      config: await _persistInputs(generation.config, cleanInput),
     );
     final estimate = estimateCredits(
       generation.mode,
@@ -382,10 +587,7 @@ class CompanionApp {
         generation = generation.copyWith(creditsBefore: creditsBefore);
         await _upsert(generation);
       }
-      final receipt = await _api.submit(
-        key,
-        input.map((key, value) => MapEntry(key.toString(), value)),
-      );
+      final receipt = await _api.submit(key, cleanInput);
       final requestId = receipt['id'];
       final pollingUrl = receipt['polling_url'];
       if (requestId is! String || pollingUrl is! String) {
@@ -456,14 +658,28 @@ class CompanionApp {
     };
     final status = terminal.contains(rawStatus) ? rawStatus : 'Pending';
     final failed = status != 'Ready' && status != 'Pending';
+    final resultUrl = status == 'Ready'
+        ? findResultUrl(payload['result'], draft: false)
+        : null;
+    var resultAsset = current.resultAsset;
+    if (resultUrl != null && resultAsset == null) {
+      try {
+        resultAsset = await _retainResult(
+          resultUrl,
+          'clawnsole-${current.localId}.mp4',
+        );
+      } on Object {
+        // The temporary BFL URL remains usable if local retention fails.
+      }
+    }
     final next = current.copyWith(
       status: status,
       progress: status == 'Ready'
           ? 100
           : normalizedProgress(payload['progress']),
-      resultUrl: status == 'Ready'
-          ? findResultUrl(payload['result'], draft: false)
-          : null,
+      resultUrl: resultUrl,
+      resultAsset: resultAsset,
+      deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
       draftCacheUrl: status == 'Ready'
           ? findResultUrl(payload['result'], draft: true)
           : null,
@@ -478,6 +694,86 @@ class CompanionApp {
     );
     await _upsert(next);
     return next;
+  }
+
+  AssetReference? _findAsset(List<Generation> generations, String id) {
+    for (final generation in generations) {
+      final references = <AssetReference?>[
+        generation.resultAsset,
+        generation.config.source,
+        ...(generation.config.keyframes ?? const <KeyframeLabel>[]).map(
+          (frame) => frame.source,
+        ),
+      ];
+      for (final reference in references) {
+        if (reference?.isLocal == true && reference!.value == id) {
+          return reference;
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<void> _asset(HttpRequest request) async {
+    final id = request.uri.queryParameters['id'];
+    if (id == null) {
+      throw const ProviderException(
+        'A local asset id is required.',
+        status: 400,
+      );
+    }
+    final reference = _findAsset((await _store.read()).generations, id);
+    if (reference == null) {
+      throw const ProviderException(
+        'The local asset was not found.',
+        status: 404,
+      );
+    }
+    final file = _store.assetFile(id);
+    if (!await file.exists()) {
+      throw const ProviderException(
+        'The local asset file is missing.',
+        status: 404,
+      );
+    }
+    final size = await file.length();
+    var start = 0;
+    var end = size - 1;
+    final range = request.headers.value(HttpHeaders.rangeHeader);
+    final match = range == null
+        ? null
+        : RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(range);
+    if (match != null) {
+      final parsedStart = int.tryParse(match.group(1) ?? '');
+      final parsedEnd = int.tryParse(match.group(2) ?? '');
+      if (parsedStart == null && parsedEnd != null) {
+        start = max(0, size - parsedEnd);
+      } else if (parsedStart != null) {
+        start = parsedStart;
+      }
+      if (parsedEnd != null && parsedStart != null) end = min(parsedEnd, end);
+      if (start < 0 || start >= size || end < start) {
+        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes */$size',
+        );
+        return request.response.close();
+      }
+      request.response
+        ..statusCode = HttpStatus.partialContent
+        ..headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-$end/$size',
+        );
+    }
+    request.response.headers
+      ..contentType = ContentType.parse(
+        reference.contentType ?? 'application/octet-stream',
+      )
+      ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..contentLength = end - start + 1;
+    await file.openRead(start, end + 1).pipe(request.response);
   }
 
   Future<void> _media(HttpRequest request) async {
