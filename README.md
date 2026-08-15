@@ -1,4 +1,14 @@
-# Clawnsole
+<p align="center">
+  <img src="docs/assets/clawnsole-icon.svg" alt="Clawnsole icon" width="96" height="96">
+</p>
+
+<h1 align="center">Clawnsole</h1>
+
+<p align="center"><em>Local BYO key studio for AI video generation</em></p>
+
+<p align="center">
+  <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview">
+</p>
 
 Clawnsole is a local-first video generation workspace with a premium, midcentury-inspired interface. It currently supports Black Forest Labs’ FLUX 3 video API and keeps provider boundaries explicit so more video APIs can be added without rewriting the library or generation UI.
 
