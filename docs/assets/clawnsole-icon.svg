@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
-  <title id="title">Clawnsole icon</title>
-  <desc id="desc">A cream letter C on a coral mark with a dark forest shadow and a curved cream cord.</desc>
-  <path d="M26 16h27c19 0 31 13 31 31 0 17-12 30-30 30H31c-12 0-20-8-20-20V42c0-16 13-26 15-26Z" fill="#0a211b" transform="translate(6 6)"/>
-  <path d="M26 13h27c19 0 31 13 31 31 0 17-12 30-30 30H31c-12 0-20-8-20-20V39c0-16 13-26 15-26Z" fill="#de633f" stroke="#f8f1e3" stroke-width="1.5"/>
-  <text x="47" y="59" fill="#fffaf0" font-family="Georgia, 'Times New Roman', serif" font-size="43" font-style="italic" font-weight="700" text-anchor="middle">C</text>
-  <path d="M72 67c1 8 4 18 11 19 6 1 9-4 8-10-1-5-4-8-8-10" fill="none" stroke="#f8f1e3" stroke-linecap="round" stroke-width="3"/>
-</svg>

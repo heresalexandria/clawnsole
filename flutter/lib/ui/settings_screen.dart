@@ -182,9 +182,12 @@ class _ApiKeySection extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const CircleAvatar(
-              backgroundColor: Color(0xFFE3EBE0),
-              child: Icon(Icons.key_rounded, color: ClawnsoleColors.forest),
+            CircleAvatar(
+              backgroundColor: context.colors.primaryContainer,
+              child: Icon(
+                Icons.key_rounded,
+                color: context.colors.onPrimaryContainer,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -208,16 +211,16 @@ class _ApiKeySection extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFDCE9DE),
+                  color: context.colors.primaryContainer,
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Icon(
                       Icons.check_rounded,
                       size: 13,
-                      color: ClawnsoleColors.forest,
+                      color: context.colors.onPrimaryContainer,
                     ),
                     SizedBox(width: 4),
                     Text(
@@ -272,8 +275,8 @@ class _ApiKeySection extends StatelessWidget {
             padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
               color: checkError == null
-                  ? const Color(0xFFE3EBE0)
-                  : const Color(0xFFF8DFD9),
+                  ? context.colors.primaryContainer
+                  : context.colors.errorContainer,
               borderRadius: BorderRadius.circular(10),
             ),
             child: Row(
@@ -290,8 +293,8 @@ class _ApiKeySection extends StatelessWidget {
                         : Icons.warning_amber_rounded,
                     size: 17,
                     color: checkError == null
-                        ? ClawnsoleColors.forest
-                        : ClawnsoleColors.danger,
+                        ? context.colors.onPrimaryContainer
+                        : context.colors.onErrorContainer,
                   ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -340,9 +343,9 @@ class _ApiKeySection extends StatelessWidget {
             if (controller.hasApiKey)
               TextButton(
                 onPressed: () => unawaited(controller.removeKey()),
-                child: const Text(
+                child: Text(
                   'Remove',
-                  style: TextStyle(color: ClawnsoleColors.danger),
+                  style: TextStyle(color: context.colors.error),
                 ),
               ),
           ],
@@ -364,11 +367,11 @@ class _StorageSection extends StatelessWidget {
       children: <Widget>[
         Row(
           children: <Widget>[
-            const CircleAvatar(
-              backgroundColor: Color(0xFFF0DFD5),
+            CircleAvatar(
+              backgroundColor: context.colors.secondaryContainer,
               child: Icon(
                 Icons.storage_rounded,
-                color: ClawnsoleColors.clayDark,
+                color: context.colors.onSecondaryContainer,
               ),
             ),
             const SizedBox(width: 12),
@@ -430,7 +433,7 @@ class _StorageSection extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: ClawnsoleColors.cream,
+            color: context.colors.surfaceContainerLow,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Column(
@@ -494,15 +497,11 @@ class _SettingsSide extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       SurfaceCard(
-        color: ClawnsoleColors.forest,
+        color: ClawnsoleColors.rail,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Icon(
-              Icons.pets_rounded,
-              color: ClawnsoleColors.mustard,
-              size: 30,
-            ),
+            const Icon(Icons.pets_rounded, color: Color(0xFFA8B9FF), size: 30),
             const SizedBox(height: 13),
             Text(
               'Room to stretch.',
@@ -526,7 +525,7 @@ class _SettingsSide extends StatelessWidget {
                 child: const Text(
                   'WEB MODE · Local companion active. No localStorage or IndexedDB history is used.',
                   style: TextStyle(
-                    color: ClawnsoleColors.mustard,
+                    color: Color(0xFFA8B9FF),
                     fontSize: 9,
                     fontWeight: FontWeight.w900,
                   ),
@@ -616,14 +615,14 @@ class _ClearButton extends StatelessWidget {
     contentPadding: EdgeInsets.zero,
     leading: Icon(
       icon,
-      color: danger ? ClawnsoleColors.danger : ClawnsoleColors.clayDark,
+      color: danger ? context.colors.error : context.colors.primary,
     ),
     title: Text(
       title,
       style: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w900,
-        color: danger ? ClawnsoleColors.danger : null,
+        color: danger ? context.colors.error : null,
       ),
     ),
     subtitle: Text(subtitle, style: const TextStyle(fontSize: 8)),

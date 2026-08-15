@@ -19,6 +19,7 @@ class ClawnsoleApp extends StatefulWidget {
 class _ClawnsoleAppState extends State<ClawnsoleApp> {
   late final AppController controller;
   String? _lastNotice;
+  ThemeMode _themeMode = ThemeMode.system;
 
   @override
   void initState() {
@@ -37,7 +38,9 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   Widget build(BuildContext context) => MaterialApp(
     title: 'Clawnsole',
     debugShowCheckedModeBanner: false,
-    theme: buildClawnsoleTheme(),
+    theme: buildClawnsoleTheme(Brightness.light),
+    darkTheme: buildClawnsoleTheme(Brightness.dark),
+    themeMode: _themeMode,
     home: AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
@@ -51,10 +54,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
                 SnackBar(
                   content: Row(
                     children: <Widget>[
-                      const Icon(
-                        Icons.pets_rounded,
-                        color: ClawnsoleColors.mustard,
-                      ),
+                      Icon(Icons.pets_rounded, color: context.colors.tertiary),
                       const SizedBox(width: 10),
                       Expanded(child: Text(controller.notice!)),
                     ],
@@ -63,16 +63,26 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
               );
           });
         }
-        return _AppShell(controller: controller);
+        return _AppShell(
+          controller: controller,
+          themeMode: _themeMode,
+          onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
+        );
       },
     ),
   );
 }
 
 class _AppShell extends StatelessWidget {
-  const _AppShell({required this.controller});
+  const _AppShell({
+    required this.controller,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
 
   final AppController controller;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +105,12 @@ class _AppShell extends StatelessWidget {
             Expanded(
               child: Column(
                 children: <Widget>[
-                  _TopBar(controller: controller, compact: !wide),
+                  _TopBar(
+                    controller: controller,
+                    compact: !wide,
+                    themeMode: themeMode,
+                    onThemeModeChanged: onThemeModeChanged,
+                  ),
                   Expanded(child: body),
                 ],
               ),
@@ -116,29 +131,20 @@ class _SideRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: 88,
-    color: ClawnsoleColors.forest,
+    color: ClawnsoleColors.rail,
     padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 10),
     child: Column(
       children: <Widget>[
         InkWell(
           borderRadius: BorderRadius.circular(18),
           onTap: () => unawaited(controller.navigate(AppSection.create)),
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: ClawnsoleColors.clay,
-              borderRadius: BorderRadius.circular(17),
-            ),
-            alignment: Alignment.center,
-            child: const Text(
-              'C',
-              style: TextStyle(
-                color: Colors.white,
-                fontFamily: 'Georgia',
-                fontSize: 25,
-                fontWeight: FontWeight.bold,
-              ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(17),
+            child: Image.asset(
+              'assets/icon.png',
+              width: 48,
+              height: 48,
+              fit: BoxFit.cover,
             ),
           ),
         ),
@@ -157,7 +163,11 @@ class _SideRail extends StatelessWidget {
           onTap: () => unawaited(controller.navigate(AppSection.library)),
         ),
         const Spacer(),
-        const Icon(Icons.pets_rounded, color: ClawnsoleColors.sage, size: 21),
+        const Icon(
+          Icons.pets_rounded,
+          color: ClawnsoleColors.railMuted,
+          size: 21,
+        ),
         const SizedBox(height: 14),
         _RailButton(
           icon: Icons.tune_rounded,
@@ -203,24 +213,29 @@ class _RailButton extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
-            Column(
-              children: <Widget>[
-                Icon(
-                  icon,
-                  size: 21,
-                  color: selected ? Colors.white : ClawnsoleColors.sage,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: selected ? Colors.white : ClawnsoleColors.sage,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
+            SizedBox(
+              width: double.infinity,
+              child: Column(
+                children: <Widget>[
+                  Icon(
+                    icon,
+                    size: 21,
+                    color: selected ? Colors.white : ClawnsoleColors.railMuted,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: selected
+                          ? Colors.white
+                          : ClawnsoleColors.railMuted,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
             if (badge > 0)
               Positioned(
@@ -228,8 +243,8 @@ class _RailButton extends StatelessWidget {
                 top: -4,
                 child: Container(
                   padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: ClawnsoleColors.mustard,
+                  decoration: BoxDecoration(
+                    color: context.colors.tertiary,
                     shape: BoxShape.circle,
                   ),
                   child: Text(
@@ -249,36 +264,47 @@ class _RailButton extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.controller, required this.compact});
+  const _TopBar({
+    required this.controller,
+    required this.compact,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
 
   final AppController controller;
   final bool compact;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   Widget build(BuildContext context) => Container(
     height: 70,
     padding: EdgeInsets.symmetric(horizontal: compact ? 15 : 28),
-    decoration: const BoxDecoration(
-      color: ClawnsoleColors.paper,
-      border: Border(bottom: BorderSide(color: ClawnsoleColors.line)),
+    decoration: BoxDecoration(
+      color: context.colors.surface,
+      border: Border(bottom: BorderSide(color: context.colors.outlineVariant)),
     ),
     child: Row(
       children: <Widget>[
         InkWell(
           onTap: () => unawaited(controller.navigate(AppSection.create)),
           child: Text(
-            'Clawnsole®',
+            'Clawnsole',
             style: TextStyle(
               fontFamily: 'Georgia',
               fontSize: compact ? 20 : 23,
               fontWeight: FontWeight.w700,
-              color: ClawnsoleColors.forest,
+              color: context.colors.primary,
             ),
           ),
         ),
         const Spacer(),
         if (!compact)
-          const _TopPill(icon: Icons.circle, label: 'FLUX 3', active: true),
+          const _TopPill(
+            icon: Icons.hub_rounded,
+            label: 'Provider · BFL / FLUX 3',
+            active: true,
+          ),
         if (!compact) const SizedBox(width: 8),
         InkWell(
           onTap: controller.hasApiKey
@@ -289,10 +315,10 @@ class _TopBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
             decoration: BoxDecoration(
               color: controller.creditError == null
-                  ? ClawnsoleColors.cream
-                  : const Color(0xFFFFE8E3),
+                  ? context.colors.surfaceContainerLow
+                  : context.colors.errorContainer,
               borderRadius: BorderRadius.circular(11),
-              border: Border.all(color: ClawnsoleColors.line),
+              border: Border.all(color: context.colors.outlineVariant),
             ),
             child: Row(
               children: <Widget>[
@@ -302,10 +328,10 @@ class _TopBar extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
-                  const Icon(
+                  Icon(
                     Icons.toll_rounded,
                     size: 17,
-                    color: ClawnsoleColors.clay,
+                    color: context.colors.primary,
                   ),
                 const SizedBox(width: 7),
                 Text(
@@ -321,6 +347,8 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(width: 8),
+        _ThemeModeButton(mode: themeMode, onChanged: onThemeModeChanged),
         const SizedBox(width: 8),
         if (!compact)
           _TopPill(
@@ -354,13 +382,15 @@ class _TopPill extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
-        color: active ? const Color(0xFFE7EFE8) : ClawnsoleColors.cream,
+        color: active
+            ? context.colors.primaryContainer
+            : context.colors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(11),
-        border: Border.all(color: ClawnsoleColors.line),
+        border: Border.all(color: context.colors.outlineVariant),
       ),
       child: Row(
         children: <Widget>[
-          Icon(icon, size: 14, color: ClawnsoleColors.forestSoft),
+          Icon(icon, size: 14, color: context.colors.secondary),
           const SizedBox(width: 6),
           Text(
             label,
@@ -368,6 +398,45 @@ class _TopPill extends StatelessWidget {
           ),
         ],
       ),
+    ),
+  );
+}
+
+class _ThemeModeButton extends StatelessWidget {
+  const _ThemeModeButton({required this.mode, required this.onChanged});
+
+  final ThemeMode mode;
+  final ValueChanged<ThemeMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return PopupMenuButton<ThemeMode>(
+      tooltip: 'Appearance: ${mode.name}',
+      initialValue: mode,
+      onSelected: onChanged,
+      icon: Icon(dark ? Icons.dark_mode_rounded : Icons.light_mode_rounded),
+      itemBuilder: (context) => <PopupMenuEntry<ThemeMode>>[
+        _themeChoice(ThemeMode.system, Icons.brightness_auto_rounded, 'System'),
+        _themeChoice(ThemeMode.light, Icons.light_mode_rounded, 'Light'),
+        _themeChoice(ThemeMode.dark, Icons.dark_mode_rounded, 'Dark'),
+      ],
+    );
+  }
+
+  PopupMenuItem<ThemeMode> _themeChoice(
+    ThemeMode value,
+    IconData icon,
+    String label,
+  ) => PopupMenuItem<ThemeMode>(
+    value: value,
+    child: Row(
+      children: <Widget>[
+        Icon(icon, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(label)),
+        if (mode == value) const Icon(Icons.check_rounded, size: 18),
+      ],
     ),
   );
 }
@@ -382,8 +451,8 @@ class _BottomNav extends StatelessWidget {
     selectedIndex: controller.section.index,
     onDestinationSelected: (index) =>
         unawaited(controller.navigate(AppSection.values[index])),
-    backgroundColor: ClawnsoleColors.paper,
-    indicatorColor: const Color(0xFFE1E9DF),
+    backgroundColor: context.colors.surface,
+    indicatorColor: context.colors.primaryContainer,
     destinations: const <NavigationDestination>[
       NavigationDestination(
         icon: Icon(Icons.auto_awesome_rounded),
@@ -412,10 +481,10 @@ class _ConnectionError extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Icon(
+            Icon(
               Icons.cloud_off_rounded,
               size: 46,
-              color: ClawnsoleColors.clay,
+              color: context.colors.primary,
             ),
             const SizedBox(height: 18),
             Text(
@@ -436,9 +505,9 @@ class _ConnectionError extends StatelessWidget {
             if (controller.gateway.usesCompanion)
               SelectableText(
                 controller.loadError ?? '',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: ClawnsoleColors.muted,
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
           ],

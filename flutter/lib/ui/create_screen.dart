@@ -75,7 +75,7 @@ class _CreateHeading extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Eyebrow('FLUX 3 studio', icon: Icons.auto_awesome_rounded),
+            const Eyebrow('Video studio', icon: Icons.auto_awesome_rounded),
             const SizedBox(height: 10),
             Text(
               'Make it move.',
@@ -91,7 +91,7 @@ class _CreateHeading extends StatelessWidget {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
         decoration: BoxDecoration(
-          color: ClawnsoleColors.forest,
+          color: ClawnsoleColors.rail,
           borderRadius: BorderRadius.circular(14),
         ),
         child: const Row(
@@ -99,16 +99,30 @@ class _CreateHeading extends StatelessWidget {
           children: <Widget>[
             CircleAvatar(
               radius: 15,
-              backgroundColor: ClawnsoleColors.mustard,
+              backgroundColor: ClawnsoleColors.cobalt,
               child: Text(
                 'BFL',
-                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
             SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                Text(
+                  'SELECTED PROVIDER',
+                  style: TextStyle(
+                    color: Color(0xFFA8B9FF),
+                    fontSize: 7,
+                    letterSpacing: 1,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 2),
                 Text(
                   'Black Forest Labs',
                   style: TextStyle(
@@ -118,7 +132,7 @@ class _CreateHeading extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  'FLUX 3 · latest',
+                  'Model · FLUX 3 latest',
                   style: TextStyle(color: Colors.white60, fontSize: 9),
                 ),
               ],
@@ -154,28 +168,39 @@ class _Composer extends StatelessWidget {
               Wrap(
                 spacing: 7,
                 runSpacing: 7,
-                children: bflProvider.modes
-                    .map(
-                      (mode) => ChoiceChip(
-                        label: Text(mode.shortLabel),
-                        avatar: Icon(_modeIcon(mode), size: 16),
-                        selected: controller.form.mode == mode,
-                        onSelected: (_) =>
-                            controller.updateForm((form) => form.mode = mode),
-                        selectedColor: ClawnsoleColors.forest,
-                        labelStyle: TextStyle(
-                          color: controller.form.mode == mode
-                              ? Colors.white
-                              : ClawnsoleColors.ink,
-                          fontWeight: FontWeight.w800,
-                        ),
-                        side: const BorderSide(color: ClawnsoleColors.line),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    )
-                    .toList(),
+                children: bflProvider.modes.map((mode) {
+                  final selected = controller.form.mode == mode;
+                  return ChoiceChip(
+                    label: Text(mode.shortLabel),
+                    avatar: Icon(
+                      _modeIcon(mode),
+                      size: 16,
+                      color: selected
+                          ? context.colors.onPrimary
+                          : context.colors.primary,
+                    ),
+                    selected: selected,
+                    onSelected: (_) =>
+                        controller.updateForm((form) => form.mode = mode),
+                    selectedColor: context.colors.primary,
+                    backgroundColor: context.colors.surfaceContainerLow,
+                    checkmarkColor: context.colors.onPrimary,
+                    labelStyle: TextStyle(
+                      color: selected
+                          ? context.colors.onPrimary
+                          : context.colors.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    side: BorderSide(
+                      color: selected
+                          ? context.colors.primary
+                          : context.colors.outlineVariant,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  );
+                }).toList(),
               ),
             ],
           ),
@@ -212,7 +237,7 @@ class _Composer extends StatelessWidget {
                 _SourceEditor(
                   title: 'Starting video',
                   description:
-                      'Upload a clip or paste a hosted BFL-compatible URL.',
+                      'Upload a clip or paste a hosted provider-compatible URL.',
                   icon: Icons.movie_filter_rounded,
                   asset: controller.form.videoAsset,
                   url: controller.form.videoUrl,
@@ -255,7 +280,7 @@ class _Composer extends StatelessWidget {
                           controller.hasApiKey
                               ? Icons.pets_rounded
                               : Icons.key_off_rounded,
-                          color: ClawnsoleColors.clay,
+                          color: context.colors.primary,
                           size: 20,
                         ),
                         const SizedBox(width: 9),
@@ -314,7 +339,7 @@ class _FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
     children: <Widget>[
-      Icon(icon, size: 17, color: ClawnsoleColors.clay),
+      Icon(icon, size: 17, color: context.colors.primary),
       const SizedBox(width: 7),
       Text(
         label,
@@ -368,9 +393,9 @@ class _KeyframeEditor extends StatelessWidget {
               width: 154,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: ClawnsoleColors.cream,
+                color: context.colors.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: ClawnsoleColors.line),
+                border: Border.all(color: context.colors.outlineVariant),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -392,18 +417,18 @@ class _KeyframeEditor extends StatelessWidget {
                                   frame.source,
                                   fit: BoxFit.cover,
                                   errorBuilder: (_, _, _) => Container(
-                                    color: ClawnsoleColors.forest,
+                                    color: ClawnsoleColors.rail,
                                     child: const Icon(
                                       Icons.link_rounded,
-                                      color: ClawnsoleColors.sage,
+                                      color: ClawnsoleColors.railMuted,
                                     ),
                                   ),
                                 )
                               : Container(
-                                  color: ClawnsoleColors.forest,
+                                  color: ClawnsoleColors.rail,
                                   child: const Icon(
                                     Icons.link_rounded,
-                                    color: ClawnsoleColors.sage,
+                                    color: ClawnsoleColors.railMuted,
                                   ),
                                 ),
                         ),
@@ -531,16 +556,16 @@ class _SourceEditor extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-      color: ClawnsoleColors.cream,
+      color: context.colors.surfaceContainerLow,
       borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: ClawnsoleColors.line),
+      border: Border.all(color: context.colors.outlineVariant),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Row(
           children: <Widget>[
-            Icon(icon, color: ClawnsoleColors.clay),
+            Icon(icon, color: context.colors.primary),
             const SizedBox(width: 9),
             Expanded(
               child: Column(
@@ -559,7 +584,7 @@ class _SourceEditor extends StatelessWidget {
         const SizedBox(height: 12),
         if (asset != null)
           ListTile(
-            tileColor: ClawnsoleColors.paper,
+            tileColor: context.colors.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(11),
             ),
@@ -674,7 +699,7 @@ class _SettingsGrid extends StatelessWidget {
             const Text('5 sec', style: TextStyle(fontSize: 9)),
             Text(
               controller.form.autoDuration
-                  ? 'BFL chooses'
+                  ? 'Provider chooses'
                   : '${controller.form.durationSeconds} sec',
               style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
             ),
@@ -815,10 +840,14 @@ class _ResolutionButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
-          color: active ? ClawnsoleColors.forest : ClawnsoleColors.cream,
+          color: active
+              ? context.colors.primary
+              : context.colors.surfaceContainerLow,
           borderRadius: BorderRadius.circular(11),
           border: Border.all(
-            color: active ? ClawnsoleColors.forest : ClawnsoleColors.line,
+            color: active
+                ? context.colors.primary
+                : context.colors.outlineVariant,
           ),
         ),
         child: Column(
@@ -826,14 +855,18 @@ class _ResolutionButton extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: active ? Colors.white : ClawnsoleColors.ink,
+                color: active
+                    ? context.colors.onPrimary
+                    : context.colors.onSurface,
                 fontWeight: FontWeight.w900,
               ),
             ),
             Text(
               detail,
               style: TextStyle(
-                color: active ? Colors.white60 : ClawnsoleColors.muted,
+                color: active
+                    ? context.colors.onPrimary.withValues(alpha: .72)
+                    : context.colors.onSurfaceVariant,
                 fontSize: 8,
               ),
             ),
@@ -865,7 +898,7 @@ class _CostPreview extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: ClawnsoleColors.forest,
+        color: ClawnsoleColors.rail,
         borderRadius: BorderRadius.circular(15),
       ),
       child: Column(
@@ -882,10 +915,10 @@ class _CostPreview extends StatelessWidget {
                 children: <Widget>[
                   const CircleAvatar(
                     radius: 19,
-                    backgroundColor: ClawnsoleColors.mustard,
+                    backgroundColor: ClawnsoleColors.cobalt,
                     child: Icon(
                       Icons.toll_rounded,
-                      color: ClawnsoleColors.ink,
+                      color: Colors.white,
                       size: 18,
                     ),
                   ),
@@ -894,7 +927,7 @@ class _CostPreview extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       const Text(
-                        'ESTIMATED BFL CHARGE',
+                        'ESTIMATED PROVIDER CHARGE',
                         style: TextStyle(
                           color: Colors.white54,
                           fontSize: 8,
@@ -917,7 +950,7 @@ class _CostPreview extends StatelessWidget {
               Text(
                 formatUsdRange(estimate.minimum, estimate.maximum),
                 style: const TextStyle(
-                  color: ClawnsoleColors.mustard,
+                  color: Color(0xFFA8B9FF),
                   fontSize: 19,
                   fontWeight: FontWeight.w900,
                 ),
@@ -951,8 +984,8 @@ class _CostPreview extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
-                '${controller.form.draft ? 'Drafts use BFL’s HD draft tier. ' : ''}'
-                '${estimate.basis == 'provider-history' ? 'Calibrated from your exact BFL charges.' : 'Based on BFL’s published per-second rate.'} '
+                '${controller.form.draft ? 'Drafts use the selected provider’s HD draft tier. ' : ''}'
+                '${estimate.basis == 'provider-history' ? 'Calibrated from this provider’s exact charges.' : 'Based on the selected provider’s published per-second rate.'} '
                 'The exact charge replaces this estimate on submit.',
                 style: const TextStyle(color: Colors.white60, fontSize: 9),
               ),
@@ -961,7 +994,7 @@ class _CostPreview extends StatelessWidget {
                     unawaited(launchUrl(Uri.parse(bflProvider.pricingUrl))),
                 child: const Text(
                   'Rate card ↗',
-                  style: TextStyle(color: ClawnsoleColors.mustard, fontSize: 9),
+                  style: TextStyle(color: Color(0xFFA8B9FF), fontSize: 9),
                 ),
               ),
             ],
@@ -1031,11 +1064,7 @@ class _RecentWork extends StatelessWidget {
         SurfaceCard(
           child: Column(
             children: <Widget>[
-              const Icon(
-                Icons.pets_rounded,
-                size: 34,
-                color: ClawnsoleColors.clay,
-              ),
+              Icon(Icons.pets_rounded, size: 34, color: context.colors.primary),
               const SizedBox(height: 12),
               Text(
                 'A quiet branch.',
@@ -1060,7 +1089,7 @@ class _RecentWork extends StatelessWidget {
             ),
       const SizedBox(height: 4),
       SurfaceCard(
-        color: const Color(0xFFE9E2D6),
+        color: context.colors.surfaceContainer,
         padding: const EdgeInsets.all(13),
         child: Wrap(
           spacing: 18,
@@ -1089,9 +1118,9 @@ class _Summary extends StatelessWidget {
     children: <Widget>[
       Text(
         value,
-        style: const TextStyle(
+        style: TextStyle(
           fontWeight: FontWeight.w900,
-          color: ClawnsoleColors.forest,
+          color: context.colors.primary,
         ),
       ),
       const SizedBox(width: 4),
