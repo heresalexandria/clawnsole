@@ -78,6 +78,7 @@ separate `macos-15` runners. `publish` waits for both and attaches:
 
 - `Clawnsole-<version>-ios.ipa`
 - `Clawnsole-<version>-mac-arm64.dmg`
+- `Clawnsole-mac-arm64.dmg` (stable alias used by the README's latest-download link)
 - `Clawnsole-<version>-mac-arm64.zip`
 - `SHA256SUMS.txt`
 

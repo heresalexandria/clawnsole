@@ -273,6 +273,9 @@ jobs:
           mkdir release
           find incoming -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.ipa' \) \
             -exec mv {} release/ \;
+          versioned_dmg="release/Clawnsole-${{ needs.prepare.outputs.version }}-mac-arm64.dmg"
+          test -f "$versioned_dmg"
+          cp "$versioned_dmg" release/Clawnsole-mac-arm64.dmg
           test -n "$(ls -A release)"
           cd release
           sha256sum * > SHA256SUMS.txt

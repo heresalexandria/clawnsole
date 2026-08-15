@@ -7,6 +7,10 @@
 <p align="center"><em>Local BYO key studio for AI video generation</em></p>
 
 <p align="center">
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"><strong>Download the latest macOS build (Apple silicon)</strong></a>
+</p>
+
+<p align="center">
   <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview">
 </p>
 
