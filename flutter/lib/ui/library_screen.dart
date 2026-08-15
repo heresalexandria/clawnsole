@@ -357,14 +357,12 @@ class _GenerationCardState extends State<GenerationCard> {
                 ),
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
-                if (item.error != null) ...<Widget>[
+                if (item.error != null ||
+                    item.lastCheckError != null ||
+                    item.lastCheckedAt != null ||
+                    item.isLongRunning) ...<Widget>[
                   const SizedBox(height: 9),
-                  Text(
-                    item.error!,
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: context.colors.error, fontSize: 9),
-                  ),
+                  GenerationStatusDetails(item: item),
                 ],
                 if (item.deliveryExpired) ...<Widget>[
                   const SizedBox(height: 9),
@@ -404,6 +402,10 @@ class _GenerationCardState extends State<GenerationCard> {
                       onPressed: () => unawaited(widget.controller.reuse(item)),
                       icon: const Icon(Icons.replay_rounded, size: 16),
                       label: const Text('Reuse'),
+                    ),
+                    GenerationStatusButton(
+                      controller: widget.controller,
+                      item: item,
                     ),
                     IconButton.outlined(
                       tooltip: 'Delete history record',

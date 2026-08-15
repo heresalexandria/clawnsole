@@ -1,5 +1,6 @@
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
+import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:flutter/material.dart';
@@ -71,6 +72,46 @@ void main() {
     expect(estimate.basis, 'provider-history');
   });
 
+  test('preserves terminal BFL statuses and extracts provider errors', () {
+    expect(normalizeGenerationStatus('task not found'), 'Task not found');
+    expect(isGenerationFailureStatus('Task not found'), isTrue);
+    expect(isGenerationWorkingStatus('Error', canPoll: true), isFalse);
+    expect(
+      providerFailureMessage(<String, Object?>{
+        'status': 'Error',
+        'details': <String, Object?>{
+          'message': 'Generation dependency unavailable',
+        },
+      }, fallback: 'Error'),
+      'Generation dependency unavailable',
+    );
+  });
+
+  test('recovers an interrupted submission instead of polling forever', () {
+    final now = DateTime.utc(2026, 8, 15, 12);
+    final interrupted = Generation(
+      localId: 'interrupted',
+      status: 'submitting',
+      prompt: 'A slow pan through a blue room.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now.subtract(const Duration(minutes: 4)),
+      updatedAt: now.subtract(const Duration(minutes: 3)),
+    );
+
+    final recovered = interrupted.recoverInterruptedSubmission(now);
+    expect(recovered.status, 'Error');
+    expect(recovered.isWorking, isFalse);
+    expect(recovered.error, contains('interrupted'));
+  });
+
   test(
     'round-trips compact history, billing, and durable asset references',
     () {
@@ -119,6 +160,10 @@ void main() {
               contentType: 'video/mp4',
               bytes: 1024,
             ),
+            lastCheckedAt: now,
+            statusCheckCount: 3,
+            consecutiveCheckFailures: 1,
+            lastCheckError: 'Temporary provider timeout',
           ),
         ],
       );
@@ -133,6 +178,13 @@ void main() {
         'asset-input',
       );
       expect(decoded.generations.single.resultAsset!.value, 'asset-video');
+      expect(decoded.generations.single.lastCheckedAt, now);
+      expect(decoded.generations.single.statusCheckCount, 3);
+      expect(decoded.generations.single.consecutiveCheckFailures, 1);
+      expect(
+        decoded.generations.single.lastCheckError,
+        'Temporary provider timeout',
+      );
       expect(original.encode(), isNot(contains('data:image')));
     },
   );

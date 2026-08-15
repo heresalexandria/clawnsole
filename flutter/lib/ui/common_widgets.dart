@@ -75,22 +75,18 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (background, foreground, label) = item.isWorking
+    final (background, foreground) = item.isWorking
         ? (
             context.colors.secondaryContainer,
             context.colors.onSecondaryContainer,
-            'In progress',
           )
         : item.isFailed
-        ? (
-            context.colors.errorContainer,
-            context.colors.onErrorContainer,
-            'Needs attention',
-          )
+        ? (context.colors.errorContainer, context.colors.onErrorContainer)
+        : item.isReady
+        ? (context.colors.primaryContainer, context.colors.onPrimaryContainer)
         : (
-            context.colors.primaryContainer,
-            context.colors.onPrimaryContainer,
-            'Ready',
+            context.colors.tertiaryContainer,
+            context.colors.onTertiaryContainer,
           );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -112,7 +108,7 @@ class StatusBadge extends StatelessWidget {
             const SizedBox(width: 5),
           ],
           Text(
-            label,
+            item.statusLabel,
             style: TextStyle(
               fontSize: 9,
               color: foreground,
@@ -120,6 +116,131 @@ class StatusBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class GenerationStatusDetails extends StatelessWidget {
+  const GenerationStatusDetails({required this.item, super.key});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final problem = item.error ?? item.lastCheckError;
+    final isTerminal = item.error != null || item.isFailed;
+    final checked = item.lastCheckedAt;
+    if (problem == null && checked == null && !item.isLongRunning) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isTerminal
+            ? context.colors.errorContainer
+            : context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isTerminal
+              ? context.colors.error.withValues(alpha: .28)
+              : context.colors.outlineVariant,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (problem != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(
+                  isTerminal
+                      ? Icons.error_outline_rounded
+                      : Icons.sync_problem_rounded,
+                  size: 15,
+                  color: isTerminal
+                      ? context.colors.error
+                      : context.colors.onSurfaceVariant,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    problem,
+                    style: TextStyle(
+                      color: isTerminal
+                          ? context.colors.onErrorContainer
+                          : context.colors.onSurfaceVariant,
+                      fontSize: 9,
+                      height: 1.35,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          if (item.isLongRunning) ...<Widget>[
+            if (problem != null) const SizedBox(height: 6),
+            Text(
+              'This render has been in progress for more than 30 minutes. You can ask the provider for a fresh status below.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 9,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (checked != null) ...<Widget>[
+            if (problem != null || item.isLongRunning)
+              const SizedBox(height: 6),
+            Text(
+              'Provider checked ${relativeTime(checked)} · ${item.statusCheckCount} ${item.statusCheckCount == 1 ? 'check' : 'checks'}',
+              style: TextStyle(
+                color: isTerminal
+                    ? context.colors.onErrorContainer.withValues(alpha: .72)
+                    : context.colors.onSurfaceVariant,
+                fontSize: 8,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class GenerationStatusButton extends StatelessWidget {
+  const GenerationStatusButton({
+    required this.controller,
+    required this.item,
+    super.key,
+    this.compact = false,
+  });
+
+  final AppController controller;
+  final Generation item;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!item.canCheckStatus || item.isReady) return const SizedBox.shrink();
+    final checking = controller.isCheckingStatus(item.localId);
+    return OutlinedButton.icon(
+      onPressed: checking
+          ? null
+          : () => unawaited(controller.checkStatus(item)),
+      icon: checking
+          ? const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.sync_rounded, size: 16),
+      label: Text(
+        checking
+            ? 'Checking…'
+            : compact
+            ? 'Check now'
+            : 'Check status',
       ),
     );
   }
@@ -610,6 +731,13 @@ class ActivityCard extends StatelessWidget {
                     color: context.colors.primary,
                   ),
                 ],
+                if (item.error != null ||
+                    item.lastCheckError != null ||
+                    item.lastCheckedAt != null ||
+                    item.isLongRunning) ...<Widget>[
+                  const SizedBox(height: 8),
+                  GenerationStatusDetails(item: item),
+                ],
                 const SizedBox(height: 9),
                 Wrap(
                   spacing: 7,
@@ -631,6 +759,11 @@ class ActivityCard extends StatelessWidget {
                       onPressed: () => unawaited(controller.reuse(item)),
                       icon: const Icon(Icons.replay_rounded, size: 15),
                       label: const Text('Reuse inputs'),
+                    ),
+                    GenerationStatusButton(
+                      controller: controller,
+                      item: item,
+                      compact: true,
                     ),
                   ],
                 ),

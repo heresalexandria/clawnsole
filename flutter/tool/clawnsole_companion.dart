@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 
@@ -459,17 +460,19 @@ class CompanionApp {
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = data.generations.map((item) {
-      if (item.deliveryExpiresAt == null ||
-          item.deliveryExpiresAt!.isAfter(now) ||
-          (item.resultUrl == null && item.draftCacheUrl == null)) {
-        return item;
+      var next = item.recoverInterruptedSubmission(now);
+      if (!identical(next, item)) changed = true;
+      if (next.deliveryExpiresAt == null ||
+          next.deliveryExpiresAt!.isAfter(now) ||
+          (next.resultUrl == null && next.draftCacheUrl == null)) {
+        return next;
       }
       changed = true;
-      final json = item.toJson()
+      final json = next.toJson()
         ..remove('resultUrl')
         ..remove('draftCacheUrl')
         ..['deliveryExpired'] =
-            item.resultAsset == null || item.draftCacheUrl != null;
+            next.resultAsset == null || next.draftCacheUrl != null;
       return Generation.fromJson(json);
     }).toList();
     if (changed) {
@@ -676,51 +679,65 @@ class CompanionApp {
         status: 404,
       );
     }
-    final payload = await _api.poll(key, pollingUrl);
-    final rawStatus = payload['status'] as String? ?? 'Pending';
-    final terminal = const <String>{
-      'Ready',
-      'Error',
-      'Failed',
-      'Request Moderated',
-      'Content Moderated',
-    };
-    final status = terminal.contains(rawStatus) ? rawStatus : 'Pending';
-    final failed = status != 'Ready' && status != 'Pending';
-    final resultUrl = status == 'Ready'
-        ? findResultUrl(payload['result'], draft: false)
-        : null;
-    var resultAsset = current.resultAsset;
-    if (resultUrl != null && resultAsset == null) {
-      try {
-        resultAsset = await _retainResult(
-          resultUrl,
-          'clawnsole-${current.localId}.mp4',
-        );
-      } on Object {
-        // The temporary BFL URL remains usable if local retention fails.
+    final checkedAt = DateTime.now().toUtc();
+    late Generation next;
+    try {
+      final payload = await _api.poll(key, pollingUrl);
+      var status = normalizeGenerationStatus(payload['status']);
+      final resultUrl = status == 'Ready'
+          ? findResultUrl(payload['result'], draft: false)
+          : null;
+      var failureMessage = isGenerationFailureStatus(status)
+          ? providerFailureMessage(payload, fallback: status)
+          : null;
+      if (status == 'Ready' && resultUrl == null) {
+        status = 'Error';
+        failureMessage =
+            'BFL reported that the generation was ready but did not include a video URL.';
       }
+      var resultAsset = current.resultAsset;
+      if (resultUrl != null && resultAsset == null) {
+        try {
+          resultAsset = await _retainResult(
+            resultUrl,
+            'clawnsole-${current.localId}.mp4',
+          );
+        } on Object {
+          // The temporary BFL URL remains usable if local retention fails.
+        }
+      }
+      final failed = isGenerationFailureStatus(status);
+      next = current.copyWith(
+        status: status,
+        progress: status == 'Ready'
+            ? 100
+            : normalizedProgress(payload['progress']),
+        resultUrl: resultUrl,
+        resultAsset: resultAsset,
+        deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
+        draftCacheUrl: status == 'Ready'
+            ? findResultUrl(payload['result'], draft: true)
+            : null,
+        deliveryExpiresAt: status == 'Ready'
+            ? checkedAt.add(const Duration(minutes: 10))
+            : null,
+        error: failureMessage,
+        clearError: !failed,
+        lastCheckedAt: checkedAt,
+        statusCheckCount: current.statusCheckCount + 1,
+        consecutiveCheckFailures: 0,
+        clearLastCheckError: true,
+        updatedAt: checkedAt,
+      );
+    } on Object catch (error) {
+      next = current.copyWith(
+        lastCheckedAt: checkedAt,
+        statusCheckCount: current.statusCheckCount + 1,
+        consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
+        lastCheckError: generationExceptionMessage(error),
+        updatedAt: checkedAt,
+      );
     }
-    final next = current.copyWith(
-      status: status,
-      progress: status == 'Ready'
-          ? 100
-          : normalizedProgress(payload['progress']),
-      resultUrl: resultUrl,
-      resultAsset: resultAsset,
-      deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
-      draftCacheUrl: status == 'Ready'
-          ? findResultUrl(payload['result'], draft: true)
-          : null,
-      deliveryExpiresAt: status == 'Ready'
-          ? DateTime.now().toUtc().add(const Duration(minutes: 10))
-          : null,
-      error: failed
-          ? jsonEncode(payload['details'] ?? payload['result'] ?? status)
-          : null,
-      clearError: !failed,
-      updatedAt: DateTime.now().toUtc(),
-    );
     await _upsert(next);
     return next;
   }

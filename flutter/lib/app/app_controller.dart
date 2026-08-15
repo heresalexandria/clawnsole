@@ -99,6 +99,7 @@ class AppController extends ChangeNotifier {
   Timer? _noticeTimer;
   bool _polling = false;
   final Set<String> _retentionAttempts = <String>{};
+  final Set<String> _statusChecks = <String>{};
   int _idCounter = 0;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
@@ -109,6 +110,7 @@ class AppController extends ChangeNotifier {
   int get readyCount => generations.where((item) => item.isReady).length;
   double get spentCredits =>
       generations.fold(0, (total, item) => total + (item.cost ?? 0));
+  bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
 
   List<Generation> get filteredGenerations {
     final query = librarySearch.trim().toLowerCase();
@@ -544,16 +546,17 @@ class AppController extends ChangeNotifier {
 
   Future<void> pollWorking() async {
     if (_polling || !hasApiKey) return;
-    final working = generations
-        .where(
-          (item) =>
-              item.pollingUrl != null &&
-              (item.isWorking ||
-                  (item.isReady &&
-                      item.resultAsset == null &&
-                      !_retentionAttempts.contains(item.localId))),
-        )
-        .toList();
+    final now = DateTime.now().toUtc();
+    final working = generations.where((item) {
+      if (!item.canCheckStatus || _statusChecks.contains(item.localId)) {
+        return false;
+      }
+      final needsRetention =
+          item.isReady &&
+          item.resultAsset == null &&
+          !_retentionAttempts.contains(item.localId);
+      return needsRetention || (item.isWorking && item.isStatusCheckDue(now));
+    }).toList();
     if (working.isEmpty) return;
     _polling = true;
     try {
@@ -564,6 +567,10 @@ class AppController extends ChangeNotifier {
           _replaceInMemory(updated);
           if (updated.isReady) {
             showNotice('Your film is ready to watch and save.');
+          } else if (!item.isFailed && updated.isFailed) {
+            showNotice(
+              'Generation needs attention: ${updated.error ?? updated.statusLabel}',
+            );
           }
         } on Object catch (error) {
           final message = _message(error);
@@ -572,13 +579,46 @@ class AppController extends ChangeNotifier {
             caseSensitive: false,
           ).hasMatch(message)) {
             _replaceInMemory(
-              item.copyWith(error: message, updatedAt: DateTime.now().toUtc()),
+              item.copyWith(
+                lastCheckedAt: DateTime.now().toUtc(),
+                statusCheckCount: item.statusCheckCount + 1,
+                consecutiveCheckFailures: item.consecutiveCheckFailures + 1,
+                lastCheckError: message,
+                updatedAt: DateTime.now().toUtc(),
+              ),
             );
           }
         }
       }
     } finally {
       _polling = false;
+    }
+  }
+
+  Future<void> checkStatus(Generation item) async {
+    if (!item.canCheckStatus) {
+      showNotice('This generation has no provider status URL to check.');
+      return;
+    }
+    if (!_statusChecks.add(item.localId)) return;
+    notifyListeners();
+    try {
+      final updated = await gateway.poll(item);
+      _replaceInMemory(updated);
+      if (updated.lastCheckError != null) {
+        showNotice('Status check failed: ${updated.lastCheckError}');
+      } else if (updated.isReady) {
+        showNotice('BFL reports that this film is ready.');
+      } else if (updated.isFailed) {
+        showNotice(updated.error ?? 'BFL reports ${updated.statusLabel}.');
+      } else {
+        showNotice('BFL reports ${updated.statusLabel.toLowerCase()}.');
+      }
+    } on Object catch (error) {
+      showNotice('Status check failed: ${_message(error)}');
+    } finally {
+      _statusChecks.remove(item.localId);
+      notifyListeners();
     }
   }
 
