@@ -1,12 +1,12 @@
 {
-    "name": "clawnsole",
-    "short_name": "clawnsole",
+    "name": "Clawnsole",
+    "short_name": "Clawnsole",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#F5F0E7",
+    "theme_color": "#223C32",
+    "description": "A local-first FLUX video generation workspace.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
