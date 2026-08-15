@@ -643,6 +643,9 @@ class CompanionApp {
             (creditsBefore != null && cost != null
                 ? (creditsBefore - cost).clamp(0, double.infinity)
                 : null),
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(receipt),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _upsert(generation);
@@ -650,7 +653,10 @@ class CompanionApp {
     } on Object catch (error) {
       generation = generation.copyWith(
         status: 'Error',
-        error: error.toString(),
+        error: generationExceptionMessage(error),
+        lastProviderStatusCode: providerHttpStatus(error),
+        lastProviderResponse: providerErrorResponse(error),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _upsert(generation);
@@ -727,16 +733,40 @@ class CompanionApp {
         statusCheckCount: current.statusCheckCount + 1,
         consecutiveCheckFailures: 0,
         clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(payload),
+        lastProviderResponseAt: checkedAt,
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
-      next = current.copyWith(
-        lastCheckedAt: checkedAt,
-        statusCheckCount: current.statusCheckCount + 1,
-        consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
-        lastCheckError: generationExceptionMessage(error),
-        updatedAt: checkedAt,
-      );
+      final payload = providerErrorPayload(error);
+      final providerStatus = normalizeGenerationStatus(payload?['status']);
+      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+        next = current.copyWith(
+          status: providerStatus,
+          progress: normalizedProgress(payload['progress']),
+          error: providerFailureMessage(payload, fallback: providerStatus),
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else {
+        next = current.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
+          lastCheckError: generationExceptionMessage(error),
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      }
     }
     await _upsert(next);
     return next;

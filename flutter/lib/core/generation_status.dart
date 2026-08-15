@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 const Set<String> generationFailureStatuses = <String>{
   'Task not found',
   'Error',
@@ -76,14 +78,39 @@ String providerFailureMessage(Object? payload, {required String fallback}) {
   }
 
   final found = find(payload);
-  if (found != null && found != fallback) return found;
+  if (found != null &&
+      found != fallback &&
+      normalizeGenerationStatus(found) == found &&
+      !generationFailureStatuses.contains(found)) {
+    return found;
+  }
+  if (fallback.startsWith('BFL ')) return fallback;
   return switch (normalizeGenerationStatus(fallback)) {
     'Task not found' =>
       'BFL no longer recognizes this task. The generation receipt may have expired or become invalid.',
     'Request Moderated' => 'BFL moderated the generation request.',
     'Content Moderated' => 'BFL moderated the generated content.',
+    'Error' || 'Failed' => 'BFL reported that this generation failed.',
     final status => 'BFL reported $status for this generation.',
   };
+}
+
+String compactProviderResponse(Object? payload, {int maxCharacters = 12000}) {
+  String rendered;
+  if (payload == null) {
+    rendered = 'No response body was returned.';
+  } else if (payload is String) {
+    rendered = payload.trim().isEmpty ? '(empty response)' : payload.trim();
+  } else {
+    try {
+      rendered = const JsonEncoder.withIndent('  ').convert(payload);
+    } on Object {
+      rendered = payload.toString();
+    }
+  }
+  if (rendered.length <= maxCharacters) return rendered;
+  return '${rendered.substring(0, maxCharacters)}\n\n'
+      '… response truncated to $maxCharacters characters by Clawnsole';
 }
 
 String generationExceptionMessage(Object error) => error

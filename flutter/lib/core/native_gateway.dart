@@ -219,6 +219,9 @@ class NativeGateway implements AppGateway {
         clearCost: cost == null,
         creditsBefore: creditsBefore,
         creditsAfter: creditsAfter,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(response),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
@@ -226,7 +229,10 @@ class NativeGateway implements AppGateway {
     } on Object catch (error) {
       record = record.copyWith(
         status: 'Error',
-        error: error.toString(),
+        error: generationExceptionMessage(error),
+        lastProviderStatusCode: providerHttpStatus(error),
+        lastProviderResponse: providerErrorResponse(error),
+        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
@@ -294,16 +300,40 @@ class NativeGateway implements AppGateway {
         statusCheckCount: generation.statusCheckCount + 1,
         consecutiveCheckFailures: 0,
         clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(payload),
+        lastProviderResponseAt: checkedAt,
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
-      next = generation.copyWith(
-        lastCheckedAt: checkedAt,
-        statusCheckCount: generation.statusCheckCount + 1,
-        consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
-        lastCheckError: generationExceptionMessage(error),
-        updatedAt: checkedAt,
-      );
+      final payload = providerErrorPayload(error);
+      final providerStatus = normalizeGenerationStatus(payload?['status']);
+      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+        next = generation.copyWith(
+          status: providerStatus,
+          progress: normalizedProgress(payload['progress']),
+          error: providerFailureMessage(payload, fallback: providerStatus),
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else {
+        next = generation.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
+          lastCheckError: generationExceptionMessage(error),
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      }
     }
     await _replaceGeneration(next);
     return next;

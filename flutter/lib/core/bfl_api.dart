@@ -115,6 +115,8 @@ class BflApi {
       401 || 403 => 'BFL rejected this API key.',
       402 => 'This BFL project does not have enough credits.',
       429 => 'BFL is at its active request limit. Try again shortly.',
+      500 || 502 || 503 || 504 =>
+        'BFL is temporarily unavailable (HTTP ${response.statusCode}). Retry shortly.',
       _ => 'BFL returned ${response.statusCode}.',
     };
     throw ProviderException(
@@ -124,6 +126,21 @@ class BflApi {
     );
   }
 }
+
+int? providerHttpStatus(Object error) =>
+    error is ProviderException ? error.status : null;
+
+Map<String, Object?>? providerErrorPayload(Object error) {
+  final details = error is ProviderException ? error.details : null;
+  if (details is! Map<Object?, Object?>) return null;
+  return details.map((key, value) => MapEntry(key.toString(), value));
+}
+
+String providerErrorResponse(Object error) => compactProviderResponse(
+  error is ProviderException
+      ? error.details ?? <String, Object?>{'error': error.message}
+      : <String, Object?>{'error': generationExceptionMessage(error)},
+);
 
 Uri validatedBflUrl(String value) {
   final url = Uri.tryParse(value);

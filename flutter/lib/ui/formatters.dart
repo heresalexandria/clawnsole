@@ -32,3 +32,6 @@ String relativeTime(DateTime value) {
   if (difference.inHours < 24) return '${difference.inHours}h ago';
   return DateFormat('MMM d').format(value.toLocal());
 }
+
+String formatTimestamp(DateTime value) =>
+    DateFormat('MMM d, y · h:mm:ss a').format(value.toLocal());

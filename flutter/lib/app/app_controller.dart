@@ -510,12 +510,16 @@ class AppController extends ChangeNotifier {
       _replaceInMemory(pending);
       if (pending.creditsAfter != null) credits = pending.creditsAfter;
     } on Object catch (error) {
-      pending = pending.copyWith(
-        status: 'Error',
-        error: _message(error),
-        updatedAt: DateTime.now().toUtc(),
-      );
-      _replaceInMemory(pending);
+      try {
+        _apply(await gateway.load());
+      } on Object {
+        pending = pending.copyWith(
+          status: 'Error',
+          error: _message(error),
+          updatedAt: DateTime.now().toUtc(),
+        );
+        _replaceInMemory(pending);
+      }
       showNotice(_message(error));
     } finally {
       submitting = false;

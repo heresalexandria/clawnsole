@@ -75,7 +75,9 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (background, foreground) = item.isWorking
+    final (background, foreground) = item.isStatusUnavailable
+        ? (context.colors.errorContainer, context.colors.onErrorContainer)
+        : item.isWorking
         ? (
             context.colors.secondaryContainer,
             context.colors.onSecondaryContainer,
@@ -97,7 +99,10 @@ class StatusBadge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (item.isWorking) ...<Widget>[
+          if (item.isStatusUnavailable) ...<Widget>[
+            Icon(Icons.cloud_off_rounded, size: 12, color: foreground),
+            const SizedBox(width: 5),
+          ] else if (item.isWorking) ...<Widget>[
             SizedBox.square(
               dimension: 10,
               child: CircularProgressIndicator(
@@ -190,6 +195,17 @@ class GenerationStatusDetails extends StatelessWidget {
               ),
             ),
           ],
+          if (item.isStatusUnavailable) ...<Widget>[
+            if (problem != null) const SizedBox(height: 6),
+            Text(
+              'The provider has not confirmed that this generation is still in progress. Retry the status check below.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 9,
+                height: 1.35,
+              ),
+            ),
+          ],
           if (checked != null) ...<Widget>[
             if (problem != null || item.isLongRunning)
               const SizedBox(height: 6),
@@ -238,12 +254,148 @@ class GenerationStatusButton extends StatelessWidget {
       label: Text(
         checking
             ? 'Checking…'
+            : item.lastCheckError != null
+            ? 'Retry status'
+            : item.isFailed
+            ? 'Retry status'
             : compact
             ? 'Check now'
             : 'Check status',
       ),
     );
   }
+}
+
+class GenerationDetailsButton extends StatelessWidget {
+  const GenerationDetailsButton({required this.item, super.key});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!item.hasProviderDetails) return const SizedBox.shrink();
+    return OutlinedButton.icon(
+      onPressed: () => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Generation details'),
+          content: SizedBox(
+            width: 620,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  _GenerationDetailLine(
+                    label: 'State',
+                    value: item.statusLabel,
+                  ),
+                  _GenerationDetailLine(
+                    label: 'Provider',
+                    value: item.provider.toUpperCase(),
+                  ),
+                  _GenerationDetailLine(label: 'Model', value: item.model),
+                  if (item.requestId != null)
+                    _GenerationDetailLine(
+                      label: 'Request ID',
+                      value: item.requestId!,
+                    ),
+                  if (item.lastProviderStatusCode != null)
+                    _GenerationDetailLine(
+                      label: 'HTTP status',
+                      value: item.lastProviderStatusCode.toString(),
+                    ),
+                  if (item.lastProviderResponseAt != null)
+                    _GenerationDetailLine(
+                      label: 'Response received',
+                      value: formatTimestamp(item.lastProviderResponseAt!),
+                    ),
+                  if (item.error != null) ...<Widget>[
+                    const SizedBox(height: 14),
+                    const Eyebrow('Error', icon: Icons.error_outline_rounded),
+                    const SizedBox(height: 7),
+                    SelectableText(item.error!),
+                  ],
+                  if (item.lastCheckError != null) ...<Widget>[
+                    const SizedBox(height: 14),
+                    const Eyebrow(
+                      'Last status-check error',
+                      icon: Icons.sync_problem_rounded,
+                    ),
+                    const SizedBox(height: 7),
+                    SelectableText(item.lastCheckError!),
+                  ],
+                  if (item.lastProviderResponse != null) ...<Widget>[
+                    const SizedBox(height: 14),
+                    const Eyebrow(
+                      'Provider response',
+                      icon: Icons.data_object_rounded,
+                    ),
+                    const SizedBox(height: 7),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: context.colors.surfaceContainerLow,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: context.colors.outlineVariant,
+                        ),
+                      ),
+                      child: SelectableText(
+                        item.lastProviderResponse!,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 10,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      ),
+      icon: const Icon(Icons.receipt_long_rounded, size: 16),
+      label: const Text('View details'),
+    );
+  }
+}
+
+class _GenerationDetailLine extends StatelessWidget {
+  const _GenerationDetailLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 112,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
 }
 
 class GenerationVideo extends StatefulWidget {
@@ -721,7 +873,7 @@ class ActivityCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 GenerationCost(item: item, compact: true),
-                if (item.isWorking) ...<Widget>[
+                if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
                   const SizedBox(height: 7),
                   LinearProgressIndicator(
                     value: item.progress == null ? null : item.progress! / 100,
@@ -758,13 +910,16 @@ class ActivityCard extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: () => unawaited(controller.reuse(item)),
                       icon: const Icon(Icons.replay_rounded, size: 15),
-                      label: const Text('Reuse inputs'),
+                      label: Text(
+                        item.isFailed ? 'Retry generation' : 'Reuse inputs',
+                      ),
                     ),
                     GenerationStatusButton(
                       controller: controller,
                       item: item,
                       compact: true,
                     ),
+                    GenerationDetailsButton(item: item),
                   ],
                 ),
               ],
