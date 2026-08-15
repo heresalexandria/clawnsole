@@ -22,7 +22,8 @@ Every PR needs exactly one:
 | `patch` | bump the third component and release |
 | `no-release` | merge without changing versions or publishing |
 
-Run **Create release labels** once from the Actions page. The Pull request
+The labels are created in repository setup and can be repaired at any time by
+running **Create release labels** from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
 kind directly and is useful for the first release. Manual dispatches can target
 macOS only while iOS signing is being provisioned; labelled PR releases continue

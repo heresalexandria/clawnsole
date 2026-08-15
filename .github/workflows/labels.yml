@@ -1,5 +1,8 @@
 name: Create release labels
 
+# Safe to re-run: existing labels are updated, not duplicated. This keeps the
+# labels consumed by the PR gate and release workflow available from day one.
+
 on:
   workflow_dispatch:
 
@@ -15,10 +18,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for spec in \
-            'major|B60205|Breaking release' \
-            'minor|1D76DB|Feature release' \
-            'patch|0E8A16|Fix release' \
-            'no-release|6E7781|Merge without a release'; do
+            'major|B60205|Breaking change - bumps 1.2.3 to 2.0.0' \
+            'minor|0E8A16|New feature - bumps 1.2.3 to 1.3.0' \
+            'patch|1D76DB|Fix or small change - bumps 1.2.3 to 1.2.4' \
+            'no-release|5B45A8|Merge without cutting a release'; do
             IFS='|' read -r name color description <<< "$spec"
             gh label create "$name" --repo "${{ github.repository }}" \
               --color "$color" --description "$description" --force
