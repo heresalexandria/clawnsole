@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+.clawnsole/
 
 # Symbolication related
 app.*.symbols
