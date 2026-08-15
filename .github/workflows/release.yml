@@ -1,7 +1,7 @@
 name: Release
 
-# A release-labelled PR merge bumps both app versions and builds iOS and macOS
-# concurrently. Manual dispatch can bootstrap macOS before iOS signing exists.
+# A release-labelled PR merge bumps both app versions and publishes the signed,
+# notarized macOS desktop build. iOS distribution builds stay local-only.
 on:
   pull_request:
     types: [closed]
@@ -13,11 +13,6 @@ on:
         type: choice
         options: [current, patch, minor, major]
         default: patch
-      targets:
-        description: Which release targets to build
-        type: choice
-        options: [all, macos]
-        default: all
 
 permissions:
   contents: write
@@ -163,108 +158,10 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  ios:
-    name: build iOS app
-    needs: prepare
-    if: needs.prepare.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.targets == 'all')
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install App Store signing identity
-        env:
-          IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
-        run: |
-          for value in IOS_CERTIFICATE_P12 IOS_CERTIFICATE_PASSWORD IOS_PROVISIONING_PROFILE IOS_TEAM_ID; do
-            if [ -z "${!value}" ]; then echo "::error::$value is required"; exit 1; fi
-          done
-          certificate="$RUNNER_TEMP/clawnsole.p12"
-          profile="$RUNNER_TEMP/clawnsole.mobileprovision"
-          keychain="$RUNNER_TEMP/clawnsole-signing.keychain-db"
-          printf '%s' "$IOS_CERTIFICATE_P12" | base64 -D > "$certificate"
-          printf '%s' "$IOS_PROVISIONING_PROFILE" | base64 -D > "$profile"
-          security create-keychain -p actions "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p actions "$keychain"
-          security import "$certificate" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -k actions "$keychain"
-          security list-keychain -d user -s "$keychain" login.keychain-db
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          profile_plist="$RUNNER_TEMP/profile.plist"
-          security cms -D -i "$profile" > "$profile_plist"
-          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$profile_plist")
-          profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$profile_plist")
-          cp "$profile" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
-          sed -i '' -E "s/DEVELOPMENT_TEAM = [A-Z0-9]+;/DEVELOPMENT_TEAM = $IOS_TEAM_ID;/g" flutter/ios/Runner.xcodeproj/project.pbxproj
-          export_options="$RUNNER_TEMP/ExportOptions.plist"
-          cat > "$export_options" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>signingStyle</key><string>manual</string>
-            <key>teamID</key><string>$IOS_TEAM_ID</string>
-            <key>provisioningProfiles</key><dict>
-              <key>app.clawnsole.clawnsole</key><string>$profile_name</string>
-            </dict>
-            <key>manageAppVersionAndBuildNumber</key><false/>
-            <key>uploadSymbols</key><true/>
-          </dict></plist>
-          PLIST
-          echo "CLAWNSOLE_IOS_EXPORT_OPTIONS=$export_options" >> "$GITHUB_ENV"
-          echo "CLAWNSOLE_IOS_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
-      - name: Build signed IPA
-        working-directory: flutter
-        run: |
-          flutter pub get
-          flutter build ipa \
-            --release \
-            --build-name "${{ needs.prepare.outputs.version }}" \
-            --build-number "${{ needs.prepare.outputs.build }}" \
-            --export-options-plist "$CLAWNSOLE_IOS_EXPORT_OPTIONS"
-          ipa=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' | head -1)
-          test -n "$ipa"
-          mkdir -p ../outgoing-ios
-          cp "$ipa" "../outgoing-ios/Clawnsole-${{ needs.prepare.outputs.version }}-ios.ipa"
-
-      - name: Upload IPA to App Store Connect
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        run: |
-          for value in APPLE_ID APPLE_APP_SPECIFIC_PASSWORD; do
-            if [ -z "${!value}" ]; then echo "::error::$value is required"; exit 1; fi
-          done
-          ipa=$(find outgoing-ios -maxdepth 1 -name '*.ipa' | head -1)
-          test -n "$ipa"
-          xcrun altool --upload-app \
-            --type ios \
-            -f "$ipa" \
-            --username "$APPLE_ID" \
-            --password "$APPLE_APP_SPECIFIC_PASSWORD"
-
-      - name: Remove temporary Apple credentials
-        if: always()
-        run: |
-          if [ -n "${CLAWNSOLE_IOS_KEYCHAIN:-}" ]; then
-            security delete-keychain "$CLAWNSOLE_IOS_KEYCHAIN" || true
-          fi
-
   publish:
     name: publish GitHub release
-    needs: [prepare, macos, ios]
-    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'skipped') && needs.prepare.outputs.skip != 'true'
+    needs: [prepare, macos]
+    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

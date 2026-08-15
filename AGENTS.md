@@ -63,8 +63,10 @@ desktop entry points live beside the other Flutter scripts:
   pass Gatekeeper plus strict signature verification before upload.
 - Every published release must contain `SHA256SUMS.txt`. The desktop updater
   refuses unverified downloads.
-- iOS and macOS build in parallel in `.github/workflows/release.yml`. Android and
-  hosted web release jobs can be added later without changing product code.
+- `.github/workflows/release.yml` publishes only signed, notarized macOS builds.
+  iOS distribution builds and signing material stay local to a configured Mac.
+  Android and hosted web release jobs can be added later without changing
+  product code.
 
 ## Verification
 

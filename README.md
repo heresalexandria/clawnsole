@@ -76,17 +76,16 @@ inputs and videos in an adjacent `assets/` directory.
 - `flutter/lib/ui/`: shared responsive screens and widgets
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
 - `electron/`: macOS shell, packaging, checksum-verified GitHub updater
-- `.github/workflows/`: PR checks and parallel iOS/macOS releases
+- `.github/workflows/`: PR checks and signed macOS releases
 
 ## Releases and desktop updates
 
 Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
-drives the release workflow. iOS and macOS build in parallel, then a GitHub
-release is published with checksums. A manual workflow dispatch can cut the
-first release or a release without a PR, including a macOS-only bootstrap before
-iOS signing is configured. The iOS job uploads its signed IPA directly to App
-Store Connect without publishing it as a GitHub artifact; Apple review and
-public release remain explicit approvals.
+drives the signed and notarized macOS release workflow. A manual dispatch can
+cut a release without a PR or retry the current synchronized version after a
+recoverable failure. iOS builds are intentionally local-only through
+`./flutter/scripts/build_ios`; GitHub never receives the iOS signing material or
+an IPA.
 
 Packaged Electron builds check GitHub at most once per day and expose
 **Clawnsole → Check for Updates…**. An accepted update downloads the architecture
