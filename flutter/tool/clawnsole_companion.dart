@@ -534,6 +534,7 @@ class CompanionApp {
         frames.add(
           KeyframeLabel(
             label: frame.label,
+            role: frame.role,
             seconds: frame.seconds,
             source: await _store.persistSource(
               index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
