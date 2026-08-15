@@ -33,5 +33,6 @@ The default build is unsigned and usable locally. Set
 environment expected by `electron-builder` for distribution to other Macs;
 unsigned apps will trigger Gatekeeper warnings away from the build machine.
 
-Desktop data lives at `~/Library/Application Support/Clawnsole/clawnsole.json`.
-It follows the same compact metadata-only persistence policy as the local web app.
+Desktop metadata lives at `~/Library/Application Support/Clawnsole/clawnsole.json`,
+with retained inputs and completed videos in the adjacent `assets/` directory.
+It follows the same reference-aware cleanup policy as the local web app.

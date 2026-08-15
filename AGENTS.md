@@ -34,8 +34,9 @@ the product contract.
 - Extend provider registries/adapters instead of branching product screens by
   provider. Provider-specific behavior belongs behind the provider interface.
 - Keep API keys and privileged provider calls out of browser/Electron renderers.
-  Persist compact metadata only; never put uploaded frames, video blobs, base64
-  payloads, or short-lived secrets in history files.
+  Keep history JSON compact: never embed uploaded frames, video blobs, base64
+  payloads, or short-lived secrets. Durable media belongs in the platform's
+  adjacent asset store behind small references and reference-aware cleanup.
 - Prefer small modules with one ownership boundary over catch-all utility files.
   Do not extract an abstraction until it has a stable contract or real reuse.
 

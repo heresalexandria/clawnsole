@@ -14,8 +14,8 @@ application.
 - Exact API charge plus before/after credit snapshots in generation history
 - Live polling, determinate/indeterminate progress, completed-video playback,
   draft enhancement, reuse, deletion, and device download
-- Uncapped compact local history with file-size accounting and granular clear
-  actions; uploaded sources and video blobs are never persisted
+- Uncapped compact history plus referenced local inputs/completed videos, storage
+  accounting, reload-safe reuse/playback, and granular clear actions
 - Provider-neutral gateway, catalog, and pricing boundaries for future services
 
 ## Install
@@ -50,8 +50,8 @@ accepts extra `flutter run` arguments.
 ## Run on iOS or Android
 
 Native builds call `https://api.bfl.ai` directly. The API key and compact
-history are stored in `Clawnsole/clawnsole.json` inside the app documents
-directory. The OS app sandbox protects this file from other apps.
+history are stored in `Clawnsole/clawnsole.json`, with retained media in the
+adjacent `assets/` directory. The OS app sandbox protects both from other apps.
 
 ```bash
 flutter run -d ios
@@ -120,12 +120,13 @@ and `--build-number`.
 ## Persistence policy
 
 - History is compact and uncapped.
-- Prompts, request IDs, polling URLs, status, settings, costs, and temporary
-  delivery URLs are retained.
-- Uploaded images, source clips, draft bundles, and generated video bytes are
-  held only long enough to submit or save; they are not written to history.
-- BFL delivery links are treated as ten-minute links and pruned after expiry.
-- Saving a video is an explicit user-directed download/filesystem action.
+- Prompts, request IDs, polling URLs, status, settings, costs, and small asset
+  references are retained in JSON; base64 payloads are never written there.
+- Uploaded references and generated videos are separate local files, enabling
+  preview, playback, and full-input reuse after restart.
+- BFL delivery links are treated as ten-minute links and pruned after the result
+  is copied locally.
+- Removing history prunes unreferenced assets. Saving exports a user-directed copy.
 
 ## Verification
 

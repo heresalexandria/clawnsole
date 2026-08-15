@@ -61,20 +61,22 @@ Android. Repository-wide platform-parity and code-sharing rules live in
 
 ## Persistence policy
 
-Clawnsole has no database and uses no browser storage. Its single source of truth is:
+Clawnsole has no database and uses no browser storage. Its local project data is:
 
-- `.clawnsole/clawnsole.json`
+- `.clawnsole/clawnsole.json` for compact metadata and the API key
+- `.clawnsole/assets/` for retained reference inputs and completed videos
 
 That directory is gitignored. Set `CLAWNSOLE_DATA_FILE` before starting the app if you want the file elsewhere, which will also make it easy to move into an Electron or Flutter application-data directory later.
 
 - Generation history is not capped.
-- History stores prompts, request IDs, polling URLs, compact generation settings, status, and temporary delivery URLs. It never stores uploaded images, source clips, generated video blobs, or base64 request payloads.
+- History JSON stores prompts, request IDs, polling URLs, compact settings, status, and small references to asset files. Base64 request payloads are never written to JSON.
+- Uploaded reference images/source clips and completed videos are retained as separate local asset files so previews, playback, and reuse survive reloads. Removing a record prunes assets no longer referenced by any other generation.
 - History also stores the estimate shown at submission, BFL’s returned credit charge, and the available-credit snapshots around the request. USD cost is derived using BFL’s published conversion of one credit to $0.01.
-- BFL delivery URLs are treated as ten-minute links and removed from stored history after expiry.
+- Completed videos are copied locally before BFL’s temporary delivery URL expires. Temporary URLs are pruned after expiry; the local copy remains.
 - The BFL API key is stored as plaintext in the local JSON file with owner-only file permissions (`0600`). API routes use it server-side and return only whether a key exists to the browser.
-- Settings shows the exact file path, file size, generation count, and last-write time. It can clear history, reset preferences, remove the API key, or delete the entire file.
+- Settings shows metadata size, retained-asset size/count, generation count, and the exact JSON path. It can clear history and its assets, reset preferences, remove the API key, or delete all project data.
 
-Saving a finished video is a user-directed filesystem action; it is not app persistence.
+“Save to Finder” exports another user-directed copy from Clawnsole’s retained local video.
 
 ## Provider architecture
 
@@ -82,9 +84,11 @@ Saving a finished video is a user-directed filesystem action; it is not app pers
 - `lib/providers/pricing.ts` dispatches provider-specific cost estimates and currency conversion.
 - `lib/server/providers/` contains server-only adapters and error normalization.
 - `lib/server/data-store.ts` owns the atomic local JSON-file reads and writes.
+- `lib/server/asset-store.ts` owns retained inputs/videos and reference-aware cleanup.
 - `/api/generations` and `/api/generations/status` are provider-dispatched API routes.
 - `/api/local-state` exposes sanitized local state and data-management actions.
 - `/api/media` validates BFL delivery hosts and proxies range requests for playback and saving.
+- `/api/assets` serves retained local media with range support and can retry result retention.
 
 Add future providers by extending the provider ID and catalog, implementing a server adapter, and registering it in the server provider map.
 
