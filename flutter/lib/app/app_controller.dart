@@ -30,6 +30,7 @@ class KeyframeDraft {
   const KeyframeDraft({
     required this.id,
     required this.label,
+    required this.role,
     required this.source,
     required this.seconds,
     this.asset,
@@ -38,6 +39,7 @@ class KeyframeDraft {
 
   final String id;
   final String label;
+  final KeyframeRole role;
   final String source;
   final double seconds;
   final PickedAsset? asset;
@@ -49,6 +51,7 @@ class KeyframeDraft {
       KeyframeDraft(
         id: id,
         label: label ?? this.label,
+        role: role,
         source: source ?? this.source,
         seconds: seconds ?? this.seconds,
         asset: asset,
@@ -74,6 +77,24 @@ class GenerationFormState {
   String draftUrl = '';
 
   Object get duration => autoDuration ? 'auto' : durationSeconds;
+
+  bool get hasStartFrame =>
+      keyframes.any((frame) => frame.role == KeyframeRole.start);
+  bool get hasEndFrame =>
+      keyframes.any((frame) => frame.role == KeyframeRole.end);
+
+  bool get hasPlainKeyframeLayout {
+    if (keyframes.length == 1) {
+      return keyframes.single.role == KeyframeRole.start;
+    }
+    return keyframes.length >= 2 && hasStartFrame && hasEndFrame;
+  }
+
+  bool get requiresTimedKeyframes =>
+      mode == VideoMode.i2v && keyframes.isNotEmpty && !hasPlainKeyframeLayout;
+  bool get usesTimedKeyframes => exactTiming || requiresTimedKeyframes;
+  bool get requiresFixedDuration =>
+      mode == VideoMode.i2v && (usesTimedKeyframes || keyframes.length > 2);
 }
 
 class AppController extends ChangeNotifier {
@@ -136,10 +157,7 @@ class AppController extends ChangeNotifier {
   }
 
   GenerationConfig get currentConfig {
-    final orderedFrames = List<KeyframeDraft>.from(form.keyframes);
-    if (form.exactTiming) {
-      orderedFrames.sort((a, b) => a.seconds.compareTo(b.seconds));
-    }
+    final orderedFrames = _orderedFrames();
     return GenerationConfig(
       aspectRatio: form.aspectRatio,
       duration: form.duration,
@@ -147,13 +165,14 @@ class AppController extends ChangeNotifier {
       generateAudio: form.generateAudio,
       safetyTolerance: form.safetyTolerance,
       draft: form.draft,
-      exactTiming: form.exactTiming,
+      exactTiming: form.usesTimedKeyframes,
       keyframes: form.mode == VideoMode.i2v
           ? orderedFrames
                 .map(
                   (frame) => KeyframeLabel(
                     label: frame.label,
-                    seconds: form.exactTiming ? frame.seconds : null,
+                    role: frame.role,
+                    seconds: form.usesTimedKeyframes ? frame.seconds : null,
                     source:
                         frame.asset?.retained ??
                         frame.retained ??
@@ -193,6 +212,9 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _apply(await gateway.load());
+      if (generations.isNotEmpty) {
+        await _restoreGenerationSettings(generations.first);
+      }
       if (hasApiKey) {
         unawaited(refreshCredits());
         unawaited(pollWorking());
@@ -272,6 +294,7 @@ class AppController extends ChangeNotifier {
   void updateForm(void Function(GenerationFormState value) update) {
     update(form);
     if (form.draft) form.resolution = 'hd';
+    if (form.requiresFixedDuration) form.autoDuration = false;
     notifyListeners();
   }
 
@@ -297,58 +320,104 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> addImageFiles() async {
-    final remaining = bflProvider.maxKeyframes - form.keyframes.length;
-    if (remaining <= 0) return;
-    final result = await FilePicker.pickFiles(
-      type: FileType.image,
-      allowMultiple: true,
-      withData: true,
-    );
-    if (result == null) return;
-    final selected = result.files.take(remaining).toList();
-    final additions = <KeyframeDraft>[];
-    for (var index = 0; index < selected.length; index += 1) {
-      final file = selected[index];
-      if (file.bytes == null) continue;
-      final asset = PickedAsset(
-        name: file.name,
-        bytes: file.bytes!,
-        mimeType:
-            lookupMimeType(file.name, headerBytes: file.bytes) ??
-            'application/octet-stream',
-      );
-      final position = form.keyframes.length + additions.length;
-      additions.add(
-        KeyframeDraft(
-          id: _uid(),
-          label: file.name,
-          source: '',
-          seconds: position == 0 ? 0 : (position * 3).clamp(0, 20).toDouble(),
-          asset: asset,
-        ),
-      );
-    }
-    form.keyframes = <KeyframeDraft>[...form.keyframes, ...additions];
-    if (result.files.length > remaining) {
-      showNotice('FLUX 3 accepts up to ten keyframes.');
-    }
-    notifyListeners();
-  }
+  bool canAddFrame(KeyframeRole role) =>
+      form.keyframes.length < bflProvider.maxKeyframes &&
+      (role == KeyframeRole.middle ||
+          !form.keyframes.any((frame) => frame.role == role));
 
-  void addUrlFrame() {
-    if (form.keyframes.length >= bflProvider.maxKeyframes) return;
-    final index = form.keyframes.length;
+  double _suggestedFrameTime(KeyframeRole role) => switch (role) {
+    KeyframeRole.start => 0,
+    KeyframeRole.end => form.durationSeconds.toDouble(),
+    KeyframeRole.middle =>
+      form.durationSeconds *
+          (form.keyframes
+                  .where((frame) => frame.role == KeyframeRole.middle)
+                  .length +
+              1) /
+          (form.keyframes
+                  .where((frame) => frame.role == KeyframeRole.middle)
+                  .length +
+              2),
+  };
+
+  void _appendFrame(
+    KeyframeRole role, {
+    required String label,
+    PickedAsset? asset,
+  }) {
+    if (!canAddFrame(role)) return;
     form.keyframes = <KeyframeDraft>[
       ...form.keyframes,
       KeyframeDraft(
         id: _uid(),
-        label: 'Reference URL',
+        label: label,
+        role: role,
         source: '',
-        seconds: index == 0 ? 0 : (index * 3).clamp(0, 20).toDouble(),
+        seconds: _suggestedFrameTime(role),
+        asset: asset,
       ),
     ];
+    if (form.requiresFixedDuration) form.autoDuration = false;
     notifyListeners();
+  }
+
+  Future<void> addImageFrame(KeyframeRole role) async {
+    if (!canAddFrame(role)) return;
+    try {
+      final asset = await _pick(type: FileType.image);
+      if (asset != null) _appendFrame(role, label: asset.name, asset: asset);
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  void addUrlFrame(KeyframeRole role) =>
+      _appendFrame(role, label: '${role.label} URL');
+
+  void setExactTiming(bool value) {
+    form.exactTiming = value;
+    if (value) {
+      form.autoDuration = false;
+      form.keyframes = form.keyframes.map((frame) {
+        if (frame.role == KeyframeRole.start) {
+          return frame.copyWith(seconds: 0);
+        }
+        if (frame.role == KeyframeRole.end) {
+          return frame.copyWith(seconds: form.durationSeconds.toDouble());
+        }
+        return frame;
+      }).toList();
+    }
+    notifyListeners();
+  }
+
+  void setDurationSeconds(int value) {
+    form.durationSeconds = value;
+    form.keyframes = form.keyframes.map((frame) {
+      return frame.role == KeyframeRole.end
+          ? frame.copyWith(seconds: value.toDouble())
+          : frame;
+    }).toList();
+    notifyListeners();
+  }
+
+  List<KeyframeDraft> _orderedFrames() {
+    final frames = List<KeyframeDraft>.from(form.keyframes);
+    if (form.usesTimedKeyframes) {
+      frames.sort((a, b) => a.seconds.compareTo(b.seconds));
+      return frames;
+    }
+    final indexed = frames.asMap().entries.toList();
+    int rank(KeyframeRole role) => switch (role) {
+      KeyframeRole.start => 0,
+      KeyframeRole.middle => 1,
+      KeyframeRole.end => 2,
+    };
+    indexed.sort((a, b) {
+      final roleOrder = rank(a.value.role).compareTo(rank(b.value.role));
+      return roleOrder == 0 ? a.key.compareTo(b.key) : roleOrder;
+    });
+    return indexed.map((entry) => entry.value).toList();
   }
 
   void updateFrame(String id, {String? source, double? seconds}) {
@@ -396,10 +465,10 @@ class AppController extends ChangeNotifier {
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
       }
-      if (!form.exactTiming && form.keyframes.length > 2 && form.autoDuration) {
-        return 'Choose a duration when using three or more evenly spaced frames.';
+      if (form.requiresFixedDuration && form.autoDuration) {
+        return 'Choose a fixed duration for this keyframe layout.';
       }
-      if (form.exactTiming) {
+      if (form.usesTimedKeyframes) {
         final seconds = form.keyframes.map((frame) => frame.seconds).toList();
         if (seconds.any((value) => value < 0 || value > 20)) {
           return 'Keyframe timing must stay between 0 and 20 seconds.';
@@ -442,14 +511,13 @@ class AppController extends ChangeNotifier {
       'draft': form.draft,
     };
     if (form.mode == VideoMode.i2v) {
-      final frames = form.exactTiming
-          ? (List<KeyframeDraft>.from(form.keyframes)
-                  ..sort((a, b) => a.seconds.compareTo(b.seconds)))
+      final frames = form.usesTimedKeyframes
+          ? _orderedFrames()
                 .map<Object?>(
                   (frame) => <Object?>[frame.seconds, frame.requestSource],
                 )
                 .toList()
-          : form.keyframes
+          : _orderedFrames()
                 .map<Object?>((frame) => frame.requestSource)
                 .toList();
       return <String, Object?>{...common, 'mode': 'i2v', 'keyframes': frames};
@@ -463,6 +531,9 @@ class AppController extends ChangeNotifier {
     }
     return <String, Object?>{...common, 'mode': 't2v'};
   }
+
+  @visibleForTesting
+  Map<String, Object?> buildInputForTesting() => _buildInput();
 
   String _uid() =>
       '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-${(_idCounter++).toRadixString(16)}';
@@ -686,38 +757,58 @@ class AppController extends ChangeNotifier {
         retained: reference,
       );
 
-  Future<void> reuse(Generation item) async {
+  Future<void> _restoreGenerationSettings(
+    Generation item, {
+    bool includePrompt = false,
+  }) async {
     final retainedFrames = <KeyframeDraft>[];
-    try {
-      for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
-        final reference = frame.source;
-        retainedFrames.add(
-          KeyframeDraft(
-            id: _uid(),
-            label: frame.label,
-            source: reference?.kind == 'remote' ? reference!.value : '',
-            seconds: frame.seconds ?? 0,
-            asset: reference?.isLocal == true
-                ? await _retainedAsset(reference!)
-                : null,
-            retained: reference,
-          ),
-        );
+    for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
+      final reference = frame.source;
+      PickedAsset? asset;
+      if (reference?.isLocal == true) {
+        try {
+          asset = await _retainedAsset(reference!);
+        } on Object {
+          // Keep the saved role and timing even if its retained file moved.
+        }
       }
-    } on Object catch (error) {
-      showNotice(_message(error));
+      retainedFrames.add(
+        KeyframeDraft(
+          id: _uid(),
+          label: frame.label,
+          role: frame.role,
+          source: reference?.kind == 'remote' ? reference!.value : '',
+          seconds:
+              frame.seconds ??
+              switch (frame.role) {
+                KeyframeRole.start => 0,
+                KeyframeRole.middle =>
+                  item.config.duration is num
+                      ? (item.config.duration as num).toDouble() / 2
+                      : 4,
+                KeyframeRole.end =>
+                  item.config.duration is num
+                      ? (item.config.duration as num).toDouble()
+                      : 8,
+              },
+          asset: asset,
+          retained: reference,
+        ),
+      );
     }
     PickedAsset? retainedVideo;
     if (item.mode == VideoMode.v2v && item.config.source?.isLocal == true) {
       try {
         retainedVideo = await _retainedAsset(item.config.source!);
-      } on Object catch (error) {
-        showNotice(_message(error));
+      } on Object {
+        // Preserve the rest of the last-used settings when an asset is gone.
       }
     }
     form
       ..mode = item.mode == VideoMode.draftEnhance ? VideoMode.t2v : item.mode
-      ..prompt = item.mode == VideoMode.draftEnhance ? '' : item.prompt
+      ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
+          ? item.prompt
+          : form.prompt
       ..aspectRatio = item.config.aspectRatio
       ..autoDuration = item.config.duration == 'auto'
       ..durationSeconds = item.config.duration is num
@@ -736,6 +827,16 @@ class AppController extends ChangeNotifier {
           : ''
       ..draftAsset = null
       ..draftUrl = '';
+    if (form.requiresFixedDuration) form.autoDuration = false;
+    notifyListeners();
+  }
+
+  Future<void> reuse(Generation item) async {
+    try {
+      await _restoreGenerationSettings(item, includePrompt: true);
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
     await navigate(AppSection.create);
     showNotice('Prompt, settings, and retained references copied.');
   }

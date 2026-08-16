@@ -8,6 +8,23 @@ enum LibraryFilter { all, working, ready, failed }
 
 enum VideoMode { t2v, i2v, v2v, draftEnhance }
 
+enum KeyframeRole { start, middle, end }
+
+extension KeyframeRoleValue on KeyframeRole {
+  String get label => switch (this) {
+    KeyframeRole.start => 'First frame',
+    KeyframeRole.middle => 'Middle frame',
+    KeyframeRole.end => 'Last frame',
+  };
+
+  static KeyframeRole? tryParse(Object? value) {
+    for (final role in KeyframeRole.values) {
+      if (role.name == value) return role;
+    }
+    return null;
+  }
+}
+
 extension VideoModeValue on VideoMode {
   String get wireValue => switch (this) {
     VideoMode.t2v => 't2v',
@@ -127,6 +144,20 @@ class GenerationConfig {
 
   factory GenerationConfig.fromJson(Map<String, Object?> json) {
     final rawDuration = json['duration'];
+    final rawKeyframes = (json['keyframes'] as List<Object?>?)
+        ?.whereType<Map<Object?, Object?>>()
+        .toList();
+    final keyframes = rawKeyframes?.asMap().entries.map((entry) {
+      final item = entry.value.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+      final legacyRole = entry.key == 0
+          ? KeyframeRole.start
+          : entry.key == rawKeyframes.length - 1
+          ? KeyframeRole.end
+          : KeyframeRole.middle;
+      return KeyframeLabel.fromJson(item, fallbackRole: legacyRole);
+    }).toList();
     return GenerationConfig(
       aspectRatio: json['aspectRatio'] is String
           ? json['aspectRatio']! as String
@@ -137,14 +168,7 @@ class GenerationConfig {
       safetyTolerance: (json['safetyTolerance'] as num?)?.toInt() ?? 2,
       draft: json['draft'] == true,
       exactTiming: json['exactTiming'] == true,
-      keyframes: (json['keyframes'] as List<Object?>?)
-          ?.whereType<Map<Object?, Object?>>()
-          .map(
-            (item) => KeyframeLabel.fromJson(
-              item.map((key, value) => MapEntry(key.toString(), value)),
-            ),
-          )
-          .toList(),
+      keyframes: keyframes,
       sourceLabel: json['sourceLabel'] as String?,
       source: json['source'] is Map<Object?, Object?>
           ? AssetReference.fromJson(
@@ -158,20 +182,31 @@ class GenerationConfig {
 }
 
 class KeyframeLabel {
-  const KeyframeLabel({required this.label, this.seconds, this.source});
+  const KeyframeLabel({
+    required this.label,
+    this.role = KeyframeRole.middle,
+    this.seconds,
+    this.source,
+  });
 
   final String label;
+  final KeyframeRole role;
   final double? seconds;
   final AssetReference? source;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
+    'role': role.name,
     if (seconds != null) 'seconds': seconds,
     if (source != null) 'source': source!.toJson(),
   };
 
-  factory KeyframeLabel.fromJson(Map<String, Object?> json) => KeyframeLabel(
+  factory KeyframeLabel.fromJson(
+    Map<String, Object?> json, {
+    KeyframeRole fallbackRole = KeyframeRole.middle,
+  }) => KeyframeLabel(
     label: json['label'] as String? ?? 'Reference frame',
+    role: KeyframeRoleValue.tryParse(json['role']) ?? fallbackRole,
     seconds: (json['seconds'] as num?)?.toDouble(),
     source: json['source'] is Map<Object?, Object?>
         ? AssetReference.fromJson(
@@ -502,7 +537,7 @@ class StoredData {
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 4,
+    'schemaVersion': 5,
     'apiKeys': <String, Object?>{if (apiKey.isNotEmpty) 'bfl': apiKey},
     'preferences': preferences.toJson(),
     'generations': generations.map((item) => item.toJson()).toList(),

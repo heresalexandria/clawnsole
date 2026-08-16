@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
+import '../core/gateway.dart';
 import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
 import '../ui/library_screen.dart';
@@ -11,7 +12,9 @@ import 'app_controller.dart';
 import 'app_theme.dart';
 
 class ClawnsoleApp extends StatefulWidget {
-  const ClawnsoleApp({super.key});
+  const ClawnsoleApp({super.key, this.gateway});
+
+  final AppGateway? gateway;
 
   @override
   State<ClawnsoleApp> createState() => _ClawnsoleAppState();
@@ -25,7 +28,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   @override
   void initState() {
     super.initState();
-    controller = AppController();
+    controller = AppController(gateway: widget.gateway);
     unawaited(controller.initialize());
   }
 
@@ -283,19 +286,25 @@ class _TopBar extends StatelessWidget {
     ),
     child: Row(
       children: <Widget>[
-        InkWell(
-          onTap: () => unawaited(controller.navigate(AppSection.create)),
-          child: Text(
-            'Clawnsole',
-            style: TextStyle(
-              fontFamily: 'Georgia',
-              fontSize: compact ? 20 : 23,
-              fontWeight: FontWeight.w700,
-              color: context.colors.primary,
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              onTap: () => unawaited(controller.navigate(AppSection.create)),
+              child: Text(
+                'Clawnsole',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'Georgia',
+                  fontSize: compact ? 20 : 23,
+                  fontWeight: FontWeight.w700,
+                  color: context.colors.primary,
+                ),
+              ),
             ),
           ),
         ),
-        const Spacer(),
         if (!compact)
           const _TopPill(
             icon: Icons.hub_rounded,
@@ -306,7 +315,7 @@ class _TopBar extends StatelessWidget {
         InkWell(
           onTap: controller.hasApiKey
               ? () => unawaited(controller.refreshCredits())
-              : null,
+              : () => unawaited(controller.navigate(AppSection.settings)),
           borderRadius: BorderRadius.circular(11),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),

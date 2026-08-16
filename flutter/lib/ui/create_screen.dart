@@ -369,19 +369,31 @@ class _KeyframeEditor extends StatelessWidget {
                 _FieldLabel('Keyframes', icon: Icons.collections_rounded),
                 SizedBox(height: 3),
                 Text(
-                  '1–10 images · first and last frames are pinned',
+                  '1–10 images · first, middle, and last positions are explicit',
                   style: TextStyle(fontSize: 9),
                 ),
               ],
             ),
           ),
           FilterChip(
-            label: const Text('Exact timing'),
-            selected: controller.form.exactTiming,
-            onSelected: (value) =>
-                controller.updateForm((form) => form.exactTiming = value),
+            label: const Text('Custom timing'),
+            selected: controller.form.usesTimedKeyframes,
+            onSelected: controller.form.requiresTimedKeyframes
+                ? null
+                : controller.setExactTiming,
           ),
         ],
+      ),
+      const SizedBox(height: 7),
+      Text(
+        controller.form.requiresTimedKeyframes
+            ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can also stand alone.'
+            : 'First-only pins the opening. First + last pins both ends. With 3+ plain frames, BFL spaces middle frames evenly.',
+        style: TextStyle(
+          color: context.colors.onSurfaceVariant,
+          fontSize: 10,
+          height: 1.35,
+        ),
       ),
       const SizedBox(height: 10),
       if (controller.form.keyframes.isNotEmpty)
@@ -452,11 +464,9 @@ class _KeyframeEditor extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    index == 0
-                        ? 'Start'
-                        : index == controller.form.keyframes.length - 1
-                        ? 'Last'
-                        : 'Frame ${index + 1}',
+                    frame.role == KeyframeRole.middle
+                        ? 'Middle frame ${controller.form.keyframes.take(index + 1).where((item) => item.role == KeyframeRole.middle).length}'
+                        : frame.role.label,
                     style: const TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.w900,
@@ -479,7 +489,7 @@ class _KeyframeEditor extends StatelessWidget {
                       style: const TextStyle(fontSize: 9),
                     ),
                   ],
-                  if (controller.form.exactTiming) ...<Widget>[
+                  if (controller.form.usesTimedKeyframes) ...<Widget>[
                     const SizedBox(height: 5),
                     TextFormField(
                       key: ValueKey('frame-time-${frame.id}'),
@@ -508,29 +518,86 @@ class _KeyframeEditor extends StatelessWidget {
         ),
       const SizedBox(height: 10),
       Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: <Widget>[
-          OutlinedButton.icon(
-            onPressed:
-                controller.form.keyframes.length >= bflProvider.maxKeyframes
-                ? null
-                : controller.addImageFiles,
-            icon: const Icon(Icons.add_photo_alternate_rounded, size: 17),
-            label: const Text('Add images'),
-          ),
-          OutlinedButton.icon(
-            onPressed:
-                controller.form.keyframes.length >= bflProvider.maxKeyframes
-                ? null
-                : controller.addUrlFrame,
-            icon: const Icon(Icons.add_link_rounded, size: 17),
-            label: const Text('Add image URL'),
-          ),
-        ],
+        spacing: 9,
+        runSpacing: 9,
+        children: KeyframeRole.values
+            .map((role) => _FrameRoleAction(controller: controller, role: role))
+            .toList(),
       ),
     ],
   );
+}
+
+class _FrameRoleAction extends StatelessWidget {
+  const _FrameRoleAction({required this.controller, required this.role});
+
+  final AppController controller;
+  final KeyframeRole role;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = controller.canAddFrame(role);
+    final detail = switch (role) {
+      KeyframeRole.start => 'Pins the opening at 0s',
+      KeyframeRole.middle => 'Timed waypoint · repeatable',
+      KeyframeRole.end => 'Pins the ending · works alone',
+    };
+    return Container(
+      width: 178,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            role.label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            detail,
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 8,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: enabled
+                      ? () => unawaited(controller.addImageFrame(role))
+                      : null,
+                  icon: const Icon(Icons.add_photo_alternate_rounded, size: 15),
+                  label: Text(
+                    enabled
+                        ? switch (role) {
+                            KeyframeRole.start => 'Add first',
+                            KeyframeRole.middle => 'Add middle',
+                            KeyframeRole.end => 'Add last',
+                          }
+                        : 'Added',
+                    style: const TextStyle(fontSize: 9),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 5),
+              IconButton.outlined(
+                tooltip: 'Add ${role.label.toLowerCase()} URL',
+                onPressed: enabled ? () => controller.addUrlFrame(role) : null,
+                icon: const Icon(Icons.add_link_rounded, size: 16),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SourceEditor extends StatelessWidget {
@@ -673,7 +740,9 @@ class _SettingsGrid extends StatelessWidget {
             FilterChip(
               label: const Text('Auto'),
               selected: controller.form.autoDuration,
-              onSelected: controller.form.mode == VideoMode.draftEnhance
+              onSelected:
+                  controller.form.mode == VideoMode.draftEnhance ||
+                      controller.form.requiresFixedDuration
                   ? null
                   : (value) => controller.updateForm(
                       (form) => form.autoDuration = value,
@@ -691,9 +760,7 @@ class _SettingsGrid extends StatelessWidget {
               controller.form.autoDuration ||
                   controller.form.mode == VideoMode.draftEnhance
               ? null
-              : (value) => controller.updateForm(
-                  (form) => form.durationSeconds = value.round(),
-                ),
+              : (value) => controller.setDurationSeconds(value.round()),
         ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -925,27 +992,30 @@ class _CostPreview extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Text(
-                        'ESTIMATED PROVIDER CHARGE',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 8,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.w900,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 220),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'ESTIMATED PROVIDER CHARGE',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 8,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                      Text(
-                        '${formatCreditRange(estimate.minimum, estimate.maximum)} credits',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
+                        Text(
+                          '${formatCreditRange(estimate.minimum, estimate.maximum)} credits',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

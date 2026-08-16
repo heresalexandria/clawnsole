@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
+import 'package:clawnsole/core/gateway.dart';
+import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
@@ -228,6 +231,7 @@ void main() {
               keyframes: <KeyframeLabel>[
                 KeyframeLabel(
                   label: 'start.png',
+                  role: KeyframeRole.start,
                   seconds: 0,
                   source: AssetReference(
                     kind: 'local',
@@ -270,6 +274,10 @@ void main() {
       expect(decoded.generations.single.creditsAfter, 364);
       expect(decoded.generations.single.config.exactTiming, isTrue);
       expect(
+        decoded.generations.single.config.keyframes!.single.role,
+        KeyframeRole.start,
+      );
+      expect(
         decoded.generations.single.config.keyframes!.single.source!.value,
         'asset-input',
       );
@@ -291,6 +299,177 @@ void main() {
     },
   );
 
+  test('migrates legacy keyframe ordering to explicit frame roles', () {
+    final decoded = StoredData.fromJson(<String, Object?>{
+      'schemaVersion': 4,
+      'generations': <Object?>[
+        <String, Object?>{
+          'localId': 'legacy',
+          'status': 'Ready',
+          'prompt': 'Legacy frames',
+          'mode': 'i2v',
+          'createdAt': '2026-08-15T12:00:00Z',
+          'updatedAt': '2026-08-15T12:00:00Z',
+          'config': <String, Object?>{
+            'aspectRatio': '16:9',
+            'duration': 8,
+            'resolution': 'hd',
+            'generateAudio': true,
+            'safetyTolerance': 2,
+            'draft': false,
+            'keyframes': <Object?>[
+              <String, Object?>{'label': 'first.png'},
+              <String, Object?>{'label': 'middle.png'},
+              <String, Object?>{'label': 'last.png'},
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(
+      decoded.generations.single.config.keyframes!.map((frame) => frame.role),
+      <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
+    );
+    expect(decoded.toJson()['schemaVersion'], 5);
+  });
+
+  test('maps first, middle, and last frame layouts to the BFL contract', () {
+    const firstUrl = 'https://cdn.bfl.ai/first.png';
+    const middleUrl = 'https://cdn.bfl.ai/middle.png';
+    const lastUrl = 'https://cdn.bfl.ai/last.png';
+
+    final endOnly = AppController();
+    endOnly.form
+      ..mode = VideoMode.i2v
+      ..durationSeconds = 12;
+    endOnly.addUrlFrame(KeyframeRole.end);
+    endOnly.updateFrame(endOnly.form.keyframes.single.id, source: lastUrl);
+    expect(endOnly.form.autoDuration, isFalse);
+    expect(endOnly.form.usesTimedKeyframes, isTrue);
+    expect(endOnly.buildInputForTesting()['keyframes'], <Object?>[
+      <Object?>[12.0, lastUrl],
+    ]);
+
+    final bothEnds = AppController();
+    bothEnds.form.mode = VideoMode.i2v;
+    bothEnds.addUrlFrame(KeyframeRole.end);
+    bothEnds.updateFrame(bothEnds.form.keyframes.single.id, source: lastUrl);
+    bothEnds.addUrlFrame(KeyframeRole.start);
+    bothEnds.updateFrame(
+      bothEnds.form.keyframes
+          .singleWhere((frame) => frame.role == KeyframeRole.start)
+          .id,
+      source: firstUrl,
+    );
+    expect(bothEnds.form.usesTimedKeyframes, isFalse);
+    expect(bothEnds.buildInputForTesting()['keyframes'], <Object?>[
+      firstUrl,
+      lastUrl,
+    ]);
+
+    final middleOnly = AppController();
+    middleOnly.form
+      ..mode = VideoMode.i2v
+      ..durationSeconds = 10;
+    middleOnly.addUrlFrame(KeyframeRole.middle);
+    middleOnly.updateFrame(
+      middleOnly.form.keyframes.single.id,
+      source: middleUrl,
+    );
+    expect(middleOnly.form.usesTimedKeyframes, isTrue);
+    expect(middleOnly.buildInputForTesting()['keyframes'], <Object?>[
+      <Object?>[5.0, middleUrl],
+    ]);
+  });
+
+  test(
+    'restores duration and frame settings from the previous generation',
+    () async {
+      final now = DateTime.utc(2026, 8, 15);
+      final gateway = _MemoryGateway(
+        LocalSnapshot(
+          generations: <Generation>[
+            Generation(
+              localId: 'previous',
+              status: 'Ready',
+              prompt: 'Do not restore this prompt.',
+              mode: VideoMode.i2v,
+              config: const GenerationConfig(
+                aspectRatio: '21:9',
+                duration: 14,
+                resolution: 'fhd',
+                generateAudio: false,
+                safetyTolerance: 1,
+                draft: false,
+                exactTiming: true,
+                keyframes: <KeyframeLabel>[
+                  KeyframeLabel(
+                    label: 'ending.png',
+                    role: KeyframeRole.end,
+                    seconds: 14,
+                    source: AssetReference(
+                      kind: 'remote',
+                      value: 'https://cdn.bfl.ai/ending.png',
+                      label: 'ending.png',
+                    ),
+                  ),
+                ],
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ],
+          preferences: const AppPreferences(),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 1, records: 1),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+
+      await controller.initialize();
+
+      expect(controller.form.prompt, isEmpty);
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(controller.form.aspectRatio, '21:9');
+      expect(controller.form.autoDuration, isFalse);
+      expect(controller.form.durationSeconds, 14);
+      expect(controller.form.keyframes.single.role, KeyframeRole.end);
+      expect(controller.form.keyframes.single.seconds, 14);
+      controller.dispose();
+    },
+  );
+
+  test('retained videos keep an AVPlayer-compatible extension', () {
+    expect(retainedAssetExtension('video/mp4', 'result'), '.mp4');
+    expect(retainedAssetExtension(null, 'clawnsole.mov'), '.mov');
+    expect(retainedAssetExtension('image/png', 'frame'), '.png');
+  });
+
+  testWidgets('mobile Add key shortcut opens settings', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    await tester.pumpWidget(ClawnsoleApp(gateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Add key'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Settings.'), findsOneWidget);
+    expect(gateway.snapshot.preferences.activeSection, AppSection.settings);
+  });
+
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
     await tester.pumpWidget(const ClawnsoleApp());
     expect(find.text('Clawnsole'), findsOneWidget);
@@ -311,4 +490,74 @@ void main() {
     expect(VideoMode.values, hasLength(4));
     expect(form.mode, VideoMode.t2v);
   });
+}
+
+class _MemoryGateway implements AppGateway {
+  _MemoryGateway(this.snapshot);
+
+  LocalSnapshot snapshot;
+
+  @override
+  bool get usesCompanion => false;
+
+  @override
+  String get persistenceDescription => 'Memory';
+
+  @override
+  Future<LocalSnapshot> load() async => snapshot;
+
+  @override
+  Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
+    snapshot = LocalSnapshot(
+      generations: snapshot.generations,
+      preferences: preferences,
+      hasApiKey: snapshot.hasApiKey,
+      storage: snapshot.storage,
+    );
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> setApiKey(String value) async => snapshot;
+
+  @override
+  Future<double> verifyKey([String? candidate]) async => 0;
+
+  @override
+  Future<double> getCredits() async => 0;
+
+  @override
+  Future<Generation> submit(GenerationSubmission submission) async =>
+      submission.record;
+
+  @override
+  Future<Generation> poll(Generation generation) async => generation;
+
+  @override
+  Future<LocalSnapshot> deleteGeneration(String localId) async => snapshot;
+
+  @override
+  Future<LocalSnapshot> clearHistory() async => snapshot;
+
+  @override
+  Future<LocalSnapshot> clearPreferences() async => snapshot;
+
+  @override
+  Future<LocalSnapshot> clearApiKey() async => snapshot;
+
+  @override
+  Future<LocalSnapshot> clearAll() async => snapshot;
+
+  @override
+  Future<Uri> assetUri(AssetReference reference) async =>
+      Uri.parse(reference.value);
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async => Uint8List(0);
+
+  @override
+  Uri mediaUri(String source) => Uri.parse(source);
+
+  @override
+  Future<Uint8List> downloadMedia(String source) async => Uint8List(0);
 }
