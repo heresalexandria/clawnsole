@@ -7,10 +7,14 @@ import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
-import 'package:clawnsole/core/local_data_store_io.dart';
+import 'package:clawnsole/core/local_data_store.dart';
+import 'package:clawnsole/core/local_data_store_io.dart'
+    show retainedAssetExtension;
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/update_check.dart';
+import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:flutter/material.dart';
@@ -298,6 +302,7 @@ void main() {
         '{"detail":"try again"}',
       );
       expect(decoded.generations.single.lastProviderResponseAt, now);
+      expect(decoded.rejectedIosReviewApiKeyId, isEmpty);
       expect(original.encode(), isNot(contains('data:image')));
     },
   );
@@ -334,7 +339,144 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 5);
+    expect(decoded.toJson()['schemaVersion'], 6);
+  });
+
+  test(
+    'uses and invalidates an iOS-only review key without persisting it',
+    () async {
+      const reviewKey = 'review-key-that-must-not-be-persisted';
+      final store = _MemoryLocalDataStore();
+      final gateway = NativeGateway(
+        store: store,
+        api: _RejectedCreditsApi(),
+        iosReviewApiKey: reviewKey,
+        iosReviewApiKeyId: 'review-key-id',
+        isIos: true,
+      );
+
+      expect((await gateway.load()).hasApiKey, isTrue);
+      expect(store.data.apiKey, isEmpty);
+      expect(store.data.encode(), isNot(contains(reviewKey)));
+
+      await expectLater(
+        gateway.getCredits(),
+        throwsA(isA<ProviderException>()),
+      );
+      final invalidated = await gateway.load();
+      expect(invalidated.hasApiKey, isFalse);
+      expect(store.data.rejectedIosReviewApiKeyId, 'review-key-id');
+      expect(store.data.encode(), isNot(contains(reviewKey)));
+    },
+  );
+
+  test(
+    'clears a rejected saved key before falling back to iOS review access',
+    () async {
+      final store = _MemoryLocalDataStore(
+        const StoredData(apiKey: 'saved-user-key'),
+      );
+      final gateway = NativeGateway(
+        store: store,
+        api: _RejectedCreditsApi(),
+        iosReviewApiKey: 'review-key',
+        iosReviewApiKeyId: 'review-key-id',
+        isIos: true,
+      );
+
+      await expectLater(
+        gateway.getCredits(),
+        throwsA(isA<ProviderException>()),
+      );
+      final fallback = await gateway.load();
+      expect(fallback.hasApiKey, isTrue);
+      expect(store.data.apiKey, isEmpty);
+      expect(store.data.rejectedIosReviewApiKeyId, isEmpty);
+
+      await expectLater(
+        gateway.getCredits(),
+        throwsA(isA<ProviderException>()),
+      );
+      final exhausted = await gateway.load();
+      expect(exhausted.hasApiKey, isFalse);
+      expect(store.data.rejectedIosReviewApiKeyId, 'review-key-id');
+    },
+  );
+
+  test('does not use the iOS review key on another native platform', () async {
+    final gateway = NativeGateway(
+      store: _MemoryLocalDataStore(),
+      iosReviewApiKey: 'review-key',
+      iosReviewApiKeyId: 'review-key-id',
+      isIos: false,
+    );
+
+    expect((await gateway.load()).hasApiKey, isFalse);
+  });
+
+  test(
+    'startup validation clears rejected access and requires another key',
+    () async {
+      final gateway = _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: true,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        creditError: const ProviderException(
+          'BFL rejected this API key.',
+          status: 401,
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+
+      await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(gateway.invalidationCount, 1);
+      expect(controller.hasApiKey, isFalse);
+      expect(controller.section, AppSection.settings);
+      expect(controller.creditError, contains('rejected'));
+      controller.dispose();
+    },
+  );
+
+  test('companion-backed access clears a rejected saved key', () async {
+    var cleared = false;
+    final gateway = WebGateway(
+      baseUrl: Uri.parse('http://127.0.0.1:8787'),
+      client: MockClient((request) async {
+        if (request.url.path == '/credits') {
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'error': 'BFL rejected this API key.',
+            }),
+            401,
+            headers: const <String, String>{'content-type': 'application/json'},
+          );
+        }
+        if (request.method == 'PATCH' && request.url.path == '/state') {
+          cleared = true;
+          return http.Response(
+            jsonEncode(
+              const LocalSnapshot(
+                generations: <Generation>[],
+                preferences: AppPreferences(),
+                hasApiKey: false,
+                storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+              ).toJson(),
+            ),
+            200,
+            headers: const <String, String>{'content-type': 'application/json'},
+          );
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    await expectLater(gateway.getCredits(), throwsA(isA<ProviderException>()));
+    expect(cleared, isTrue);
   });
 
   test('maps first, middle, and last frame layouts to the BFL contract', () {
@@ -802,11 +944,17 @@ void main() {
 }
 
 class _MemoryGateway implements AppGateway {
-  _MemoryGateway(this.snapshot, {this.supportsPhotoLibrarySave = false});
+  _MemoryGateway(
+    this.snapshot, {
+    this.supportsPhotoLibrarySave = false,
+    this.creditError,
+  });
 
   LocalSnapshot snapshot;
   @override
   final bool supportsPhotoLibrarySave;
+  final Object? creditError;
+  int invalidationCount = 0;
   Uint8List? photoLibraryBytes;
   String? photoLibraryFileName;
 
@@ -837,7 +985,19 @@ class _MemoryGateway implements AppGateway {
   Future<double> verifyKey([String? candidate]) async => 0;
 
   @override
-  Future<double> getCredits() async => 0;
+  Future<double> getCredits() async {
+    if (creditError != null) {
+      invalidationCount += 1;
+      snapshot = LocalSnapshot(
+        generations: snapshot.generations,
+        preferences: snapshot.preferences,
+        hasApiKey: false,
+        storage: snapshot.storage,
+      );
+      throw creditError!;
+    }
+    return 0;
+  }
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async =>
@@ -879,5 +1039,31 @@ class _MemoryGateway implements AppGateway {
   Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) async {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
+  }
+}
+
+class _MemoryLocalDataStore extends LocalDataStore {
+  _MemoryLocalDataStore([this.data = const StoredData()]);
+
+  StoredData data;
+
+  @override
+  Future<StoredData> read() async => data;
+
+  @override
+  Future<void> write(StoredData value) async => data = value;
+
+  @override
+  Future<StorageStats> stats(int records) async => StorageStats(
+    path: 'memory',
+    bytes: data.encode().length,
+    records: records,
+  );
+}
+
+class _RejectedCreditsApi extends BflApi {
+  @override
+  Future<double> getCredits(String apiKey) async {
+    throw const ProviderException('BFL rejected this API key.', status: 401);
   }
 }

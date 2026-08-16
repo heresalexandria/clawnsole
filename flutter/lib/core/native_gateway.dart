@@ -12,15 +12,57 @@ import 'local_data_store.dart';
 import 'models.dart';
 import 'pricing.dart';
 
+const _configuredIosReviewApiKey = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY',
+);
+const _configuredIosReviewApiKeyId = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_ID',
+);
+
+enum _ApiKeySource { saved, iosReview }
+
+class _ActiveApiKey {
+  const _ActiveApiKey(this.value, this.source);
+
+  final String value;
+  final _ApiKeySource source;
+}
+
 class NativeGateway implements AppGateway {
-  NativeGateway({LocalDataStore? store, BflApi? api, http.Client? client})
-    : _store = store ?? LocalDataStore(),
-      _api = api ?? BflApi(),
-      _client = client ?? http.Client();
+  NativeGateway({
+    LocalDataStore? store,
+    BflApi? api,
+    http.Client? client,
+    String? iosReviewApiKey,
+    String? iosReviewApiKeyId,
+    bool? isIos,
+  }) : _store = store ?? LocalDataStore(),
+       _api = api ?? BflApi(),
+       _client = client ?? http.Client(),
+       _iosReviewApiKey = (iosReviewApiKey ?? _configuredIosReviewApiKey)
+           .trim(),
+       _iosReviewApiKeyId = (iosReviewApiKeyId ?? _configuredIosReviewApiKeyId)
+           .trim(),
+       _isIos = isIos ?? Platform.isIOS;
 
   final LocalDataStore _store;
   final BflApi _api;
   final http.Client _client;
+  final String _iosReviewApiKey;
+  final String _iosReviewApiKeyId;
+  final bool _isIos;
+
+  _ActiveApiKey? _activeApiKey(StoredData data) {
+    final saved = data.apiKey.trim();
+    if (saved.isNotEmpty) return _ActiveApiKey(saved, _ApiKeySource.saved);
+    if (_isIos &&
+        _iosReviewApiKey.isNotEmpty &&
+        _iosReviewApiKeyId.isNotEmpty &&
+        data.rejectedIosReviewApiKeyId != _iosReviewApiKeyId) {
+      return _ActiveApiKey(_iosReviewApiKey, _ApiKeySource.iosReview);
+    }
+    return null;
+  }
 
   @override
   bool get usesCompanion => false;
@@ -65,7 +107,7 @@ class NativeGateway implements AppGateway {
     return LocalSnapshot(
       generations: data.generations,
       preferences: data.preferences,
-      hasApiKey: data.apiKey.trim().isNotEmpty,
+      hasApiKey: _activeApiKey(data) != null,
       storage: await _store.stats(data.generations.length),
     );
   }
@@ -100,13 +142,39 @@ class NativeGateway implements AppGateway {
     return _snapshot(next);
   }
 
+  Future<void> _invalidateCredential(_ActiveApiKey rejected) async {
+    final current = await _store.read();
+    final active = _activeApiKey(current);
+    if (active == null ||
+        active.source != rejected.source ||
+        active.value != rejected.value) {
+      return;
+    }
+    final next = switch (rejected.source) {
+      _ApiKeySource.saved => current.copyWith(apiKey: ''),
+      _ApiKeySource.iosReview => current.copyWith(
+        rejectedIosReviewApiKeyId: _iosReviewApiKeyId,
+      ),
+    };
+    await _store.write(next);
+  }
+
   @override
   Future<double> verifyKey([String? candidate]) async {
-    final key = candidate?.trim().isNotEmpty == true
-        ? candidate!.trim()
-        : (await _store.read()).apiKey.trim();
+    final supplied = candidate?.trim().isNotEmpty == true;
+    final active = supplied ? null : _activeApiKey(await _store.read());
+    final key = supplied ? candidate!.trim() : active?.value ?? '';
     if (key.isEmpty) throw StateError('An API key is required.');
-    return _api.getCredits(key);
+    try {
+      return await _api.getCredits(key);
+    } on Object catch (error) {
+      if (active != null &&
+          (providerHttpStatus(error) == 401 ||
+              providerHttpStatus(error) == 403)) {
+        await _invalidateCredential(active);
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -177,7 +245,8 @@ class NativeGateway implements AppGateway {
   Future<Generation> submit(GenerationSubmission submission) async {
     var record = submission.record;
     final data = await _readFresh();
-    final key = data.apiKey.trim();
+    final credential = _activeApiKey(data);
+    final key = credential?.value ?? '';
     if (key.isEmpty) throw StateError('Add a BFL API key before generating.');
     record = record.copyWith(
       config: await _persistInputs(record.config, submission.input),
@@ -243,6 +312,11 @@ class NativeGateway implements AppGateway {
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
+      if (credential != null &&
+          (providerHttpStatus(error) == 401 ||
+              providerHttpStatus(error) == 403)) {
+        await _invalidateCredential(credential);
+      }
       rethrow;
     }
   }
@@ -251,8 +325,10 @@ class NativeGateway implements AppGateway {
   Future<Generation> poll(Generation generation) async {
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
+    _ActiveApiKey? credential;
     try {
-      final key = (await _store.read()).apiKey.trim();
+      credential = _activeApiKey(await _store.read());
+      final key = credential?.value ?? '';
       if (key.isEmpty) throw StateError('The saved BFL API key is missing.');
       if (!generation.canCheckStatus) {
         throw StateError('This generation has no polling URL.');
@@ -313,6 +389,11 @@ class NativeGateway implements AppGateway {
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
+      if (credential != null &&
+          (providerHttpStatus(error) == 401 ||
+              providerHttpStatus(error) == 403)) {
+        await _invalidateCredential(credential);
+      }
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
       if (payload != null && isGenerationFailureStatus(providerStatus)) {
@@ -377,7 +458,17 @@ class NativeGateway implements AppGateway {
   }
 
   @override
-  Future<LocalSnapshot> clearApiKey() => setApiKey('');
+  Future<LocalSnapshot> clearApiKey() async {
+    final current = await _store.read();
+    final next = current.copyWith(
+      apiKey: '',
+      rejectedIosReviewApiKeyId: _isIos && _iosReviewApiKeyId.isNotEmpty
+          ? _iosReviewApiKeyId
+          : current.rejectedIosReviewApiKeyId,
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
 
   @override
   Future<LocalSnapshot> clearAll() async {

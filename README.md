@@ -78,8 +78,10 @@ inputs and videos in an adjacent `assets/` directory.
 - Base64 request payloads and video blobs are never stored in JSON.
 - Removing history prunes media no longer referenced by another generation.
 - BFL delivery links are temporary; completed videos are retained locally first.
-- The BFL key is plaintext inside the locally protected JSON file and is never
-  returned to the web renderer.
+- User-supplied BFL keys are plaintext inside the locally protected JSON file
+  and are never returned to the web renderer. An optional temporary iOS App
+  Review fallback is compiled only by the local iOS build script, never written
+  to local JSON, and never displayed in the app.
 
 ## Architecture
 

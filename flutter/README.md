@@ -117,7 +117,11 @@ the saved key itself.
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate. Xcode signing must already be configured. iOS
   builds are deliberately local-only and are not run or published by GitHub
-  Actions.
+  Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY` or point
+  `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_FILE` at a one-line key file. A local,
+  Git-ignored `flutter/.env.ios-review` can set either variable and is loaded by
+  `build_ios` automatically. The script passes the credential only to the iOS
+  compiler; web, Android, and macOS builds do not receive it.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
@@ -126,6 +130,17 @@ the saved key itself.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.
+
+The iOS review credential is a fallback, not local user data. A saved user key
+takes precedence. Clawnsole validates active access at launch and immediately
+before generation; HTTP 401/403 responses during credit checks, submission, or
+polling invalidate the active source. The review credential is never populated
+into a field, returned through a snapshot, or written to `clawnsole.json`.
+
+Any credential compiled into a client IPA can be recovered by a determined
+party. Use a temporary, revocable, least-privilege project key with a strict
+spending limit, and revoke it as soon as App Review is complete. A server-side
+broker is required if the credential must remain a true secret.
 
 ## Persistence policy
 

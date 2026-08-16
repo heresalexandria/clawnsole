@@ -518,27 +518,34 @@ class AppPreferences {
 class StoredData {
   const StoredData({
     this.apiKey = '',
+    this.rejectedIosReviewApiKeyId = '',
     this.preferences = const AppPreferences(),
     this.generations = const <Generation>[],
   });
 
   final String apiKey;
+  final String rejectedIosReviewApiKeyId;
   final AppPreferences preferences;
   final List<Generation> generations;
 
   StoredData copyWith({
     String? apiKey,
+    String? rejectedIosReviewApiKeyId,
     AppPreferences? preferences,
     List<Generation>? generations,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
+    rejectedIosReviewApiKeyId:
+        rejectedIosReviewApiKeyId ?? this.rejectedIosReviewApiKeyId,
     preferences: preferences ?? this.preferences,
     generations: generations ?? this.generations,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 5,
+    'schemaVersion': 6,
     'apiKeys': <String, Object?>{if (apiKey.isNotEmpty) 'bfl': apiKey},
+    if (rejectedIosReviewApiKeyId.isNotEmpty)
+      'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     'preferences': preferences.toJson(),
     'generations': generations.map((item) => item.toJson()).toList(),
   };
@@ -556,6 +563,8 @@ class StoredData {
         );
     return StoredData(
       apiKey: apiKeys['bfl'] as String? ?? '',
+      rejectedIosReviewApiKeyId:
+          json['rejectedIosReviewApiKeyId'] as String? ?? '',
       preferences: AppPreferences.fromJson(preferences),
       generations: (json['generations'] as List<Object?>? ?? const [])
           .whereType<Map<Object?, Object?>>()

@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
+import '../core/bfl_api.dart';
 import '../core/gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
@@ -129,6 +130,7 @@ class AppController extends ChangeNotifier {
 
   Timer? _pollTimer;
   Timer? _creditTimer;
+  Future<bool>? _creditRefreshFuture;
   Timer? _noticeTimer;
   bool _polling = false;
   final Set<String> _retentionAttempts = <String>{};
@@ -558,6 +560,7 @@ class AppController extends ChangeNotifier {
       if (!hasApiKey) unawaited(navigate(AppSection.settings));
       return;
     }
+    if (!await refreshCredits()) return;
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;
     var pending = Generation(
@@ -594,6 +597,7 @@ class AppController extends ChangeNotifier {
       _replaceInMemory(pending);
       if (pending.creditsAfter != null) credits = pending.creditsAfter;
     } on Object catch (error) {
+      await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
       try {
         _apply(await gateway.load());
       } on Object {
@@ -653,6 +657,12 @@ class AppController extends ChangeNotifier {
         try {
           final updated = await gateway.poll(item);
           _replaceInMemory(updated);
+          if (await _invalidateRejectedApiKey(
+            updated.lastProviderStatusCode,
+            showNoticeOnFailure: true,
+          )) {
+            break;
+          }
           if (updated.isReady) {
             showNotice('Your film is ready to watch and save.');
           } else if (!item.isFailed && updated.isFailed) {
@@ -661,6 +671,12 @@ class AppController extends ChangeNotifier {
             );
           }
         } on Object catch (error) {
+          if (await _invalidateRejectedApiKey(
+            error,
+            showNoticeOnFailure: true,
+          )) {
+            break;
+          }
           final message = _message(error);
           if (!RegExp(
             '429|active request',
@@ -693,6 +709,12 @@ class AppController extends ChangeNotifier {
     try {
       final updated = await gateway.poll(item);
       _replaceInMemory(updated);
+      if (await _invalidateRejectedApiKey(
+        updated.lastProviderStatusCode,
+        showNoticeOnFailure: true,
+      )) {
+        return;
+      }
       if (updated.lastCheckError != null) {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
@@ -703,6 +725,9 @@ class AppController extends ChangeNotifier {
         showNotice('BFL reports ${updated.statusLabel.toLowerCase()}.');
       }
     } on Object catch (error) {
+      if (await _invalidateRejectedApiKey(error, showNoticeOnFailure: true)) {
+        return;
+      }
       showNotice('Status check failed: ${_message(error)}');
     } finally {
       _statusChecks.remove(item.localId);
@@ -710,35 +735,99 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> refreshCredits() async {
-    if (!hasApiKey || refreshingCredits) return;
+  bool _isApiKeyRejection(Object? error) {
+    final status = error is int
+        ? error
+        : error == null
+        ? null
+        : providerHttpStatus(error);
+    return status == 401 || status == 403;
+  }
+
+  Future<bool> _invalidateRejectedApiKey(
+    Object? error, {
+    required bool showNoticeOnFailure,
+  }) async {
+    if (!_isApiKeyRejection(error)) return false;
+    _apply(await gateway.load());
+    credits = null;
+    if (!hasApiKey) {
+      creditError = 'BFL rejected the active API key. Add another key.';
+      if (showNoticeOnFailure) {
+        showNotice(creditError!);
+        unawaited(navigate(AppSection.settings));
+      }
+    }
+    return true;
+  }
+
+  Future<bool> refreshCredits() {
+    final running = _creditRefreshFuture;
+    if (running != null) return running;
+    late Future<bool> tracked;
+    tracked = _refreshCredits().whenComplete(() {
+      if (identical(_creditRefreshFuture, tracked)) {
+        _creditRefreshFuture = null;
+      }
+    });
+    _creditRefreshFuture = tracked;
+    return tracked;
+  }
+
+  Future<bool> _refreshCredits() async {
+    if (!hasApiKey) return false;
     refreshingCredits = true;
     creditError = null;
     notifyListeners();
     try {
-      credits = await gateway.getCredits();
-    } on Object catch (error) {
-      creditError = _message(error);
+      for (var attempt = 0; attempt < 2 && hasApiKey; attempt += 1) {
+        try {
+          credits = await gateway.getCredits();
+          creditError = null;
+          return true;
+        } on Object catch (error) {
+          if (!_isApiKeyRejection(error)) {
+            creditError = _message(error);
+            return true;
+          }
+          await _invalidateRejectedApiKey(error, showNoticeOnFailure: false);
+        }
+      }
+      creditError = 'BFL rejected the active API key. Add another key.';
+      showNotice(creditError!);
+      unawaited(navigate(AppSection.settings));
+      return false;
     } finally {
       refreshingCredits = false;
       notifyListeners();
     }
   }
 
-  Future<double> verifyKey(String candidate) =>
-      gateway.verifyKey(candidate.trim().isEmpty ? null : candidate);
+  Future<double> verifyKey(String candidate) async {
+    final clean = candidate.trim();
+    try {
+      return await gateway.verifyKey(clean.isEmpty ? null : clean);
+    } on Object catch (error) {
+      if (clean.isEmpty) {
+        await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
+      }
+      rethrow;
+    }
+  }
 
   Future<void> saveKey(String value) async {
-    _apply(await gateway.setApiKey(value));
-    credits = null;
-    unawaited(refreshCredits());
-    showNotice('API key saved locally.');
+    final clean = value.trim();
+    if (clean.isEmpty) throw StateError('An API key is required.');
+    credits = await gateway.verifyKey(clean);
+    _apply(await gateway.setApiKey(clean));
+    creditError = null;
+    showNotice('API key verified and saved locally.');
   }
 
   Future<void> removeKey() async {
     _apply(await gateway.clearApiKey());
     credits = null;
-    showNotice('API key removed from local data.');
+    showNotice('API access removed from this device.');
   }
 
   Future<void> deleteGeneration(String localId) async {

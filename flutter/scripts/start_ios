@@ -36,7 +36,7 @@ if [[ -z "$SIMULATOR_ID" ]]; then
 fi
 
 if ! xcrun simctl list devices booted | grep --quiet --fixed-strings "$SIMULATOR_ID"; then
-  echo "Booting iPhone simulator $SIMULATOR_ID…"
+  echo "Booting iPhone simulator ${SIMULATOR_ID}…"
   xcrun simctl boot "$SIMULATOR_ID"
 fi
 
@@ -45,5 +45,5 @@ xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
 "$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
 
-echo "Launching Clawnsole on iOS simulator $SIMULATOR_ID…"
+echo "Launching Clawnsole on iOS simulator ${SIMULATOR_ID}…"
 exec flutter run -d "$SIMULATOR_ID" "$@"
