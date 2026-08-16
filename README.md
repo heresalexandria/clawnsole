@@ -21,6 +21,14 @@ Clawnsole is a local-first Flutter video generation workspace with a premium,
 midcentury-inspired interface. It currently supports Black Forest Labs' FLUX 3
 video API and keeps provider boundaries explicit for future video services.
 
+## iPhone
+
+<p align="center">
+  <img src="docs/app-store/iphone/01-create.png" alt="Create an AI video in Clawnsole on iPhone" width="31%">
+  <img src="docs/app-store/iphone/02-frames.png" alt="Configure reference frames in Clawnsole on iPhone" width="31%">
+  <img src="docs/app-store/iphone/03-library.png" alt="Browse the local film library in Clawnsole on iPhone" width="31%">
+</p>
+
 ## What it does
 
 - Text-to-video, image-to-video, video continuation, and draft enhancement
