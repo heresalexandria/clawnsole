@@ -111,6 +111,7 @@ class AppController extends ChangeNotifier {
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
+  int formRevision = 0;
   String? loadError;
   String? creditError;
   String? notice;
@@ -797,16 +798,17 @@ class AppController extends ChangeNotifier {
         ),
       );
     }
-    PickedAsset? retainedVideo;
-    if (item.mode == VideoMode.v2v && item.config.source?.isLocal == true) {
+    PickedAsset? retainedSource;
+    if ((item.mode == VideoMode.v2v || item.mode == VideoMode.draftEnhance) &&
+        item.config.source?.isLocal == true) {
       try {
-        retainedVideo = await _retainedAsset(item.config.source!);
+        retainedSource = await _retainedAsset(item.config.source!);
       } on Object {
         // Preserve the rest of the last-used settings when an asset is gone.
       }
     }
     form
-      ..mode = item.mode == VideoMode.draftEnhance ? VideoMode.t2v : item.mode
+      ..mode = item.mode
       ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
           ? item.prompt
           : form.prompt
@@ -821,14 +823,19 @@ class AppController extends ChangeNotifier {
       ..draft = item.config.draft
       ..exactTiming = item.config.exactTiming
       ..keyframes = retainedFrames
-      ..videoAsset = retainedVideo
+      ..videoAsset = item.mode == VideoMode.v2v ? retainedSource : null
       ..videoUrl =
           item.mode == VideoMode.v2v && item.config.source?.kind == 'remote'
           ? item.config.source!.value
           : ''
-      ..draftAsset = null
-      ..draftUrl = '';
+      ..draftAsset = item.mode == VideoMode.draftEnhance ? retainedSource : null
+      ..draftUrl =
+          item.mode == VideoMode.draftEnhance &&
+              item.config.source?.kind == 'remote'
+          ? item.config.source!.value
+          : '';
     if (form.requiresFixedDuration) form.autoDuration = false;
+    formRevision += 1;
     notifyListeners();
   }
 
@@ -855,6 +862,8 @@ class AppController extends ChangeNotifier {
       ..draft = false
       ..draftAsset = null
       ..draftUrl = item.draftCacheUrl!;
+    formRevision += 1;
+    notifyListeners();
     unawaited(navigate(AppSection.create));
   }
 
