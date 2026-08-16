@@ -45,3 +45,6 @@ __pycache__/
 # local machine setup: never commit
 /use_heresalexandria.sh
 /use-heresalexandria.sh
+
+# local agent/editor state
+/.claude/

@@ -8,6 +8,7 @@ import '../app/app_theme.dart';
 import '../core/provider_catalog.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
+import 'panels.dart';
 import 'formatters.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -227,8 +228,8 @@ class _ApiKeySection extends StatelessWidget {
                     Text(
                       'Connected',
                       style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
@@ -239,7 +240,7 @@ class _ApiKeySection extends StatelessWidget {
         const SizedBox(height: 18),
         const Text(
           'BFL API key',
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 7),
         TextField(
@@ -266,7 +267,7 @@ class _ApiKeySection extends StatelessWidget {
           controller.gateway.usesCompanion
               ? 'The browser receives only whether a key exists. Start the loopback companion before using the web build.'
               : 'The app sandbox protects this file from other apps. It is removed when you clear the key or delete all local data.',
-          style: const TextStyle(fontSize: 9),
+          style: const TextStyle(fontSize: 11.5, height: 1.4),
         ),
         if (checking ||
             checkedCredits != null ||
@@ -305,8 +306,8 @@ class _ApiKeySection extends StatelessWidget {
                         : checkError ??
                               'Key verified · ${formatCredits(checkedCredits!)} credits available',
                     style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -440,12 +441,13 @@ class _StorageSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              const Text(
+              Text(
                 'DATA FILE',
                 style: TextStyle(
-                  fontSize: 8,
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.w900,
+                  fontSize: 9.5,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w700,
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 5),
@@ -453,12 +455,12 @@ class _StorageSection extends StatelessWidget {
                 controller.storage.path.isEmpty
                     ? 'Not created yet'
                     : controller.storage.path,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
               ),
               const SizedBox(height: 8),
               Text(
                 controller.gateway.persistenceDescription,
-                style: const TextStyle(fontSize: 9),
+                style: const TextStyle(fontSize: 11.5, height: 1.4),
               ),
             ],
           ),
@@ -479,10 +481,20 @@ class _Stat extends StatelessWidget {
     children: <Widget>[
       Text(
         value,
-        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+        style: const TextStyle(
+          fontFamily: 'Fraunces',
+          fontWeight: FontWeight.w600,
+          fontSize: 16,
+        ),
       ),
       const SizedBox(height: 3),
-      Text(label, style: const TextStyle(fontSize: 8)),
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 10.5,
+          color: context.colors.onSurfaceVariant,
+        ),
+      ),
     ],
   );
 }
@@ -497,38 +509,40 @@ class _SettingsSide extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      SurfaceCard(
-        color: ClawnsoleColors.rail,
+      TexturePanel(
+        stitched: true,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const ClawMark(size: 30, color: Color(0xFFA8B9FF)),
+            ClawMark(size: 30, color: context.tokens.panelBrass),
             const SizedBox(height: 13),
             Text(
               'Room to stretch.',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineMedium?.copyWith(color: Colors.white),
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                color: context.tokens.onPanel,
+              ),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'History is uncapped. Uploaded references and completed videos remain local until their records are removed.',
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(color: context.tokens.onPanelMuted),
             ),
             if (controller.gateway.usesCompanion) ...<Widget>[
               const SizedBox(height: 13),
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white10,
+                  color: Colors.white.withValues(alpha: .07),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Text(
+                child: Text(
                   'WEB MODE · Local companion active. No localStorage or IndexedDB history is used.',
                   style: TextStyle(
-                    color: Color(0xFFA8B9FF),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
+                    color: context.tokens.panelBrass,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: .4,
+                    height: 1.4,
                   ),
                 ),
               ),
@@ -621,12 +635,12 @@ class _ClearButton extends StatelessWidget {
     title: Text(
       title,
       style: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w900,
+        fontSize: 12.5,
+        fontWeight: FontWeight.w700,
         color: danger ? context.colors.error : null,
       ),
     ),
-    subtitle: Text(subtitle, style: const TextStyle(fontSize: 8)),
+    subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
     trailing: const Icon(Icons.chevron_right_rounded, size: 17),
     onTap: () => unawaited(onTap()),
   );

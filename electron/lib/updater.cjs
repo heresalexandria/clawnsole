@@ -338,6 +338,19 @@ open "$dest"
   setTimeout(() => app().quit(), 400);
 }
 
+// The renderer only needs a compact, serializable summary of a check.
+function summarize(result) {
+  return {
+    ok: Boolean(result?.ok),
+    current: result?.current ?? null,
+    latest: result?.latest ?? null,
+    available: Boolean(result?.available),
+    installable: Boolean(result?.installable),
+    error: result?.error ?? null,
+    htmlUrl: result?.htmlUrl ?? RELEASE_PAGE,
+  };
+}
+
 module.exports = {
   ALLOWED_HOSTS,
   CHECK_INTERVAL_MS,
@@ -351,4 +364,5 @@ module.exports = {
   install,
   isNewer,
   parseVersion,
+  summarize,
 };

@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
@@ -21,16 +22,16 @@ class Eyebrow extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: <Widget>[
       if (icon != null) ...<Widget>[
-        Icon(icon, size: 14, color: context.colors.primary),
+        Icon(icon, size: 14, color: context.tokens.brass),
         const SizedBox(width: 7),
       ],
       Text(
         text.toUpperCase(),
         style: TextStyle(
-          color: context.colors.primary,
-          fontSize: 10,
-          letterSpacing: 1.6,
-          fontWeight: FontWeight.w900,
+          color: context.tokens.brass,
+          fontSize: 10.5,
+          letterSpacing: 2,
+          fontWeight: FontWeight.w700,
         ),
       ),
     ],
@@ -54,18 +55,183 @@ class SurfaceCard extends StatelessWidget {
     padding: padding,
     decoration: BoxDecoration(
       color: color ?? context.colors.surface,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(16),
       border: Border.all(color: context.colors.outlineVariant),
       boxShadow: <BoxShadow>[
         BoxShadow(
-          color: context.colors.shadow.withValues(alpha: .07),
-          blurRadius: 16,
-          offset: Offset(0, 5),
+          color: context.colors.shadow.withValues(alpha: .06),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
         ),
       ],
     ),
     child: Material(type: MaterialType.transparency, child: child),
   );
+}
+
+/// A small on/off pill used for optional behaviors like auto duration.
+class TogglePill extends StatelessWidget {
+  const TogglePill({
+    required this.label,
+    required this.selected,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final bool selected;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    return Opacity(
+      opacity: enabled ? 1 : .45,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: enabled ? () => onChanged!(!selected) : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? context.colors.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: selected
+                  ? context.colors.primary
+                  : context.colors.outline.withValues(alpha: .6),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                selected
+                    ? Icons.check_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 13,
+                color: selected
+                    ? context.colors.onPrimary
+                    : context.colors.onSurfaceVariant,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? context.colors.onPrimary
+                      : context.colors.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A generation's prompt with a one-tap copy action; long prompts collapse
+/// and expand in place so the whole direction is always reachable.
+class GenerationPrompt extends StatefulWidget {
+  const GenerationPrompt({
+    required this.controller,
+    required this.prompt,
+    super.key,
+    this.collapsedLines = 3,
+    this.style,
+  });
+
+  final AppController controller;
+  final String prompt;
+  final int collapsedLines;
+  final TextStyle? style;
+
+  @override
+  State<GenerationPrompt> createState() => _GenerationPromptState();
+}
+
+class _GenerationPromptState extends State<GenerationPrompt> {
+  bool _expanded = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.prompt));
+    widget.controller.showNotice('Prompt copied to the clipboard.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style =
+        widget.style ??
+        Theme.of(context).textTheme.titleMedium ??
+        const TextStyle();
+    final linkColor = Theme.of(context).brightness == Brightness.dark
+        ? context.colors.tertiary
+        : context.colors.primary;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = (constraints.maxWidth - 36).clamp(
+          0.0,
+          double.infinity,
+        );
+        final painter = TextPainter(
+          text: TextSpan(text: widget.prompt, style: style),
+          maxLines: widget.collapsedLines,
+          textDirection: TextDirection.ltr,
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: available);
+        final truncated = painter.didExceedMaxLines;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    widget.prompt,
+                    maxLines: _expanded ? null : widget.collapsedLines,
+                    overflow: _expanded ? null : TextOverflow.ellipsis,
+                    style: style,
+                  ),
+                  if (truncated || _expanded)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () => setState(() => _expanded = !_expanded),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          _expanded ? 'Show less' : 'Show full prompt',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: linkColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Copy prompt',
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+              padding: EdgeInsets.zero,
+              onPressed: () => unawaited(_copy()),
+              icon: Icon(
+                Icons.copy_rounded,
+                size: 15,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class StatusBadge extends StatelessWidget {
@@ -91,7 +257,7 @@ class StatusBadge extends StatelessWidget {
             context.colors.onTertiaryContainer,
           );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(999),
@@ -110,14 +276,15 @@ class StatusBadge extends StatelessWidget {
                 color: foreground,
               ),
             ),
-            const SizedBox(width: 5),
+            const SizedBox(width: 6),
           ],
           Text(
             item.statusLabel,
             style: TextStyle(
-              fontSize: 9,
+              fontSize: 10,
+              letterSpacing: .3,
               color: foreground,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -125,6 +292,483 @@ class StatusBadge extends StatelessWidget {
     );
   }
 }
+
+/// Every setting used for a generation, shown as compact chips.
+class GenerationSpecChips extends StatelessWidget {
+  const GenerationSpecChips({required this.item, super.key});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final config = item.config;
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: <Widget>[
+        _SpecChip(label: item.mode.label),
+        _SpecChip(
+          label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
+          leading: _MiniRatioGlyph(ratio: config.aspectRatio),
+        ),
+        _SpecChip(
+          icon: Icons.timelapse_rounded,
+          label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
+        ),
+        _SpecChip(label: config.resolution == 'fhd' ? 'Full HD' : 'HD'),
+        if (config.generateAudio)
+          const _SpecChip(icon: Icons.graphic_eq_rounded, label: 'Audio'),
+        if (config.draft)
+          const _SpecChip(icon: Icons.bolt_rounded, label: 'Draft tier'),
+        if (config.exactTiming)
+          const _SpecChip(icon: Icons.schedule_rounded, label: 'Timed'),
+      ],
+    );
+  }
+}
+
+class _SpecChip extends StatelessWidget {
+  const _SpecChip({required this.label, this.icon, this.leading});
+
+  final String label;
+  final IconData? icon;
+  final Widget? leading;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: context.colors.outlineVariant),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (leading != null) ...<Widget>[
+          leading!,
+          const SizedBox(width: 5),
+        ] else if (icon != null) ...<Widget>[
+          Icon(icon, size: 12, color: context.colors.onSurfaceVariant),
+          const SizedBox(width: 4),
+        ],
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: context.colors.onSurface.withValues(alpha: .85),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _MiniRatioGlyph extends StatelessWidget {
+  const _MiniRatioGlyph({required this.ratio});
+
+  final String ratio;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colors.onSurfaceVariant;
+    if (ratio == 'auto') {
+      return Icon(Icons.crop_free_rounded, size: 12, color: color);
+    }
+    final parts = ratio.split(':');
+    final aspect =
+        (double.tryParse(parts.first) ?? 1) /
+        (double.tryParse(parts.last) ?? 1);
+    final width = aspect >= 1 ? 15.0 : 10.0 * aspect;
+    final height = aspect >= 1 ? 15.0 / aspect : 10.0;
+    return Container(
+      width: width,
+      height: height.clamp(5, 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.2),
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
+/// Thumbnails of the reference inputs a generation was made from. Tapping a
+/// frame opens it at full resolution with a download action.
+class ReferenceInputsStrip extends StatelessWidget {
+  const ReferenceInputsStrip({
+    required this.controller,
+    required this.item,
+    super.key,
+  });
+
+  final AppController controller;
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final frames = item.config.keyframes ?? const <KeyframeLabel>[];
+    final source = item.config.source;
+    if (frames.isEmpty && source == null) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        ...frames.map(
+          (frame) => _ReferenceThumb(controller: controller, frame: frame),
+        ),
+        if (source != null)
+          _SourceReferenceChip(
+            controller: controller,
+            source: source,
+            mode: item.mode,
+          ),
+      ],
+    );
+  }
+}
+
+class _ReferenceThumb extends StatefulWidget {
+  const _ReferenceThumb({required this.controller, required this.frame});
+
+  final AppController controller;
+  final KeyframeLabel frame;
+
+  @override
+  State<_ReferenceThumb> createState() => _ReferenceThumbState();
+}
+
+class _ReferenceThumbState extends State<_ReferenceThumb> {
+  Future<Uint8List>? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReferenceThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.frame.source?.value != widget.frame.source?.value) _load();
+  }
+
+  void _load() {
+    final source = widget.frame.source;
+    _bytes = source == null
+        ? null
+        : widget.controller.gateway.readAsset(source);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final frame = widget.frame;
+    final timing = frame.seconds == null
+        ? ''
+        : ' · at ${frame.seconds!.toStringAsFixed(frame.seconds! % 1 == 0 ? 0 : 1)} s';
+    return Tooltip(
+      message: '${frame.role.label}$timing — tap to view',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => unawaited(
+          showReferenceFrameViewer(context, widget.controller, frame),
+        ),
+        child: Container(
+          width: 44,
+          height: 44,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: ClawnsoleColors.plumInk,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: context.colors.outlineVariant),
+          ),
+          child: _bytes == null
+              ? const Icon(
+                  Icons.image_outlined,
+                  size: 16,
+                  color: ClawnsoleColors.creamMuted,
+                )
+              : FutureBuilder<Uint8List>(
+                  future: _bytes,
+                  builder: (context, snapshot) => snapshot.hasData
+                      ? Image.memory(
+                          snapshot.data!,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                        )
+                      : Icon(
+                          snapshot.hasError
+                              ? Icons.broken_image_outlined
+                              : Icons.image_outlined,
+                          size: 16,
+                          color: ClawnsoleColors.creamMuted,
+                        ),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SourceReferenceChip extends StatelessWidget {
+  const _SourceReferenceChip({
+    required this.controller,
+    required this.source,
+    required this.mode,
+  });
+
+  final AppController controller;
+  final AssetReference source;
+  final VideoMode mode;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: source.label,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => unawaited(
+        showSourceReferenceSheet(context, controller, source, mode),
+      ),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: context.colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: context.colors.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              mode == VideoMode.draftEnhance
+                  ? Icons.auto_fix_high_rounded
+                  : Icons.movie_filter_rounded,
+              size: 15,
+              color: context.colors.onSurfaceVariant,
+            ),
+            const SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 110),
+              child: Text(
+                source.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> showReferenceFrameViewer(
+  BuildContext context,
+  AppController controller,
+  KeyframeLabel frame,
+) {
+  final source = frame.source;
+  final timing = frame.seconds == null
+      ? null
+      : 'at ${frame.seconds!.toStringAsFixed(frame.seconds! % 1 == 0 ? 0 : 1)} s';
+  return showDialog<void>(
+    context: context,
+    builder: (context) => Dialog(
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 780),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 14, 8, 12),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Eyebrow(
+                          timing == null
+                              ? frame.role.label
+                              : '${frame.role.label} · $timing',
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          frame.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: Container(
+                color: ClawnsoleColors.plumInk,
+                constraints: const BoxConstraints(minHeight: 220),
+                child: source == null
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(30),
+                          child: Text(
+                            'This frame was submitted inline and was not retained.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: ClawnsoleColors.creamMuted),
+                          ),
+                        ),
+                      )
+                    : _FullResReference(controller: controller, source: source),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.end,
+                children: <Widget>[
+                  if (source != null && !source.isLocal)
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          unawaited(launchUrl(Uri.parse(source.value))),
+                      icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                      label: const Text('Open link'),
+                    ),
+                  if (source != null)
+                    FilledButton.tonalIcon(
+                      onPressed: () async {
+                        try {
+                          await controller.saveReferenceImage(source);
+                        } on Object catch (error) {
+                          controller.showNotice(error.toString());
+                        }
+                      },
+                      icon: const Icon(Icons.download_rounded, size: 16),
+                      label: const Text('Download'),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _FullResReference extends StatefulWidget {
+  const _FullResReference({required this.controller, required this.source});
+
+  final AppController controller;
+  final AssetReference source;
+
+  @override
+  State<_FullResReference> createState() => _FullResReferenceState();
+}
+
+class _FullResReferenceState extends State<_FullResReference> {
+  late final Future<Uint8List> _bytes = widget.controller.gateway.readAsset(
+    widget.source,
+  );
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List>(
+    future: _bytes,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(30),
+            child: Text(
+              'The full-resolution file could not be loaded.',
+              style: TextStyle(color: ClawnsoleColors.creamMuted),
+            ),
+          ),
+        );
+      }
+      if (!snapshot.hasData) {
+        return const SizedBox(
+          height: 220,
+          child: Center(child: CircularProgressIndicator()),
+        );
+      }
+      return InteractiveViewer(
+        maxScale: 5,
+        child: Image.memory(snapshot.data!, fit: BoxFit.contain),
+      );
+    },
+  );
+}
+
+Future<void> showSourceReferenceSheet(
+  BuildContext context,
+  AppController controller,
+  AssetReference source,
+  VideoMode mode,
+) => showDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: Text(
+      mode == VideoMode.draftEnhance ? 'Draft cache' : 'Starting video',
+    ),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(source.label),
+        if (source.bytes != null) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            formatBytes(source.bytes!),
+            style: TextStyle(
+              fontSize: 11.5,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    ),
+    actions: <Widget>[
+      if (!source.isLocal)
+        OutlinedButton.icon(
+          onPressed: () => unawaited(launchUrl(Uri.parse(source.value))),
+          icon: const Icon(Icons.open_in_new_rounded, size: 15),
+          label: const Text('Open link'),
+        ),
+      FilledButton.tonalIcon(
+        onPressed: () async {
+          try {
+            await controller.saveReferenceImage(source);
+          } on Object catch (error) {
+            controller.showNotice(error.toString());
+          }
+        },
+        icon: const Icon(Icons.download_rounded, size: 16),
+        label: const Text('Download'),
+      ),
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+    ],
+  ),
+);
 
 class GenerationStatusDetails extends StatelessWidget {
   const GenerationStatusDetails({required this.item, super.key});
@@ -140,7 +784,7 @@ class GenerationStatusDetails extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
         color: isTerminal
             ? context.colors.errorContainer
@@ -165,7 +809,7 @@ class GenerationStatusDetails extends StatelessWidget {
                       : Icons.sync_problem_rounded,
                   size: 15,
                   color: isTerminal
-                      ? context.colors.error
+                      ? context.colors.onErrorContainer
                       : context.colors.onSurfaceVariant,
                 ),
                 const SizedBox(width: 7),
@@ -176,9 +820,9 @@ class GenerationStatusDetails extends StatelessWidget {
                       color: isTerminal
                           ? context.colors.onErrorContainer
                           : context.colors.onSurfaceVariant,
-                      fontSize: 9,
-                      height: 1.35,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      height: 1.4,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -190,8 +834,8 @@ class GenerationStatusDetails extends StatelessWidget {
               'This render has been in progress for more than 30 minutes. You can ask the provider for a fresh status below.',
               style: TextStyle(
                 color: context.colors.onSurfaceVariant,
-                fontSize: 9,
-                height: 1.35,
+                fontSize: 11,
+                height: 1.4,
               ),
             ),
           ],
@@ -201,8 +845,8 @@ class GenerationStatusDetails extends StatelessWidget {
               'The provider has not confirmed that this generation is still in progress. Retry the status check below.',
               style: TextStyle(
                 color: context.colors.onSurfaceVariant,
-                fontSize: 9,
-                height: 1.35,
+                fontSize: 11,
+                height: 1.4,
               ),
             ),
           ],
@@ -213,9 +857,9 @@ class GenerationStatusDetails extends StatelessWidget {
               'Provider checked ${relativeTime(checked)} · ${item.statusCheckCount} ${item.statusCheckCount == 1 ? 'check' : 'checks'}',
               style: TextStyle(
                 color: isTerminal
-                    ? context.colors.onErrorContainer.withValues(alpha: .72)
+                    ? context.colors.onErrorContainer.withValues(alpha: .75)
                     : context.colors.onSurfaceVariant,
-                fontSize: 8,
+                fontSize: 10,
               ),
             ),
           ],
@@ -250,7 +894,7 @@ class GenerationStatusButton extends StatelessWidget {
               dimension: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : const Icon(Icons.sync_rounded, size: 16),
+          : const Icon(Icons.sync_rounded, size: 15),
       label: Text(
         checking
             ? 'Checking…'
@@ -345,7 +989,7 @@ class GenerationDetailsButton extends StatelessWidget {
                         item.lastProviderResponse!,
                         style: const TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 10,
+                          fontSize: 11,
                           height: 1.45,
                         ),
                       ),
@@ -363,7 +1007,7 @@ class GenerationDetailsButton extends StatelessWidget {
           ],
         ),
       ),
-      icon: const Icon(Icons.receipt_long_rounded, size: 16),
+      icon: const Icon(Icons.receipt_long_rounded, size: 15),
       label: const Text('View details'),
     );
   }
@@ -382,13 +1026,13 @@ class _GenerationDetailLine extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         SizedBox(
-          width: 112,
+          width: 130,
           child: Text(
             label,
             style: TextStyle(
               color: context.colors.onSurfaceVariant,
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -550,16 +1194,19 @@ class _MediaPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.rail,
+    color: ClawnsoleColors.plumInk,
     child: Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, color: ClawnsoleColors.railMuted, size: 30),
+          Icon(icon, color: ClawnsoleColors.creamMuted, size: 28),
           const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            style: const TextStyle(
+              color: ClawnsoleColors.creamMuted,
+              fontSize: 11.5,
+            ),
           ),
         ],
       ),
@@ -578,12 +1225,17 @@ class GenerationCost extends StatelessWidget {
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();
+    final exact = item.cost != null;
+    final background = exact
+        ? context.colors.primaryContainer
+        : context.colors.secondaryContainer;
+    final foreground = exact
+        ? context.colors.onPrimaryContainer
+        : context.colors.onSecondaryContainer;
     return Container(
       padding: EdgeInsets.all(compact ? 9 : 12),
       decoration: BoxDecoration(
-        color: item.cost != null
-            ? context.colors.primaryContainer
-            : context.colors.secondaryContainer,
+        color: background,
         borderRadius: BorderRadius.circular(11),
       ),
       child: Column(
@@ -594,24 +1246,26 @@ class GenerationCost extends StatelessWidget {
               Icon(
                 Icons.toll_rounded,
                 size: compact ? 13 : 15,
-                color: context.colors.primary,
+                color: foreground,
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '${item.cost != null ? 'Provider charge' : 'Estimated'} · '
+                  '${exact ? 'Provider charge' : 'Estimated'} · '
                   '${formatCreditRange(minimum, maximum)} cr',
                   style: TextStyle(
-                    fontSize: compact ? 10 : 11,
-                    fontWeight: FontWeight.w900,
+                    fontSize: compact ? 11 : 12,
+                    fontWeight: FontWeight.w700,
+                    color: foreground,
                   ),
                 ),
               ),
               Text(
                 formatUsdRange(minimum, maximum),
                 style: TextStyle(
-                  fontSize: compact ? 10 : 11,
-                  fontWeight: FontWeight.w900,
+                  fontSize: compact ? 11 : 12,
+                  fontWeight: FontWeight.w700,
+                  color: foreground,
                 ),
               ),
             ],
@@ -623,8 +1277,8 @@ class GenerationCost extends StatelessWidget {
             Text(
               '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
               style: TextStyle(
-                fontSize: 9,
-                color: context.colors.onSurfaceVariant,
+                fontSize: 10.5,
+                color: foreground.withValues(alpha: .8),
               ),
             ),
           ],
@@ -655,7 +1309,7 @@ class ActivityCard extends StatelessWidget {
               children: <Widget>[
                 ClipRRect(
                   borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(17),
+                    top: Radius.circular(15),
                   ),
                   child: hasMedia
                       ? GenerationMedia(controller: controller, item: item)
@@ -669,45 +1323,50 @@ class ActivityCard extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(13),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      item.mode.label,
-                      style: const TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
+                    Expanded(
+                      child: GenerationPrompt(
+                        controller: controller,
+                        prompt: item.prompt,
+                        collapsedLines: 2,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      relativeTime(item.createdAt),
-                      style: const TextStyle(fontSize: 9),
+                    const SizedBox(width: 6),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        relativeTime(item.createdAt),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  item.prompt,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 9),
+                GenerationSpecChips(item: item),
+                if (item.config.keyframes?.isNotEmpty == true ||
+                    item.config.source != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  ReferenceInputsStrip(controller: controller, item: item),
+                ],
+                const SizedBox(height: 9),
                 GenerationCost(item: item, compact: true),
                 if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
-                  const SizedBox(height: 7),
+                  const SizedBox(height: 8),
                   LinearProgressIndicator(
                     value: item.progress == null ? null : item.progress! / 100,
                     minHeight: 5,
                     borderRadius: BorderRadius.circular(99),
-                    backgroundColor: context.colors.outlineVariant,
+                    backgroundColor: context.colors.surfaceContainerHigh,
                     color: context.colors.primary,
                   ),
                 ],
@@ -718,7 +1377,7 @@ class ActivityCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   GenerationStatusDetails(item: item),
                 ],
-                const SizedBox(height: 9),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 7,
                   runSpacing: 7,

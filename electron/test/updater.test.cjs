@@ -4,6 +4,30 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const updater = require("../lib/updater.cjs");
 
+test("check results summarize into a compact renderer payload", () => {
+  const summary = updater.summarize({
+    ok: true,
+    current: "0.4.0",
+    latest: "0.5.0",
+    available: true,
+    installable: true,
+    htmlUrl: "https://github.com/heresalexandria/clawnsole/releases/tag/v0.5.0",
+    asset: { name: "Clawnsole-0.5.0-mac-arm64.zip", secret: "not for renderers" },
+    release: { body: "notes" },
+  });
+  assert.deepEqual(summary, {
+    ok: true,
+    current: "0.4.0",
+    latest: "0.5.0",
+    available: true,
+    installable: true,
+    error: null,
+    htmlUrl: "https://github.com/heresalexandria/clawnsole/releases/tag/v0.5.0",
+  });
+  assert.equal(updater.summarize(null).ok, false);
+  assert.equal(updater.summarize(undefined).htmlUrl, updater.RELEASE_PAGE);
+});
+
 test("semantic versions compare numerically", () => {
   assert.deepEqual(updater.parseVersion("v1.2.3"), [1, 2, 3]);
   assert.equal(updater.compareVersions("0.10.0", "0.9.0"), 1);

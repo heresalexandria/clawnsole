@@ -203,7 +203,7 @@ class _TimelineFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ColoredBox(
-    color: ClawnsoleColors.rail,
+    color: ClawnsoleColors.plumInk,
     child: Stack(
       fit: StackFit.expand,
       children: <Widget>[
