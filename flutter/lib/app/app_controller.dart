@@ -60,7 +60,6 @@ class KeyframeDraft {
 }
 
 class GenerationFormState {
-  VideoMode mode = VideoMode.t2v;
   String prompt = '';
   String aspectRatio = '16:9';
   bool autoDuration = true;
@@ -75,6 +74,18 @@ class GenerationFormState {
   String videoUrl = '';
   PickedAsset? draftAsset;
   String draftUrl = '';
+
+  /// The generation mode implied by what is attached. There is no mode
+  /// picker: a draft cache wins, then a starting video, then keyframes,
+  /// and plain text otherwise.
+  VideoMode get mode {
+    if (draftAsset != null || draftUrl.trim().isNotEmpty) {
+      return VideoMode.draftEnhance;
+    }
+    if (videoAsset != null || videoUrl.trim().isNotEmpty) return VideoMode.v2v;
+    if (keyframes.isNotEmpty) return VideoMode.i2v;
+    return VideoMode.t2v;
+  }
 
   Object get duration => autoDuration ? 'auto' : durationSeconds;
 
@@ -805,10 +816,14 @@ class AppController extends ChangeNotifier {
         retainedSource = await _retainedAsset(item.config.source!);
       } on Object {
         // Preserve the rest of the last-used settings when an asset is gone.
+        showNotice(
+          item.mode == VideoMode.v2v
+              ? 'The retained starting video is no longer on disk. Attach a video to continue one.'
+              : 'The retained draft cache is no longer on disk. Attach a draft to enhance it.',
+        );
       }
     }
     form
-      ..mode = item.mode
       ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
           ? item.prompt
           : form.prompt
@@ -852,7 +867,6 @@ class AppController extends ChangeNotifier {
   void enhance(Generation item) {
     if (item.draftCacheUrl == null) return;
     form
-      ..mode = VideoMode.draftEnhance
       ..autoDuration = item.config.duration == 'auto'
       ..durationSeconds = item.config.duration is num
           ? (item.config.duration as num).toInt()
@@ -907,6 +921,32 @@ class AppController extends ChangeNotifier {
   Future<Uri?> generationMediaUri(Generation item) async {
     if (item.resultAsset != null) return gateway.assetUri(item.resultAsset!);
     return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
+  }
+
+  Future<void> saveReferenceImage(AssetReference reference) async {
+    final bytes = await gateway.readAsset(reference);
+    final cleaned = reference.label.replaceAll(RegExp(r'[\\/:]'), '-').trim();
+    final subtype = reference.contentType?.split('/').lastOrNull;
+    final extension =
+        subtype != null && subtype.isNotEmpty && subtype.length <= 5
+        ? '.$subtype'
+        : '.png';
+    final fileName = cleaned.contains('.') ? cleaned : '$cleaned$extension';
+    final location = await FilePicker.saveFile(
+      dialogTitle: 'Save reference frame',
+      fileName: fileName.isEmpty ? 'clawnsole-frame.png' : fileName,
+      bytes: bytes,
+      type: FileType.image,
+    );
+    if (location == null) {
+      showNotice(
+        kIsWeb
+            ? 'Download started. Choose a location when your browser or desktop app asks.'
+            : 'Save canceled.',
+      );
+      return;
+    }
+    showNotice('Reference frame saved to $location');
   }
 
   @override

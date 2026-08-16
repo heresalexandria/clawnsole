@@ -302,7 +302,7 @@ class _VideoControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.rail,
+    color: ClawnsoleColors.plumInk,
     padding: const EdgeInsets.symmetric(horizontal: 8),
     child: Row(
       children: <Widget>[
@@ -362,12 +362,12 @@ class _VideoPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.rail,
+    color: ClawnsoleColors.plumInk,
     child: Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, color: ClawnsoleColors.railMuted, size: 30),
+          Icon(icon, color: ClawnsoleColors.creamMuted, size: 30),
           const SizedBox(height: 8),
           Text(
             label,

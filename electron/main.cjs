@@ -4,6 +4,7 @@ const {
   app,
   BrowserWindow,
   dialog,
+  ipcMain,
   Menu,
   nativeTheme,
   session,
@@ -118,6 +119,46 @@ function showMessage(options) {
     : dialog.showMessageBox(options);
 }
 
+function emitUpdateEvent(payload) {
+  mainWindow?.webContents.send("clawnsole:update:event", payload);
+}
+
+// Downloads and installs a checked update while streaming progress to both
+// the dock icon and the renderer, which shows its own progress modal.
+async function downloadAndInstall(result) {
+  mainWindow?.setProgressBar(2);
+  emitUpdateEvent({
+    phase: "downloading",
+    version: result.latest,
+    received: 0,
+    total: result.asset?.size ?? null,
+    fraction: null,
+  });
+  try {
+    const staged = await updater.download(result, ({ received, total, fraction }) => {
+      mainWindow?.setProgressBar(fraction ?? 2);
+      emitUpdateEvent({
+        phase: "downloading",
+        version: result.latest,
+        received,
+        total,
+        fraction,
+      });
+    });
+    emitUpdateEvent({ phase: "installing", version: result.latest });
+    mainWindow?.setProgressBar(-1);
+    await updater.install(staged);
+  } catch (error) {
+    mainWindow?.setProgressBar(-1);
+    emitUpdateEvent({
+      phase: "error",
+      version: result.latest,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
+
 async function checkForUpdates({ manual = false } = {}) {
   if (updateBusy) return;
   updateBusy = true;
@@ -167,12 +208,7 @@ async function checkForUpdates({ manual = false } = {}) {
     }
     if (!result.installable || choice.response !== 0) return;
 
-    mainWindow?.setProgressBar(2);
-    const staged = await updater.download(result, ({ fraction }) => {
-      mainWindow?.setProgressBar(fraction ?? 2);
-    });
-    mainWindow?.setProgressBar(-1);
-    await updater.install(staged);
+    await downloadAndInstall(result);
   } catch (error) {
     mainWindow?.setProgressBar(-1);
     await showMessage({
@@ -184,6 +220,63 @@ async function checkForUpdates({ manual = false } = {}) {
   } finally {
     updateBusy = false;
   }
+}
+
+// The renderer's version dialog already carries the user's consent, so this
+// flow skips the native prompt and reports through update events instead.
+async function startUpdateFromRenderer() {
+  if (updateBusy) {
+    return { ok: false, error: "An update is already in progress." };
+  }
+  updateBusy = true;
+  try {
+    const result = await updater.check({ force: true });
+    const summary = updater.summarize(result);
+    if (!result.ok) return summary;
+    if (!result.available) {
+      return { ...summary, error: `Clawnsole ${result.current} is already up to date.` };
+    }
+    if (!result.installable) {
+      return {
+        ...summary,
+        error: "This build updates from source with git rather than replacing itself.",
+      };
+    }
+    await downloadAndInstall(result);
+    return { ...summary, started: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    updateBusy = false;
+  }
+}
+
+// The in-app update dialog only appears when the preload reaches the renderer
+// and the Flutter app binds to it, so the smoke test treats either half being
+// absent as a packaging failure. Flutter boots asynchronously, so poll.
+async function verifyRendererBridge(timeoutMs = 40_000) {
+  const deadline = Date.now() + timeoutMs;
+  let shape = "unavailable";
+  while (Date.now() < deadline) {
+    shape = await mainWindow?.webContents.executeJavaScript(
+      "[typeof window.clawnsole?.checkForUpdate,"
+      + " typeof window.clawnsole?.startUpdate,"
+      + " typeof window.clawnsole?.onUpdateEvent,"
+      + " window.clawnsoleShellReady === true].join(',')",
+    );
+    if (shape === "function,function,function,true") return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`The renderer update bridge is missing (saw ${shape}).`);
+}
+
+function installRendererBridge() {
+  ipcMain.handle("clawnsole:update:check", async () =>
+    updater.summarize(await updater.check({ force: true })));
+  ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
 }
 
 function protectNavigation(window, localRendererUrl) {
@@ -213,6 +306,7 @@ async function createMainWindow(localRendererUrl) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
       webSecurity: true,
     },
@@ -229,6 +323,7 @@ async function createMainWindow(localRendererUrl) {
 
 async function startApplication() {
   installApplicationMenu();
+  installRendererBridge();
 
   session.defaultSession.on("will-download", (_event, item) => {
     item.setSaveDialogOptions({
@@ -245,6 +340,7 @@ async function startApplication() {
   if (!app.isPackaged) await waitForServer(rendererUrl, { timeoutMs: 60_000 });
   await createMainWindow(rendererUrl);
   if (IS_SMOKE_TEST) {
+    await verifyRendererBridge();
     console.log("Clawnsole packaged smoke test passed.");
     setTimeout(() => app.quit(), 250).unref();
   } else if (app.isPackaged) {

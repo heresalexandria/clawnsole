@@ -10,6 +10,7 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
+import 'package:clawnsole/core/update_check.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:flutter/material.dart';
@@ -342,9 +343,7 @@ void main() {
     const lastUrl = 'https://cdn.bfl.ai/last.png';
 
     final endOnly = AppController();
-    endOnly.form
-      ..mode = VideoMode.i2v
-      ..durationSeconds = 12;
+    endOnly.form.durationSeconds = 12;
     endOnly.addUrlFrame(KeyframeRole.end);
     endOnly.updateFrame(endOnly.form.keyframes.single.id, source: lastUrl);
     expect(endOnly.form.autoDuration, isFalse);
@@ -354,7 +353,6 @@ void main() {
     ]);
 
     final bothEnds = AppController();
-    bothEnds.form.mode = VideoMode.i2v;
     bothEnds.addUrlFrame(KeyframeRole.end);
     bothEnds.updateFrame(bothEnds.form.keyframes.single.id, source: lastUrl);
     bothEnds.addUrlFrame(KeyframeRole.start);
@@ -371,9 +369,7 @@ void main() {
     ]);
 
     final middleOnly = AppController();
-    middleOnly.form
-      ..mode = VideoMode.i2v
-      ..durationSeconds = 10;
+    middleOnly.form.durationSeconds = 10;
     middleOnly.addUrlFrame(KeyframeRole.middle);
     middleOnly.updateFrame(
       middleOnly.form.keyframes.single.id,
@@ -664,6 +660,37 @@ void main() {
     controller.dispose();
   });
 
+  test('update checks compare releases and read the shell summary', () {
+    expect(compareSemanticVersions('0.4.1', '0.4.0'), greaterThan(0));
+    expect(compareSemanticVersions('v0.10.0', '0.9.0'), greaterThan(0));
+    expect(compareSemanticVersions('0.4.0', '0.4.0'), 0);
+    expect(compareSemanticVersions('not-a-version', '0.4.0'), isNull);
+
+    final installable = UpdateCheckResult.fromShell(<String, Object?>{
+      'ok': true,
+      'current': '0.4.0',
+      'latest': '0.4.1',
+      'available': true,
+      'installable': true,
+      'htmlUrl':
+          'https://github.com/heresalexandria/clawnsole/releases/tag/v0.4.1',
+    });
+    expect(installable.available, isTrue);
+    expect(installable.installable, isTrue);
+    expect(installable.latest, '0.4.1');
+
+    // A shell that declines an in-place install must not claim it can.
+    final development = UpdateCheckResult.fromShell(<String, Object?>{
+      'ok': true,
+      'current': '0.4.0',
+      'latest': '0.4.1',
+      'available': true,
+      'installable': false,
+    });
+    expect(development.installable, isFalse);
+    expect(development.releaseUrl, clawnsoleReleasePage);
+  });
+
   test('retained videos keep an AVPlayer-compatible extension', () {
     expect(retainedAssetExtension('video/mp4', 'result'), '.mp4');
     expect(retainedAssetExtension(null, 'clawnsole.mov'), '.mov');
@@ -684,7 +711,9 @@ void main() {
         storage: StorageStats(path: 'memory', bytes: 0, records: 0),
       ),
     );
-    await tester.pumpWidget(ClawnsoleApp(gateway: gateway));
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Add key'));
@@ -695,7 +724,7 @@ void main() {
   });
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
-    await tester.pumpWidget(const ClawnsoleApp());
+    await tester.pumpWidget(const ClawnsoleApp(checkForUpdates: false));
     expect(find.text('Clawnsole'), findsOneWidget);
     expect(find.text('Create'), findsWidgets);
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
@@ -709,10 +738,28 @@ void main() {
     expect(find.text('Dark'), findsOneWidget);
   });
 
-  test('form exposes every FLUX 3 generation mode', () {
-    final form = GenerationFormState();
+  test('form infers every FLUX 3 generation mode from its inputs', () {
     expect(VideoMode.values, hasLength(4));
-    expect(form.mode, VideoMode.t2v);
+    final controller = AppController();
+    expect(controller.form.mode, VideoMode.t2v);
+    controller.addUrlFrame(KeyframeRole.start);
+    expect(controller.form.mode, VideoMode.i2v);
+    controller.updateForm(
+      (form) => form.videoUrl = 'https://cdn.bfl.ai/start.mp4',
+    );
+    expect(controller.form.mode, VideoMode.v2v);
+    controller.updateForm(
+      (form) => form.draftUrl = 'https://cdn.bfl.ai/cache.zip',
+    );
+    expect(controller.form.mode, VideoMode.draftEnhance);
+    controller.updateForm(
+      (form) => form
+        ..draftUrl = ''
+        ..videoUrl = ''
+        ..keyframes = <KeyframeDraft>[],
+    );
+    expect(controller.form.mode, VideoMode.t2v);
+    controller.dispose();
   });
 
   test('saves a delivered generation directly to Photos', () async {

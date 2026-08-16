@@ -1,8 +1,37 @@
 # Electron desktop updates
 
 Packaged macOS builds check GitHub Releases at most once every 24 hours. A manual
-check is always available from **Clawnsole → Check for Updates…**. Development
-builds explain that they update through git instead of replacing themselves.
+check is always available from **Clawnsole → Check for Updates…** or from the
+version chip beside the wordmark in the app's top bar. Development builds explain
+that they update through git instead of replacing themselves.
+
+## In-app version chip and update dialog
+
+The Flutter top bar shows the running version. It checks once per launch
+(`lib/core/update_status.dart`) and marks the chip with a brass dot when a newer
+release exists; opening the dialog re-checks immediately. Store-managed
+platforms (iOS, Android) skip the check entirely because the App Store owns
+their updates, and `ClawnsoleApp(checkForUpdates: false)` disables it in tests.
+
+Where the shell can install in place, the dialog's primary action is
+**Download and install <version>** — the same verified pipeline as the system
+menu, not a link to GitHub. It falls back to a release link only when there is
+no self-updating shell (a browser preview), and says so plainly when an
+unpackaged development build declines to replace itself.
+
+## Renderer bridge
+
+`electron/preload.cjs` exposes `window.clawnsole` to the Flutter renderer with
+`checkForUpdate()`, `startUpdate()`, and an `onUpdateEvent(callback)`
+subscription. The Flutter app (`lib/core/shell_bridge*.dart`) feature-detects
+this surface. Any in-flight download — including one begun from the system menu
+— streams `downloading / installing / error` events that open a blocking
+progress modal in the UI, alongside the dock-icon progress bar. Failures the
+renderer detects itself are pushed onto the same stream, so the modal always
+resolves instead of hanging. Renderer-initiated installs skip the native
+confirmation dialog because the in-app dialog already carries the user's
+consent; the download, checksum, and swap pipeline below is identical for both
+entry points.
 
 ## Update flow
 

@@ -1,142 +1,456 @@
 import 'package:flutter/material.dart';
 
+/// Brand constants that keep their meaning in both appearance modes.
+///
+/// The palette is a midcentury sitting room: plum and navy upholstery,
+/// walnut burl casework, brass hardware, and warm parchment paper.
 abstract final class ClawnsoleColors {
-  static const deepPurple = Color(0xFF3B2A67);
-  static const deepBlue = Color(0xFF173A69);
-  static const cobalt = Color(0xFF3159C7);
-  static const rail = Color(0xFF151329);
-  static const railMuted = Color(0xFFC7C4E0);
-  static const danger = Color(0xFFB4233A);
+  static const plum = Color(0xFF532B4E);
+  static const plumInk = Color(0xFF271E25);
+  static const navy = Color(0xFF26405F);
+  static const brass = Color(0xFF7C5B22);
+  static const brassBright = Color(0xFFD9B36C);
+  static const cream = Color(0xFFF3EAD9);
+  static const creamMuted = Color(0xFFCFC1B0);
+  static const danger = Color(0xFF96342B);
+}
+
+/// Bundled material photography used on panels and backdrops.
+abstract final class ClawnsoleTextures {
+  static const plumLeather = 'assets/textures/leather_plum.jpg';
+  static const navyLeather = 'assets/textures/leather_navy.jpg';
+  static const burlwood = 'assets/textures/wood_burl.jpg';
+  static const linen = 'assets/textures/linen_cream.jpg';
+}
+
+/// Mode-aware tokens that sit outside the Material color roles.
+@immutable
+class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
+  const ClawnsoleTokens({
+    required this.brass,
+    required this.onPanel,
+    required this.onPanelMuted,
+    required this.panelBrass,
+    required this.stitch,
+    required this.canvas,
+    required this.canvasTexture,
+    required this.canvasTextureOpacity,
+  });
+
+  /// Accent for eyebrows, the claw mark, and small hardware details.
+  final Color brass;
+
+  /// Primary text and icons placed on leather or wood panels.
+  final Color onPanel;
+
+  /// Secondary text placed on leather or wood panels.
+  final Color onPanelMuted;
+
+  /// Brass accent tuned for dark panel backgrounds in both modes.
+  final Color panelBrass;
+
+  /// Thread color for stitched panel borders.
+  final Color stitch;
+
+  /// Scaffold ground color behind the canvas texture.
+  final Color canvas;
+
+  /// Repeating material texture drawn behind every screen.
+  final String canvasTexture;
+
+  final double canvasTextureOpacity;
+
+  static const light = ClawnsoleTokens(
+    brass: ClawnsoleColors.brass,
+    onPanel: ClawnsoleColors.cream,
+    onPanelMuted: ClawnsoleColors.creamMuted,
+    panelBrass: ClawnsoleColors.brassBright,
+    stitch: ClawnsoleColors.brassBright,
+    canvas: Color(0xFFF1EBDE),
+    canvasTexture: ClawnsoleTextures.linen,
+    canvasTextureOpacity: .55,
+  );
+
+  static const dark = ClawnsoleTokens(
+    brass: ClawnsoleColors.brassBright,
+    onPanel: ClawnsoleColors.cream,
+    onPanelMuted: ClawnsoleColors.creamMuted,
+    panelBrass: ClawnsoleColors.brassBright,
+    stitch: ClawnsoleColors.brassBright,
+    canvas: Color(0xFF15100C),
+    canvasTexture: ClawnsoleTextures.plumLeather,
+    canvasTextureOpacity: .12,
+  );
+
+  @override
+  ClawnsoleTokens copyWith({
+    Color? brass,
+    Color? onPanel,
+    Color? onPanelMuted,
+    Color? panelBrass,
+    Color? stitch,
+    Color? canvas,
+    String? canvasTexture,
+    double? canvasTextureOpacity,
+  }) => ClawnsoleTokens(
+    brass: brass ?? this.brass,
+    onPanel: onPanel ?? this.onPanel,
+    onPanelMuted: onPanelMuted ?? this.onPanelMuted,
+    panelBrass: panelBrass ?? this.panelBrass,
+    stitch: stitch ?? this.stitch,
+    canvas: canvas ?? this.canvas,
+    canvasTexture: canvasTexture ?? this.canvasTexture,
+    canvasTextureOpacity: canvasTextureOpacity ?? this.canvasTextureOpacity,
+  );
+
+  @override
+  ClawnsoleTokens lerp(ThemeExtension<ClawnsoleTokens>? other, double t) {
+    if (other is! ClawnsoleTokens) return this;
+    return ClawnsoleTokens(
+      brass: Color.lerp(brass, other.brass, t)!,
+      onPanel: Color.lerp(onPanel, other.onPanel, t)!,
+      onPanelMuted: Color.lerp(onPanelMuted, other.onPanelMuted, t)!,
+      panelBrass: Color.lerp(panelBrass, other.panelBrass, t)!,
+      stitch: Color.lerp(stitch, other.stitch, t)!,
+      canvas: Color.lerp(canvas, other.canvas, t)!,
+      canvasTexture: t < .5 ? canvasTexture : other.canvasTexture,
+      canvasTextureOpacity:
+          canvasTextureOpacity +
+          (other.canvasTextureOpacity - canvasTextureOpacity) * t,
+    );
+  }
 }
 
 extension ClawnsoleThemeContext on BuildContext {
   ColorScheme get colors => Theme.of(this).colorScheme;
+  ClawnsoleTokens get tokens =>
+      Theme.of(this).extension<ClawnsoleTokens>() ??
+      (Theme.of(this).brightness == Brightness.dark
+          ? ClawnsoleTokens.dark
+          : ClawnsoleTokens.light);
 }
+
+ColorScheme _lightScheme() => const ColorScheme(
+  brightness: Brightness.light,
+  primary: ClawnsoleColors.plum,
+  onPrimary: Color(0xFFFBF3E6),
+  primaryContainer: Color(0xFFEDDCE6),
+  onPrimaryContainer: Color(0xFF3E1F3A),
+  secondary: ClawnsoleColors.navy,
+  onSecondary: Color(0xFFF5F1E6),
+  secondaryContainer: Color(0xFFDBE2EE),
+  onSecondaryContainer: Color(0xFF1A2E47),
+  tertiary: ClawnsoleColors.brass,
+  onTertiary: Color(0xFFFFF8E6),
+  tertiaryContainer: Color(0xFFEFE2C0),
+  onTertiaryContainer: Color(0xFF46330D),
+  error: ClawnsoleColors.danger,
+  onError: Color(0xFFFFF6F0),
+  errorContainer: Color(0xFFF3D8CF),
+  onErrorContainer: Color(0xFF571D15),
+  surface: Color(0xFFFBF7ED),
+  onSurface: Color(0xFF29202F),
+  onSurfaceVariant: Color(0xFF60566A),
+  surfaceContainerLowest: Color(0xFFFEFCF6),
+  surfaceContainerLow: Color(0xFFF4EEE0),
+  surfaceContainer: Color(0xFFEEE6D4),
+  surfaceContainerHigh: Color(0xFFE7DDC8),
+  surfaceContainerHighest: Color(0xFFDFD4BB),
+  outline: Color(0xFF877D8C),
+  outlineVariant: Color(0xFFDBD1BF),
+  shadow: Color(0xFF3A2C24),
+  scrim: Colors.black,
+  inverseSurface: Color(0xFF2E2436),
+  onInverseSurface: ClawnsoleColors.cream,
+  inversePrimary: Color(0xFFE3C6DD),
+);
+
+// Dark mode is a warm evening study — espresso neutrals that flatter the
+// burlwood, navy, hunter green, and plum rather than a violet-cast gray.
+ColorScheme _darkScheme() => const ColorScheme(
+  brightness: Brightness.dark,
+  primary: Color(0xFF6E3D66),
+  onPrimary: Color(0xFFFBF3E6),
+  primaryContainer: Color(0xFF4C2B47),
+  onPrimaryContainer: Color(0xFFF0DCEA),
+  secondary: Color(0xFFAFC3E6),
+  onSecondary: Color(0xFF172A45),
+  secondaryContainer: Color(0xFF27364E),
+  onSecondaryContainer: Color(0xFFD7E2F5),
+  tertiary: Color(0xFFD9B4D0),
+  onTertiary: Color(0xFF3C2140),
+  tertiaryContainer: Color(0xFF4C2F49),
+  onTertiaryContainer: Color(0xFFF4DFF2),
+  error: Color(0xFFF0B3A8),
+  onError: Color(0xFF491710),
+  errorContainer: Color(0xFF5E241B),
+  onErrorContainer: Color(0xFFFBDCD5),
+  surface: Color(0xFF211B15),
+  onSurface: Color(0xFFF1E9DB),
+  onSurfaceVariant: Color(0xFFB9AB9B),
+  surfaceContainerLowest: Color(0xFF120E0A),
+  surfaceContainerLow: Color(0xFF28211A),
+  surfaceContainer: Color(0xFF2E261E),
+  surfaceContainerHigh: Color(0xFF362D24),
+  surfaceContainerHighest: Color(0xFF3E342A),
+  outline: Color(0xFF877866),
+  outlineVariant: Color(0xFF41372C),
+  shadow: Colors.black,
+  scrim: Colors.black,
+  inverseSurface: Color(0xFFEFE7D9),
+  onInverseSurface: Color(0xFF28211A),
+  inversePrimary: ClawnsoleColors.plum,
+);
+
+const _display = 'Fraunces';
+const _text = 'DM Sans';
+
+TextTheme _textTheme() => const TextTheme(
+  displayLarge: TextStyle(
+    fontFamily: _display,
+    fontSize: 46,
+    height: 1.04,
+    letterSpacing: -.8,
+    fontWeight: FontWeight.w600,
+  ),
+  displayMedium: TextStyle(
+    fontFamily: _display,
+    fontSize: 38,
+    height: 1.05,
+    letterSpacing: -.6,
+    fontWeight: FontWeight.w600,
+  ),
+  headlineLarge: TextStyle(
+    fontFamily: _display,
+    fontSize: 32,
+    height: 1.08,
+    letterSpacing: -.4,
+    fontWeight: FontWeight.w600,
+  ),
+  headlineMedium: TextStyle(
+    fontFamily: _display,
+    fontSize: 25,
+    height: 1.12,
+    letterSpacing: -.2,
+    fontWeight: FontWeight.w600,
+  ),
+  headlineSmall: TextStyle(
+    fontFamily: _display,
+    fontSize: 20,
+    height: 1.18,
+    fontWeight: FontWeight.w600,
+  ),
+  titleLarge: TextStyle(
+    fontSize: 16.5,
+    height: 1.32,
+    letterSpacing: -.1,
+    fontWeight: FontWeight.w700,
+  ),
+  titleMedium: TextStyle(
+    fontSize: 14.5,
+    height: 1.3,
+    fontWeight: FontWeight.w700,
+  ),
+  titleSmall: TextStyle(fontSize: 13, height: 1.3, fontWeight: FontWeight.w700),
+  bodyLarge: TextStyle(fontSize: 15, height: 1.55),
+  bodyMedium: TextStyle(fontSize: 13.5, height: 1.5),
+  bodySmall: TextStyle(fontSize: 12, height: 1.45),
+  labelLarge: TextStyle(
+    fontSize: 13.5,
+    letterSpacing: .1,
+    fontWeight: FontWeight.w700,
+  ),
+  labelMedium: TextStyle(
+    fontSize: 12,
+    letterSpacing: .3,
+    fontWeight: FontWeight.w700,
+  ),
+  labelSmall: TextStyle(
+    fontSize: 11,
+    letterSpacing: .7,
+    fontWeight: FontWeight.w700,
+  ),
+);
 
 ThemeData buildClawnsoleTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
-  final scheme =
-      ColorScheme.fromSeed(
-        seedColor: ClawnsoleColors.deepPurple,
-        brightness: brightness,
-      ).copyWith(
-        primary: dark ? const Color(0xFFC8B8FF) : ClawnsoleColors.deepPurple,
-        onPrimary: dark ? const Color(0xFF211442) : Colors.white,
-        secondary: dark ? const Color(0xFF93BDFF) : ClawnsoleColors.deepBlue,
-        onSecondary: dark ? const Color(0xFF071D38) : Colors.white,
-        tertiary: dark ? const Color(0xFFA8B9FF) : ClawnsoleColors.cobalt,
-        onTertiary: dark ? const Color(0xFF0D1B4D) : Colors.white,
-        surface: dark ? const Color(0xFF171827) : const Color(0xFFFCFCFF),
-        onSurface: dark ? const Color(0xFFF0EFF8) : const Color(0xFF1E1E2B),
-        surfaceContainerLowest: dark
-            ? const Color(0xFF0D0E18)
-            : const Color(0xFFF3F4FA),
-        surfaceContainerLow: dark
-            ? const Color(0xFF202235)
-            : const Color(0xFFF0F1F8),
-        surfaceContainer: dark
-            ? const Color(0xFF282A40)
-            : const Color(0xFFE8EAF4),
-        surfaceContainerHigh: dark
-            ? const Color(0xFF30334B)
-            : const Color(0xFFE1E4F0),
-        onSurfaceVariant: dark
-            ? const Color(0xFFB9B9CA)
-            : const Color(0xFF616174),
-        outline: dark ? const Color(0xFF76768B) : const Color(0xFF777789),
-        outlineVariant: dark
-            ? const Color(0xFF393B52)
-            : const Color(0xFFD9DBE7),
-        error: dark ? const Color(0xFFFFB2BE) : ClawnsoleColors.danger,
-        errorContainer: dark
-            ? const Color(0xFF5C1725)
-            : const Color(0xFFFFDADF),
-      );
+  final scheme = dark ? _darkScheme() : _lightScheme();
+  final tokens = dark ? ClawnsoleTokens.dark : ClawnsoleTokens.light;
 
   final base = ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
-    scaffoldBackgroundColor: scheme.surfaceContainerLowest,
-    textTheme: const TextTheme(
-      displayLarge: TextStyle(
-        fontFamily: 'Georgia',
-        fontSize: 58,
-        height: .96,
-        letterSpacing: -2.2,
-        fontWeight: FontWeight.w700,
-      ),
-      headlineLarge: TextStyle(
-        fontFamily: 'Georgia',
-        fontSize: 42,
-        height: 1,
-        letterSpacing: -1.3,
-        fontWeight: FontWeight.w700,
-      ),
-      headlineMedium: TextStyle(
-        fontFamily: 'Georgia',
-        fontSize: 27,
-        height: 1.05,
-        fontWeight: FontWeight.w700,
-      ),
-      titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-      titleMedium: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-      bodyLarge: TextStyle(fontSize: 15, height: 1.5),
-      bodyMedium: TextStyle(fontSize: 13, height: 1.45),
-      labelLarge: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-    ),
+    fontFamily: _text,
+    textTheme: _textTheme(),
+    visualDensity: VisualDensity.standard,
+    scaffoldBackgroundColor: tokens.canvas,
+    extensions: <ThemeExtension<dynamic>>[tokens],
   );
 
+  OutlineInputBorder inputBorder(Color color, [double width = 1]) =>
+      OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: color, width: width),
+      );
+
   return base.copyWith(
+    dividerColor: scheme.outlineVariant,
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant,
+      thickness: 1,
+      space: 1,
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: scheme.surface,
+      fillColor: dark
+          ? scheme.surfaceContainerLow
+          : scheme.surfaceContainerLowest,
       contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: scheme.outlineVariant),
+      border: inputBorder(scheme.outlineVariant),
+      enabledBorder: inputBorder(scheme.outlineVariant),
+      focusedBorder: inputBorder(scheme.primary, 1.6),
+      hintStyle: TextStyle(
+        color: scheme.onSurfaceVariant.withValues(alpha: .8),
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: scheme.outlineVariant),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: scheme.primary, width: 1.5),
-      ),
-      hintStyle: TextStyle(color: scheme.onSurfaceVariant),
     ),
-    dividerColor: scheme.outlineVariant,
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: scheme.primary,
-        foregroundColor: scheme.onPrimary,
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        textStyle: const TextStyle(
+          fontFamily: _text,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .1,
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: scheme.primary,
+        foregroundColor: dark ? scheme.tertiary : scheme.primary,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        side: BorderSide(color: scheme.outlineVariant),
+        side: BorderSide(
+          color: dark ? scheme.outline : const Color(0xFFC4B8A6),
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w800),
+        textStyle: const TextStyle(
+          fontFamily: _text,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .1,
+        ),
       ),
     ),
-    snackBarTheme: SnackBarThemeData(
-      backgroundColor: dark ? const Color(0xFF292443) : ClawnsoleColors.rail,
-      contentTextStyle: const TextStyle(
-        color: Colors.white,
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: dark ? scheme.tertiary : scheme.primary,
+        textStyle: const TextStyle(
+          fontFamily: _text,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(foregroundColor: scheme.onSurfaceVariant),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: dark ? const Color(0xFF96628D) : scheme.primary,
+      inactiveTrackColor: scheme.outlineVariant,
+      thumbColor: dark ? const Color(0xFF96628D) : scheme.primary,
+      overlayColor: scheme.primary.withValues(alpha: .1),
+      valueIndicatorColor: ClawnsoleColors.plumInk,
+      valueIndicatorTextStyle: const TextStyle(
+        color: ClawnsoleColors.cream,
+        fontFamily: _text,
         fontWeight: FontWeight.w700,
       ),
+      // ignore: deprecated_member_use, opts into the 2024 slider appearance.
+      year2023: false,
+    ),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? scheme.onPrimary
+            : scheme.outline,
+      ),
+      trackColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? scheme.primary
+            : scheme.surfaceContainerHigh,
+      ),
+      trackOutlineColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? Colors.transparent
+            : scheme.outline,
+      ),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: dark ? scheme.tertiary : scheme.primary,
+    ),
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: dark ? const Color(0xFF30281F) : ClawnsoleColors.plumInk,
+      contentTextStyle: const TextStyle(
+        fontFamily: _text,
+        color: ClawnsoleColors.cream,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        height: 1.4,
+      ),
       behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    navigationBarTheme: NavigationBarThemeData(
+    popupMenuTheme: PopupMenuThemeData(
+      color: dark ? scheme.surfaceContainerHigh : scheme.surfaceContainerLowest,
+      surfaceTintColor: Colors.transparent,
+      elevation: 8,
+      shadowColor: scheme.shadow.withValues(alpha: .4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+      textStyle: TextStyle(
+        fontFamily: _text,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: scheme.onSurface,
+      ),
+    ),
+    dialogTheme: DialogThemeData(
       backgroundColor: scheme.surface,
-      indicatorColor: scheme.primaryContainer,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      titleTextStyle: _textTheme().headlineMedium?.copyWith(
+        color: scheme.onSurface,
+      ),
+      contentTextStyle: _textTheme().bodyMedium?.copyWith(
+        color: scheme.onSurface,
+      ),
     ),
-    dialogTheme: DialogThemeData(backgroundColor: scheme.surface),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: scheme.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: ClawnsoleColors.plumInk,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      textStyle: const TextStyle(
+        fontFamily: _text,
+        color: ClawnsoleColors.cream,
+        fontSize: 11.5,
+      ),
+    ),
+    listTileTheme: ListTileThemeData(
+      iconColor: scheme.onSurfaceVariant,
+      titleTextStyle: _textTheme().titleSmall?.copyWith(
+        color: scheme.onSurface,
+      ),
+      subtitleTextStyle: _textTheme().bodySmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    ),
   );
 }

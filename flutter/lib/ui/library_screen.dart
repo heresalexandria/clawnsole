@@ -86,15 +86,16 @@ class _LibraryHeading extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Eyebrow('Local history', icon: Icons.video_library_rounded),
+            const Eyebrow('Local history'),
             const SizedBox(height: 10),
             Text(
               'Your films.',
               style: Theme.of(context).textTheme.displayLarge,
             ),
             const SizedBox(height: 10),
-            const Text(
-              'Generation metadata, reference inputs, and completed videos stay together on this device.',
+            Text(
+              'Generation settings, reference inputs, and completed videos stay together on this device.',
+              style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
           ],
         ),
@@ -113,9 +114,17 @@ class _LibraryToolbar extends StatelessWidget {
 
   final AppController controller;
 
+  int _count(LibraryFilter filter) => switch (filter) {
+    LibraryFilter.all => controller.generations.length,
+    LibraryFilter.working => controller.workingCount,
+    LibraryFilter.ready => controller.readyCount,
+    LibraryFilter.failed =>
+      controller.generations.where((item) => item.isFailed).length,
+  };
+
   @override
   Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.all(11),
+    padding: const EdgeInsets.all(10),
     child: Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -123,45 +132,127 @@ class _LibraryToolbar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: <Widget>[
         Wrap(
-          spacing: 6,
-          runSpacing: 6,
+          spacing: 5,
+          runSpacing: 5,
           children: LibraryFilter.values
               .map(
-                (filter) => ChoiceChip(
-                  label: Text(_filterLabel(filter)),
+                (filter) => _FilterSegment(
+                  filter: filter,
+                  count: _count(filter),
                   selected: controller.libraryFilter == filter,
-                  selectedColor: context.colors.primary,
-                  labelStyle: TextStyle(
-                    color: controller.libraryFilter == filter
-                        ? Colors.white
-                        : context.colors.onSurface,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                  side: BorderSide.none,
-                  onSelected: (_) =>
-                      unawaited(controller.setLibraryFilter(filter)),
+                  onTap: () => unawaited(controller.setLibraryFilter(filter)),
                 ),
               )
               .toList(),
         ),
         SizedBox(
-          width: 260,
+          width: 250,
           child: TextField(
             onChanged: controller.setSearch,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.search_rounded, size: 18),
               hintText: 'Search prompts',
+              isDense: true,
               contentPadding: EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 10,
               ),
             ),
+            style: const TextStyle(fontSize: 13),
           ),
         ),
       ],
     ),
   );
+}
+
+class _FilterSegment extends StatelessWidget {
+  const _FilterSegment({
+    required this.filter,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final LibraryFilter filter;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static const _icons = <LibraryFilter, IconData>{
+    LibraryFilter.all: Icons.grid_view_rounded,
+    LibraryFilter.working: Icons.autorenew_rounded,
+    LibraryFilter.ready: Icons.check_circle_outline_rounded,
+    LibraryFilter.failed: Icons.error_outline_rounded,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected
+        ? context.colors.onPrimary
+        : context.colors.onSurfaceVariant;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected
+              ? context.colors.primary
+              : context.colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? context.colors.primary
+                : context.colors.outlineVariant,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(_icons[filter], size: 14, color: foreground),
+            const SizedBox(width: 6),
+            Text(
+              _filterLabel(filter),
+              style: TextStyle(
+                color: selected
+                    ? context.colors.onPrimary
+                    : context.colors.onSurface,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (count > 0) ...<Widget>[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 5.5,
+                  vertical: 1.5,
+                ),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? context.colors.onPrimary.withValues(alpha: .18)
+                      : context.colors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    color: selected
+                        ? context.colors.onPrimary
+                        : context.colors.onSurfaceVariant,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 String _filterLabel(LibraryFilter filter) => switch (filter) {
@@ -184,8 +275,8 @@ class _LibraryEmpty extends StatelessWidget {
         children: <Widget>[
           Icon(
             Icons.collections_outlined,
-            size: 48,
-            color: context.colors.primary,
+            size: 44,
+            color: context.tokens.brass,
           ),
           const SizedBox(height: 14),
           Text(
@@ -200,6 +291,7 @@ class _LibraryEmpty extends StatelessWidget {
                 ? 'Your first generation will arrive here with its settings and live status.'
                 : 'Try another filter or a broader prompt search.',
             textAlign: TextAlign.center,
+            style: TextStyle(color: context.colors.onSurfaceVariant),
           ),
           if (controller.generations.isEmpty) ...<Widget>[
             const SizedBox(height: 18),
@@ -276,7 +368,7 @@ class _GenerationCardState extends State<GenerationCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
             child: SizedBox(
               height: 280,
               child: Stack(
@@ -301,7 +393,7 @@ class _GenerationCardState extends State<GenerationCard> {
                             : item.progress! / 100,
                         minHeight: 5,
                         backgroundColor: Colors.white24,
-                        color: context.colors.tertiary,
+                        color: ClawnsoleColors.brassBright,
                       ),
                     ),
                 ],
@@ -314,46 +406,38 @@ class _GenerationCardState extends State<GenerationCard> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      item.mode.label.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 8,
-                        letterSpacing: 1.1,
-                        fontWeight: FontWeight.w900,
-                        color: context.colors.primary,
+                    Expanded(
+                      child: GenerationPrompt(
+                        controller: widget.controller,
+                        prompt: item.prompt,
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      relativeTime(item.createdAt),
-                      style: const TextStyle(fontSize: 9),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        relativeTime(item.createdAt),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  item.prompt,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 11),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    _ConfigTag(item.config.aspectRatio),
-                    _ConfigTag(
-                      item.config.duration == 'auto'
-                          ? 'Auto'
-                          : '${item.config.duration}s',
-                    ),
-                    _ConfigTag(item.config.resolution.toUpperCase()),
-                    if (item.config.generateAudio)
-                      const _ConfigTag('Audio', icon: Icons.graphic_eq_rounded),
-                  ],
-                ),
+                GenerationSpecChips(item: item),
+                if (item.config.keyframes?.isNotEmpty == true ||
+                    item.config.source != null) ...<Widget>[
+                  const SizedBox(height: 9),
+                  ReferenceInputsStrip(
+                    controller: widget.controller,
+                    item: item,
+                  ),
+                ],
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
                 if (item.error != null ||
@@ -368,7 +452,7 @@ class _GenerationCardState extends State<GenerationCard> {
                   Text(
                     'The provider’s delivery link expired; the generation record remains.',
                     style: TextStyle(
-                      fontSize: 9,
+                      fontSize: 11,
                       color: context.colors.onSurfaceVariant,
                     ),
                   ),
@@ -422,34 +506,4 @@ class _GenerationCardState extends State<GenerationCard> {
       ),
     );
   }
-}
-
-class _ConfigTag extends StatelessWidget {
-  const _ConfigTag(this.label, {this.icon});
-
-  final String label;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-    decoration: BoxDecoration(
-      color: context.colors.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(7),
-      border: Border.all(color: context.colors.outlineVariant),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (icon != null) ...<Widget>[
-          Icon(icon, size: 11),
-          const SizedBox(width: 4),
-        ],
-        Text(
-          label,
-          style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w800),
-        ),
-      ],
-    ),
-  );
 }

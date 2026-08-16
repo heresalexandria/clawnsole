@@ -70,6 +70,29 @@ flutter:
   assets:
     - assets/icon.png
     - assets/claw.png
+    - assets/textures/leather_plum.jpg
+    - assets/textures/leather_navy.jpg
+    - assets/textures/wood_burl.jpg
+    - assets/textures/linen_cream.jpg
+
+  fonts:
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces-500.ttf
+          weight: 500
+        - asset: assets/fonts/Fraunces-600.ttf
+          weight: 600
+        - asset: assets/fonts/Fraunces-500-Italic.ttf
+          weight: 500
+          style: italic
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/DMSans-400.ttf
+          weight: 400
+        - asset: assets/fonts/DMSans-500.ttf
+          weight: 500
+        - asset: assets/fonts/DMSans-700.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -34,6 +34,15 @@ policy. Black Forest Labs is currently the only supported generation provider.
 Clawnsole is an independent client and is not affiliated with or endorsed by
 Black Forest Labs.
 
+## Update checks
+
+The desktop app and the web build ask GitHub's public releases API whether a
+newer Clawnsole version exists: once per app launch, and again when you open the
+version dialog or choose **Check for Updates…**. That request carries no API
+key, prompt, media, or history — GitHub receives only an ordinary web request
+and its usual connection metadata. The iOS and Android apps do not make this
+request; the App Store handles their updates.
+
 ## Data collected by the developer
 
 Clawnsole does not send the developer your API key, prompts, reference media,

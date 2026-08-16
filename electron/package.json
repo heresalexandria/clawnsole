@@ -24,6 +24,7 @@
     "asar": true,
     "files": [
       "main.cjs",
+      "preload.cjs",
       "lib/**/*",
       "package.json"
     ],

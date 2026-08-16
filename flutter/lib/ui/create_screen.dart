@@ -10,6 +10,7 @@ import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
+import 'panels.dart';
 
 class CreateScreen extends StatelessWidget {
   const CreateScreen({required this.controller, super.key});
@@ -28,8 +29,8 @@ class CreateScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                _CreateHeading(controller: controller),
-                const SizedBox(height: 24),
+                const _CreateHeading(),
+                const SizedBox(height: 26),
                 if (split)
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -38,7 +39,7 @@ class CreateScreen extends StatelessWidget {
                         flex: 7,
                         child: _Composer(controller: controller),
                       ),
-                      const SizedBox(width: 20),
+                      const SizedBox(width: 22),
                       Expanded(
                         flex: 4,
                         child: _RecentWork(controller: controller),
@@ -47,7 +48,7 @@ class CreateScreen extends StatelessWidget {
                   )
                 else ...<Widget>[
                   _Composer(controller: controller),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 24),
                   _RecentWork(controller: controller),
                 ],
               ],
@@ -60,478 +61,552 @@ class CreateScreen extends StatelessWidget {
 }
 
 class _CreateHeading extends StatelessWidget {
-  const _CreateHeading({required this.controller});
-
-  final AppController controller;
+  const _CreateHeading();
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 22,
-    runSpacing: 16,
-    alignment: WrapAlignment.spaceBetween,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    children: <Widget>[
-      ConstrainedBox(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final title = ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 650),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Eyebrow('Video studio', icon: Icons.auto_awesome_rounded),
+            const Eyebrow('Video studio'),
             const SizedBox(height: 10),
             Text(
               'Make it move.',
               style: Theme.of(context).textTheme.displayLarge,
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
+              style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
           ],
         ),
-      ),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
-        decoration: BoxDecoration(
-          color: ClawnsoleColors.rail,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            CircleAvatar(
-              radius: 15,
-              backgroundColor: ClawnsoleColors.cobalt,
-              child: Text(
-                'BFL',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'SELECTED PROVIDER',
-                  style: TextStyle(
-                    color: Color(0xFFA8B9FF),
-                    fontSize: 7,
-                    letterSpacing: 1,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  'Black Forest Labs',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  'Model · FLUX 3 latest',
-                  style: TextStyle(color: Colors.white60, fontSize: 9),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    ],
+      );
+      const plaque = _ProviderPlaque();
+      // Wide layouts pin the plaque to the far right of the page; narrow ones
+      // stack it under the title rather than squeezing both onto one line.
+      if (constraints.maxWidth < 720) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[title, const SizedBox(height: 16), plaque],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: title),
+          ),
+          const SizedBox(width: 22),
+          plaque,
+        ],
+      );
+    },
   );
 }
 
-class _Composer extends StatelessWidget {
-  const _Composer({required this.controller});
-
-  final AppController controller;
+class _ProviderPlaque extends StatelessWidget {
+  const _ProviderPlaque();
 
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: EdgeInsets.zero,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget build(BuildContext context) => TexturePanel(
+    surface: PanelSurface.navyLeather,
+    stitched: true,
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Text(
-                'Generation mode',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 9),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: bflProvider.modes.map((mode) {
-                  final selected = controller.form.mode == mode;
-                  return ChoiceChip(
-                    label: Text(mode.shortLabel),
-                    avatar: Icon(
-                      _modeIcon(mode),
-                      size: 16,
-                      color: selected
-                          ? context.colors.onPrimary
-                          : context.colors.primary,
-                    ),
-                    selected: selected,
-                    onSelected: (_) =>
-                        controller.updateForm((form) => form.mode = mode),
-                    selectedColor: context.colors.primary,
-                    backgroundColor: context.colors.surfaceContainerLow,
-                    checkmarkColor: context.colors.onPrimary,
-                    labelStyle: TextStyle(
-                      color: selected
-                          ? context.colors.onPrimary
-                          : context.colors.onSurface,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    side: BorderSide(
-                      color: selected
-                          ? context.colors.primary
-                          : context.colors.outlineVariant,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
+        Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: context.tokens.panelBrass),
+            color: Colors.white.withValues(alpha: .06),
+          ),
+          child: Text(
+            'BFL',
+            style: TextStyle(
+              color: context.tokens.panelBrass,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: .5,
+            ),
           ),
         ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (controller.form.mode != VideoMode.draftEnhance) ...<Widget>[
-                const _FieldLabel('Direction', icon: Icons.edit_note_rounded),
-                const SizedBox(height: 8),
-                TextFormField(
-                  key: ValueKey('generation-prompt-${controller.formRevision}'),
-                  initialValue: controller.form.prompt,
-                  minLines: 5,
-                  maxLines: 9,
-                  maxLength: 50000,
-                  onChanged: (value) =>
-                      controller.updateForm((form) => form.prompt = value),
-                  decoration: const InputDecoration(
-                    hintText:
-                        'A single continuous shot… describe movement, framing, sound, and what must stay consistent.',
-                    counterText: '',
-                    alignLabelWithHint: true,
-                  ),
-                ),
-                const SizedBox(height: 18),
-              ],
-              if (controller.form.mode == VideoMode.i2v)
-                _KeyframeEditor(controller: controller),
-              if (controller.form.mode == VideoMode.v2v)
-                _SourceEditor(
-                  title: 'Starting video',
-                  description:
-                      'Upload a clip or paste a hosted provider-compatible URL.',
-                  icon: Icons.movie_filter_rounded,
-                  asset: controller.form.videoAsset,
-                  url: controller.form.videoUrl,
-                  onPick: controller.pickVideo,
-                  onUrl: (value) =>
-                      controller.updateForm((form) => form.videoUrl = value),
-                  onClear: () => controller.updateForm((form) {
-                    form.videoAsset = null;
-                    form.videoUrl = '';
-                  }),
-                  formRevision: controller.formRevision,
-                ),
-              if (controller.form.mode == VideoMode.draftEnhance)
-                _SourceEditor(
-                  title: 'FLUX 3 draft cache',
-                  description:
-                      'Choose a draft cache bundle or use a retained cache URL.',
-                  icon: Icons.auto_fix_high_rounded,
-                  asset: controller.form.draftAsset,
-                  url: controller.form.draftUrl,
-                  onPick: controller.pickDraft,
-                  onUrl: (value) =>
-                      controller.updateForm((form) => form.draftUrl = value),
-                  onClear: () => controller.updateForm((form) {
-                    form.draftAsset = null;
-                    form.draftUrl = '';
-                  }),
-                  formRevision: controller.formRevision,
-                ),
-              if (controller.form.mode != VideoMode.t2v)
-                const SizedBox(height: 18),
-              _SettingsGrid(controller: controller),
-              const SizedBox(height: 18),
-              _CostPreview(controller: controller),
-              const SizedBox(height: 18),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Row(
-                      children: <Widget>[
-                        if (controller.hasApiKey)
-                          ClawMark(size: 20, color: context.colors.primary)
-                        else
-                          Icon(
-                            Icons.key_off_rounded,
-                            color: context.colors.primary,
-                            size: 20,
-                          ),
-                        const SizedBox(width: 9),
-                        Flexible(
-                          child: Text(
-                            controller.hasApiKey
-                                ? 'Ready when you are'
-                                : 'API key needed',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  FilledButton.icon(
-                    onPressed: controller.submitting
-                        ? null
-                        : () => unawaited(controller.submit()),
-                    icon: controller.submitting
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Generate video'),
-                  ),
-                ],
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'PROVIDER',
+              style: TextStyle(
+                color: context.tokens.onPanelMuted,
+                fontSize: 8.5,
+                letterSpacing: 1.6,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              'Black Forest Labs',
+              style: TextStyle(
+                color: context.tokens.onPanel,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              'FLUX 3 · latest',
+              style: TextStyle(
+                color: context.tokens.onPanelMuted,
+                fontSize: 10.5,
+              ),
+            ),
+          ],
         ),
       ],
     ),
   );
 }
 
-IconData _modeIcon(VideoMode mode) => switch (mode) {
-  VideoMode.t2v => Icons.text_fields_rounded,
-  VideoMode.i2v => Icons.photo_library_rounded,
-  VideoMode.v2v => Icons.video_file_rounded,
-  VideoMode.draftEnhance => Icons.auto_fix_high_rounded,
-};
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.label, {required this.icon});
-
-  final String label;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Icon(icon, size: 17, color: context.colors.primary),
-      const SizedBox(width: 7),
-      Text(
-        label,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
-      ),
-    ],
-  );
-}
-
-class _KeyframeEditor extends StatelessWidget {
-  const _KeyframeEditor({required this.controller});
+class _Composer extends StatefulWidget {
+  const _Composer({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      Row(
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  bool _showVideoPanel = false;
+  bool _showDraftPanel = false;
+  int _seenRevision = -1;
+
+  AppController get controller => widget.controller;
+
+  @override
+  Widget build(BuildContext context) {
+    if (_seenRevision != controller.formRevision) {
+      // A reuse/enhance action replaced the form; let its contents decide
+      // which source panels are open.
+      _seenRevision = controller.formRevision;
+      _showVideoPanel = false;
+      _showDraftPanel = false;
+    }
+    final form = controller.form;
+    final draftActive =
+        form.draftAsset != null ||
+        form.draftUrl.trim().isNotEmpty ||
+        _showDraftPanel;
+    final videoActive =
+        !draftActive &&
+        (form.videoAsset != null ||
+            form.videoUrl.trim().isNotEmpty ||
+            _showVideoPanel);
+    final enhancing = form.mode == VideoMode.draftEnhance;
+
+    return SurfaceCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (!enhancing) ...<Widget>[
+            const FieldLabel('Direction', icon: Icons.edit_note_rounded),
+            const SizedBox(height: 9),
+            TextFormField(
+              key: ValueKey('generation-prompt-${controller.formRevision}'),
+              initialValue: form.prompt,
+              minLines: 4,
+              maxLines: 10,
+              maxLength: 50000,
+              style: const TextStyle(fontSize: 14.5, height: 1.5),
+              onChanged: (value) =>
+                  controller.updateForm((form) => form.prompt = value),
+              decoration: const InputDecoration(
+                hintText:
+                    'A single continuous shot… describe movement, framing, sound, and what must stay consistent.',
+                counterText: '',
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+          if (draftActive)
+            _SourceEditor(
+              title: 'Enhance a draft render',
+              description:
+                  'Re-render a saved FLUX 3 draft cache at full quality. Prompt, framing, and duration come from the original.',
+              icon: Icons.auto_fix_high_rounded,
+              asset: form.draftAsset,
+              url: form.draftUrl,
+              onPick: controller.pickDraft,
+              onUrl: (value) =>
+                  controller.updateForm((form) => form.draftUrl = value),
+              onDismiss: () {
+                setState(() => _showDraftPanel = false);
+                controller.updateForm((form) {
+                  form.draftAsset = null;
+                  form.draftUrl = '';
+                });
+              },
+              formRevision: controller.formRevision,
+            )
+          else if (videoActive) ...<Widget>[
+            _SourceEditor(
+              title: 'Continue a video',
+              description:
+                  'FLUX 3 extends the motion of an uploaded clip or a hosted provider-compatible URL.',
+              icon: Icons.movie_filter_rounded,
+              asset: form.videoAsset,
+              url: form.videoUrl,
+              onPick: controller.pickVideo,
+              onUrl: (value) =>
+                  controller.updateForm((form) => form.videoUrl = value),
+              onDismiss: () {
+                setState(() => _showVideoPanel = false);
+                controller.updateForm((form) {
+                  form.videoAsset = null;
+                  form.videoUrl = '';
+                });
+              },
+              formRevision: controller.formRevision,
+            ),
+            if (form.keyframes.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                'Your ${form.keyframes.length} reference '
+                '${form.keyframes.length == 1 ? 'frame is' : 'frames are'} set '
+                'aside while a starting video is attached.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ] else
+            _FramesSection(controller: controller),
+          if (!draftActive && !videoActive) ...<Widget>[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
-                _FieldLabel('Keyframes', icon: Icons.collections_rounded),
-                SizedBox(height: 3),
                 Text(
-                  '1–10 images · first, middle, and last positions are explicit',
-                  style: TextStyle(fontSize: 9),
+                  'Or start from',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+                _QuietAction(
+                  icon: Icons.movie_filter_rounded,
+                  label: 'a video to continue',
+                  onTap: () => setState(() => _showVideoPanel = true),
+                ),
+                _QuietAction(
+                  icon: Icons.auto_fix_high_rounded,
+                  label: 'a saved draft to enhance',
+                  onTap: () => setState(() => _showDraftPanel = true),
                 ),
               ],
             ),
-          ),
-          FilterChip(
-            label: const Text('Custom timing'),
-            selected: controller.form.usesTimedKeyframes,
-            onSelected: controller.form.requiresTimedKeyframes
-                ? null
-                : controller.setExactTiming,
-          ),
+          ],
+          const SizedBox(height: 20),
+          Divider(color: context.colors.outlineVariant),
+          const SizedBox(height: 20),
+          if (enhancing)
+            _EnhanceSettings(controller: controller)
+          else
+            _SettingsGrid(controller: controller),
+          const SizedBox(height: 20),
+          _CostPreview(controller: controller),
+          const SizedBox(height: 18),
+          _ComposerFooter(controller: controller),
         ],
       ),
-      const SizedBox(height: 7),
-      Text(
-        controller.form.requiresTimedKeyframes
-            ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can also stand alone.'
-            : 'First-only pins the opening. First + last pins both ends. With 3+ plain frames, BFL spaces middle frames evenly.',
-        style: TextStyle(
-          color: context.colors.onSurfaceVariant,
-          fontSize: 10,
-          height: 1.35,
+    );
+  }
+}
+
+class _QuietAction extends StatelessWidget {
+  const _QuietAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    onPressed: onTap,
+    style: TextButton.styleFrom(
+      foregroundColor: context.colors.secondary,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+      textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+    ),
+    icon: Icon(icon, size: 15),
+    label: Text(label),
+  );
+}
+
+class FieldLabel extends StatelessWidget {
+  const FieldLabel(this.label, {required this.icon, super.key, this.trailing});
+
+  final String label;
+  final IconData icon;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Icon(icon, size: 16, color: context.tokens.brass),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.3,
+            fontWeight: FontWeight.w700,
+            color: context.colors.onSurface.withValues(alpha: .82),
+          ),
         ),
       ),
-      const SizedBox(height: 10),
-      if (controller.form.keyframes.isNotEmpty)
-        Wrap(
-          spacing: 9,
-          runSpacing: 9,
-          children: controller.form.keyframes.asMap().entries.map((entry) {
-            final index = entry.key;
-            final frame = entry.value;
-            return Container(
-              width: 154,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: context.colors.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: context.colors.outlineVariant),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Stack(
-                    children: <Widget>[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          height: 80,
-                          width: double.infinity,
-                          child: frame.asset != null
-                              ? Image.memory(
-                                  frame.asset!.bytes,
-                                  fit: BoxFit.cover,
-                                )
-                              : Uri.tryParse(frame.source)?.scheme == 'https'
-                              ? Image.network(
-                                  frame.source,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => Container(
-                                    color: ClawnsoleColors.rail,
-                                    child: const Icon(
-                                      Icons.link_rounded,
-                                      color: ClawnsoleColors.railMuted,
-                                    ),
-                                  ),
-                                )
-                              : Container(
-                                  color: ClawnsoleColors.rail,
-                                  child: const Icon(
-                                    Icons.link_rounded,
-                                    color: ClawnsoleColors.railMuted,
-                                  ),
-                                ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 3,
-                        right: 3,
-                        child: IconButton.filledTonal(
-                          constraints: const BoxConstraints.tightFor(
-                            width: 27,
-                            height: 27,
-                          ),
-                          padding: EdgeInsets.zero,
-                          onPressed: () => controller.removeFrame(frame.id),
-                          icon: const Icon(Icons.close_rounded, size: 14),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    frame.role == KeyframeRole.middle
-                        ? 'Middle frame ${controller.form.keyframes.take(index + 1).where((item) => item.role == KeyframeRole.middle).length}'
-                        : frame.role.label,
-                    style: const TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  if (frame.asset == null) ...<Widget>[
-                    const SizedBox(height: 5),
-                    TextFormField(
-                      key: ValueKey('frame-url-${frame.id}'),
-                      initialValue: frame.source,
-                      onChanged: (value) =>
-                          controller.updateFrame(frame.id, source: value),
-                      decoration: const InputDecoration(
-                        hintText: 'https://…',
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                      ),
-                      style: const TextStyle(fontSize: 9),
-                    ),
-                  ],
-                  if (controller.form.usesTimedKeyframes) ...<Widget>[
-                    const SizedBox(height: 5),
-                    TextFormField(
-                      key: ValueKey('frame-time-${frame.id}'),
-                      initialValue: frame.seconds.toString(),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      onChanged: (value) => controller.updateFrame(
-                        frame.id,
-                        seconds: double.tryParse(value) ?? frame.seconds,
-                      ),
-                      decoration: const InputDecoration(
-                        suffixText: 'sec',
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                      ),
-                      style: const TextStyle(fontSize: 9),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          }).toList(),
-        ),
-      const SizedBox(height: 10),
-      Wrap(
-        spacing: 9,
-        runSpacing: 9,
-        children: KeyframeRole.values
-            .map((role) => _FrameRoleAction(controller: controller, role: role))
-            .toList(),
-      ),
+      if (trailing != null) trailing!,
     ],
   );
 }
 
-class _FrameRoleAction extends StatelessWidget {
-  const _FrameRoleAction({required this.controller, required this.role});
+class _FramesSection extends StatelessWidget {
+  const _FramesSection({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          'Reference frames · optional',
+          icon: Icons.collections_rounded,
+          trailing: form.keyframes.isEmpty
+              ? null
+              : TogglePill(
+                  label: 'Custom timing',
+                  selected: form.usesTimedKeyframes,
+                  onChanged: form.requiresTimedKeyframes
+                      ? null
+                      : controller.setExactTiming,
+                ),
+        ),
+        const SizedBox(height: 9),
+        Text(
+          form.keyframes.isEmpty
+              ? 'Pin up to ${bflProvider.maxKeyframes} images to the first, middle, or last positions — or leave this empty for pure text-to-video.'
+              : form.requiresTimedKeyframes
+              ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
+              : 'First-only pins the opening. First + last pins both ends. With three or more plain frames, BFL spaces the middle evenly.',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11.5,
+            height: 1.4,
+          ),
+        ),
+        if (form.keyframes.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: form.keyframes
+                .asMap()
+                .entries
+                .map(
+                  (entry) => _FrameTile(
+                    controller: controller,
+                    index: entry.key,
+                    frame: entry.value,
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: KeyframeRole.values
+              .map(
+                (role) => _AddFrameButton(controller: controller, role: role),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _FrameTile extends StatelessWidget {
+  const _FrameTile({
+    required this.controller,
+    required this.index,
+    required this.frame,
+  });
+
+  final AppController controller;
+  final int index;
+  final KeyframeDraft frame;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    final roleLabel = frame.role == KeyframeRole.middle
+        ? 'Middle ${form.keyframes.take(index + 1).where((item) => item.role == KeyframeRole.middle).length}'
+        : frame.role == KeyframeRole.start
+        ? 'First'
+        : 'Last';
+    return Container(
+      width: 132,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Stack(
+            children: <Widget>[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  height: 76,
+                  width: double.infinity,
+                  child: frame.asset != null
+                      ? Image.memory(frame.asset!.bytes, fit: BoxFit.cover)
+                      : Uri.tryParse(frame.source)?.scheme == 'https'
+                      ? Image.network(
+                          frame.source,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const _FrameLinkGhost(),
+                        )
+                      : const _FrameLinkGhost(),
+                ),
+              ),
+              Positioned(
+                top: 4,
+                left: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2.5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: ClawnsoleColors.plumInk.withValues(alpha: .82),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    roleLabel.toUpperCase(),
+                    style: const TextStyle(
+                      color: ClawnsoleColors.cream,
+                      fontSize: 8,
+                      letterSpacing: .8,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 3,
+                right: 3,
+                child: IconButton.filledTonal(
+                  tooltip: 'Remove frame',
+                  constraints: const BoxConstraints.tightFor(
+                    width: 26,
+                    height: 26,
+                  ),
+                  padding: EdgeInsets.zero,
+                  onPressed: () => controller.removeFrame(frame.id),
+                  icon: const Icon(Icons.close_rounded, size: 14),
+                ),
+              ),
+            ],
+          ),
+          if (frame.asset == null) ...<Widget>[
+            const SizedBox(height: 6),
+            TextFormField(
+              key: ValueKey('frame-url-${frame.id}'),
+              initialValue: frame.source,
+              onChanged: (value) =>
+                  controller.updateFrame(frame.id, source: value),
+              decoration: const InputDecoration(
+                hintText: 'https://…',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
+              ),
+              style: const TextStyle(fontSize: 10.5),
+            ),
+          ],
+          if (controller.form.usesTimedKeyframes) ...<Widget>[
+            const SizedBox(height: 6),
+            TextFormField(
+              key: ValueKey('frame-time-${frame.id}'),
+              initialValue: frame.seconds.toString(),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (value) => controller.updateFrame(
+                frame.id,
+                seconds: double.tryParse(value) ?? frame.seconds,
+              ),
+              decoration: const InputDecoration(
+                suffixText: 'sec',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
+              ),
+              style: const TextStyle(fontSize: 10.5),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FrameLinkGhost extends StatelessWidget {
+  const _FrameLinkGhost();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: ClawnsoleColors.plumInk,
+    child: const Icon(
+      Icons.link_rounded,
+      color: ClawnsoleColors.creamMuted,
+      size: 18,
+    ),
+  );
+}
+
+class _AddFrameButton extends StatelessWidget {
+  const _AddFrameButton({required this.controller, required this.role});
 
   final AppController controller;
   final KeyframeRole role;
@@ -539,64 +614,84 @@ class _FrameRoleAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = controller.canAddFrame(role);
-    final detail = switch (role) {
-      KeyframeRole.start => 'Pins the opening at 0s',
+    final label = switch (role) {
+      KeyframeRole.start => 'First frame',
+      KeyframeRole.middle => 'Middle frame',
+      KeyframeRole.end => 'Last frame',
+    };
+    final hint = switch (role) {
+      KeyframeRole.start => 'Pins the opening at 0 s',
       KeyframeRole.middle => 'Timed waypoint · repeatable',
       KeyframeRole.end => 'Pins the ending · works alone',
     };
-    return Container(
-      width: 178,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: context.colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.colors.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text(
-            role.label,
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            detail,
-            style: TextStyle(
-              color: context.colors.onSurfaceVariant,
-              fontSize: 8,
+    return Tooltip(
+      message: hint,
+      child: PopupMenuButton<String>(
+        enabled: enabled,
+        tooltip: '',
+        onSelected: (choice) {
+          if (choice == 'upload') {
+            unawaited(controller.addImageFrame(role));
+          } else {
+            controller.addUrlFrame(role);
+          }
+        },
+        itemBuilder: (context) => <PopupMenuEntry<String>>[
+          const PopupMenuItem(
+            value: 'upload',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.add_photo_alternate_rounded, size: 17),
+                SizedBox(width: 9),
+                Text('Upload an image'),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
+          const PopupMenuItem(
+            value: 'url',
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.add_link_rounded, size: 17),
+                SizedBox(width: 9),
+                Text('Paste an image URL'),
+              ],
+            ),
+          ),
+        ],
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: enabled
+                  ? context.colors.outline.withValues(alpha: .55)
+                  : context.colors.outlineVariant,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: enabled
-                      ? () => unawaited(controller.addImageFrame(role))
-                      : null,
-                  icon: const Icon(Icons.add_photo_alternate_rounded, size: 15),
-                  label: Text(
-                    enabled
-                        ? switch (role) {
-                            KeyframeRole.start => 'Add first',
-                            KeyframeRole.middle => 'Add middle',
-                            KeyframeRole.end => 'Add last',
-                          }
-                        : 'Added',
-                    style: const TextStyle(fontSize: 9),
-                  ),
-                ),
+              Icon(
+                enabled ? Icons.add_rounded : Icons.check_rounded,
+                size: 15,
+                color: enabled
+                    ? context.colors.primary
+                    : context.colors.onSurfaceVariant,
               ),
               const SizedBox(width: 5),
-              IconButton.outlined(
-                tooltip: 'Add ${role.label.toLowerCase()} URL',
-                onPressed: enabled ? () => controller.addUrlFrame(role) : null,
-                icon: const Icon(Icons.add_link_rounded, size: 16),
+              Text(
+                enabled ? label : '$label added',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: enabled
+                      ? context.colors.onSurface
+                      : context.colors.onSurfaceVariant,
+                ),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -611,7 +706,7 @@ class _SourceEditor extends StatelessWidget {
     required this.url,
     required this.onPick,
     required this.onUrl,
-    required this.onClear,
+    required this.onDismiss,
     required this.formRevision,
   });
 
@@ -622,12 +717,12 @@ class _SourceEditor extends StatelessWidget {
   final String url;
   final Future<void> Function() onPick;
   final ValueChanged<String> onUrl;
-  final VoidCallback onClear;
+  final VoidCallback onDismiss;
   final int formRevision;
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.all(15),
     decoration: BoxDecoration(
       color: context.colors.surfaceContainerLow,
       borderRadius: BorderRadius.circular(14),
@@ -638,19 +733,35 @@ class _SourceEditor extends StatelessWidget {
       children: <Widget>[
         Row(
           children: <Widget>[
-            Icon(icon, color: context.colors.primary),
-            const SizedBox(width: 9),
+            Icon(icon, size: 20, color: context.tokens.brass),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
                     title,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                  Text(description, style: const TextStyle(fontSize: 9)),
+                  const SizedBox(height: 2),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.35,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
                 ],
               ),
+            ),
+            IconButton(
+              tooltip: 'Remove this source',
+              onPressed: onDismiss,
+              icon: const Icon(Icons.close_rounded, size: 18),
             ),
           ],
         ),
@@ -669,24 +780,31 @@ class _SourceEditor extends StatelessWidget {
             ),
             subtitle: Text(formatBytes(asset!.bytes.length)),
             trailing: IconButton(
-              onPressed: onClear,
+              tooltip: 'Clear file',
+              onPressed: onDismiss,
               icon: const Icon(Icons.close_rounded),
             ),
           )
         else
           Wrap(
-            spacing: 9,
-            runSpacing: 9,
+            spacing: 10,
+            runSpacing: 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               OutlinedButton.icon(
                 onPressed: () => unawaited(onPick()),
-                icon: const Icon(Icons.upload_file_rounded),
+                icon: const Icon(Icons.upload_file_rounded, size: 16),
                 label: const Text('Choose file'),
               ),
-              const Text('or', style: TextStyle(fontSize: 10)),
+              Text(
+                'or',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ),
               SizedBox(
-                width: 290,
+                width: 300,
                 child: TextFormField(
                   key: ValueKey('$title-url-$formRevision'),
                   initialValue: url,
@@ -694,7 +812,9 @@ class _SourceEditor extends StatelessWidget {
                   decoration: const InputDecoration(
                     prefixIcon: Icon(Icons.link_rounded, size: 17),
                     hintText: 'Paste a hosted URL',
+                    isDense: true,
                   ),
+                  style: const TextStyle(fontSize: 12.5),
                 ),
               ),
             ],
@@ -712,159 +832,54 @@ class _SettingsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final columns = constraints.maxWidth > 610;
+      final columns = constraints.maxWidth > 640;
       final first = <Widget>[
-        const _FieldLabel('Frame', icon: Icons.crop_rounded),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          key: ValueKey(controller.form.aspectRatio),
-          initialValue: controller.form.aspectRatio,
-          items: bflProvider.aspectRatios
-              .map(
-                (ratio) => DropdownMenuItem(value: ratio, child: Text(ratio)),
-              )
-              .toList(),
-          onChanged: controller.form.mode == VideoMode.draftEnhance
-              ? null
-              : (value) {
-                  if (value != null) {
-                    controller.updateForm((form) => form.aspectRatio = value);
-                  }
-                },
-          decoration: const InputDecoration(
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: <Widget>[
-            const Expanded(
-              child: _FieldLabel('Duration', icon: Icons.timelapse_rounded),
-            ),
-            FilterChip(
-              label: const Text('Auto'),
-              selected: controller.form.autoDuration,
-              onSelected:
-                  controller.form.mode == VideoMode.draftEnhance ||
-                      controller.form.requiresFixedDuration
-                  ? null
-                  : (value) => controller.updateForm(
-                      (form) => form.autoDuration = value,
-                    ),
-            ),
-          ],
-        ),
-        Slider(
-          min: bflProvider.minDuration.toDouble(),
-          max: bflProvider.maxDuration.toDouble(),
-          divisions: bflProvider.maxDuration - bflProvider.minDuration,
-          label: '${controller.form.durationSeconds}s',
-          value: controller.form.durationSeconds.toDouble(),
-          onChanged:
-              controller.form.autoDuration ||
-                  controller.form.mode == VideoMode.draftEnhance
-              ? null
-              : (value) => controller.setDurationSeconds(value.round()),
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: <Widget>[
-            const Text('5 sec', style: TextStyle(fontSize: 9)),
-            Text(
-              controller.form.autoDuration
-                  ? 'Provider chooses'
-                  : '${controller.form.durationSeconds} sec',
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
-            ),
-            const Text('20 sec', style: TextStyle(fontSize: 9)),
-          ],
-        ),
+        const FieldLabel('Frame', icon: Icons.crop_rounded),
+        const SizedBox(height: 10),
+        _RatioStrip(controller: controller),
+        const SizedBox(height: 20),
+        _DurationControl(controller: controller),
       ];
       final second = <Widget>[
-        const _FieldLabel('Finish', icon: Icons.high_quality_rounded),
+        const FieldLabel('Finish', icon: Icons.high_quality_rounded),
+        const SizedBox(height: 10),
+        _ResolutionRow(controller: controller),
         const SizedBox(height: 8),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: _ResolutionButton(
-                label: 'HD',
-                detail: 'Fast native render',
-                active: controller.form.resolution == 'hd',
-                onTap: () =>
-                    controller.updateForm((form) => form.resolution = 'hd'),
-              ),
-            ),
-            const SizedBox(width: 7),
-            Expanded(
-              child: _ResolutionButton(
-                label: 'Full HD',
-                detail: 'Upsampled finish',
-                active: controller.form.resolution == 'fhd',
-                enabled: !controller.form.draft,
-                onTap: () =>
-                    controller.updateForm((form) => form.resolution = 'fhd'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (controller.form.mode != VideoMode.draftEnhance) ...<Widget>[
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Synchronized audio',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
-            ),
-            subtitle: const Text(
-              'Dialogue, ambience, and sound',
-              style: TextStyle(fontSize: 9),
-            ),
-            value: controller.form.generateAudio,
-            onChanged: (value) =>
-                controller.updateForm((form) => form.generateAudio = value),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Synchronized audio',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Fast draft',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
-            ),
-            subtitle: const Text(
-              'HD preview now, enhance later',
-              style: TextStyle(fontSize: 9),
-            ),
-            value: controller.form.draft,
-            onChanged: (value) =>
-                controller.updateForm((form) => form.draft = value),
+          subtitle: const Text(
+            'Dialogue, ambience, and sound',
+            style: TextStyle(fontSize: 11),
           ),
-        ],
-        Row(
-          children: <Widget>[
-            const Expanded(
-              child: _FieldLabel(
-                'Safety tolerance',
-                icon: Icons.shield_outlined,
-              ),
-            ),
-            Text(
-              '${controller.form.safetyTolerance} / 4',
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900),
-            ),
-          ],
+          value: controller.form.generateAudio,
+          onChanged: (value) =>
+              controller.updateForm((form) => form.generateAudio = value),
         ),
-        Slider(
-          min: 0,
-          max: 4,
-          divisions: 4,
-          value: controller.form.safetyTolerance.toDouble(),
-          onChanged: (value) => controller.updateForm(
-            (form) => form.safetyTolerance = value.round(),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Fast draft',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
+          subtitle: const Text(
+            'HD preview now, enhance later',
+            style: TextStyle(fontSize: 11),
+          ),
+          value: controller.form.draft,
+          onChanged: (value) =>
+              controller.updateForm((form) => form.draft = value),
         ),
+        const SizedBox(height: 8),
+        _SafetyControl(controller: controller),
       ];
       if (!columns) {
         return Column(
-          children: <Widget>[...first, const SizedBox(height: 20), ...second],
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[...first, const SizedBox(height: 22), ...second],
         );
       }
       return Row(
@@ -876,7 +891,7 @@ class _SettingsGrid extends StatelessWidget {
               children: first,
             ),
           ),
-          const SizedBox(width: 22),
+          const SizedBox(width: 26),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -886,6 +901,264 @@ class _SettingsGrid extends StatelessWidget {
         ],
       );
     },
+  );
+}
+
+class _EnhanceSettings extends StatelessWidget {
+  const _EnhanceSettings({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth > 640;
+      final finish = <Widget>[
+        const FieldLabel('Finish', icon: Icons.high_quality_rounded),
+        const SizedBox(height: 10),
+        _ResolutionRow(controller: controller),
+      ];
+      final safety = <Widget>[_SafetyControl(controller: controller)];
+      if (!columns) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[...finish, const SizedBox(height: 20), ...safety],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: finish,
+            ),
+          ),
+          const SizedBox(width: 26),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: safety,
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+class _RatioStrip extends StatelessWidget {
+  const _RatioStrip({required this.controller});
+
+  final AppController controller;
+
+  static const _hints = <String, String>{
+    'auto': 'Provider chooses the frame',
+    '21:9': 'Cinema wide',
+    '2:1': 'Panoramic',
+    '16:9': 'Widescreen',
+    '4:3': 'Classic',
+    '1:1': 'Square',
+    '3:4': 'Tall',
+    '9:16': 'Vertical',
+  };
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 7,
+    runSpacing: 7,
+    children: bflProvider.aspectRatios.map((ratio) {
+      final selected = controller.form.aspectRatio == ratio;
+      return Tooltip(
+        message: _hints[ratio] ?? ratio,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(11),
+          onTap: () =>
+              controller.updateForm((form) => form.aspectRatio = ratio),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: 58,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: selected
+                  ? context.colors.primary
+                  : context.colors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(
+                color: selected
+                    ? context.colors.primary
+                    : context.colors.outlineVariant,
+              ),
+            ),
+            child: Column(
+              children: <Widget>[
+                SizedBox(
+                  width: 30,
+                  height: 20,
+                  child: Center(
+                    child: _RatioGlyph(
+                      ratio: ratio,
+                      color: selected
+                          ? context.colors.onPrimary
+                          : context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  ratio == 'auto' ? 'Auto' : ratio,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: selected
+                        ? context.colors.onPrimary
+                        : context.colors.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }).toList(),
+  );
+}
+
+class _RatioGlyph extends StatelessWidget {
+  const _RatioGlyph({required this.ratio, required this.color});
+
+  final String ratio;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (ratio == 'auto') {
+      return Icon(Icons.crop_free_rounded, size: 17, color: color);
+    }
+    final parts = ratio.split(':');
+    final aspect = double.parse(parts[0]) / double.parse(parts[1]);
+    final width = aspect >= 1 ? 28.0 : 18.0 * aspect;
+    final height = aspect >= 1 ? 28.0 / aspect : 18.0;
+    return Container(
+      width: width,
+      height: height.clamp(9, 18),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.5),
+        borderRadius: BorderRadius.circular(3.5),
+      ),
+    );
+  }
+}
+
+class _DurationControl extends StatelessWidget {
+  const _DurationControl({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          'Duration',
+          icon: Icons.timelapse_rounded,
+          trailing: TogglePill(
+            label: 'Auto',
+            selected: form.autoDuration,
+            onChanged: form.requiresFixedDuration
+                ? null
+                : (value) => controller.updateForm(
+                    (form) => form.autoDuration = value,
+                  ),
+          ),
+        ),
+        Slider(
+          min: bflProvider.minDuration.toDouble(),
+          max: bflProvider.maxDuration.toDouble(),
+          divisions: bflProvider.maxDuration - bflProvider.minDuration,
+          label: '${form.durationSeconds} s',
+          value: form.durationSeconds.toDouble(),
+          onChanged: (value) => controller.setDurationSeconds(value.round()),
+        ),
+        Row(
+          children: <Widget>[
+            Text(
+              '${bflProvider.minDuration} s',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                form.autoDuration
+                    ? 'Auto — the provider chooses'
+                    : '${form.durationSeconds} seconds',
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              '${bflProvider.maxDuration} s',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        if (form.requiresFixedDuration)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'This keyframe layout needs a fixed duration.',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ResolutionRow extends StatelessWidget {
+  const _ResolutionRow({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Expanded(
+        child: _ResolutionButton(
+          label: 'HD',
+          detail: 'Fast native render',
+          active: controller.form.resolution == 'hd',
+          onTap: () => controller.updateForm((form) => form.resolution = 'hd'),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: _ResolutionButton(
+          label: 'Full HD',
+          detail: 'Upsampled finish',
+          active: controller.form.resolution == 'fhd',
+          enabled:
+              !controller.form.draft ||
+              controller.form.mode == VideoMode.draftEnhance,
+          onTap: () => controller.updateForm((form) => form.resolution = 'fhd'),
+        ),
+      ),
+    ],
   );
 }
 
@@ -906,12 +1179,13 @@ class _ResolutionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Opacity(
-    opacity: enabled ? 1 : .42,
+    opacity: enabled ? 1 : .45,
     child: InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(11),
-      child: Container(
-        padding: const EdgeInsets.all(11),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
         decoration: BoxDecoration(
           color: active
               ? context.colors.primary
@@ -931,22 +1205,55 @@ class _ResolutionButton extends StatelessWidget {
                 color: active
                     ? context.colors.onPrimary
                     : context.colors.onSurface,
-                fontWeight: FontWeight.w900,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
               ),
             ),
+            const SizedBox(height: 2),
             Text(
               detail,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: active
-                    ? context.colors.onPrimary.withValues(alpha: .72)
+                    ? context.colors.onPrimary.withValues(alpha: .78)
                     : context.colors.onSurfaceVariant,
-                fontSize: 8,
+                fontSize: 10,
               ),
             ),
           ],
         ),
       ),
     ),
+  );
+}
+
+class _SafetyControl extends StatelessWidget {
+  const _SafetyControl({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      FieldLabel(
+        'Safety tolerance',
+        icon: Icons.shield_outlined,
+        trailing: Text(
+          '${controller.form.safetyTolerance} / 4',
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+        ),
+      ),
+      Slider(
+        min: 0,
+        max: 4,
+        divisions: 4,
+        value: controller.form.safetyTolerance.toDouble(),
+        onChanged: (value) => controller.updateForm(
+          (form) => form.safetyTolerance = value.round(),
+        ),
+      ),
+    ],
   );
 }
 
@@ -957,6 +1264,7 @@ class _CostPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = context.tokens;
     final estimate = controller.currentEstimate;
     final afterMin = controller.credits == null
         ? null
@@ -968,12 +1276,10 @@ class _CostPreview extends StatelessWidget {
         : (controller.credits! - estimate.minimum)
               .clamp(0, double.infinity)
               .toDouble();
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: ClawnsoleColors.rail,
-        borderRadius: BorderRadius.circular(15),
-      ),
+    return TexturePanel(
+      surface: PanelSurface.hunterFelt,
+      stitched: true,
+      padding: const EdgeInsets.all(18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -986,36 +1292,44 @@ class _CostPreview extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  const CircleAvatar(
-                    radius: 19,
-                    backgroundColor: ClawnsoleColors.cobalt,
+                  Container(
+                    width: 38,
+                    height: 38,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: tokens.panelBrass),
+                      color: Colors.white.withValues(alpha: .05),
+                    ),
                     child: Icon(
                       Icons.toll_rounded,
-                      color: Colors.white,
-                      size: 18,
+                      color: tokens.panelBrass,
+                      size: 17,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 220),
+                    constraints: const BoxConstraints(maxWidth: 230),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        const Text(
-                          'ESTIMATED PROVIDER CHARGE',
+                        Text(
+                          'ESTIMATED CHARGE',
                           style: TextStyle(
-                            color: Colors.white54,
-                            fontSize: 8,
-                            letterSpacing: 1.2,
-                            fontWeight: FontWeight.w900,
+                            color: tokens.onPanelMuted,
+                            fontSize: 9,
+                            letterSpacing: 1.6,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
                           '${formatCreditRange(estimate.minimum, estimate.maximum)} credits',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
+                          style: TextStyle(
+                            fontFamily: 'Fraunces',
+                            color: tokens.onPanel,
+                            fontSize: 21,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
@@ -1025,16 +1339,18 @@ class _CostPreview extends StatelessWidget {
               ),
               Text(
                 formatUsdRange(estimate.minimum, estimate.maximum),
-                style: const TextStyle(
-                  color: Color(0xFFA8B9FF),
+                style: TextStyle(
+                  fontFamily: 'Fraunces',
+                  color: tokens.panelBrass,
                   fontSize: 19,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 13),
-          const Divider(color: Colors.white12),
+          const SizedBox(height: 14),
+          Divider(color: tokens.onPanel.withValues(alpha: .14)),
+          const SizedBox(height: 11),
           Row(
             children: <Widget>[
               Expanded(
@@ -1060,18 +1376,23 @@ class _CostPreview extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
-                '${controller.form.draft ? 'Drafts use the selected provider’s HD draft tier. ' : ''}'
-                '${estimate.basis == 'provider-history' ? 'Calibrated from this provider’s exact charges.' : 'Based on the selected provider’s published per-second rate.'} '
+                '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
+                '${estimate.basis == 'provider-history' ? 'Calibrated from this provider’s exact charges.' : 'Based on the provider’s published per-second rate.'} '
                 'The exact charge replaces this estimate on submit.',
-                style: const TextStyle(color: Colors.white60, fontSize: 9),
+                style: TextStyle(color: tokens.onPanelMuted, fontSize: 10.5),
               ),
               TextButton(
                 onPressed: () =>
                     unawaited(launchUrl(Uri.parse(bflProvider.pricingUrl))),
-                child: const Text(
-                  'Rate card ↗',
-                  style: TextStyle(color: Color(0xFFA8B9FF), fontSize: 9),
+                style: TextButton.styleFrom(
+                  foregroundColor: tokens.panelBrass,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  textStyle: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
+                child: const Text('Rate card ↗'),
               ),
             ],
           ),
@@ -1091,18 +1412,109 @@ class _BalanceLine extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: <Widget>[
-      Text(label, style: const TextStyle(color: Colors.white54, fontSize: 8)),
-      const SizedBox(height: 2),
+      Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: context.tokens.onPanelMuted,
+          fontSize: 8.5,
+          letterSpacing: 1.2,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 3),
       Text(
         value,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
+        style: TextStyle(
+          color: context.tokens.onPanel,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
         ),
       ),
     ],
   );
+}
+
+class _ComposerFooter extends StatelessWidget {
+  const _ComposerFooter({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    final status = Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (controller.hasApiKey)
+              ClawMark(size: 19, color: context.tokens.brass)
+            else
+              Icon(
+                Icons.key_off_rounded,
+                color: context.colors.error,
+                size: 18,
+              ),
+            const SizedBox(width: 9),
+            Text(
+              controller.hasApiKey ? 'Ready when you are' : 'API key needed',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+            ),
+          ],
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: context.colors.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: context.colors.outlineVariant),
+          ),
+          child: Text(
+            form.mode.label,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+    final generate = FilledButton.icon(
+      onPressed: controller.submitting
+          ? null
+          : () => unawaited(controller.submit()),
+      icon: controller.submitting
+          ? SizedBox.square(
+              dimension: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: context.colors.onPrimary,
+              ),
+            )
+          : const Icon(Icons.play_arrow_rounded, size: 20),
+      label: const Text('Generate video'),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 480) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[status, const SizedBox(height: 12), generate],
+          );
+        }
+        return Row(
+          children: <Widget>[
+            Expanded(child: status),
+            generate,
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _RecentWork extends StatelessWidget {
@@ -1121,7 +1533,7 @@ class _RecentWork extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 const Eyebrow('On the branch'),
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Text(
                   'Recent work',
                   style: Theme.of(context).textTheme.headlineMedium,
@@ -1140,17 +1552,20 @@ class _RecentWork extends StatelessWidget {
         SurfaceCard(
           child: Column(
             children: <Widget>[
-              ClawMark(size: 42, color: context.colors.primary),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+              ClawMark(size: 40, color: context.tokens.brass),
+              const SizedBox(height: 13),
               Text(
                 'A quiet branch.',
-                style: Theme.of(context).textTheme.titleLarge,
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-              const SizedBox(height: 5),
-              const Text(
+              const SizedBox(height: 6),
+              Text(
                 'Your generations will gather here with live progress and playback.',
                 textAlign: TextAlign.center,
+                style: TextStyle(color: context.colors.onSurfaceVariant),
               ),
+              const SizedBox(height: 10),
             ],
           ),
         )
@@ -1159,14 +1574,14 @@ class _RecentWork extends StatelessWidget {
             .take(5)
             .map(
               (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 9),
+                padding: const EdgeInsets.only(bottom: 12),
                 child: ActivityCard(controller: controller, item: item),
               ),
             ),
-      const SizedBox(height: 4),
+      const SizedBox(height: 2),
       SurfaceCard(
         color: context.colors.surfaceContainer,
-        padding: const EdgeInsets.all(13),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Wrap(
           spacing: 18,
           runSpacing: 8,
@@ -1195,12 +1610,17 @@ class _Summary extends StatelessWidget {
       Text(
         value,
         style: TextStyle(
-          fontWeight: FontWeight.w900,
-          color: context.colors.primary,
+          fontFamily: 'Fraunces',
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: context.colors.onSurface,
         ),
       ),
-      const SizedBox(width: 4),
-      Text(label, style: const TextStyle(fontSize: 9)),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: TextStyle(fontSize: 11, color: context.colors.onSurfaceVariant),
+      ),
     ],
   );
 }

@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 ELECTRON_PACKAGE = ROOT / "electron" / "package.json"
 ELECTRON_LOCK = ROOT / "electron" / "package-lock.json"
 FLUTTER_PACKAGE = ROOT / "flutter" / "pubspec.yaml"
+FLUTTER_VERSION_SOURCE = ROOT / "flutter" / "lib" / "core" / "app_version.dart"
 VERSION_PATTERN = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.MULTILINE)
+SOURCE_VERSION_PATTERN = re.compile(r"const clawnsoleVersion = '(\d+)\.(\d+)\.(\d+)';")
 
 
 def versions() -> tuple[str, int]:
@@ -85,6 +87,14 @@ def main() -> None:
     source = FLUTTER_PACKAGE.read_text()
     source = VERSION_PATTERN.sub(f"version: {version}+{build + 1}", source, count=1)
     FLUTTER_PACKAGE.write_text(source)
+
+    dart_source = FLUTTER_VERSION_SOURCE.read_text()
+    if not SOURCE_VERSION_PATTERN.search(dart_source):
+        raise SystemExit("error: lib/core/app_version.dart has no version constant")
+    dart_source = SOURCE_VERSION_PATTERN.sub(
+        f"const clawnsoleVersion = '{version}';", dart_source, count=1
+    )
+    FLUTTER_VERSION_SOURCE.write_text(dart_source)
 
     emit(version, build + 1)
     print(f"{version}+{build + 1}")
