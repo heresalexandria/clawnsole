@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
+import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
@@ -10,6 +11,7 @@ import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
+import 'package:clawnsole/ui/create_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -439,6 +441,228 @@ void main() {
       controller.dispose();
     },
   );
+
+  test('reuse recreates the exact stored request for every mode', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    final now = DateTime.utc(2026, 8, 15);
+    const config = GenerationConfig(
+      aspectRatio: '21:9',
+      duration: 12,
+      resolution: 'fhd',
+      generateAudio: false,
+      safetyTolerance: 1,
+      draft: false,
+    );
+    Generation generation(
+      VideoMode mode, {
+      GenerationConfig generationConfig = config,
+    }) => Generation(
+      localId: mode.name,
+      status: 'Ready',
+      prompt: 'Restore this exact direction.',
+      mode: mode,
+      config: generationConfig,
+      createdAt: now,
+      updatedAt: now,
+    );
+    const common = <String, Object?>{
+      'prompt': 'Restore this exact direction.',
+      'aspect_ratio': '21:9',
+      'duration': 12,
+      'resolution': 'fhd',
+      'version': 'latest',
+      'generate_audio': false,
+      'safety_tolerance': 1,
+      'draft': false,
+    };
+
+    controller.updateForm((form) => form.prompt = 'Stale editor text.');
+    await controller.reuse(generation(VideoMode.t2v));
+    expect(controller.form.prompt, 'Restore this exact direction.');
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      ...common,
+      'mode': 't2v',
+    });
+
+    const firstFrame = 'https://cdn.bfl.ai/first.png';
+    const lastFrame = 'https://cdn.bfl.ai/last.png';
+    await controller.reuse(
+      generation(
+        VideoMode.i2v,
+        generationConfig: const GenerationConfig(
+          aspectRatio: '21:9',
+          duration: 12,
+          resolution: 'fhd',
+          generateAudio: false,
+          safetyTolerance: 1,
+          draft: false,
+          exactTiming: true,
+          keyframes: <KeyframeLabel>[
+            KeyframeLabel(
+              label: 'first.png',
+              role: KeyframeRole.start,
+              seconds: 0,
+              source: AssetReference(
+                kind: 'remote',
+                value: firstFrame,
+                label: 'first.png',
+              ),
+            ),
+            KeyframeLabel(
+              label: 'last.png',
+              role: KeyframeRole.end,
+              seconds: 12,
+              source: AssetReference(
+                kind: 'remote',
+                value: lastFrame,
+                label: 'last.png',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      ...common,
+      'mode': 'i2v',
+      'keyframes': <Object?>[
+        <Object?>[0.0, firstFrame],
+        <Object?>[12.0, lastFrame],
+      ],
+    });
+
+    const sourceVideo = 'https://cdn.bfl.ai/source.mp4';
+    await controller.reuse(
+      generation(
+        VideoMode.v2v,
+        generationConfig: const GenerationConfig(
+          aspectRatio: '21:9',
+          duration: 12,
+          resolution: 'fhd',
+          generateAudio: false,
+          safetyTolerance: 1,
+          draft: false,
+          source: AssetReference(
+            kind: 'remote',
+            value: sourceVideo,
+            label: 'source.mp4',
+          ),
+        ),
+      ),
+    );
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      ...common,
+      'mode': 'v2v',
+      'start_video': sourceVideo,
+    });
+
+    const draftCache = 'https://cdn.bfl.ai/draft-cache.zip';
+    await controller.reuse(
+      generation(
+        VideoMode.draftEnhance,
+        generationConfig: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'fhd',
+          generateAudio: true,
+          safetyTolerance: 3,
+          draft: false,
+          source: AssetReference(
+            kind: 'remote',
+            value: draftCache,
+            label: 'draft-cache.zip',
+          ),
+        ),
+      ),
+    );
+    expect(controller.form.mode, VideoMode.draftEnhance);
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      'mode': 'draft_enhance',
+      'draft_cache': draftCache,
+      'resolution': 'fhd',
+      'safety_tolerance': 3,
+    });
+    controller.dispose();
+  });
+
+  testWidgets('Reuse inputs replaces the visible prompt on desktop', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 15);
+    final item = Generation(
+      localId: 'desktop-reuse',
+      status: 'Ready',
+      prompt: 'The restored desktop prompt.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '21:9',
+        duration: 17,
+        resolution: 'fhd',
+        generateAudio: false,
+        safetyTolerance: 1,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        LocalSnapshot(
+          generations: <Generation>[item],
+          preferences: const AppPreferences(),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 1, records: 1),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Finder promptField() => find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    await tester.enterText(promptField(), 'Stale visible desktop prompt.');
+    await tester.ensureVisible(find.text('Reuse inputs'));
+    await tester.tap(find.text('Reuse inputs'));
+    await tester.pumpAndSettle();
+
+    final editable = tester.widget<EditableText>(
+      find.descendant(of: promptField(), matching: find.byType(EditableText)),
+    );
+    expect(editable.controller.text, 'The restored desktop prompt.');
+    expect(controller.form.prompt, 'The restored desktop prompt.');
+    expect(controller.form.mode, VideoMode.t2v);
+    expect(controller.form.aspectRatio, '21:9');
+    expect(controller.form.durationSeconds, 17);
+    expect(controller.form.resolution, 'fhd');
+    expect(controller.form.generateAudio, isFalse);
+    expect(controller.form.safetyTolerance, 1);
+    controller.dispose();
+  });
 
   test('retained videos keep an AVPlayer-compatible extension', () {
     expect(retainedAssetExtension('video/mp4', 'result'), '.mp4');
