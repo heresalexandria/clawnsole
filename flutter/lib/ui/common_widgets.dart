@@ -8,6 +8,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'formatters.dart';
 import 'generation_video.dart';
+import 'video_save_sheet.dart';
 
 class Eyebrow extends StatelessWidget {
   const Eyebrow(this.text, {super.key, this.icon});
@@ -449,9 +450,13 @@ class _GenerationMediaState extends State<GenerationMedia> {
       }
       return GenerationVideo(
         uri: snapshot.data!,
-        onDownload: () async {
+        supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+        onDownload: (destination) async {
           try {
-            await widget.controller.saveVideo(widget.item);
+            await widget.controller.saveVideo(
+              widget.item,
+              destination: destination,
+            );
           } on Object catch (error) {
             widget.controller.showNotice(error.toString());
           }
@@ -720,13 +725,9 @@ class ActivityCard extends StatelessWidget {
                   children: <Widget>[
                     if (hasMedia)
                       FilledButton.tonalIcon(
-                        onPressed: () async {
-                          try {
-                            await controller.saveVideo(item);
-                          } on Object catch (error) {
-                            controller.showNotice(error.toString());
-                          }
-                        },
+                        onPressed: () => unawaited(
+                          saveGenerationVideo(context, controller, item),
+                        ),
                         icon: const Icon(Icons.download_rounded, size: 15),
                         label: const Text('Save'),
                       ),

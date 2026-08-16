@@ -5,9 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../app/app_theme.dart';
+import '../app/app_controller.dart';
 import 'video_controller.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
+import 'video_save_sheet.dart';
 
 class GenerationVideo extends StatefulWidget {
   const GenerationVideo({
@@ -19,15 +21,17 @@ class GenerationVideo extends StatefulWidget {
     this.autoplay = false,
     this.controllerFactory,
     this.frameLoader,
+    this.supportsPhotos = false,
   });
 
   final Uri uri;
-  final Future<void> Function() onDownload;
+  final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool fullscreen;
   final Duration initialPosition;
   final bool autoplay;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
+  final bool supportsPhotos;
 
   @override
   State<GenerationVideo> createState() => _GenerationVideoState();
@@ -102,9 +106,14 @@ class _GenerationVideoState extends State<GenerationVideo> {
 
   Future<void> _download() async {
     if (_saving) return;
+    final destination = await chooseVideoSaveDestination(
+      context,
+      supportsPhotos: widget.supportsPhotos,
+    );
+    if (destination == null || !mounted) return;
     setState(() => _saving = true);
     try {
-      await widget.onDownload();
+      await widget.onDownload(destination);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -129,6 +138,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
               autoplay: wasPlaying,
               controllerFactory: widget.controllerFactory,
               frameLoader: widget.frameLoader,
+              supportsPhotos: widget.supportsPhotos,
             ),
           ),
         ),

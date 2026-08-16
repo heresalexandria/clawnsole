@@ -6,6 +6,7 @@ import 'web_gateway.dart';
 
 abstract interface class AppGateway {
   bool get usesCompanion;
+  bool get supportsPhotoLibrarySave;
   String get persistenceDescription;
 
   Future<LocalSnapshot> load();
@@ -24,6 +25,7 @@ abstract interface class AppGateway {
   Future<Uint8List> readAsset(AssetReference reference);
   Uri mediaUri(String source);
   Future<Uint8List> downloadMedia(String source);
+  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName);
 }
 
 AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();

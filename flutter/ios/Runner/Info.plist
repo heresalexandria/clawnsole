@@ -28,6 +28,8 @@
 	<false/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Clawnsole uses selected images as FLUX video keyframes.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Clawnsole saves generated videos to your Photos library when you choose Save to Photos.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>

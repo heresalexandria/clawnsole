@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/video_frame_timeline.dart';
 import 'package:flutter/material.dart';
@@ -95,16 +96,51 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets('download offers Photos first and returns that destination', (
+    tester,
+  ) async {
+    VideoSaveDestination? destination;
+    await tester.pumpWidget(
+      _testApp(
+        supportsPhotos: true,
+        onDownload: (value) async => destination = value,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Download video…'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save to Photos'), findsOneWidget);
+    expect(find.text('Add the video to your camera roll'), findsOneWidget);
+    expect(find.text('Save to Files'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Save to Photos')).dy,
+      lessThan(tester.getTopLeft(find.text('Save to Files')).dy),
+    );
+
+    await tester.tap(find.text('Save to Photos'));
+    await tester.pumpAndSettle();
+    expect(destination, VideoSaveDestination.photos);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
 }
 
-Widget _testApp() => MaterialApp(
+Widget _testApp({
+  bool supportsPhotos = false,
+  Future<void> Function(VideoSaveDestination)? onDownload,
+}) => MaterialApp(
   home: Scaffold(
     body: SizedBox(
       width: 640,
       height: 360,
       child: GenerationVideo(
         uri: Uri.parse('https://example.com/test.mp4'),
-        onDownload: () async {},
+        onDownload: onDownload ?? (_) async {},
+        supportsPhotos: supportsPhotos,
         frameLoader: (_, _) async => null,
       ),
     ),
