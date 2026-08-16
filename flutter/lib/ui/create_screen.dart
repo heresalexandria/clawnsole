@@ -216,7 +216,7 @@ class _Composer extends StatelessWidget {
                 const _FieldLabel('Direction', icon: Icons.edit_note_rounded),
                 const SizedBox(height: 8),
                 TextFormField(
-                  key: const ValueKey('generation-prompt'),
+                  key: ValueKey('generation-prompt-${controller.formRevision}'),
                   initialValue: controller.form.prompt,
                   minLines: 5,
                   maxLines: 9,
@@ -249,6 +249,7 @@ class _Composer extends StatelessWidget {
                     form.videoAsset = null;
                     form.videoUrl = '';
                   }),
+                  formRevision: controller.formRevision,
                 ),
               if (controller.form.mode == VideoMode.draftEnhance)
                 _SourceEditor(
@@ -265,6 +266,7 @@ class _Composer extends StatelessWidget {
                     form.draftAsset = null;
                     form.draftUrl = '';
                   }),
+                  formRevision: controller.formRevision,
                 ),
               if (controller.form.mode != VideoMode.t2v)
                 const SizedBox(height: 18),
@@ -610,6 +612,7 @@ class _SourceEditor extends StatelessWidget {
     required this.onPick,
     required this.onUrl,
     required this.onClear,
+    required this.formRevision,
   });
 
   final String title;
@@ -620,6 +623,7 @@ class _SourceEditor extends StatelessWidget {
   final Future<void> Function() onPick;
   final ValueChanged<String> onUrl;
   final VoidCallback onClear;
+  final int formRevision;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -684,7 +688,7 @@ class _SourceEditor extends StatelessWidget {
               SizedBox(
                 width: 290,
                 child: TextFormField(
-                  key: ValueKey('$title-url'),
+                  key: ValueKey('$title-url-$formRevision'),
                   initialValue: url,
                   onChanged: onUrl,
                   decoration: const InputDecoration(
