@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#211720">
+    <meta
+      name="description"
+      content="Clawnsole privacy policy: local project storage, direct provider connections, and no developer-operated cloud database."
+    >
+    <title>Privacy policy — Clawnsole</title>
+    <link rel="stylesheet" href="../assets/site.css">
+  </head>
+  <body class="privacy-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="../" aria-label="Clawnsole home">
+        <span class="wordmark-mark" aria-hidden="true">C</span>
+        <span>Clawnsole</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="../#features">Features</a>
+        <a href="../#screenshots">Screenshots</a>
+        <a href="./" aria-current="page">Privacy</a>
+      </nav>
+      <a
+        class="button button-small"
+        href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
+      >
+        Download
+      </a>
+    </header>
+
+    <main id="main" class="policy-shell">
+      <header class="policy-hero">
+        <p class="eyebrow">Clawnsole privacy policy</p>
+        <h1>Privacy without a hidden backend.</h1>
+        <p class="policy-intro">
+          Clawnsole is a local-first client for third-party video generation
+          services. Its developer does not operate an account system, analytics
+          service, advertising network, or cloud database for the app.
+        </p>
+        <p class="policy-date">Effective August 16, 2026</p>
+      </header>
+
+      <section class="policy-summary" aria-label="Privacy summary">
+        <article>
+          <span aria-hidden="true">01</span>
+          <h2>Stored locally</h2>
+          <p>Your key, settings, inputs, history, and retained videos live in Clawnsole’s local app storage.</p>
+        </article>
+        <article>
+          <span aria-hidden="true">02</span>
+          <h2>Sent deliberately</h2>
+          <p>Prompts and selected media leave the device only when you ask a connected provider to perform a task.</p>
+        </article>
+        <article>
+          <span aria-hidden="true">03</span>
+          <h2>No developer cloud</h2>
+          <p>Clawnsole’s developer does not receive or persist your keys, prompts, media, or project history.</p>
+        </article>
+      </section>
+
+      <div class="policy-layout">
+        <aside class="policy-nav" aria-label="Policy sections">
+          <strong>On this page</strong>
+          <a href="#local-data">Local data</a>
+          <a href="#provider-data">Provider processing</a>
+          <a href="#network">Other network requests</a>
+          <a href="#developer-data">Developer collection</a>
+          <a href="#choices">Your choices</a>
+          <a href="#security">Security and retention</a>
+          <a href="#changes">Changes and contact</a>
+        </aside>
+
+        <article class="policy-content">
+          <section id="local-data">
+            <p class="eyebrow">On your device</p>
+            <h2>Data stored locally</h2>
+            <p>
+              Clawnsole stores the information needed to provide its features in
+              the app’s private local storage. Depending on how you use the app,
+              this can include:
+            </p>
+            <ul>
+              <li>your selected provider and API key;</li>
+              <li>prompts, generation settings, provider job identifiers, status, errors, and credit usage;</li>
+              <li>reference images, source video, generated video, and local file references; and</li>
+              <li>appearance, retention, and other app preferences.</li>
+            </ul>
+            <p>
+              Clawnsole has no sync service. Local data is not uploaded to a
+              Clawnsole account or developer-operated cloud. Operating-system
+              backups or device-management tools may handle app data according
+              to your device settings and their own policies.
+            </p>
+          </section>
+
+          <section id="provider-data">
+            <p class="eyebrow">When you press generate</p>
+            <h2>Data sent to a connected provider</h2>
+            <p>
+              When you ask Clawnsole to verify an account, check a credit
+              balance, or create, monitor, or download a generation, the app
+              communicates directly with the provider you connected. It sends
+              the provider API key and the information required for that
+              request.
+            </p>
+            <p>
+              Black Forest Labs is currently the only supported generation
+              provider. A request can include prompts, settings, reference
+              images, source video and audio contained in that video, provider
+              job identifiers, and related request metadata.
+            </p>
+            <div class="policy-callout">
+              <strong>Provider processing is separate from Clawnsole’s local storage.</strong>
+              <p>
+                Black Forest Labs may process and retain inputs, outputs, account
+                identifiers, and technical request information under its own
+                terms and privacy policy. Review those documents before sending
+                private or sensitive material.
+              </p>
+              <p>
+                <a href="https://bfl.ai/legal/privacy-policy">Black Forest Labs privacy policy <span aria-hidden="true">↗</span></a>
+                <a href="https://bfl.ai/legal/usage-policy">Black Forest Labs usage policy <span aria-hidden="true">↗</span></a>
+              </p>
+            </div>
+            <p>
+              Clawnsole is an independent client and is not affiliated with or
+              endorsed by Black Forest Labs. Adding another provider in a future
+              version will require an update to this policy.
+            </p>
+          </section>
+
+          <section id="network">
+            <p class="eyebrow">A short destination list</p>
+            <h2>Other network requests</h2>
+            <p>
+              The desktop app and companion-backed web build ask GitHub’s public
+              releases API whether a newer Clawnsole version exists. This occurs
+              once per app launch and when you manually check for updates. The
+              request contains no provider API key, prompt, reference media,
+              generated media, or project history. GitHub receives an ordinary
+              web request and its usual connection metadata.
+            </p>
+            <p>
+              The iOS and Android apps do not perform this GitHub release check;
+              their stores handle updates. Links that you choose to open, such
+              as provider documentation or this policy, open in your web browser
+              and are governed by the destination site’s policy.
+            </p>
+          </section>
+
+          <section id="developer-data">
+            <p class="eyebrow">What we receive</p>
+            <h2>Data collected by the developer</h2>
+            <p>
+              Clawnsole does not send its developer your API key, prompts,
+              reference media, generated media, project history, contacts,
+              precise location, advertising identifiers, or analytics events.
+              The app does not use data for advertising or cross-app tracking.
+            </p>
+            <p>
+              Apple, Google, GitHub, Black Forest Labs, and the platform through
+              which you install or use Clawnsole may process account, download,
+              purchase, diagnostic, crash, or connection information under their
+              own policies and your settings with those services.
+            </p>
+          </section>
+
+          <section id="choices">
+            <p class="eyebrow">You stay in control</p>
+            <h2>Your privacy choices</h2>
+            <ul>
+              <li>Do not add a provider key if you do not want Clawnsole to contact that provider.</li>
+              <li>Choose which prompts and media to submit for each generation.</li>
+              <li>Remove your provider key from Settings at any time.</li>
+              <li>Clear generation history, reset preferences, or delete all local Clawnsole data from Settings.</li>
+              <li>Revoke a provider key in the provider’s account dashboard to end its access.</li>
+              <li>Contact the provider directly about data it retains on its systems.</li>
+            </ul>
+          </section>
+
+          <section id="security">
+            <p class="eyebrow">Retention and safeguards</p>
+            <h2>Security and retention</h2>
+            <p>
+              User-supplied provider keys are stored in Clawnsole’s locally
+              protected JSON data, not sent to the developer, and never displayed
+              again after saving. Keep provider keys private and revoke a key
+              through the provider if you believe it has been exposed.
+            </p>
+            <p>
+              Clawnsole keeps local data until you remove individual records,
+              use a clear-data control, or uninstall the app. Removing the app
+              may remove data in its sandbox, subject to operating-system backup
+              and device-management behavior. Provider-side retention and
+              deletion are controlled by that provider.
+            </p>
+          </section>
+
+          <section id="changes">
+            <p class="eyebrow">Policy maintenance</p>
+            <h2>Changes and contact</h2>
+            <p>
+              This policy may be updated as Clawnsole adds providers or changes
+              how data is handled. Material changes will be reflected on this
+              page with a revised effective date.
+            </p>
+            <p>
+              For privacy questions, open an issue in the
+              <a href="https://github.com/heresalexandria/clawnsole/issues">Clawnsole issue tracker</a>.
+              Do not include API keys, private prompts, or personal media in a
+              public issue.
+            </p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer section-shell">
+      <span>Clawnsole is an independent, open-source client.</span>
+      <div>
+        <a href="../">Home</a>
+        <a href="https://github.com/heresalexandria/clawnsole">Source</a>
+        <a href="https://github.com/heresalexandria/clawnsole/issues">Support</a>
+      </div>
+    </footer>
+  </body>
+</html>

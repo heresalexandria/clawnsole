@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/app_links.dart';
 import '../core/provider_catalog.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
@@ -605,6 +606,13 @@ class _SettingsSide extends StatelessWidget {
         onPressed: () => unawaited(launchUrl(Uri.parse(bflProvider.docsUrl))),
         icon: const Icon(Icons.open_in_new_rounded, size: 16),
         label: const Text('FLUX 3 documentation'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () =>
+            unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
+        icon: const Icon(Icons.privacy_tip_outlined, size: 16),
+        label: const Text('Privacy policy'),
       ),
     ],
   );
