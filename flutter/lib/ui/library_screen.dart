@@ -279,7 +279,7 @@ class _GenerationCardState extends State<GenerationCard> {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
             child: SizedBox(
-              height: 220,
+              height: 280,
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[
