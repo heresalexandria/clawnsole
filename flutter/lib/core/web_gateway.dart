@@ -86,23 +86,32 @@ class WebGateway implements AppGateway {
 
   @override
   Future<double> verifyKey([String? candidate]) async {
-    final payload = _map(
-      await _read(
-        await _client.post(
-          _url('/credits'),
-          headers: const <String, String>{'Content-Type': 'application/json'},
-          body: jsonEncode(<String, Object?>{
-            if (candidate?.trim().isNotEmpty == true)
-              'apiKey': candidate!.trim(),
-          }),
+    final supplied = candidate?.trim().isNotEmpty == true;
+    try {
+      final payload = _map(
+        await _read(
+          await _client.post(
+            _url('/credits'),
+            headers: const <String, String>{'Content-Type': 'application/json'},
+            body: jsonEncode(<String, Object?>{
+              if (supplied) 'apiKey': candidate!.trim(),
+            }),
+          ),
         ),
-      ),
-    );
-    final credits = payload['credits'];
-    if (credits is! num) {
-      throw const ProviderException('Invalid credit balance.');
+      );
+      final credits = payload['credits'];
+      if (credits is! num) {
+        throw const ProviderException('Invalid credit balance.');
+      }
+      return credits.toDouble();
+    } on Object catch (error) {
+      if (!supplied &&
+          (providerHttpStatus(error) == 401 ||
+              providerHttpStatus(error) == 403)) {
+        await clearApiKey();
+      }
+      rethrow;
     }
-    return credits.toDouble();
   }
 
   @override
@@ -114,20 +123,28 @@ class WebGateway implements AppGateway {
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async {
-    final payload = _map(
-      await _read(
-        await _client.post(
-          _url('/generations'),
-          headers: const <String, String>{'Content-Type': 'application/json'},
-          body: jsonEncode(<String, Object?>{
-            'provider': 'bfl',
-            'input': submission.input,
-            'record': submission.record.toJson(),
-          }),
+    try {
+      final payload = _map(
+        await _read(
+          await _client.post(
+            _url('/generations'),
+            headers: const <String, String>{'Content-Type': 'application/json'},
+            body: jsonEncode(<String, Object?>{
+              'provider': 'bfl',
+              'input': submission.input,
+              'record': submission.record.toJson(),
+            }),
+          ),
         ),
-      ),
-    );
-    return Generation.fromJson(_map(payload['generation']));
+      );
+      return Generation.fromJson(_map(payload['generation']));
+    } on Object catch (error) {
+      if (providerHttpStatus(error) == 401 ||
+          providerHttpStatus(error) == 403) {
+        await clearApiKey();
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -145,7 +162,12 @@ class WebGateway implements AppGateway {
         ),
       ),
     );
-    return Generation.fromJson(_map(payload['generation']));
+    final updated = Generation.fromJson(_map(payload['generation']));
+    if (updated.lastProviderStatusCode == 401 ||
+        updated.lastProviderStatusCode == 403) {
+      await clearApiKey();
+    }
+    return updated;
   }
 
   @override

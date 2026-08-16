@@ -203,8 +203,8 @@ class _ApiKeySection extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     controller.gateway.usesCompanion
-                        ? 'Your key is sent only to the loopback companion and stored in its local JSON file.'
-                        : 'Your key stays inside this app’s private local JSON file.',
+                        ? 'Configured credentials stay in the loopback companion and are never returned to the browser.'
+                        : 'Configured credentials are never displayed. User-supplied keys stay in this app’s private local JSON file.',
                   ),
                 ],
               ),
@@ -250,7 +250,7 @@ class _ApiKeySection extends StatelessWidget {
           enableSuggestions: false,
           decoration: InputDecoration(
             hintText: controller.hasApiKey
-                ? 'Saved — paste a replacement'
+                ? 'Connected — paste a replacement'
                 : 'bfl_••••••••••••••••',
             suffixIcon: IconButton(
               onPressed: onToggleVisibility,
@@ -266,7 +266,7 @@ class _ApiKeySection extends StatelessWidget {
         Text(
           controller.gateway.usesCompanion
               ? 'The browser receives only whether a key exists. Start the loopback companion before using the web build.'
-              : 'The app sandbox protects this file from other apps. It is removed when you clear the key or delete all local data.',
+              : 'The app reports only whether access is configured. It never fills this field with an existing credential.',
           style: const TextStyle(fontSize: 11.5, height: 1.4),
         ),
         if (checking ||
