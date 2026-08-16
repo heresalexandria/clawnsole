@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:video_player/video_player.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'formatters.dart';
-import 'video_controller.dart';
+import 'generation_video.dart';
+import 'video_save_sheet.dart';
 
 class Eyebrow extends StatelessWidget {
   const Eyebrow(this.text, {super.key, this.icon});
@@ -398,22 +398,6 @@ class _GenerationDetailLine extends StatelessWidget {
   );
 }
 
-class GenerationVideo extends StatefulWidget {
-  const GenerationVideo({
-    required this.uri,
-    required this.onDownload,
-    super.key,
-    this.fullscreen = false,
-  });
-
-  final Uri uri;
-  final Future<void> Function() onDownload;
-  final bool fullscreen;
-
-  @override
-  State<GenerationVideo> createState() => _GenerationVideoState();
-}
-
 class GenerationMedia extends StatefulWidget {
   const GenerationMedia({
     required this.controller,
@@ -466,9 +450,13 @@ class _GenerationMediaState extends State<GenerationMedia> {
       }
       return GenerationVideo(
         uri: snapshot.data!,
-        onDownload: () async {
+        supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+        onDownload: (destination) async {
           try {
-            await widget.controller.saveVideo(widget.item);
+            await widget.controller.saveVideo(
+              widget.item,
+              destination: destination,
+            );
           } on Object catch (error) {
             widget.controller.showNotice(error.toString());
           }
@@ -552,166 +540,6 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
       },
     );
   }
-}
-
-class _GenerationVideoState extends State<GenerationVideo> {
-  late VideoPlayerController _controller;
-  Future<void>? _initializing;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _createController();
-  }
-
-  @override
-  void didUpdateWidget(covariant GenerationVideo oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.uri != widget.uri) {
-      unawaited(_controller.dispose());
-      _createController();
-    }
-  }
-
-  void _createController() {
-    _controller = createVideoController(widget.uri);
-    _initializing = _controller.initialize();
-    _controller.addListener(_refresh);
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _download() async {
-    if (_saving) return;
-    setState(() => _saving = true);
-    try {
-      await widget.onDownload();
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _openFullscreen() async {
-    await _controller.pause();
-    if (!mounted) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: GenerationVideo(
-              uri: widget.uri,
-              onDownload: widget.onDownload,
-              fullscreen: true,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller
-      ..removeListener(_refresh)
-      ..dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<void>(
-    future: _initializing,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return const _MediaPlaceholder(
-          icon: Icons.link_off_rounded,
-          label: 'Delivery unavailable',
-        );
-      }
-      if (snapshot.connectionState != ConnectionState.done) {
-        return const _MediaPlaceholder(
-          icon: Icons.hourglass_bottom_rounded,
-          label: 'Loading film',
-        );
-      }
-      return ColoredBox(
-        color: Colors.black,
-        child: Column(
-          children: <Widget>[
-            Expanded(
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: _controller.value.aspectRatio,
-                  child: VideoPlayer(_controller),
-                ),
-              ),
-            ),
-            VideoProgressIndicator(
-              _controller,
-              allowScrubbing: true,
-              colors: VideoProgressColors(playedColor: context.colors.primary),
-            ),
-            Container(
-              color: ClawnsoleColors.rail,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                children: <Widget>[
-                  IconButton(
-                    color: Colors.white,
-                    icon: Icon(
-                      _controller.value.isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                    ),
-                    onPressed: () => _controller.value.isPlaying
-                        ? _controller.pause()
-                        : _controller.play(),
-                  ),
-                  const Text(
-                    'Clawnsole preview',
-                    style: TextStyle(color: Colors.white70, fontSize: 10),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Download video…',
-                    color: Colors.white,
-                    onPressed: _saving ? null : () => unawaited(_download()),
-                    icon: _saving
-                        ? const SizedBox.square(
-                            dimension: 17,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.download_rounded),
-                  ),
-                  IconButton(
-                    tooltip: widget.fullscreen
-                        ? 'Exit fullscreen'
-                        : 'Enter fullscreen',
-                    color: Colors.white,
-                    onPressed: widget.fullscreen
-                        ? () => Navigator.of(context).pop()
-                        : () => unawaited(_openFullscreen()),
-                    icon: Icon(
-                      widget.fullscreen
-                          ? Icons.fullscreen_exit_rounded
-                          : Icons.fullscreen_rounded,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    },
-  );
 }
 
 class _MediaPlaceholder extends StatelessWidget {
@@ -821,7 +649,7 @@ class ActivityCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           SizedBox(
-            height: hasMedia ? 180 : 110,
+            height: hasMedia ? 235 : 110,
             child: Stack(
               fit: StackFit.expand,
               children: <Widget>[
@@ -897,13 +725,9 @@ class ActivityCard extends StatelessWidget {
                   children: <Widget>[
                     if (hasMedia)
                       FilledButton.tonalIcon(
-                        onPressed: () async {
-                          try {
-                            await controller.saveVideo(item);
-                          } on Object catch (error) {
-                            controller.showNotice(error.toString());
-                          }
-                        },
+                        onPressed: () => unawaited(
+                          saveGenerationVideo(context, controller, item),
+                        ),
                         icon: const Icon(Icons.download_rounded, size: 15),
                         label: const Text('Save'),
                       ),

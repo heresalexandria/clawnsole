@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import 'bfl_api.dart';
 import 'generation_status.dart';
@@ -21,6 +24,9 @@ class NativeGateway implements AppGateway {
 
   @override
   bool get usesCompanion => false;
+
+  @override
+  bool get supportsPhotoLibrarySave => Platform.isIOS || Platform.isAndroid;
 
   @override
   String get persistenceDescription =>
@@ -405,5 +411,36 @@ class NativeGateway implements AppGateway {
       );
     }
     return response.bodyBytes;
+  }
+
+  @override
+  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) async {
+    if (!supportsPhotoLibrarySave) {
+      throw UnsupportedError(
+        'Saving directly to Photos is available in the iOS and Android apps.',
+      );
+    }
+
+    final hasAccess = await Gal.hasAccess();
+    if (!hasAccess && !await Gal.requestAccess()) {
+      throw StateError(
+        'Photos access was not granted. Allow Clawnsole to add videos in system settings and try again.',
+      );
+    }
+
+    final directory = await getTemporaryDirectory();
+    final file = File('${directory.path}/$fileName');
+    try {
+      await file.writeAsBytes(bytes, flush: true);
+      await Gal.putVideo(file.path);
+    } on GalException catch (error) {
+      throw StateError(error.type.message);
+    } finally {
+      try {
+        if (await file.exists()) await file.delete();
+      } on FileSystemException {
+        // The operating system also cleans this temporary directory.
+      }
+    }
   }
 }

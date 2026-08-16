@@ -31,6 +31,9 @@ class WebGateway implements AppGateway {
   bool get usesCompanion => true;
 
   @override
+  bool get supportsPhotoLibrarySave => false;
+
+  @override
   String get persistenceDescription =>
       'Local companion JSON file (browser storage is not used)';
 
@@ -194,4 +197,10 @@ class WebGateway implements AppGateway {
     }
     return response.bodyBytes;
   }
+
+  @override
+  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) =>
+      throw UnsupportedError(
+        'Saving directly to Photos is available in the iOS and Android apps.',
+      );
 }

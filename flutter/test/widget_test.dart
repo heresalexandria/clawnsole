@@ -490,12 +490,54 @@ void main() {
     expect(VideoMode.values, hasLength(4));
     expect(form.mode, VideoMode.t2v);
   });
+
+  test('saves a delivered generation directly to Photos', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      supportsPhotoLibrarySave: true,
+    );
+    final controller = AppController(gateway: gateway);
+    final now = DateTime.utc(2026, 8, 15);
+    final item = Generation(
+      localId: 'photo-save',
+      status: 'Ready',
+      prompt: 'A sloth checks the camera roll.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      resultUrl: 'https://example.com/video.mp4',
+    );
+
+    await controller.saveVideo(item, destination: VideoSaveDestination.photos);
+
+    expect(gateway.photoLibraryBytes, <int>[1, 2, 3]);
+    expect(gateway.photoLibraryFileName, 'clawnsole-2026-08-15-photo-.mp4');
+    expect(controller.notice, 'Video saved to Photos.');
+    controller.dispose();
+  });
 }
 
 class _MemoryGateway implements AppGateway {
-  _MemoryGateway(this.snapshot);
+  _MemoryGateway(this.snapshot, {this.supportsPhotoLibrarySave = false});
 
   LocalSnapshot snapshot;
+  @override
+  final bool supportsPhotoLibrarySave;
+  Uint8List? photoLibraryBytes;
+  String? photoLibraryFileName;
 
   @override
   bool get usesCompanion => false;
@@ -559,5 +601,12 @@ class _MemoryGateway implements AppGateway {
   Uri mediaUri(String source) => Uri.parse(source);
 
   @override
-  Future<Uint8List> downloadMedia(String source) async => Uint8List(0);
+  Future<Uint8List> downloadMedia(String source) async =>
+      Uint8List.fromList(<int>[1, 2, 3]);
+
+  @override
+  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) async {
+    photoLibraryBytes = bytes;
+    photoLibraryFileName = fileName;
+  }
 }

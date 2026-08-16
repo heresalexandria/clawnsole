@@ -34,6 +34,21 @@ PODS:
     - DKImagePickerController/PhotoGallery
     - Flutter
   - Flutter (1.0.0)
+  - gal (1.0.0):
+    - Flutter
+    - FlutterMacOS
+  - libwebp (1.6.0):
+    - libwebp/demux (= 1.6.0)
+    - libwebp/mux (= 1.6.0)
+    - libwebp/sharpyuv (= 1.6.0)
+    - libwebp/webp (= 1.6.0)
+  - libwebp/demux (1.6.0):
+    - libwebp/webp
+  - libwebp/mux (1.6.0):
+    - libwebp/demux
+  - libwebp/sharpyuv (1.6.0)
+  - libwebp/webp (1.6.0):
+    - libwebp/sharpyuv
   - path_provider_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -46,18 +61,24 @@ PODS:
   - video_player_avfoundation (0.0.1):
     - Flutter
     - FlutterMacOS
+  - video_thumbnail (0.0.1):
+    - Flutter
+    - libwebp
 
 DEPENDENCIES:
   - file_picker (from `.symlinks/plugins/file_picker/ios`)
   - Flutter (from `Flutter`)
+  - gal (from `.symlinks/plugins/gal/darwin`)
   - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
+  - video_thumbnail (from `.symlinks/plugins/video_thumbnail/ios`)
 
 SPEC REPOS:
   trunk:
     - DKImagePickerController
     - DKPhotoGallery
+    - libwebp
     - SDWebImage
     - SwiftyGif
 
@@ -66,23 +87,30 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/file_picker/ios"
   Flutter:
     :path: Flutter
+  gal:
+    :path: ".symlinks/plugins/gal/darwin"
   path_provider_foundation:
     :path: ".symlinks/plugins/path_provider_foundation/darwin"
   url_launcher_ios:
     :path: ".symlinks/plugins/url_launcher_ios/ios"
   video_player_avfoundation:
     :path: ".symlinks/plugins/video_player_avfoundation/darwin"
+  video_thumbnail:
+    :path: ".symlinks/plugins/video_thumbnail/ios"
 
 SPEC CHECKSUMS:
   DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
   DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
   file_picker: b159e0c068aef54932bb15dc9fd1571818edaf49
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  gal: 6a522c75909f1244732d4596d11d6a2f86ff37a5
+  libwebp: af5937a13536ef73f3784d69cc342b98961acf33
   path_provider_foundation: 0b743cbb62d8e47eab856f09262bb8c1ddcfe6ba
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
   url_launcher_ios: bb13df5870e8c4234ca12609d04010a21be43dfa
   video_player_avfoundation: 7993f492ae0bd77edaea24d9dc051d8bb2cd7c86
+  video_thumbnail: c4e2a3c539e247d4de13cd545344fd2d26ffafd1
 
 PODFILE CHECKSUM: ce2a4dd764e1c7aeed6a7cdc5e61d092b6dc6d32
 

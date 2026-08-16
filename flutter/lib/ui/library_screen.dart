@@ -7,6 +7,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
+import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatelessWidget {
   const LibraryScreen({required this.controller, super.key});
@@ -235,9 +236,7 @@ class _GenerationCardState extends State<GenerationCard> {
   Future<void> _save() async {
     setState(() => saving = true);
     try {
-      await widget.controller.saveVideo(widget.item);
-    } on Object catch (error) {
-      widget.controller.showNotice(error.toString());
+      await saveGenerationVideo(context, widget.controller, widget.item);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -279,7 +278,7 @@ class _GenerationCardState extends State<GenerationCard> {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(17)),
             child: SizedBox(
-              height: 220,
+              height: 280,
               child: Stack(
                 fit: StackFit.expand,
                 children: <Widget>[

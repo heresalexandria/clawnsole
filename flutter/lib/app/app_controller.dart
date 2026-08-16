@@ -125,6 +125,7 @@ class AppController extends ChangeNotifier {
 
   List<Generation> get generations => snapshot?.generations ?? const [];
   bool get hasApiKey => snapshot?.hasApiKey ?? false;
+  bool get supportsPhotoLibrarySave => gateway.supportsPhotoLibrarySave;
   StorageStats get storage =>
       snapshot?.storage ?? const StorageStats(path: '', bytes: 0, records: 0);
   int get workingCount => generations.where((item) => item.isWorking).length;
@@ -857,7 +858,10 @@ class AppController extends ChangeNotifier {
     unawaited(navigate(AppSection.create));
   }
 
-  Future<String?> saveVideo(Generation item) async {
+  Future<String?> saveVideo(
+    Generation item, {
+    VideoSaveDestination destination = VideoSaveDestination.files,
+  }) async {
     if (item.resultAsset == null && item.resultUrl == null) {
       throw StateError('This video is not available.');
     }
@@ -867,6 +871,11 @@ class AppController extends ChangeNotifier {
     final baseName =
         'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
         '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
+    if (destination == VideoSaveDestination.photos) {
+      await gateway.saveVideoToPhotoLibrary(bytes, '$baseName.mp4');
+      showNotice('Video saved to Photos.');
+      return null;
+    }
     final location = await FilePicker.saveFile(
       dialogTitle: 'Save Clawnsole video',
       fileName: '$baseName.mp4',
@@ -899,6 +908,8 @@ class AppController extends ChangeNotifier {
     super.dispose();
   }
 }
+
+enum VideoSaveDestination { photos, files }
 
 extension<T> on List<T> {
   T? get firstOrNull => isEmpty ? null : first;
