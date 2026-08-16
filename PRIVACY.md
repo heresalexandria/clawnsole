@@ -1,6 +1,6 @@
 # Clawnsole privacy policy
 
-Effective: August 15, 2026
+Effective: August 16, 2026
 
 Clawnsole is a local-first client for third-party video generation services. The
 developer of Clawnsole does not operate an account system, analytics service,
@@ -29,10 +29,13 @@ provider. It sends the provider API key and the information required for that
 request. For Black Forest Labs, this can include prompts, settings, reference
 images, source video, job identifiers, and related request metadata.
 
-That provider processes and retains information under its own terms and privacy
-policy. Black Forest Labs is currently the only supported generation provider.
-Clawnsole is an independent client and is not affiliated with or endorsed by
-Black Forest Labs.
+That provider processes and may retain information under its own terms and
+privacy policy. Black Forest Labs is currently the only supported generation
+provider. Its requests can include audio contained in a submitted source video.
+Review the [Black Forest Labs privacy policy](https://bfl.ai/legal/privacy-policy)
+and [usage policy](https://bfl.ai/legal/usage-policy) before sending private or
+sensitive material. Clawnsole is an independent client and is not affiliated
+with or endorsed by Black Forest Labs.
 
 ## Update checks
 
@@ -45,10 +48,10 @@ request; the App Store handles their updates.
 
 ## Data collected by the developer
 
-Clawnsole does not send the developer your API key, prompts, reference media,
-generated media, generation history, contacts, precise location, advertising
-identifiers, or analytics events. The app does not use data for advertising or
-cross-app tracking.
+Clawnsole does not operate a sync service and does not send the developer your
+API key, prompts, reference media, generated media, generation history,
+contacts, precise location, advertising identifiers, or analytics events. The
+app does not use data for advertising or cross-app tracking.
 
 Apple and the platform through which you install Clawnsole may process download,
 purchase, diagnostic, or crash information under their own policies and the
@@ -70,3 +73,6 @@ date.
 For privacy questions, open an issue at
 <https://github.com/heresalexandria/clawnsole/issues>. Do not include API keys,
 private prompts, or personal media in a public issue.
+
+The public version of this policy is available at
+<https://heresalexandria.github.io/clawnsole/privacy/>.
