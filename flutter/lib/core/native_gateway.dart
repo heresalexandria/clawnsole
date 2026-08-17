@@ -11,12 +11,26 @@ import 'gateway.dart';
 import 'local_data_store.dart';
 import 'models.dart';
 import 'pricing.dart';
+import 'provider_api.dart';
+import 'provider_catalog.dart';
 
 const _configuredIosReviewApiKey = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY',
 );
 const _configuredIosReviewApiKeyId = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_ID',
+);
+const _configuredIosReviewLtxApiKey = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_LTX_API_KEY',
+);
+const _configuredIosReviewLtxApiKeyId = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_LTX_API_KEY_ID',
+);
+const _configuredIosReviewAtlasApiKey = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY',
+);
+const _configuredIosReviewAtlasApiKeyId = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_ID',
 );
 
 enum _ApiKeySource { saved, iosReview }
@@ -28,38 +42,64 @@ class _ActiveApiKey {
   final _ApiKeySource source;
 }
 
-class NativeGateway implements AppGateway {
+class NativeGateway implements AppGateway, ProviderGateway {
   NativeGateway({
     LocalDataStore? store,
     BflApi? api,
     http.Client? client,
     String? iosReviewApiKey,
     String? iosReviewApiKeyId,
+    String? iosReviewLtxApiKey,
+    String? iosReviewLtxApiKeyId,
+    String? iosReviewAtlasApiKey,
+    String? iosReviewAtlasApiKeyId,
+    ProviderApiRouter? providerRouter,
     bool? isIos,
   }) : _store = store ?? LocalDataStore(),
-       _api = api ?? BflApi(),
+       _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _client = client ?? http.Client(),
        _iosReviewApiKey = (iosReviewApiKey ?? _configuredIosReviewApiKey)
            .trim(),
        _iosReviewApiKeyId = (iosReviewApiKeyId ?? _configuredIosReviewApiKeyId)
            .trim(),
+       _iosReviewKeys = <String, String>{
+         'ltx': (iosReviewLtxApiKey ?? _configuredIosReviewLtxApiKey).trim(),
+         'atlas': (iosReviewAtlasApiKey ?? _configuredIosReviewAtlasApiKey)
+             .trim(),
+       },
+       _iosReviewKeyIds = <String, String>{
+         'ltx': (iosReviewLtxApiKeyId ?? _configuredIosReviewLtxApiKeyId)
+             .trim(),
+         'atlas': (iosReviewAtlasApiKeyId ?? _configuredIosReviewAtlasApiKeyId)
+             .trim(),
+       },
        _isIos = isIos ?? Platform.isIOS;
 
   final LocalDataStore _store;
-  final BflApi _api;
+  final ProviderApiRouter _providers;
   final http.Client _client;
   final String _iosReviewApiKey;
   final String _iosReviewApiKeyId;
+  final Map<String, String> _iosReviewKeys;
+  final Map<String, String> _iosReviewKeyIds;
   final bool _isIos;
 
-  _ActiveApiKey? _activeApiKey(StoredData data) {
-    final saved = data.apiKey.trim();
+  String _reviewKey(String provider) =>
+      provider == 'bfl' ? _iosReviewApiKey : _iosReviewKeys[provider] ?? '';
+
+  String _reviewKeyId(String provider) =>
+      provider == 'bfl' ? _iosReviewApiKeyId : _iosReviewKeyIds[provider] ?? '';
+
+  _ActiveApiKey? _activeApiKey(String provider, StoredData data) {
+    final saved = data.apiKeyFor(provider).trim();
     if (saved.isNotEmpty) return _ActiveApiKey(saved, _ApiKeySource.saved);
+    final reviewKey = _reviewKey(provider);
+    final reviewKeyId = _reviewKeyId(provider);
     if (_isIos &&
-        _iosReviewApiKey.isNotEmpty &&
-        _iosReviewApiKeyId.isNotEmpty &&
-        data.rejectedIosReviewApiKeyId != _iosReviewApiKeyId) {
-      return _ActiveApiKey(_iosReviewApiKey, _ApiKeySource.iosReview);
+        reviewKey.isNotEmpty &&
+        reviewKeyId.isNotEmpty &&
+        data.rejectedReviewKeyIdFor(provider) != reviewKeyId) {
+      return _ActiveApiKey(reviewKey, _ApiKeySource.iosReview);
     }
     return null;
   }
@@ -104,10 +144,15 @@ class NativeGateway implements AppGateway {
 
   Future<LocalSnapshot> _snapshot([StoredData? input]) async {
     final data = input ?? await _readFresh();
+    final connected = videoProviders
+        .where((provider) => _activeApiKey(provider.id, data) != null)
+        .map((provider) => provider.id)
+        .toSet();
     return LocalSnapshot(
       generations: data.generations,
       preferences: data.preferences,
-      hasApiKey: _activeApiKey(data) != null,
+      hasApiKey: connected.contains('bfl'),
+      connectedProviders: connected,
       storage: await _store.stats(data.generations.length),
     );
   }
@@ -133,27 +178,36 @@ class NativeGateway implements AppGateway {
 
   @override
   Future<LocalSnapshot> setApiKey(String value) async {
+    return setProviderApiKey('bfl', value);
+  }
+
+  @override
+  Future<LocalSnapshot> setProviderApiKey(String provider, String value) async {
     final clean = value.trim();
     if (clean.length > 2000) {
-      throw StateError('The BFL API key is unexpectedly long.');
+      throw StateError('The provider API key is unexpectedly long.');
     }
-    final next = (await _store.read()).copyWith(apiKey: clean);
+    final next = (await _store.read()).withApiKey(provider, clean);
     await _store.write(next);
     return _snapshot(next);
   }
 
-  Future<void> _invalidateCredential(_ActiveApiKey rejected) async {
+  Future<void> _invalidateCredential(
+    String provider,
+    _ActiveApiKey rejected,
+  ) async {
     final current = await _store.read();
-    final active = _activeApiKey(current);
+    final active = _activeApiKey(provider, current);
     if (active == null ||
         active.source != rejected.source ||
         active.value != rejected.value) {
       return;
     }
     final next = switch (rejected.source) {
-      _ApiKeySource.saved => current.copyWith(apiKey: ''),
-      _ApiKeySource.iosReview => current.copyWith(
-        rejectedIosReviewApiKeyId: _iosReviewApiKeyId,
+      _ApiKeySource.saved => current.withApiKey(provider, ''),
+      _ApiKeySource.iosReview => current.withRejectedReviewKeyId(
+        provider,
+        _reviewKeyId(provider),
       ),
     };
     await _store.write(next);
@@ -161,17 +215,28 @@ class NativeGateway implements AppGateway {
 
   @override
   Future<double> verifyKey([String? candidate]) async {
+    final account = await verifyProviderKey('bfl', candidate);
+    return account.balance ?? 0;
+  }
+
+  @override
+  Future<ProviderAccountStatus> verifyProviderKey(
+    String provider, [
+    String? candidate,
+  ]) async {
     final supplied = candidate?.trim().isNotEmpty == true;
-    final active = supplied ? null : _activeApiKey(await _store.read());
+    final active = supplied
+        ? null
+        : _activeApiKey(provider, await _store.read());
     final key = supplied ? candidate!.trim() : active?.value ?? '';
     if (key.isEmpty) throw StateError('An API key is required.');
     try {
-      return await _api.getCredits(key);
+      return await _providers.verify(provider, key);
     } on Object catch (error) {
       if (active != null &&
           (providerHttpStatus(error) == 401 ||
               providerHttpStatus(error) == 403)) {
-        await _invalidateCredential(active);
+        await _invalidateCredential(provider, active);
       }
       rethrow;
     }
@@ -181,15 +246,25 @@ class NativeGateway implements AppGateway {
   Future<double> getCredits() => verifyKey();
 
   @override
+  Future<ProviderAccountStatus> getProviderAccount(String provider) =>
+      verifyProviderKey(provider);
+
+  @override
+  Future<List<ProviderModelPrice>> listProviderModels(String provider) async {
+    final credential = _activeApiKey(provider, await _store.read());
+    return _providers.listModels(provider, credential?.value);
+  }
+
+  @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
     final next = (await _store.read()).copyWith(preferences: preferences);
     await _store.write(next);
     return _snapshot(next);
   }
 
-  Future<double?> _creditsSafely(String key) async {
+  Future<double?> _balanceSafely(String provider, String key) async {
     try {
-      return await _api.getCredits(key);
+      return (await _providers.verify(provider, key)).balance;
     } on Object {
       return null;
     }
@@ -245,42 +320,60 @@ class NativeGateway implements AppGateway {
   Future<Generation> submit(GenerationSubmission submission) async {
     var record = submission.record;
     final data = await _readFresh();
-    final credential = _activeApiKey(data);
+    final provider = record.provider;
+    final credential = _activeApiKey(provider, data);
     final key = credential?.value ?? '';
-    if (key.isEmpty) throw StateError('Add a BFL API key before generating.');
+    if (key.isEmpty) {
+      throw StateError(
+        'Add a ${providerById(provider).name} API key before generating.',
+      );
+    }
     record = record.copyWith(
       config: await _persistInputs(record.config, submission.input),
     );
-    final estimate = estimateCredits(
+    final estimate = estimateCost(
+      provider,
+      record.model,
       record.mode,
       record.config,
       data.generations,
     );
     record = record.copyWith(
-      estimatedCreditsMin: estimate.minimum,
-      estimatedCreditsMax: estimate.maximum,
-      estimateBasis: estimate.basis,
+      estimatedCreditsMin:
+          record.estimatedCreditsMin ??
+          estimate.providerUnitsMinimum ??
+          estimate.minimumUsd,
+      estimatedCreditsMax:
+          record.estimatedCreditsMax ??
+          estimate.providerUnitsMaximum ??
+          estimate.maximumUsd,
+      estimateBasis: record.estimateBasis ?? estimate.basis,
       updatedAt: DateTime.now().toUtc(),
     );
     await _replaceGeneration(record);
 
     try {
-      final creditsBefore = await _creditsSafely(key);
+      final creditsBefore = await _balanceSafely(provider, key);
       if (creditsBefore != null) {
         record = record.copyWith(creditsBefore: creditsBefore);
         await _replaceGeneration(record);
       }
-      final response = await _api.submit(key, submission.input);
+      final response = await _providers.submit(
+        provider,
+        key,
+        record.model,
+        submission.input,
+      );
       final requestId = response['id'];
       final pollingUrl = response['polling_url'];
       if (requestId is! String || pollingUrl is! String) {
         throw const ProviderException(
-          'BFL returned an invalid generation receipt.',
+          'The provider returned an invalid generation receipt.',
           status: 502,
         );
       }
       final cost = (response['cost'] as num?)?.toDouble();
-      final liveAfter = await _creditsSafely(key);
+      final liveAfter = await _balanceSafely(provider, key);
       final creditsAfter =
           liveAfter ??
           (creditsBefore != null && cost != null
@@ -315,7 +408,7 @@ class NativeGateway implements AppGateway {
       if (credential != null &&
           (providerHttpStatus(error) == 401 ||
               providerHttpStatus(error) == 403)) {
-        await _invalidateCredential(credential);
+        await _invalidateCredential(provider, credential);
       }
       rethrow;
     }
@@ -327,32 +420,45 @@ class NativeGateway implements AppGateway {
     late Generation next;
     _ActiveApiKey? credential;
     try {
-      credential = _activeApiKey(await _store.read());
+      credential = _activeApiKey(generation.provider, await _store.read());
       final key = credential?.value ?? '';
-      if (key.isEmpty) throw StateError('The saved BFL API key is missing.');
+      if (key.isEmpty) {
+        throw StateError(
+          'The saved ${providerById(generation.provider).name} API key is missing.',
+        );
+      }
       if (!generation.canCheckStatus) {
         throw StateError('This generation has no polling URL.');
       }
-      final payload = await _api.poll(key, generation.pollingUrl!);
+      final payload = await _providers.poll(
+        generation.provider,
+        key,
+        generation.pollingUrl!,
+      );
       var status = normalizeGenerationStatus(payload['status']);
+      final result = payload['result'] ?? payload['outputs'] ?? payload;
       final resultUrl = status == 'Ready'
-          ? findResultUrl(payload['result'], draft: false)
+          ? findResultUrl(result, draft: false)
           : null;
       final draftUrl = status == 'Ready'
-          ? findResultUrl(payload['result'], draft: true)
+          ? findResultUrl(result, draft: true)
           : null;
       var failureMessage = isGenerationFailureStatus(status)
-          ? providerFailureMessage(payload, fallback: status)
+          ? providerNamedFailureMessage(
+              providerById(generation.provider).name,
+              payload,
+              fallback: status,
+            )
           : null;
       if (status == 'Ready' && resultUrl == null) {
         status = 'Error';
         failureMessage =
-            'BFL reported that the generation was ready but did not include a video URL.';
+            '${providerById(generation.provider).name} reported that the generation was ready but did not include a video URL.';
       }
       AssetReference? resultAsset = generation.resultAsset;
       if (resultUrl != null && resultAsset == null) {
         try {
-          final response = await _client.get(validatedBflUrl(resultUrl));
+          final response = await _client.get(validatedProviderUrl(resultUrl));
           if (response.statusCode >= 200 && response.statusCode < 300) {
             resultAsset = await _store.writeAsset(
               response.bodyBytes,
@@ -392,7 +498,7 @@ class NativeGateway implements AppGateway {
       if (credential != null &&
           (providerHttpStatus(error) == 401 ||
               providerHttpStatus(error) == 403)) {
-        await _invalidateCredential(credential);
+        await _invalidateCredential(generation.provider, credential);
       }
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
@@ -400,7 +506,11 @@ class NativeGateway implements AppGateway {
         next = generation.copyWith(
           status: providerStatus,
           progress: normalizedProgress(payload['progress']),
-          error: providerFailureMessage(payload, fallback: providerStatus),
+          error: providerNamedFailureMessage(
+            providerById(generation.provider).name,
+            payload,
+            fallback: providerStatus,
+          ),
           lastCheckedAt: checkedAt,
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
@@ -458,14 +568,16 @@ class NativeGateway implements AppGateway {
   }
 
   @override
-  Future<LocalSnapshot> clearApiKey() async {
+  Future<LocalSnapshot> clearApiKey() => clearProviderApiKey('bfl');
+
+  @override
+  Future<LocalSnapshot> clearProviderApiKey(String provider) async {
     final current = await _store.read();
-    final next = current.copyWith(
-      apiKey: '',
-      rejectedIosReviewApiKeyId: _isIos && _iosReviewApiKeyId.isNotEmpty
-          ? _iosReviewApiKeyId
-          : current.rejectedIosReviewApiKeyId,
-    );
+    var next = current.withApiKey(provider, '');
+    final reviewId = _reviewKeyId(provider);
+    if (_isIos && reviewId.isNotEmpty) {
+      next = next.withRejectedReviewKeyId(provider, reviewId);
+    }
     await _store.write(next);
     return _snapshot(next);
   }
@@ -490,14 +602,14 @@ class NativeGateway implements AppGateway {
   }
 
   @override
-  Uri mediaUri(String source) => validatedBflUrl(source);
+  Uri mediaUri(String source) => validatedProviderUrl(source);
 
   @override
   Future<Uint8List> downloadMedia(String source) async {
-    final response = await _client.get(validatedBflUrl(source));
+    final response = await _client.get(validatedProviderUrl(source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ProviderException(
-        'This BFL delivery link is no longer available.',
+        'This provider delivery link is no longer available.',
         status: response.statusCode,
       );
     }

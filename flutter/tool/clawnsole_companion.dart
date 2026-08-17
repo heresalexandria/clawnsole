@@ -8,6 +8,8 @@ import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
+import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/provider_catalog.dart';
 
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
@@ -15,6 +17,11 @@ Future<void> main(List<String> arguments) async {
   final app = CompanionApp(
     store: store,
     api: BflApi(),
+    fallbackApiKeys: <String, String>{
+      'bfl': Platform.environment['BFL_API_KEY']?.trim() ?? '',
+      'ltx': Platform.environment['LTX_API_KEY']?.trim() ?? '',
+      'atlas': Platform.environment['ATLAS_CLOUD_KEY']?.trim() ?? '',
+    },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
   );
   final server = await HttpServer.bind(
@@ -282,13 +289,17 @@ class CompanionApp {
   CompanionApp({
     required CompanionStore store,
     required BflApi api,
+    ProviderApiRouter? providerRouter,
+    Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
   }) : _store = store,
-       _api = api,
+       _providers = providerRouter ?? ProviderApiRouter(bfl: api),
+       _fallbackApiKeys = fallbackApiKeys,
        _webRoot = webRoot;
 
   final CompanionStore _store;
-  final BflApi _api;
+  final ProviderApiRouter _providers;
+  final Map<String, String> _fallbackApiKeys;
   final Directory? _webRoot;
 
   Future<void> handle(HttpRequest request) async {
@@ -318,16 +329,35 @@ class CompanionApp {
         await _stateAction(body['action']?.toString() ?? '', body['value']);
         return await _json(request.response, 200, (await _snapshot()).toJson());
       }
-      if (request.method == 'POST' && path == '/credits') {
+      if (request.method == 'POST' &&
+          (path == '/account' || path == '/credits')) {
         final body = await _bodyMap(request);
-        final saved = (await _store.read()).apiKey.trim();
+        final provider = body['provider']?.toString() ?? 'bfl';
+        final saved = _activeKey(await _store.read(), provider);
         final candidate = body['apiKey']?.toString().trim();
         final key = candidate?.isNotEmpty == true ? candidate! : saved;
         if (key.isEmpty) throw StateError('An API key is required.');
-        final credits = await _api.getCredits(key);
-        return await _json(request.response, 200, <String, Object?>{
-          'credits': credits,
-        });
+        final account = await _providers.verify(provider, key);
+        return await _json(
+          request.response,
+          200,
+          path == '/credits'
+              ? <String, Object?>{'credits': account.balance ?? 0}
+              : account.toJson(),
+        );
+      }
+      if (request.method == 'GET' && path == '/providers/models') {
+        final provider = request.uri.queryParameters['provider'] ?? 'bfl';
+        final data = await _store.read();
+        final models = await _providers.listModels(
+          provider,
+          _activeKey(data, provider),
+        );
+        return await _json(
+          request.response,
+          200,
+          models.map((model) => model.toJson()).toList(),
+        );
       }
       if (request.method == 'POST' && path == '/generations') {
         final generation = await _submit(await _bodyMap(request));
@@ -432,7 +462,15 @@ class CompanionApp {
         if (key.length > 2000) {
           throw StateError('The BFL API key is unexpectedly long.');
         }
-        next = current.copyWith(apiKey: key);
+        next = current.withApiKey('bfl', key);
+      } else if (action == 'setProviderApiKey') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final provider = map['provider']?.toString() ?? '';
+        final key = map['apiKey']?.toString().trim() ?? '';
+        if (provider.isEmpty || key.length > 2000) {
+          throw StateError('The provider API key is invalid.');
+        }
+        next = current.withApiKey(provider, key);
       } else if (action == 'setPreferences') {
         final map = value is Map<Object?, Object?>
             ? value.map((key, child) => MapEntry(key.toString(), child))
@@ -443,7 +481,9 @@ class CompanionApp {
       } else if (action == 'clearPreferences') {
         next = current.copyWith(preferences: const AppPreferences());
       } else if (action == 'clearApiKey') {
-        next = current.copyWith(apiKey: '');
+        next = current.withApiKey('bfl', '');
+      } else if (action == 'clearProviderApiKey') {
+        next = current.withApiKey(value?.toString() ?? '', '');
       } else {
         throw const ProviderException(
           'Unknown local data action.',
@@ -479,10 +519,15 @@ class CompanionApp {
       data = data.copyWith(generations: generations);
       await _store.replace(data);
     }
+    final connected = videoProviders
+        .where((provider) => _activeKey(data, provider.id).isNotEmpty)
+        .map((provider) => provider.id)
+        .toSet();
     return LocalSnapshot(
       generations: data.generations,
       preferences: data.preferences,
-      hasApiKey: data.apiKey.trim().isNotEmpty,
+      hasApiKey: connected.contains('bfl'),
+      connectedProviders: connected,
       storage: await _store.stats(data.generations.length),
     );
   }
@@ -505,9 +550,14 @@ class CompanionApp {
     });
   }
 
-  Future<double?> _creditsSafely(String key) async {
+  String _activeKey(StoredData data, String provider) {
+    final saved = data.apiKeyFor(provider).trim();
+    return saved.isNotEmpty ? saved : _fallbackApiKeys[provider]?.trim() ?? '';
+  }
+
+  Future<double?> _balanceSafely(String provider, String key) async {
     try {
-      return await _api.getCredits(key);
+      return (await _providers.verify(provider, key)).balance;
     } on Object {
       return null;
     }
@@ -560,7 +610,7 @@ class CompanionApp {
   }
 
   Future<AssetReference?> _retainResult(String source, String label) async {
-    final target = validatedBflUrl(source);
+    final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {
       final upstream = await (await client.getUrl(target)).close();
@@ -590,47 +640,65 @@ class CompanionApp {
       );
     }
     final data = await _store.read();
-    final key = data.apiKey.trim();
-    if (key.isEmpty) throw StateError('Add a BFL API key before generating.');
     var generation = Generation.fromJson(
       rawRecord.map((key, value) => MapEntry(key.toString(), value)),
     );
     final cleanInput = input.map(
       (key, value) => MapEntry(key.toString(), value),
     );
+    final provider = generation.provider;
+    final key = _activeKey(data, provider);
+    if (key.isEmpty) {
+      throw StateError(
+        'Add a ${providerById(provider).name} API key before generating.',
+      );
+    }
     generation = generation.copyWith(
       config: await _persistInputs(generation.config, cleanInput),
     );
-    final estimate = estimateCredits(
+    final estimate = estimateCost(
+      provider,
+      generation.model,
       generation.mode,
       generation.config,
       data.generations,
     );
     generation = generation.copyWith(
       status: 'submitting',
-      estimatedCreditsMin: estimate.minimum,
-      estimatedCreditsMax: estimate.maximum,
-      estimateBasis: estimate.basis,
+      estimatedCreditsMin:
+          generation.estimatedCreditsMin ??
+          estimate.providerUnitsMinimum ??
+          estimate.minimumUsd,
+      estimatedCreditsMax:
+          generation.estimatedCreditsMax ??
+          estimate.providerUnitsMaximum ??
+          estimate.maximumUsd,
+      estimateBasis: generation.estimateBasis ?? estimate.basis,
       updatedAt: DateTime.now().toUtc(),
     );
     await _upsert(generation);
     try {
-      final creditsBefore = await _creditsSafely(key);
+      final creditsBefore = await _balanceSafely(provider, key);
       if (creditsBefore != null) {
         generation = generation.copyWith(creditsBefore: creditsBefore);
         await _upsert(generation);
       }
-      final receipt = await _api.submit(key, cleanInput);
+      final receipt = await _providers.submit(
+        provider,
+        key,
+        generation.model,
+        cleanInput,
+      );
       final requestId = receipt['id'];
       final pollingUrl = receipt['polling_url'];
       if (requestId is! String || pollingUrl is! String) {
         throw const ProviderException(
-          'BFL returned an invalid generation receipt.',
+          'The provider returned an invalid generation receipt.',
           status: 502,
         );
       }
       final cost = (receipt['cost'] as num?)?.toDouble();
-      final liveAfter = await _creditsSafely(key);
+      final liveAfter = await _balanceSafely(provider, key);
       generation = generation.copyWith(
         requestId: requestId,
         pollingUrl: pollingUrl,
@@ -675,8 +743,6 @@ class CompanionApp {
       );
     }
     final data = await _store.read();
-    final key = data.apiKey.trim();
-    if (key.isEmpty) throw StateError('The saved BFL API key is missing.');
     final current = data.generations
         .where((item) => item.localId == localId)
         .firstOrNull;
@@ -686,21 +752,32 @@ class CompanionApp {
         status: 404,
       );
     }
+    final key = _activeKey(data, current.provider);
+    if (key.isEmpty) {
+      throw StateError(
+        'The saved ${providerById(current.provider).name} API key is missing.',
+      );
+    }
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
     try {
-      final payload = await _api.poll(key, pollingUrl);
+      final payload = await _providers.poll(current.provider, key, pollingUrl);
       var status = normalizeGenerationStatus(payload['status']);
+      final result = payload['result'] ?? payload['outputs'] ?? payload;
       final resultUrl = status == 'Ready'
-          ? findResultUrl(payload['result'], draft: false)
+          ? findResultUrl(result, draft: false)
           : null;
       var failureMessage = isGenerationFailureStatus(status)
-          ? providerFailureMessage(payload, fallback: status)
+          ? providerNamedFailureMessage(
+              providerById(current.provider).name,
+              payload,
+              fallback: status,
+            )
           : null;
       if (status == 'Ready' && resultUrl == null) {
         status = 'Error';
         failureMessage =
-            'BFL reported that the generation was ready but did not include a video URL.';
+            '${providerById(current.provider).name} reported that the generation was ready but did not include a video URL.';
       }
       var resultAsset = current.resultAsset;
       if (resultUrl != null && resultAsset == null) {
@@ -723,7 +800,7 @@ class CompanionApp {
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
         draftCacheUrl: status == 'Ready'
-            ? findResultUrl(payload['result'], draft: true)
+            ? findResultUrl(result, draft: true)
             : null,
         deliveryExpiresAt: status == 'Ready'
             ? checkedAt.add(const Duration(minutes: 10))
@@ -746,7 +823,11 @@ class CompanionApp {
         next = current.copyWith(
           status: providerStatus,
           progress: normalizedProgress(payload['progress']),
-          error: providerFailureMessage(payload, fallback: providerStatus),
+          error: providerNamedFailureMessage(
+            providerById(current.provider).name,
+            payload,
+            fallback: providerStatus,
+          ),
           lastCheckedAt: checkedAt,
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
@@ -858,7 +939,7 @@ class CompanionApp {
     if (source == null) {
       throw const ProviderException('A media URL is required.', status: 400);
     }
-    final target = validatedBflUrl(source);
+    final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {
       final upstreamRequest = await client.getUrl(target);
@@ -931,11 +1012,7 @@ class CompanionApp {
     await file.openRead().pipe(request.response);
   }
 
-  Future<void> _json(
-    HttpResponse response,
-    int status,
-    Map<String, Object?> payload,
-  ) async {
+  Future<void> _json(HttpResponse response, int status, Object? payload) async {
     response.statusCode = status;
     response.headers.contentType = ContentType.json;
     response.write(jsonEncode(payload));

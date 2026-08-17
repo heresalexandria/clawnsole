@@ -18,8 +18,8 @@
 </p>
 
 Clawnsole is a local-first Flutter video generation workspace with a premium,
-midcentury-inspired interface. It currently supports Black Forest Labs' FLUX 3
-video API and keeps provider boundaries explicit for future video services.
+midcentury-inspired interface. It supports Black Forest Labs FLUX 3, LTX, and
+Atlas Cloud through one provider-neutral Create and Library workflow.
 
 ## iPhone
 
@@ -41,6 +41,8 @@ video API and keeps provider boundaries explicit for future video services.
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
 - Local API-key setup with no database, `localStorage`, or IndexedDB history
+- A Providers desk for per-provider keys, console/docs links, live Atlas model
+  discovery, and 10/15/20/30-second USD comparisons with reference costs
 
 ## One product, four targets
 
@@ -77,8 +79,8 @@ inputs and videos in an adjacent `assets/` directory.
 - History is not capped.
 - Base64 request payloads and video blobs are never stored in JSON.
 - Removing history prunes media no longer referenced by another generation.
-- BFL delivery links are temporary; completed videos are retained locally first.
-- User-supplied BFL keys are plaintext inside the locally protected JSON file
+- Provider delivery links may be temporary; completed videos are retained locally first.
+- User-supplied provider keys are plaintext inside the locally protected JSON file
   and are never returned to the web renderer. An optional temporary iOS App
   Review fallback is compiled only by the local iOS build script, never written
   to local JSON, and never displayed in the app.
@@ -127,4 +129,9 @@ cd ../electron
 npm test
 ```
 
-The implementation follows BFL's official [FLUX 3 video documentation](https://docs.bfl.ai/flux_3/flux3_video), [API reference](https://docs.bfl.ai/api-reference/utility/generate-a-video-with-flux-3), [pricing calculator](https://bfl.ai/pricing), and [polling guidance](https://docs.bfl.ai/api_integration/integration_guidelines).
+Provider contracts and fallback rates follow the official
+[BFL documentation](https://docs.bfl.ai/flux_3/flux3_video),
+[LTX documentation](https://docs.ltx.io), and
+[Atlas Cloud video documentation](https://www.atlascloud.ai/docs/models/video).
+Atlas models are refreshed from its public catalog and Create-ready costs use
+its no-charge request preflight when available.

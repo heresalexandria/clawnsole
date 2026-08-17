@@ -119,7 +119,16 @@ class AppController extends ChangeNotifier {
   AppSection section = AppSection.create;
   LibraryFilter libraryFilter = LibraryFilter.all;
   String librarySearch = '';
+  String selectedProviderId = 'bfl';
+  String selectedModelId = 'flux-3-video';
   double? credits;
+  final Map<String, ProviderAccountStatus> providerAccounts =
+      <String, ProviderAccountStatus>{};
+  final Map<String, List<ProviderModelPrice>> providerPrices =
+      <String, List<ProviderModelPrice>>{
+        for (final provider in videoProviders)
+          provider.id: publishedProviderPrices(provider.id),
+      };
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -138,14 +147,38 @@ class AppController extends ChangeNotifier {
   int _idCounter = 0;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
-  bool get hasApiKey => snapshot?.hasApiKey ?? false;
+  VideoProviderDefinition get selectedProvider =>
+      providerById(selectedProviderId);
+  VideoModelDefinition get selectedModel =>
+      modelById(selectedProviderId, selectedModelId);
+  VideoModelDefinition get referenceModel => selectedModel.maxKeyframes > 0
+      ? selectedModel
+      : selectedProvider.models.firstWhere(
+          (model) => model.modes.contains(VideoMode.i2v),
+          orElse: () => selectedModel,
+        );
+  bool get hasApiKey => hasApiKeyFor(selectedProviderId);
+  bool hasApiKeyFor(String provider) =>
+      snapshot?.hasApiKeyFor(provider) ?? false;
+  bool get hasAnyApiKey =>
+      snapshot?.connectedProviders.isNotEmpty == true ||
+      snapshot?.hasApiKey == true;
   bool get supportsPhotoLibrarySave => gateway.supportsPhotoLibrarySave;
   StorageStats get storage =>
       snapshot?.storage ?? const StorageStats(path: '', bytes: 0, records: 0);
   int get workingCount => generations.where((item) => item.isWorking).length;
   int get readyCount => generations.where((item) => item.isReady).length;
-  double get spentCredits =>
-      generations.fold(0, (total, item) => total + (item.cost ?? 0));
+  double get spentCredits => generations
+      .where((item) => item.billingUnit == 'credits')
+      .fold(0, (total, item) => total + (item.cost ?? 0));
+  double get spentUsd => generations.fold(
+    0,
+    (total, item) =>
+        total +
+        (item.billingUnit == 'usd'
+            ? item.cost ?? 0
+            : creditsToUsd(item.cost ?? 0)),
+  );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
 
   List<Generation> get filteredGenerations {
@@ -221,8 +254,14 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  CreditEstimate get currentEstimate =>
-      estimateCredits(form.mode, currentConfig, generations);
+  CostEstimate get currentEstimate => estimateCost(
+    selectedProviderId,
+    selectedModel.id,
+    form.mode,
+    currentConfig,
+    generations,
+    providerPrices[selectedProviderId] ?? const <ProviderModelPrice>[],
+  );
 
   Future<void> initialize() async {
     try {
@@ -233,6 +272,9 @@ class AppController extends ChangeNotifier {
       if (hasApiKey) {
         unawaited(refreshCredits());
         unawaited(pollWorking());
+      }
+      for (final provider in videoProviders) {
+        unawaited(refreshProviderModels(provider.id));
       }
     } on Object catch (error) {
       loadError = _message(error);
@@ -245,7 +287,7 @@ class AppController extends ChangeNotifier {
       (_) => unawaited(pollWorking()),
     );
     _creditTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (hasApiKey) unawaited(refreshCredits());
+      if (hasAnyApiKey) unawaited(refreshCredits());
     });
   }
 
@@ -253,6 +295,8 @@ class AppController extends ChangeNotifier {
     snapshot = value;
     section = value.preferences.activeSection;
     libraryFilter = value.preferences.libraryFilter;
+    selectedProviderId = providerById(value.preferences.provider).id;
+    selectedModelId = modelById(selectedProviderId, value.preferences.model).id;
     loadError = null;
     notifyListeners();
   }
@@ -277,11 +321,7 @@ class AppController extends ChangeNotifier {
     section = value;
     notifyListeners();
     try {
-      _apply(
-        await gateway.setPreferences(
-          AppPreferences(activeSection: value, libraryFilter: libraryFilter),
-        ),
-      );
+      _apply(await gateway.setPreferences(_preferences(activeSection: value)));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -291,11 +331,7 @@ class AppController extends ChangeNotifier {
     libraryFilter = value;
     notifyListeners();
     try {
-      _apply(
-        await gateway.setPreferences(
-          AppPreferences(activeSection: section, libraryFilter: value),
-        ),
-      );
+      _apply(await gateway.setPreferences(_preferences(libraryFilter: value)));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -308,9 +344,84 @@ class AppController extends ChangeNotifier {
 
   void updateForm(void Function(GenerationFormState value) update) {
     update(form);
-    if (form.draft) form.resolution = 'hd';
+    _selectCompatibleModel();
+    if (form.draft && selectedModel.supportsDraft) form.resolution = 'hd';
+    if (!selectedModel.resolutions.any((item) => item.id == form.resolution)) {
+      form.resolution = selectedModel.resolutions.first.id;
+    }
     if (form.requiresFixedDuration) form.autoDuration = false;
+    form.durationSeconds = _validDuration(form.durationSeconds);
     notifyListeners();
+  }
+
+  AppPreferences _preferences({
+    AppSection? activeSection,
+    LibraryFilter? libraryFilter,
+  }) => AppPreferences(
+    activeSection: activeSection ?? section,
+    libraryFilter: libraryFilter ?? this.libraryFilter,
+    provider: selectedProviderId,
+    model: selectedModelId,
+  );
+
+  int _validDuration(int value) {
+    final model = selectedModel;
+    final clamped = value.clamp(model.minDuration, model.maxDuration);
+    final offset = clamped - model.minDuration;
+    return model.minDuration +
+        (offset ~/ model.durationStep) * model.durationStep;
+  }
+
+  void _selectCompatibleModel() {
+    if (selectedModel.modes.contains(form.mode)) return;
+    final compatible = selectedProvider.models
+        .where((model) => model.modes.contains(form.mode))
+        .firstOrNull;
+    if (compatible != null) selectedModelId = compatible.id;
+  }
+
+  Future<void> selectProvider(String providerId) async {
+    final provider = providerById(providerId);
+    selectedProviderId = provider.id;
+    selectedModelId = provider.defaultModel.id;
+    _selectCompatibleModel();
+    _normalizeFormForModel();
+    credits = providerAccounts[provider.id]?.balance;
+    notifyListeners();
+    try {
+      _apply(await gateway.setPreferences(_preferences()));
+      if (hasApiKey) unawaited(refreshCredits());
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> selectModel(String modelId) async {
+    selectedModelId = modelById(selectedProviderId, modelId).id;
+    _normalizeFormForModel();
+    notifyListeners();
+    try {
+      _apply(await gateway.setPreferences(_preferences()));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  void _normalizeFormForModel() {
+    final model = selectedModel;
+    form.durationSeconds = _validDuration(form.durationSeconds);
+    if (!model.supportsAutoDuration) form.autoDuration = false;
+    if (!model.supportsAudio) form.generateAudio = false;
+    if (!model.supportsDraft) form.draft = false;
+    if (!model.supportsTimedKeyframes) form.exactTiming = false;
+    if (!model.resolutions.any((item) => item.id == form.resolution)) {
+      form.resolution = model.resolutions.first.id;
+    }
+    if (!model.aspectRatios.contains(form.aspectRatio)) {
+      form.aspectRatio = model.aspectRatios.contains('16:9')
+          ? '16:9'
+          : model.aspectRatios.first;
+    }
   }
 
   Future<PickedAsset?> _pick({
@@ -336,7 +447,7 @@ class AppController extends ChangeNotifier {
   }
 
   bool canAddFrame(KeyframeRole role) =>
-      form.keyframes.length < bflProvider.maxKeyframes &&
+      form.keyframes.length < referenceModel.maxKeyframes &&
       (role == KeyframeRole.middle ||
           !form.keyframes.any((frame) => frame.role == role));
 
@@ -372,6 +483,8 @@ class AppController extends ChangeNotifier {
         asset: asset,
       ),
     ];
+    _selectCompatibleModel();
+    _normalizeFormForModel();
     if (form.requiresFixedDuration) form.autoDuration = false;
     notifyListeners();
   }
@@ -407,10 +520,10 @@ class AppController extends ChangeNotifier {
   }
 
   void setDurationSeconds(int value) {
-    form.durationSeconds = value;
+    form.durationSeconds = _validDuration(value);
     form.keyframes = form.keyframes.map((frame) {
       return frame.role == KeyframeRole.end
-          ? frame.copyWith(seconds: value.toDouble())
+          ? frame.copyWith(seconds: form.durationSeconds.toDouble())
           : frame;
     }).toList();
     notifyListeners();
@@ -449,6 +562,8 @@ class AppController extends ChangeNotifier {
 
   void removeFrame(String id) {
     form.keyframes = form.keyframes.where((frame) => frame.id != id).toList();
+    _selectCompatibleModel();
+    _normalizeFormForModel();
     notifyListeners();
   }
 
@@ -471,12 +586,22 @@ class AppController extends ChangeNotifier {
   }
 
   String? validate() {
-    if (!hasApiKey) return 'Add your BFL API key before generating.';
+    final provider = selectedProvider;
+    final model = selectedModel;
+    if (!hasApiKey) {
+      return 'Add your ${provider.name} API key before generating.';
+    }
+    if (!model.modes.contains(form.mode)) {
+      return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
+    }
     if (form.mode != VideoMode.draftEnhance && form.prompt.trim().isEmpty) {
       return 'Describe the video you want to make.';
     }
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty) return 'Add at least one image frame.';
+      if (form.keyframes.length > model.maxKeyframes) {
+        return '${model.label} accepts up to ${model.maxKeyframes} reference images.';
+      }
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
       }
@@ -485,8 +610,8 @@ class AppController extends ChangeNotifier {
       }
       if (form.usesTimedKeyframes) {
         final seconds = form.keyframes.map((frame) => frame.seconds).toList();
-        if (seconds.any((value) => value < 0 || value > 20)) {
-          return 'Keyframe timing must stay between 0 and 20 seconds.';
+        if (seconds.any((value) => value < 0 || value > model.maxDuration)) {
+          return 'Keyframe timing must stay between 0 and ${model.maxDuration} seconds.';
         }
         if (seconds.toSet().length != seconds.length) {
           return 'Each timed keyframe needs a unique time.';
@@ -496,12 +621,15 @@ class AppController extends ChangeNotifier {
     if (form.mode == VideoMode.v2v &&
         form.videoAsset == null &&
         form.videoUrl.trim().isEmpty) {
-      return 'Add the video you want FLUX 3 to continue.';
+      return 'Add the video you want ${model.label} to continue.';
     }
     if (form.mode == VideoMode.draftEnhance &&
         form.draftAsset == null &&
         form.draftUrl.trim().isEmpty) {
       return 'Add a draft cache bundle or URL.';
+    }
+    if (form.autoDuration && !model.supportsAutoDuration) {
+      return '${model.label} needs a fixed duration.';
     }
     return null;
   }
@@ -557,7 +685,7 @@ class AppController extends ChangeNotifier {
     final problem = validate();
     if (problem != null) {
       showNotice(problem);
-      if (!hasApiKey) unawaited(navigate(AppSection.settings));
+      if (!hasApiKey) unawaited(navigate(AppSection.providers));
       return;
     }
     if (!await refreshCredits()) return;
@@ -565,6 +693,9 @@ class AppController extends ChangeNotifier {
     final estimate = currentEstimate;
     var pending = Generation(
       localId: _uid(),
+      provider: selectedProviderId,
+      model: selectedModel.id,
+      billingUnit: selectedProviderId == 'bfl' ? 'credits' : 'usd',
       status: 'submitting',
       progress: 0,
       prompt: form.mode == VideoMode.draftEnhance
@@ -574,8 +705,8 @@ class AppController extends ChangeNotifier {
       config: currentConfig,
       createdAt: now,
       updatedAt: now,
-      estimatedCreditsMin: estimate.minimum,
-      estimatedCreditsMax: estimate.maximum,
+      estimatedCreditsMin: estimate.providerUnitsMinimum ?? estimate.minimumUsd,
+      estimatedCreditsMax: estimate.providerUnitsMaximum ?? estimate.maximumUsd,
       estimateBasis: estimate.basis,
     );
     final current = snapshot;
@@ -584,6 +715,7 @@ class AppController extends ChangeNotifier {
         generations: <Generation>[pending, ...current.generations],
         preferences: current.preferences,
         hasApiKey: current.hasApiKey,
+        connectedProviders: current.connectedProviders,
         storage: current.storage,
       );
     }
@@ -631,18 +763,20 @@ class AppController extends ChangeNotifier {
       generations: items,
       preferences: current.preferences,
       hasApiKey: current.hasApiKey,
+      connectedProviders: current.connectedProviders,
       storage: current.storage,
     );
     notifyListeners();
   }
 
   Future<void> pollWorking() async {
-    if (_polling || !hasApiKey) return;
+    if (_polling || !hasAnyApiKey) return;
     final now = DateTime.now().toUtc();
     final working = generations.where((item) {
       if (!item.canCheckStatus || _statusChecks.contains(item.localId)) {
         return false;
       }
+      if (!hasApiKeyFor(item.provider)) return false;
       final needsRetention =
           item.isReady &&
           item.resultAsset == null &&
@@ -718,11 +852,18 @@ class AppController extends ChangeNotifier {
       if (updated.lastCheckError != null) {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
-        showNotice('BFL reports that this film is ready.');
+        showNotice(
+          '${providerById(item.provider).shortName} reports that this film is ready.',
+        );
       } else if (updated.isFailed) {
-        showNotice(updated.error ?? 'BFL reports ${updated.statusLabel}.');
+        showNotice(
+          updated.error ??
+              '${providerById(item.provider).shortName} reports ${updated.statusLabel}.',
+        );
       } else {
-        showNotice('BFL reports ${updated.statusLabel.toLowerCase()}.');
+        showNotice(
+          '${providerById(item.provider).shortName} reports ${updated.statusLabel.toLowerCase()}.',
+        );
       }
     } on Object catch (error) {
       if (await _invalidateRejectedApiKey(error, showNoticeOnFailure: true)) {
@@ -752,10 +893,11 @@ class AppController extends ChangeNotifier {
     _apply(await gateway.load());
     credits = null;
     if (!hasApiKey) {
-      creditError = 'BFL rejected the active API key. Add another key.';
+      creditError =
+          '${selectedProvider.name} rejected the active API key. Add another key.';
       if (showNoticeOnFailure) {
         showNotice(creditError!);
-        unawaited(navigate(AppSection.settings));
+        unawaited(navigate(AppSection.providers));
       }
     }
     return true;
@@ -782,7 +924,18 @@ class AppController extends ChangeNotifier {
     try {
       for (var attempt = 0; attempt < 2 && hasApiKey; attempt += 1) {
         try {
-          credits = await gateway.getCredits();
+          final providerGateway = gateway is ProviderGateway
+              ? gateway as ProviderGateway
+              : null;
+          final account = providerGateway == null
+              ? ProviderAccountStatus(
+                  provider: 'bfl',
+                  balance: await gateway.getCredits(),
+                  currency: 'credits',
+                )
+              : await providerGateway.getProviderAccount(selectedProviderId);
+          providerAccounts[selectedProviderId] = account;
+          credits = account.balance;
           creditError = null;
           return true;
         } on Object catch (error) {
@@ -793,9 +946,10 @@ class AppController extends ChangeNotifier {
           await _invalidateRejectedApiKey(error, showNoticeOnFailure: false);
         }
       }
-      creditError = 'BFL rejected the active API key. Add another key.';
+      creditError =
+          '${selectedProvider.name} rejected the active API key. Add another key.';
       showNotice(creditError!);
-      unawaited(navigate(AppSection.settings));
+      unawaited(navigate(AppSection.providers));
       return false;
     } finally {
       refreshingCredits = false;
@@ -804,9 +958,30 @@ class AppController extends ChangeNotifier {
   }
 
   Future<double> verifyKey(String candidate) async {
+    final account = await verifyProviderKey('bfl', candidate);
+    return account.balance ?? 0;
+  }
+
+  Future<ProviderAccountStatus> verifyProviderKey(
+    String provider,
+    String candidate,
+  ) async {
     final clean = candidate.trim();
     try {
-      return await gateway.verifyKey(clean.isEmpty ? null : clean);
+      if (gateway is ProviderGateway) {
+        return await (gateway as ProviderGateway).verifyProviderKey(
+          provider,
+          clean.isEmpty ? null : clean,
+        );
+      }
+      if (provider != 'bfl') {
+        throw StateError('This gateway does not support $provider.');
+      }
+      return ProviderAccountStatus(
+        provider: 'bfl',
+        balance: await gateway.verifyKey(clean.isEmpty ? null : clean),
+        currency: 'credits',
+      );
     } on Object catch (error) {
       if (clean.isEmpty) {
         await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
@@ -816,18 +991,61 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> saveKey(String value) async {
+    await saveProviderKey('bfl', value);
+  }
+
+  Future<void> saveProviderKey(String provider, String value) async {
     final clean = value.trim();
     if (clean.isEmpty) throw StateError('An API key is required.');
-    credits = await gateway.verifyKey(clean);
-    _apply(await gateway.setApiKey(clean));
+    final account = await verifyProviderKey(provider, clean);
+    providerAccounts[provider] = account;
+    if (provider == selectedProviderId) credits = account.balance;
+    if (gateway is ProviderGateway) {
+      _apply(
+        await (gateway as ProviderGateway).setProviderApiKey(provider, clean),
+      );
+    } else {
+      if (provider != 'bfl') {
+        throw StateError('This gateway does not support $provider.');
+      }
+      _apply(await gateway.setApiKey(clean));
+    }
     creditError = null;
-    showNotice('API key verified and saved locally.');
+    showNotice(
+      '${providerById(provider).shortName} key verified and saved locally.',
+    );
   }
 
   Future<void> removeKey() async {
-    _apply(await gateway.clearApiKey());
-    credits = null;
-    showNotice('API access removed from this device.');
+    await removeProviderKey('bfl');
+  }
+
+  Future<void> removeProviderKey(String provider) async {
+    if (gateway is ProviderGateway) {
+      _apply(await (gateway as ProviderGateway).clearProviderApiKey(provider));
+    } else {
+      if (provider != 'bfl') {
+        throw StateError('This gateway does not support $provider.');
+      }
+      _apply(await gateway.clearApiKey());
+    }
+    providerAccounts.remove(provider);
+    if (provider == selectedProviderId) credits = null;
+    showNotice(
+      '${providerById(provider).shortName} access removed from this device.',
+    );
+  }
+
+  Future<void> refreshProviderModels(String provider) async {
+    try {
+      final models = gateway is ProviderGateway
+          ? await (gateway as ProviderGateway).listProviderModels(provider)
+          : publishedProviderPrices(provider);
+      if (models.isNotEmpty) providerPrices[provider] = models;
+      notifyListeners();
+    } on Object {
+      // Published prices remain visible if a live catalog is unavailable.
+    }
   }
 
   Future<void> deleteGeneration(String localId) async {

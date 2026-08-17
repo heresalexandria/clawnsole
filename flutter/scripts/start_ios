@@ -2,6 +2,7 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_review_credentials.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/start_ios [additional flutter run arguments]"
@@ -45,5 +46,9 @@ xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
 "$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
 
+load_clawnsole_review_credentials
+prepare_clawnsole_review_defines
+trap cleanup_clawnsole_review_defines EXIT
+
 echo "Launching Clawnsole on iOS simulator ${SIMULATOR_ID}…"
-exec flutter run -d "$SIMULATOR_ID" "$@"
+flutter run -d "$SIMULATOR_ID" "${REVIEW_BUILD_ARGUMENTS[@]}" "$@"

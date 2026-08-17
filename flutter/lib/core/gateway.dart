@@ -28,4 +28,18 @@ abstract interface class AppGateway {
   Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName);
 }
 
+/// Provider-aware operations implemented by the production gateways. Keeping
+/// this separate preserves compatibility with lightweight BFL-only test and
+/// embedder gateways while the app can route LTX and Atlas Cloud explicitly.
+abstract interface class ProviderGateway {
+  Future<LocalSnapshot> setProviderApiKey(String provider, String value);
+  Future<ProviderAccountStatus> verifyProviderKey(
+    String provider, [
+    String? candidate,
+  ]);
+  Future<ProviderAccountStatus> getProviderAccount(String provider);
+  Future<LocalSnapshot> clearProviderApiKey(String provider);
+  Future<List<ProviderModelPrice>> listProviderModels(String provider);
+}
+
 AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();

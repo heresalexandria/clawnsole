@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/app_links.dart';
+import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
@@ -22,52 +23,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final keyController = TextEditingController();
-  bool showKey = false;
-  bool saving = false;
-  bool checking = false;
-  double? checkedCredits;
-  String? checkError;
-
-  @override
-  void dispose() {
-    keyController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (keyController.text.trim().isEmpty) {
-      widget.controller.showNotice('Paste a BFL API key first.');
-      return;
-    }
-    setState(() => saving = true);
-    try {
-      await widget.controller.saveKey(keyController.text);
-      keyController.clear();
-      checkedCredits = null;
-      checkError = null;
-    } on Object catch (error) {
-      widget.controller.showNotice(error.toString());
-    } finally {
-      if (mounted) setState(() => saving = false);
-    }
-  }
-
-  Future<void> _verify() async {
-    setState(() {
-      checking = true;
-      checkError = null;
-      checkedCredits = null;
-    });
-    try {
-      checkedCredits = await widget.controller.verifyKey(keyController.text);
-    } on Object catch (error) {
-      checkError = error.toString();
-    } finally {
-      if (mounted) setState(() => checking = false);
-    }
-  }
-
   Future<bool> _confirm(String title, String detail) async =>
       await showDialog<bool>(
         context: context,
@@ -94,18 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final split = constraints.maxWidth >= 1050;
       final main = Column(
         children: <Widget>[
-          _ApiKeySection(
-            controller: widget.controller,
-            keyController: keyController,
-            showKey: showKey,
-            saving: saving,
-            checking: checking,
-            checkedCredits: checkedCredits,
-            checkError: checkError,
-            onToggleVisibility: () => setState(() => showKey = !showKey),
-            onSave: _save,
-            onVerify: _verify,
-          ),
+          _ProviderAccessCard(controller: widget.controller),
           const SizedBox(height: 18),
           _StorageSection(controller: widget.controller),
         ],
@@ -130,7 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'Connect your provider and keep a close eye on Clawnsole’s local data.',
+                  'Manage appearance, updates, and Clawnsole’s private local data.',
                 ),
                 const SizedBox(height: 24),
                 if (split)
@@ -152,206 +96,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 }
 
-class _ApiKeySection extends StatelessWidget {
-  const _ApiKeySection({
-    required this.controller,
-    required this.keyController,
-    required this.showKey,
-    required this.saving,
-    required this.checking,
-    required this.checkedCredits,
-    required this.checkError,
-    required this.onToggleVisibility,
-    required this.onSave,
-    required this.onVerify,
-  });
+class _ProviderAccessCard extends StatelessWidget {
+  const _ProviderAccessCard({required this.controller});
 
   final AppController controller;
-  final TextEditingController keyController;
-  final bool showKey;
-  final bool saving;
-  final bool checking;
-  final double? checkedCredits;
-  final String? checkError;
-  final VoidCallback onToggleVisibility;
-  final Future<void> Function() onSave;
-  final Future<void> Function() onVerify;
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    child: Row(
       children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            CircleAvatar(
-              backgroundColor: context.colors.primaryContainer,
-              child: Icon(
-                Icons.key_rounded,
-                color: context.colors.onPrimaryContainer,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Black Forest Labs',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    controller.gateway.usesCompanion
-                        ? 'Configured credentials stay in the loopback companion and are never returned to the browser.'
-                        : 'Configured credentials are never displayed. User-supplied keys stay in this app’s private local JSON file.',
-                  ),
-                ],
-              ),
-            ),
-            if (controller.hasApiKey)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                decoration: BoxDecoration(
-                  color: context.colors.primaryContainer,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Icon(
-                      Icons.check_rounded,
-                      size: 13,
-                      color: context.colors.onPrimaryContainer,
-                    ),
-                    SizedBox(width: 4),
-                    Text(
-                      'Connected',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 18),
-        const Text(
-          'BFL API key',
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 7),
-        TextField(
-          controller: keyController,
-          obscureText: !showKey,
-          autocorrect: false,
-          enableSuggestions: false,
-          decoration: InputDecoration(
-            hintText: controller.hasApiKey
-                ? 'Connected — paste a replacement'
-                : 'bfl_••••••••••••••••',
-            suffixIcon: IconButton(
-              onPressed: onToggleVisibility,
-              icon: Icon(
-                showKey
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-              ),
-            ),
+        CircleAvatar(
+          backgroundColor: context.colors.primaryContainer,
+          child: Icon(
+            Icons.hub_rounded,
+            color: context.colors.onPrimaryContainer,
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          controller.gateway.usesCompanion
-              ? 'The browser receives only whether a key exists. Start the loopback companion before using the web build.'
-              : 'The app reports only whether access is configured. It never fills this field with an existing credential.',
-          style: const TextStyle(fontSize: 11.5, height: 1.4),
-        ),
-        if (checking ||
-            checkedCredits != null ||
-            checkError != null) ...<Widget>[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              color: checkError == null
-                  ? context.colors.primaryContainer
-                  : context.colors.errorContainer,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: <Widget>[
-                if (checking)
-                  const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(
-                    checkError == null
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.warning_amber_rounded,
-                    size: 17,
-                    color: checkError == null
-                        ? context.colors.onPrimaryContainer
-                        : context.colors.onErrorContainer,
-                  ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    checking
-                        ? 'Checking with BFL…'
-                        : checkError ??
-                              'Key verified · ${formatCredits(checkedCredits!)} credits available',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 15),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: <Widget>[
-            FilledButton.icon(
-              onPressed: saving ? null : () => unawaited(onSave()),
-              icon: saving
-                  ? const SizedBox.square(
-                      dimension: 15,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.key_rounded, size: 17),
-              label: Text(controller.hasApiKey ? 'Replace key' : 'Save key'),
-            ),
-            OutlinedButton.icon(
-              onPressed:
-                  checking ||
-                      (keyController.text.isEmpty && !controller.hasApiKey)
-                  ? null
-                  : () => unawaited(onVerify()),
-              icon: const Icon(Icons.refresh_rounded, size: 17),
-              label: const Text('Verify & check credits'),
-            ),
-            if (controller.hasApiKey)
-              TextButton(
-                onPressed: () => unawaited(controller.removeKey()),
-                child: Text(
-                  'Remove',
-                  style: TextStyle(color: context.colors.error),
-                ),
+        const SizedBox(width: 12),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'Provider access moved to its own desk',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
-          ],
+              SizedBox(height: 4),
+              Text(
+                'Set BFL, LTX, and Atlas Cloud keys and compare live model costs in Providers.',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        FilledButton.icon(
+          onPressed: () => unawaited(controller.navigate(AppSection.providers)),
+          icon: const Icon(Icons.arrow_forward_rounded, size: 17),
+          label: const Text('Open Providers'),
         ),
       ],
     ),

@@ -29,7 +29,7 @@ class CreateScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const _CreateHeading(),
+                _CreateHeading(controller: controller),
                 const SizedBox(height: 26),
                 if (split)
                   Row(
@@ -61,7 +61,9 @@ class CreateScreen extends StatelessWidget {
 }
 
 class _CreateHeading extends StatelessWidget {
-  const _CreateHeading();
+  const _CreateHeading({required this.controller});
+
+  final AppController controller;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -85,7 +87,7 @@ class _CreateHeading extends StatelessWidget {
           ],
         ),
       );
-      const plaque = _ProviderPlaque();
+      final plaque = _ProviderPlaque(controller: controller);
       // Wide layouts pin the plaque to the far right of the page; narrow ones
       // stack it under the title rather than squeezing both onto one line.
       if (constraints.maxWidth < 720) {
@@ -109,67 +111,118 @@ class _CreateHeading extends StatelessWidget {
 }
 
 class _ProviderPlaque extends StatelessWidget {
-  const _ProviderPlaque();
+  const _ProviderPlaque({required this.controller});
+
+  final AppController controller;
+
+  Future<void> _select(String value) async {
+    final divider = value.indexOf('|');
+    final provider = value.substring(0, divider);
+    final model = value.substring(divider + 1);
+    if (controller.selectedProviderId != provider) {
+      await controller.selectProvider(provider);
+    }
+    await controller.selectModel(model);
+  }
 
   @override
   Widget build(BuildContext context) => TexturePanel(
     surface: PanelSurface.navyLeather,
     stitched: true,
     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Container(
-          width: 34,
-          height: 34,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: context.tokens.panelBrass),
-            color: Colors.white.withValues(alpha: .06),
-          ),
-          child: Text(
-            'BFL',
-            style: TextStyle(
-              color: context.tokens.panelBrass,
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              letterSpacing: .5,
+    child: PopupMenuButton<String>(
+      tooltip: 'Choose provider and model',
+      onSelected: (value) => unawaited(_select(value)),
+      itemBuilder: (context) => videoProviders.expand((provider) {
+        return <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            enabled: false,
+            height: 34,
+            child: Text(
+              provider.name.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 10,
+                letterSpacing: 1.1,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'PROVIDER',
+          ...provider.models.map(
+            (model) => PopupMenuItem<String>(
+              value: '${provider.id}|${model.id}',
+              child: Row(
+                children: <Widget>[
+                  Expanded(child: Text(model.label)),
+                  if (provider.id == controller.selectedProviderId &&
+                      model.id == controller.selectedModel.id)
+                    const Icon(Icons.check_rounded, size: 17),
+                ],
+              ),
+            ),
+          ),
+        ];
+      }).toList(),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: context.tokens.panelBrass),
+              color: Colors.white.withValues(alpha: .06),
+            ),
+            child: Text(
+              controller.selectedProvider.shortName,
               style: TextStyle(
-                color: context.tokens.onPanelMuted,
-                fontSize: 8.5,
-                letterSpacing: 1.6,
+                color: context.tokens.panelBrass,
+                fontSize: 9,
                 fontWeight: FontWeight.w700,
+                letterSpacing: .5,
               ),
             ),
-            const SizedBox(height: 3),
-            Text(
-              'Black Forest Labs',
-              style: TextStyle(
-                color: context.tokens.onPanel,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                'PROVIDER',
+                style: TextStyle(
+                  color: context.tokens.onPanelMuted,
+                  fontSize: 8.5,
+                  letterSpacing: 1.6,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            Text(
-              'FLUX 3 · latest',
-              style: TextStyle(
-                color: context.tokens.onPanelMuted,
-                fontSize: 10.5,
+              const SizedBox(height: 3),
+              Text(
+                controller.selectedProvider.name,
+                style: TextStyle(
+                  color: context.tokens.onPanel,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
+              Text(
+                controller.selectedModel.label,
+                style: TextStyle(
+                  color: context.tokens.onPanelMuted,
+                  fontSize: 10.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Icon(
+            Icons.unfold_more_rounded,
+            size: 17,
+            color: context.tokens.panelBrass,
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -308,12 +361,22 @@ class _ComposerState extends State<_Composer> {
                 _QuietAction(
                   icon: Icons.movie_filter_rounded,
                   label: 'a video to continue',
-                  onTap: () => setState(() => _showVideoPanel = true),
+                  onTap:
+                      controller.selectedProvider.models.any(
+                        (model) => model.modes.contains(VideoMode.v2v),
+                      )
+                      ? () => setState(() => _showVideoPanel = true)
+                      : null,
                 ),
                 _QuietAction(
                   icon: Icons.auto_fix_high_rounded,
                   label: 'a saved draft to enhance',
-                  onTap: () => setState(() => _showDraftPanel = true),
+                  onTap:
+                      controller.selectedProvider.models.any(
+                        (model) => model.modes.contains(VideoMode.draftEnhance),
+                      )
+                      ? () => setState(() => _showDraftPanel = true)
+                      : null,
                 ),
               ],
             ),
@@ -344,7 +407,7 @@ class _QuietAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => TextButton.icon(
@@ -403,6 +466,8 @@ class _FramesSection extends StatelessWidget {
           icon: Icons.collections_rounded,
           trailing: form.keyframes.isEmpty
               ? null
+              : !controller.selectedModel.supportsTimedKeyframes
+              ? null
               : TogglePill(
                   label: 'Custom timing',
                   selected: form.usesTimedKeyframes,
@@ -414,10 +479,10 @@ class _FramesSection extends StatelessWidget {
         const SizedBox(height: 9),
         Text(
           form.keyframes.isEmpty
-              ? 'Pin up to ${bflProvider.maxKeyframes} images to the first, middle, or last positions — or leave this empty for pure text-to-video.'
+              ? 'Pin up to ${controller.referenceModel.maxKeyframes} images for ${controller.referenceModel.label} — or leave this empty for pure text-to-video.'
               : form.requiresTimedKeyframes
               ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
-              : 'First-only pins the opening. First + last pins both ends. With three or more plain frames, BFL spaces the middle evenly.',
+              : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.',
           style: TextStyle(
             color: context.colors.onSurfaceVariant,
             fontSize: 11.5,
@@ -856,25 +921,30 @@ class _SettingsGrid extends StatelessWidget {
             style: TextStyle(fontSize: 11),
           ),
           value: controller.form.generateAudio,
-          onChanged: (value) =>
-              controller.updateForm((form) => form.generateAudio = value),
+          onChanged: controller.selectedModel.supportsAudio
+              ? (value) =>
+                    controller.updateForm((form) => form.generateAudio = value)
+              : null,
         ),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          title: const Text(
-            'Fast draft',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        if (controller.selectedModel.supportsDraft)
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Fast draft',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            subtitle: const Text(
+              'HD preview now, enhance later',
+              style: TextStyle(fontSize: 11),
+            ),
+            value: controller.form.draft,
+            onChanged: (value) =>
+                controller.updateForm((form) => form.draft = value),
           ),
-          subtitle: const Text(
-            'HD preview now, enhance later',
-            style: TextStyle(fontSize: 11),
-          ),
-          value: controller.form.draft,
-          onChanged: (value) =>
-              controller.updateForm((form) => form.draft = value),
-        ),
-        const SizedBox(height: 8),
-        _SafetyControl(controller: controller),
+        if (controller.selectedProviderId == 'bfl') ...<Widget>[
+          const SizedBox(height: 8),
+          _SafetyControl(controller: controller),
+        ],
       ];
       if (!columns) {
         return Column(
@@ -967,7 +1037,7 @@ class _RatioStrip extends StatelessWidget {
   Widget build(BuildContext context) => Wrap(
     spacing: 7,
     runSpacing: 7,
-    children: bflProvider.aspectRatios.map((ratio) {
+    children: controller.selectedModel.aspectRatios.map((ratio) {
       final selected = controller.form.aspectRatio == ratio;
       return Tooltip(
         message: _hints[ratio] ?? ratio,
@@ -1058,6 +1128,7 @@ class _DurationControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final form = controller.form;
+    final model = controller.selectedModel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1067,7 +1138,7 @@ class _DurationControl extends StatelessWidget {
           trailing: TogglePill(
             label: 'Auto',
             selected: form.autoDuration,
-            onChanged: form.requiresFixedDuration
+            onChanged: form.requiresFixedDuration || !model.supportsAutoDuration
                 ? null
                 : (value) => controller.updateForm(
                     (form) => form.autoDuration = value,
@@ -1075,9 +1146,10 @@ class _DurationControl extends StatelessWidget {
           ),
         ),
         Slider(
-          min: bflProvider.minDuration.toDouble(),
-          max: bflProvider.maxDuration.toDouble(),
-          divisions: bflProvider.maxDuration - bflProvider.minDuration,
+          min: model.minDuration.toDouble(),
+          max: model.maxDuration.toDouble(),
+          divisions:
+              (model.maxDuration - model.minDuration) ~/ model.durationStep,
           label: '${form.durationSeconds} s',
           value: form.durationSeconds.toDouble(),
           onChanged: (value) => controller.setDurationSeconds(value.round()),
@@ -1085,7 +1157,7 @@ class _DurationControl extends StatelessWidget {
         Row(
           children: <Widget>[
             Text(
-              '${bflProvider.minDuration} s',
+              '${model.minDuration} s',
               style: TextStyle(
                 fontSize: 10.5,
                 color: context.colors.onSurfaceVariant,
@@ -1106,7 +1178,7 @@ class _DurationControl extends StatelessWidget {
               ),
             ),
             Text(
-              '${bflProvider.maxDuration} s',
+              '${model.maxDuration} s',
               style: TextStyle(
                 fontSize: 10.5,
                 color: context.colors.onSurfaceVariant,
@@ -1136,29 +1208,33 @@ class _ResolutionRow extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Expanded(
-        child: _ResolutionButton(
-          label: 'HD',
-          detail: 'Fast native render',
-          active: controller.form.resolution == 'hd',
-          onTap: () => controller.updateForm((form) => form.resolution = 'hd'),
-        ),
-      ),
-      const SizedBox(width: 8),
-      Expanded(
-        child: _ResolutionButton(
-          label: 'Full HD',
-          detail: 'Upsampled finish',
-          active: controller.form.resolution == 'fhd',
-          enabled:
-              !controller.form.draft ||
-              controller.form.mode == VideoMode.draftEnhance,
-          onTap: () => controller.updateForm((form) => form.resolution = 'fhd'),
-        ),
-      ),
-    ],
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final resolutions = controller.selectedModel.resolutions;
+      final width = resolutions.length <= 2
+          ? (constraints.maxWidth - 8) / resolutions.length
+          : (constraints.maxWidth - 8) / 2;
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: resolutions
+            .map(
+              (resolution) => SizedBox(
+                width: width,
+                child: _ResolutionButton(
+                  label: resolution.label,
+                  detail: resolution.detail,
+                  active: controller.form.resolution == resolution.id,
+                  enabled: !controller.form.draft || resolution.id == 'hd',
+                  onTap: () => controller.updateForm(
+                    (form) => form.resolution = resolution.id,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      );
+    },
   );
 }
 
@@ -1266,14 +1342,29 @@ class _CostPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final estimate = controller.currentEstimate;
+    final providerUnits = estimate.providerUnitsMinimum != null;
+    final account = controller.providerAccounts[controller.selectedProviderId];
+    final balanceUsesCredits = account?.currency == 'credits';
+    final chargeMinimum = providerUnits
+        ? estimate.providerUnitsMinimum!
+        : estimate.minimumUsd;
+    final chargeMaximum = providerUnits
+        ? estimate.providerUnitsMaximum!
+        : estimate.maximumUsd;
     final afterMin = controller.credits == null
         ? null
-        : (controller.credits! - estimate.maximum)
+        : (controller.credits! -
+                  (balanceUsesCredits
+                      ? estimate.providerUnitsMaximum ?? 0
+                      : estimate.maximumUsd))
               .clamp(0, double.infinity)
               .toDouble();
     final afterMax = controller.credits == null
         ? null
-        : (controller.credits! - estimate.minimum)
+        : (controller.credits! -
+                  (balanceUsesCredits
+                      ? estimate.providerUnitsMinimum ?? 0
+                      : estimate.minimumUsd))
               .clamp(0, double.infinity)
               .toDouble();
     return TexturePanel(
@@ -1324,7 +1415,12 @@ class _CostPreview extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${formatCreditRange(estimate.minimum, estimate.maximum)} credits',
+                          providerUnits
+                              ? '${formatCreditRange(chargeMinimum, chargeMaximum)} credits'
+                              : formatUsdAmountRange(
+                                  estimate.minimumUsd,
+                                  estimate.maximumUsd,
+                                ),
                           style: TextStyle(
                             fontFamily: 'Fraunces',
                             color: tokens.onPanel,
@@ -1338,7 +1434,12 @@ class _CostPreview extends StatelessWidget {
                 ],
               ),
               Text(
-                formatUsdRange(estimate.minimum, estimate.maximum),
+                providerUnits
+                    ? formatUsdAmountRange(
+                        estimate.minimumUsd,
+                        estimate.maximumUsd,
+                      )
+                    : controller.selectedModel.label,
                 style: TextStyle(
                   fontFamily: 'Fraunces',
                   color: tokens.panelBrass,
@@ -1357,8 +1458,12 @@ class _CostPreview extends StatelessWidget {
                 child: _BalanceLine(
                   label: 'Available now',
                   value: controller.credits == null
-                      ? (controller.hasApiKey ? 'Checking…' : 'Add API key')
-                      : '${formatCredits(controller.credits!)} credits',
+                      ? (controller.hasApiKey
+                            ? account?.balanceLabel ?? 'Connected'
+                            : 'Add API key')
+                      : balanceUsesCredits
+                      ? '${formatCredits(controller.credits!)} credits'
+                      : formatUsdAmount(controller.credits!),
                 ),
               ),
               Expanded(
@@ -1366,7 +1471,9 @@ class _CostPreview extends StatelessWidget {
                   label: 'Estimated after',
                   value: afterMin == null || afterMax == null
                       ? '—'
-                      : '${formatCreditRange(afterMin, afterMax)} credits',
+                      : balanceUsesCredits
+                      ? '${formatCreditRange(afterMin, afterMax)} credits'
+                      : formatUsdAmountRange(afterMin, afterMax),
                 ),
               ),
             ],
@@ -1377,13 +1484,13 @@ class _CostPreview extends StatelessWidget {
             children: <Widget>[
               Text(
                 '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
-                '${estimate.basis == 'provider-history' ? 'Calibrated from this provider’s exact charges.' : 'Based on the provider’s published per-second rate.'} '
-                'The exact charge replaces this estimate on submit.',
+                '${estimate.basis == 'provider-history' ? 'Calibrated from exact charges.' : 'Based on the provider’s current published or live rate.'}',
                 style: TextStyle(color: tokens.onPanelMuted, fontSize: 10.5),
               ),
               TextButton(
-                onPressed: () =>
-                    unawaited(launchUrl(Uri.parse(bflProvider.pricingUrl))),
+                onPressed: () => unawaited(
+                  launchUrl(Uri.parse(controller.selectedProvider.pricingUrl)),
+                ),
                 style: TextButton.styleFrom(
                   foregroundColor: tokens.panelBrass,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1589,7 +1696,7 @@ class _RecentWork extends StatelessWidget {
             _Summary('${controller.generations.length}', 'kept locally'),
             _Summary('${controller.readyCount}', 'complete'),
             _Summary('${controller.workingCount}', 'moving'),
-            _Summary(formatCredits(controller.spentCredits), 'credits spent'),
+            _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),
           ],
         ),
       ),

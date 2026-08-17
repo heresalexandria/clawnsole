@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'generation_status.dart';
 
-enum AppSection { create, library, settings }
+enum AppSection { create, library, providers, settings }
 
 enum LibraryFilter { all, working, ready, failed }
 
@@ -229,6 +229,7 @@ class Generation {
     required this.updatedAt,
     this.provider = 'bfl',
     this.model = 'flux-3-video',
+    this.billingUnit = 'credits',
     this.requestId,
     this.pollingUrl,
     this.progress,
@@ -256,6 +257,7 @@ class Generation {
   final String localId;
   final String provider;
   final String model;
+  final String billingUnit;
   final String? requestId;
   final String? pollingUrl;
   final String status;
@@ -319,7 +321,7 @@ class Generation {
     return copyWith(
       status: 'Error',
       error:
-          'Clawnsole was interrupted before it received a provider status URL. Check the BFL dashboard before submitting again.',
+          'Clawnsole was interrupted before it received a provider status URL. Check the provider console before submitting again.',
       updatedAt: now,
     );
   }
@@ -358,6 +360,7 @@ class Generation {
     localId: localId,
     provider: provider,
     model: model,
+    billingUnit: billingUnit,
     requestId: requestId ?? this.requestId,
     pollingUrl: pollingUrl ?? this.pollingUrl,
     status: status ?? this.status,
@@ -397,6 +400,7 @@ class Generation {
     'localId': localId,
     'provider': provider,
     'model': model,
+    if (billingUnit != 'credits') 'billingUnit': billingUnit,
     if (requestId != null) 'requestId': requestId,
     if (pollingUrl != null) 'pollingUrl': pollingUrl,
     'status': status,
@@ -439,6 +443,7 @@ class Generation {
     localId: json['localId'] as String? ?? '',
     provider: json['provider'] as String? ?? 'bfl',
     model: json['model'] as String? ?? 'flux-3-video',
+    billingUnit: json['billingUnit'] as String? ?? 'credits',
     requestId: json['requestId'] as String?,
     pollingUrl: json['pollingUrl'] as String?,
     status: json['status'] as String? ?? 'Error',
@@ -493,14 +498,20 @@ class AppPreferences {
   const AppPreferences({
     this.activeSection = AppSection.create,
     this.libraryFilter = LibraryFilter.all,
+    this.provider = 'bfl',
+    this.model = 'flux-3-video',
   });
 
   final AppSection activeSection;
   final LibraryFilter libraryFilter;
+  final String provider;
+  final String model;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'activeSection': activeSection.name,
     'libraryFilter': libraryFilter.name,
+    'provider': provider,
+    'model': model,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -512,40 +523,91 @@ class AppPreferences {
       (value) => value.name == json['libraryFilter'],
       orElse: () => LibraryFilter.all,
     ),
+    provider: json['provider'] as String? ?? 'bfl',
+    model: json['model'] as String? ?? 'flux-3-video',
   );
 }
 
 class StoredData {
   const StoredData({
     this.apiKey = '',
+    this.apiKeys = const <String, String>{},
     this.rejectedIosReviewApiKeyId = '',
+    this.rejectedIosReviewApiKeyIds = const <String, String>{},
     this.preferences = const AppPreferences(),
     this.generations = const <Generation>[],
   });
 
   final String apiKey;
+  final Map<String, String> apiKeys;
   final String rejectedIosReviewApiKeyId;
+  final Map<String, String> rejectedIosReviewApiKeyIds;
   final AppPreferences preferences;
   final List<Generation> generations;
 
   StoredData copyWith({
     String? apiKey,
+    Map<String, String>? apiKeys,
     String? rejectedIosReviewApiKeyId,
+    Map<String, String>? rejectedIosReviewApiKeyIds,
     AppPreferences? preferences,
     List<Generation>? generations,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
+    apiKeys: apiKeys ?? this.apiKeys,
     rejectedIosReviewApiKeyId:
         rejectedIosReviewApiKeyId ?? this.rejectedIosReviewApiKeyId,
+    rejectedIosReviewApiKeyIds:
+        rejectedIosReviewApiKeyIds ?? this.rejectedIosReviewApiKeyIds,
     preferences: preferences ?? this.preferences,
     generations: generations ?? this.generations,
   );
 
+  String apiKeyFor(String provider) =>
+      apiKeys[provider] ?? (provider == 'bfl' ? apiKey : '');
+
+  String rejectedReviewKeyIdFor(String provider) =>
+      rejectedIosReviewApiKeyIds[provider] ??
+      (provider == 'bfl' ? rejectedIosReviewApiKeyId : '');
+
+  StoredData withApiKey(String provider, String value) {
+    final next = Map<String, String>.from(apiKeys);
+    if (value.trim().isEmpty) {
+      next.remove(provider);
+    } else {
+      next[provider] = value.trim();
+    }
+    return copyWith(
+      apiKey: provider == 'bfl' ? value.trim() : apiKey,
+      apiKeys: next,
+    );
+  }
+
+  StoredData withRejectedReviewKeyId(String provider, String value) {
+    final next = Map<String, String>.from(rejectedIosReviewApiKeyIds);
+    if (value.isEmpty) {
+      next.remove(provider);
+    } else {
+      next[provider] = value;
+    }
+    return copyWith(
+      rejectedIosReviewApiKeyId: provider == 'bfl'
+          ? value
+          : rejectedIosReviewApiKeyId,
+      rejectedIosReviewApiKeyIds: next,
+    );
+  }
+
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 6,
-    'apiKeys': <String, Object?>{if (apiKey.isNotEmpty) 'bfl': apiKey},
+    'schemaVersion': 7,
+    'apiKeys': <String, Object?>{
+      if (apiKey.isNotEmpty) 'bfl': apiKey,
+      ...apiKeys,
+    },
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
+    if (rejectedIosReviewApiKeyIds.isNotEmpty)
+      'rejectedIosReviewApiKeyIds': rejectedIosReviewApiKeyIds,
     'preferences': preferences.toJson(),
     'generations': generations.map((item) => item.toJson()).toList(),
   };
@@ -561,10 +623,18 @@ class StoredData {
         (json['preferences'] as Map<Object?, Object?>? ?? const {}).map(
           (key, value) => MapEntry(key.toString(), value),
         );
+    final rejectedIds =
+        (json['rejectedIosReviewApiKeyIds'] as Map<Object?, Object?>? ??
+                const {})
+            .map((key, value) => MapEntry(key.toString(), value.toString()));
     return StoredData(
       apiKey: apiKeys['bfl'] as String? ?? '',
+      apiKeys: apiKeys.map(
+        (key, value) => MapEntry(key, value is String ? value : ''),
+      )..removeWhere((key, value) => value.isEmpty),
       rejectedIosReviewApiKeyId:
           json['rejectedIosReviewApiKeyId'] as String? ?? '',
+      rejectedIosReviewApiKeyIds: rejectedIds,
       preferences: AppPreferences.fromJson(preferences),
       generations: (json['generations'] as List<Object?>? ?? const [])
           .whereType<Map<Object?, Object?>>()
@@ -630,17 +700,23 @@ class LocalSnapshot {
     required this.preferences,
     required this.hasApiKey,
     required this.storage,
+    this.connectedProviders = const <String>{},
   });
 
   final List<Generation> generations;
   final AppPreferences preferences;
   final bool hasApiKey;
   final StorageStats storage;
+  final Set<String> connectedProviders;
+
+  bool hasApiKeyFor(String provider) =>
+      connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);
 
   Map<String, Object?> toJson() => <String, Object?>{
     'generations': generations.map((item) => item.toJson()).toList(),
     'preferences': preferences.toJson(),
     'hasBflApiKey': hasApiKey,
+    'connectedProviders': connectedProviders.toList()..sort(),
     'storage': storage.toJson(),
   };
 
@@ -659,6 +735,10 @@ class LocalSnapshot {
       ),
     ),
     hasApiKey: json['hasBflApiKey'] == true,
+    connectedProviders:
+        (json['connectedProviders'] as List<Object?>? ?? const <Object?>[])
+            .whereType<String>()
+            .toSet(),
     storage: StorageStats.fromJson(
       (json['storage'] as Map<Object?, Object?>? ?? const {}).map(
         (key, value) => MapEntry(key.toString(), value),
@@ -677,6 +757,159 @@ class CreditEstimate {
   final double minimum;
   final double maximum;
   final String basis;
+}
+
+class ProviderAccountStatus {
+  const ProviderAccountStatus({
+    required this.provider,
+    this.balance,
+    this.currency = 'USD',
+    this.balanceLabel,
+  });
+
+  final String provider;
+  final double? balance;
+  final String currency;
+  final String? balanceLabel;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'provider': provider,
+    if (balance != null) 'balance': balance,
+    'currency': currency,
+    if (balanceLabel != null) 'balanceLabel': balanceLabel,
+  };
+
+  factory ProviderAccountStatus.fromJson(Map<String, Object?> json) =>
+      ProviderAccountStatus(
+        provider: json['provider'] as String? ?? 'bfl',
+        balance: (json['balance'] as num?)?.toDouble(),
+        currency: json['currency'] as String? ?? 'USD',
+        balanceLabel: json['balanceLabel'] as String?,
+      );
+}
+
+class ProviderModelPrice {
+  const ProviderModelPrice({
+    required this.provider,
+    required this.model,
+    required this.label,
+    required this.usdPerSecond,
+    required this.modes,
+    this.referenceUsdPerSecond,
+    this.source = 'published',
+    this.createReady = true,
+    this.minDuration,
+    this.maxDuration,
+    this.durationStep = 1,
+    this.durationPrices = const <int, double>{},
+    this.reference10SecondUsd,
+    this.pricingUnit = 'per-second',
+  });
+
+  final String provider;
+  final String model;
+  final String label;
+  final double usdPerSecond;
+  final double? referenceUsdPerSecond;
+  final List<VideoMode> modes;
+  final String source;
+  final bool createReady;
+  final int? minDuration;
+  final int? maxDuration;
+  final int durationStep;
+  final Map<int, double> durationPrices;
+  final double? reference10SecondUsd;
+  final String pricingUnit;
+
+  bool supportsDuration(int seconds) {
+    if (minDuration == null || maxDuration == null) return true;
+    return seconds >= minDuration! &&
+        seconds <= maxDuration! &&
+        (seconds - minDuration!) % durationStep == 0;
+  }
+
+  bool hasPriceFor(int seconds) =>
+      supportsDuration(seconds) &&
+      (durationPrices.containsKey(seconds) || pricingUnit == 'per-second');
+
+  double priceFor(int seconds, {bool withReferences = false}) {
+    if (withReferences && seconds == 10 && reference10SecondUsd != null) {
+      return reference10SecondUsd!;
+    }
+    final exact = durationPrices[seconds];
+    if (exact != null) return exact;
+    return (withReferences
+            ? referenceUsdPerSecond ?? usdPerSecond
+            : usdPerSecond) *
+        seconds;
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'provider': provider,
+    'model': model,
+    'label': label,
+    'usdPerSecond': usdPerSecond,
+    if (referenceUsdPerSecond != null)
+      'referenceUsdPerSecond': referenceUsdPerSecond,
+    'modes': modes.map((mode) => mode.wireValue).toList(),
+    'source': source,
+    'createReady': createReady,
+    if (minDuration != null) 'minDuration': minDuration,
+    if (maxDuration != null) 'maxDuration': maxDuration,
+    'durationStep': durationStep,
+    if (durationPrices.isNotEmpty)
+      'durationPrices': durationPrices.map(
+        (seconds, price) => MapEntry(seconds.toString(), price),
+      ),
+    if (reference10SecondUsd != null)
+      'reference10SecondUsd': reference10SecondUsd,
+    'pricingUnit': pricingUnit,
+  };
+
+  factory ProviderModelPrice.fromJson(
+    Map<String, Object?> json,
+  ) => ProviderModelPrice(
+    provider: json['provider'] as String? ?? '',
+    model: json['model'] as String? ?? '',
+    label: json['label'] as String? ?? json['model'] as String? ?? '',
+    usdPerSecond: (json['usdPerSecond'] as num?)?.toDouble() ?? 0,
+    referenceUsdPerSecond: (json['referenceUsdPerSecond'] as num?)?.toDouble(),
+    modes: (json['modes'] as List<Object?>? ?? const <Object?>[])
+        .map(VideoModeValue.parse)
+        .toList(),
+    source: json['source'] as String? ?? 'published',
+    createReady: json['createReady'] != false,
+    minDuration: (json['minDuration'] as num?)?.toInt(),
+    maxDuration: (json['maxDuration'] as num?)?.toInt(),
+    durationStep: (json['durationStep'] as num?)?.toInt() ?? 1,
+    durationPrices:
+        (json['durationPrices'] as Map<Object?, Object?>? ?? const {}).map(
+          (seconds, price) => MapEntry(
+            int.tryParse(seconds.toString()) ?? 0,
+            (price as num).toDouble(),
+          ),
+        )..remove(0),
+    reference10SecondUsd: (json['reference10SecondUsd'] as num?)?.toDouble(),
+    pricingUnit: json['pricingUnit'] as String? ?? 'per-second',
+  );
+}
+
+class CostEstimate {
+  const CostEstimate({
+    required this.minimumUsd,
+    required this.maximumUsd,
+    required this.basis,
+    this.providerUnitsMinimum,
+    this.providerUnitsMaximum,
+    this.providerUnitLabel,
+  });
+
+  final double minimumUsd;
+  final double maximumUsd;
+  final String basis;
+  final double? providerUnitsMinimum;
+  final double? providerUnitsMaximum;
+  final String? providerUnitLabel;
 }
 
 class GenerationSubmission {

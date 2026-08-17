@@ -4,6 +4,14 @@ const EXTERNAL_HOSTS = new Set([
   "bfl.ai",
   "www.bfl.ai",
   "docs.bfl.ai",
+  "dashboard.bfl.ai",
+  "ltx.io",
+  "www.ltx.io",
+  "docs.ltx.io",
+  "console.ltx.io",
+  "atlascloud.ai",
+  "www.atlascloud.ai",
+  "console.atlascloud.ai",
 ]);
 
 function parseUrl(value) {

@@ -2,7 +2,7 @@
 
 Electron is a thin native shell around the canonical Flutter implementation. A
 desktop build packages `flutter/build/web` and the compiled Dart companion. The
-companion serves the Flutter bundle and owns local BFL requests, persistence,
+companion serves the Flutter bundle and owns local provider requests, persistence,
 and media on one private loopback origin. No root Next.js app or external runtime
 is required.
 
@@ -28,6 +28,10 @@ runner. The current release workflow ships Apple silicon and can add Intel later
 Desktop data lives at
 `~/Library/Application Support/Clawnsole/clawnsole.json`, with retained media in
 the adjacent `assets/` directory.
+
+For local development, `start_macos` loads the ignored repository `.env` so
+`BFL_API_KEY`, `LTX_API_KEY`, and `ATLAS_CLOUD_KEY` can act as test credentials
+without exposing them to the Flutter renderer. Saved keys still take precedence.
 
 ## Signing and notarization
 
