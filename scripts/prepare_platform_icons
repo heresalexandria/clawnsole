@@ -87,7 +87,10 @@ prepare_macos() {
   local master="$WORK_DIRECTORY/macos-master.png"
   local iconset="$WORK_DIRECTORY/Clawnsole.iconset"
   local destination="$REPOSITORY_ROOT/electron/assets/icon.icns"
-  "$RENDERER" "$SOURCE_ICON" "$master" 1024 transparent
+  # macOS 26 gives transparent, irregular legacy icons a system-provided plate.
+  # Render an opaque full canvas so the system masks our artwork directly
+  # instead of placing it on the light rounded-square backing.
+  "$RENDERER" "$SOURCE_ICON" "$master" 1024 opaque
   mkdir -p "$iconset" "$(dirname "$destination")"
 
   make_resized_icon "$master" 16 "$iconset/icon_16x16.png"
