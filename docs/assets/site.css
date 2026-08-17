@@ -271,7 +271,7 @@ nav a:focus-visible,
 .hero-visual {
   position: relative;
   min-width: 0;
-  padding: 18px 0 70px 10px;
+  padding: 18px 0 18px 10px;
 }
 
 .hero-visual::before {
@@ -320,53 +320,6 @@ nav a:focus-visible,
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.maker-ticket {
-  position: absolute;
-  left: 5%;
-  bottom: 13px;
-  display: grid;
-  min-width: 245px;
-  padding: 22px 25px;
-  border: 1px dashed #bb9760;
-  border-radius: 10px;
-  color: #fff2d6;
-  background: var(--navy);
-  box-shadow: 0 18px 35px rgba(24, 36, 62, 0.25);
-  text-decoration: none;
-  transform: rotate(-3deg);
-  transition: transform 160ms ease, box-shadow 160ms ease;
-}
-
-.maker-ticket:hover,
-.maker-ticket:focus-visible {
-  box-shadow: 0 22px 42px rgba(24, 36, 62, 0.32);
-  transform: rotate(-3deg) translateY(-2px);
-}
-
-.maker-ticket:focus-visible {
-  outline: 3px solid var(--brass);
-  outline-offset: 4px;
-}
-
-.maker-ticket span,
-.maker-ticket small {
-  color: #d8c49d;
-  font-size: 0.57rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.maker-ticket strong {
-  padding-block: 2px;
-  font-family: Georgia, serif;
-  font-size: 1.35rem;
-}
-
-.maker-ticket small + small {
-  margin-top: 2px;
 }
 
 .feature-section,
@@ -583,7 +536,9 @@ nav a:focus-visible,
 
 .site-footer div {
   display: flex;
+  flex-wrap: wrap;
   gap: 24px;
+  justify-content: flex-end;
 }
 
 .privacy-page {
@@ -824,20 +779,6 @@ nav a:focus-visible,
     height: 27px;
   }
 
-  .maker-ticket {
-    position: relative;
-    left: auto;
-    bottom: auto;
-    width: fit-content;
-    min-width: 175px;
-    margin: 18px 0 0 12px;
-    padding: 16px 18px;
-  }
-
-  .maker-ticket strong {
-    font-size: 1.2rem;
-  }
-
   .feature-section,
   .screens-section {
     padding-block: 82px;
@@ -909,6 +850,10 @@ nav a:focus-visible,
   .site-footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .site-footer div {
+    justify-content: flex-start;
   }
 
   .policy-hero {
