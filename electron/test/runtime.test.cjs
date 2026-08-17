@@ -14,15 +14,22 @@ test("app navigation stays on the active local renderer origin", () => {
   assert.equal(isAllowedAppUrl("not a URL", origin), false);
 });
 
-test("external navigation is HTTPS-only and provider allowlisted", () => {
+test("external navigation is HTTPS-only and explicitly allowlisted", () => {
   assert.equal(isAllowedExternalUrl("https://bfl.ai/pricing"), true);
   assert.equal(isAllowedExternalUrl("https://docs.bfl.ai/flux_3/flux3_video"), true);
   assert.equal(isAllowedExternalUrl("https://console.ltx.io/"), true);
   assert.equal(isAllowedExternalUrl("https://docs.ltx.io/pricing"), true);
   assert.equal(isAllowedExternalUrl("https://www.atlascloud.ai/console"), true);
   assert.equal(isAllowedExternalUrl("https://console.atlascloud.ai/"), true);
+  assert.equal(isAllowedExternalUrl("https://heresalexandria.com/"), true);
+  assert.equal(isAllowedExternalUrl("https://www.heresalexandria.com/"), true);
   assert.equal(isAllowedExternalUrl("http://bfl.ai/pricing"), false);
+  assert.equal(isAllowedExternalUrl("http://heresalexandria.com/"), false);
   assert.equal(isAllowedExternalUrl("https://bfl.ai.example.com"), false);
+  assert.equal(
+    isAllowedExternalUrl("https://heresalexandria.com.example.com"),
+    false,
+  );
   assert.equal(isAllowedExternalUrl("https://example.com"), false);
 });
 

@@ -322,9 +322,9 @@ nav a:focus-visible,
   text-transform: uppercase;
 }
 
-.provider-ticket {
+.maker-ticket {
   position: absolute;
-  right: 5%;
+  left: 5%;
   bottom: 13px;
   display: grid;
   min-width: 245px;
@@ -334,11 +334,24 @@ nav a:focus-visible,
   color: #fff2d6;
   background: var(--navy);
   box-shadow: 0 18px 35px rgba(24, 36, 62, 0.25);
+  text-decoration: none;
   transform: rotate(-3deg);
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.provider-ticket span,
-.provider-ticket small {
+.maker-ticket:hover,
+.maker-ticket:focus-visible {
+  box-shadow: 0 22px 42px rgba(24, 36, 62, 0.32);
+  transform: rotate(-3deg) translateY(-2px);
+}
+
+.maker-ticket:focus-visible {
+  outline: 3px solid var(--brass);
+  outline-offset: 4px;
+}
+
+.maker-ticket span,
+.maker-ticket small {
   color: #d8c49d;
   font-size: 0.57rem;
   font-weight: 800;
@@ -346,13 +359,13 @@ nav a:focus-visible,
   text-transform: uppercase;
 }
 
-.provider-ticket strong {
+.maker-ticket strong {
   padding-block: 2px;
   font-family: Georgia, serif;
   font-size: 1.35rem;
 }
 
-.provider-ticket small + small {
+.maker-ticket small + small {
   margin-top: 2px;
 }
 
@@ -799,7 +812,7 @@ nav a:focus-visible,
   }
 
   .hero-visual {
-    padding: 0 0 68px;
+    padding: 0;
   }
 
   .screen-frame {
@@ -811,13 +824,17 @@ nav a:focus-visible,
     height: 27px;
   }
 
-  .provider-ticket {
-    right: 2%;
+  .maker-ticket {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    width: fit-content;
     min-width: 175px;
+    margin: 18px 0 0 12px;
     padding: 16px 18px;
   }
 
-  .provider-ticket strong {
+  .maker-ticket strong {
     font-size: 1.2rem;
   }
 
