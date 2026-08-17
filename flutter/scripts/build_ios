@@ -2,6 +2,7 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_review_credentials.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_ios [additional flutter build ipa arguments]"
@@ -10,7 +11,9 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "  CLAWNSOLE_IOS_EXPORT_METHOD  app-store, ad-hoc, development, or enterprise"
   echo "                                (default: app-store)"
   echo "  CLAWNSOLE_IOS_REVIEW_BFL_API_KEY       App Review BFL key"
-  echo "  CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_FILE  File containing the App Review BFL key"
+  echo "  CLAWNSOLE_IOS_REVIEW_LTX_API_KEY       App Review LTX key"
+  echo "  CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY     App Review Atlas Cloud key"
+  echo "  Append _FILE to any key variable to load it from a one-line file"
   echo "  CLAWNSOLE_IOS_REVIEW_ENV_FILE           Optional shell env file"
   echo "                                           (default: flutter/.env.ios-review)"
   exit 0
@@ -26,55 +29,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
-REVIEW_ENV_FILE="${CLAWNSOLE_IOS_REVIEW_ENV_FILE:-$FLUTTER_DIRECTORY/.env.ios-review}"
-
-if [[ -z "${CLAWNSOLE_IOS_REVIEW_BFL_API_KEY+x}" &&
-      -z "${CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_FILE+x}" &&
-      -f "$REVIEW_ENV_FILE" ]]; then
-  # This local file is ignored by Git. It may set either review-key variable.
-  # shellcheck disable=SC1090
-  source "$REVIEW_ENV_FILE"
-fi
-
-REVIEW_KEY="${CLAWNSOLE_IOS_REVIEW_BFL_API_KEY:-}"
-REVIEW_KEY_FILE="${CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_FILE:-}"
-REVIEW_DEFINE_FILE=""
-REVIEW_BUILD_ARGUMENTS=()
-
-cleanup_review_defines() {
-  if [[ -n "$REVIEW_DEFINE_FILE" && -f "$REVIEW_DEFINE_FILE" ]]; then
-    rm -f -- "$REVIEW_DEFINE_FILE"
-  fi
-}
-trap cleanup_review_defines EXIT
-
-if [[ -z "$REVIEW_KEY" && -n "$REVIEW_KEY_FILE" ]]; then
-  if [[ ! -r "$REVIEW_KEY_FILE" ]]; then
-    echo "The iOS App Review key file is not readable: $REVIEW_KEY_FILE" >&2
-    exit 1
-  fi
-  REVIEW_KEY="$(<"$REVIEW_KEY_FILE")"
-fi
-
-# Strip accidental leading/trailing whitespace without ever printing the key.
-REVIEW_KEY="${REVIEW_KEY#"${REVIEW_KEY%%[![:space:]]*}"}"
-REVIEW_KEY="${REVIEW_KEY%"${REVIEW_KEY##*[![:space:]]}"}"
-
-if [[ -n "$REVIEW_KEY" ]]; then
-  if [[ ${#REVIEW_KEY} -gt 2000 || "$REVIEW_KEY" == *$'\n'* || "$REVIEW_KEY" == *$'\r'* ]]; then
-    echo "The iOS App Review key is malformed." >&2
-    exit 1
-  fi
-  require_command shasum
-  REVIEW_KEY_ID="$(printf '%s' "$REVIEW_KEY" | shasum -a 256 | awk '{print $1}')"
-  REVIEW_DEFINE_FILE="$(umask 077; mktemp "${TMPDIR:-/tmp}/clawnsole-ios-review.XXXXXX.env")"
-  printf 'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY=%s\n' "$REVIEW_KEY" >"$REVIEW_DEFINE_FILE"
-  printf 'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_ID=%s\n' "$REVIEW_KEY_ID" >>"$REVIEW_DEFINE_FILE"
-  REVIEW_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
-  echo "Including the configured iOS App Review credential."
-else
-  echo "No iOS App Review credential is configured; this build will require a user key."
-fi
+load_clawnsole_review_credentials
+prepare_clawnsole_review_defines
+trap cleanup_clawnsole_review_defines EXIT
 
 "$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
 

@@ -21,6 +21,13 @@ print_heading "macOS desktop development"
 prepare_dependencies
 require_command dart
 
+if [[ -f "$REPOSITORY_ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPOSITORY_ROOT/.env"
+  set +a
+fi
+
 cd "$FLUTTER_DIRECTORY"
 flutter build web --debug --dart-define "CLAWNSOLE_PROXY_URL="
 exec node "$ELECTRON_DIRECTORY/scripts/start.mjs" "$@"

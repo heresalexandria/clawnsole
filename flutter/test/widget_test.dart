@@ -10,9 +10,11 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/local_data_store.dart';
 import 'package:clawnsole/core/local_data_store_io.dart'
     show retainedAssetExtension;
+import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
+import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/update_check.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
@@ -339,7 +341,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 6);
+    expect(decoded.toJson()['schemaVersion'], 7);
   });
 
   test(
@@ -403,6 +405,37 @@ void main() {
     },
   );
 
+  test('isolates and invalidates an LTX iOS review key', () async {
+    const reviewKey = 'ltx-review-key-that-must-not-be-persisted';
+    final store = _MemoryLocalDataStore();
+    final gateway = NativeGateway(
+      store: store,
+      providerRouter: ProviderApiRouter(
+        ltx: LtxApi(
+          client: MockClient(
+            (_) async => http.Response(
+              jsonEncode(<String, String>{'error': 'unauthorized'}),
+              401,
+            ),
+          ),
+        ),
+      ),
+      iosReviewLtxApiKey: reviewKey,
+      iosReviewLtxApiKeyId: 'ltx-review-key-id',
+      isIos: true,
+    );
+
+    expect((await gateway.load()).hasApiKeyFor('ltx'), isTrue);
+    expect(store.data.encode(), isNot(contains(reviewKey)));
+    await expectLater(
+      gateway.getProviderAccount('ltx'),
+      throwsA(isA<ProviderException>()),
+    );
+    expect((await gateway.load()).hasApiKeyFor('ltx'), isFalse);
+    expect(store.data.rejectedReviewKeyIdFor('ltx'), 'ltx-review-key-id');
+    expect(store.data.encode(), isNot(contains(reviewKey)));
+  });
+
   test('does not use the iOS review key on another native platform', () async {
     final gateway = NativeGateway(
       store: _MemoryLocalDataStore(),
@@ -436,7 +469,7 @@ void main() {
 
       expect(gateway.invalidationCount, 1);
       expect(controller.hasApiKey, isFalse);
-      expect(controller.section, AppSection.settings);
+      expect(controller.section, AppSection.providers);
       expect(controller.creditError, contains('rejected'));
       controller.dispose();
     },
@@ -447,7 +480,7 @@ void main() {
     final gateway = WebGateway(
       baseUrl: Uri.parse('http://127.0.0.1:8787'),
       client: MockClient((request) async {
-        if (request.url.path == '/credits') {
+        if (request.url.path == '/account') {
           return http.Response(
             jsonEncode(<String, Object?>{
               'error': 'BFL rejected this API key.',
@@ -839,7 +872,7 @@ void main() {
     expect(retainedAssetExtension('image/png', 'frame'), '.png');
   });
 
-  testWidgets('mobile Add key shortcut opens settings', (tester) async {
+  testWidgets('mobile Add key shortcut opens providers', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -861,8 +894,8 @@ void main() {
     await tester.tap(find.text('Add key'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Settings.'), findsOneWidget);
-    expect(gateway.snapshot.preferences.activeSection, AppSection.settings);
+    expect(find.text('Providers.'), findsOneWidget);
+    expect(gateway.snapshot.preferences.activeSection, AppSection.providers);
   });
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {

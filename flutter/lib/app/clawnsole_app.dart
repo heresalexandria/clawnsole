@@ -11,6 +11,7 @@ import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
 import '../ui/library_screen.dart';
 import '../ui/panels.dart';
+import '../ui/providers_screen.dart';
 import '../ui/settings_screen.dart';
 import '../ui/update_dialog.dart';
 import 'app_controller.dart';
@@ -129,6 +130,7 @@ class _AppShell extends StatelessWidget {
         : switch (controller.section) {
             AppSection.create => CreateScreen(controller: controller),
             AppSection.library => LibraryScreen(controller: controller),
+            AppSection.providers => ProvidersScreen(controller: controller),
             AppSection.settings => SettingsScreen(controller: controller),
           };
 
@@ -211,6 +213,12 @@ class _SideRail extends StatelessWidget {
             badge: controller.workingCount,
             selected: controller.section == AppSection.library,
             onTap: () => unawaited(controller.navigate(AppSection.library)),
+          ),
+          _RailButton(
+            icon: Icons.hub_rounded,
+            label: 'Providers',
+            selected: controller.section == AppSection.providers,
+            onTap: () => unawaited(controller.navigate(AppSection.providers)),
           ),
           const Spacer(),
           _RailButton(
@@ -459,7 +467,7 @@ class _CreditsPill extends StatelessWidget {
   Widget build(BuildContext context) => InkWell(
     onTap: controller.hasApiKey
         ? () => unawaited(controller.refreshCredits())
-        : () => unawaited(controller.navigate(AppSection.settings)),
+        : () => unawaited(controller.navigate(AppSection.providers)),
     borderRadius: BorderRadius.circular(999),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
@@ -481,15 +489,25 @@ class _CreditsPill extends StatelessWidget {
             Icon(Icons.toll_rounded, size: 15, color: context.tokens.brass),
           const SizedBox(width: 7),
           Text(
-            controller.credits == null
-                ? (controller.hasApiKey ? '— credits' : 'Add key')
-                : '${controller.credits!.toStringAsFixed(controller.credits! % 1 == 0 ? 0 : 1)} cr',
+            _balanceText(controller),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
           ),
         ],
       ),
     ),
   );
+
+  String _balanceText(AppController controller) {
+    if (!controller.hasApiKey) return 'Add key';
+    final account = controller.providerAccounts[controller.selectedProviderId];
+    if (account?.balance == null) {
+      return '${controller.selectedProvider.shortName} connected';
+    }
+    if (account!.currency == 'credits') {
+      return '${account.balance!.toStringAsFixed(account.balance! % 1 == 0 ? 0 : 1)} cr';
+    }
+    return '\$${account.balance!.toStringAsFixed(2)}';
+  }
 }
 
 class _KeyPill extends StatelessWidget {
@@ -501,7 +519,7 @@ class _KeyPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final active = controller.hasApiKey;
     return InkWell(
-      onTap: () => unawaited(controller.navigate(AppSection.settings)),
+      onTap: () => unawaited(controller.navigate(AppSection.providers)),
       borderRadius: BorderRadius.circular(999),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -525,7 +543,9 @@ class _KeyPill extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              active ? 'API key set' : 'Add API key',
+              active
+                  ? '${controller.selectedProvider.shortName} connected'
+                  : 'Add provider key',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
@@ -612,6 +632,12 @@ class _BottomNav extends StatelessWidget {
               badge: controller.workingCount,
               selected: controller.section == AppSection.library,
               onTap: () => unawaited(controller.navigate(AppSection.library)),
+            ),
+            _BottomNavButton(
+              icon: Icons.hub_rounded,
+              label: 'Providers',
+              selected: controller.section == AppSection.providers,
+              onTap: () => unawaited(controller.navigate(AppSection.providers)),
             ),
             _BottomNavButton(
               icon: Icons.tune_rounded,

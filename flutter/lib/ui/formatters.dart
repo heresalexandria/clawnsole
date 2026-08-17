@@ -17,6 +17,14 @@ String formatUsdRange(double minimum, double maximum) => minimum == maximum
     ? formatUsd(minimum)
     : '${formatUsd(minimum)}–${formatUsd(maximum)}';
 
+String formatUsdAmount(double value) =>
+    NumberFormat.simpleCurrency(name: 'USD').format(value);
+
+String formatUsdAmountRange(double minimum, double maximum) =>
+    minimum == maximum
+    ? formatUsdAmount(minimum)
+    : '${formatUsdAmount(minimum)}–${formatUsdAmount(maximum)}';
+
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) {

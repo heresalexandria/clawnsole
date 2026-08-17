@@ -16,7 +16,7 @@ Uri _configuredBaseUrl(Uri? override) {
   return configured.trim().isEmpty ? Uri.base : Uri.parse(configured);
 }
 
-class WebGateway implements AppGateway {
+class WebGateway implements AppGateway, ProviderGateway {
   WebGateway({http.Client? client, Uri? baseUrl})
     : _client = client ?? http.Client(),
       _baseUrl = _configuredBaseUrl(baseUrl);
@@ -85,30 +85,43 @@ class WebGateway implements AppGateway {
   Future<LocalSnapshot> setApiKey(String value) => _action('setApiKey', value);
 
   @override
+  Future<LocalSnapshot> setProviderApiKey(String provider, String value) =>
+      _action('setProviderApiKey', <String, Object?>{
+        'provider': provider,
+        'apiKey': value,
+      });
+
+  @override
   Future<double> verifyKey([String? candidate]) async {
+    final account = await verifyProviderKey('bfl', candidate);
+    return account.balance ?? 0;
+  }
+
+  @override
+  Future<ProviderAccountStatus> verifyProviderKey(
+    String provider, [
+    String? candidate,
+  ]) async {
     final supplied = candidate?.trim().isNotEmpty == true;
     try {
       final payload = _map(
         await _read(
           await _client.post(
-            _url('/credits'),
+            _url('/account'),
             headers: const <String, String>{'Content-Type': 'application/json'},
             body: jsonEncode(<String, Object?>{
               if (supplied) 'apiKey': candidate!.trim(),
+              'provider': provider,
             }),
           ),
         ),
       );
-      final credits = payload['credits'];
-      if (credits is! num) {
-        throw const ProviderException('Invalid credit balance.');
-      }
-      return credits.toDouble();
+      return ProviderAccountStatus.fromJson(payload);
     } on Object catch (error) {
       if (!supplied &&
           (providerHttpStatus(error) == 401 ||
               providerHttpStatus(error) == 403)) {
-        await clearApiKey();
+        await clearProviderApiKey(provider);
       }
       rethrow;
     }
@@ -116,6 +129,30 @@ class WebGateway implements AppGateway {
 
   @override
   Future<double> getCredits() => verifyKey();
+
+  @override
+  Future<ProviderAccountStatus> getProviderAccount(String provider) =>
+      verifyProviderKey(provider);
+
+  @override
+  Future<List<ProviderModelPrice>> listProviderModels(String provider) async {
+    final payload = await _read(
+      await _client.get(
+        _url('/providers/models', <String, String>{'provider': provider}),
+      ),
+    );
+    if (payload is! List<Object?>) {
+      throw const ProviderException('Invalid provider model catalog.');
+    }
+    return payload
+        .whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => ProviderModelPrice.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .toList();
+  }
 
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) =>
@@ -130,7 +167,7 @@ class WebGateway implements AppGateway {
             _url('/generations'),
             headers: const <String, String>{'Content-Type': 'application/json'},
             body: jsonEncode(<String, Object?>{
-              'provider': 'bfl',
+              'provider': submission.record.provider,
               'input': submission.input,
               'record': submission.record.toJson(),
             }),
@@ -141,7 +178,7 @@ class WebGateway implements AppGateway {
     } on Object catch (error) {
       if (providerHttpStatus(error) == 401 ||
           providerHttpStatus(error) == 403) {
-        await clearApiKey();
+        await clearProviderApiKey(submission.record.provider);
       }
       rethrow;
     }
@@ -155,7 +192,7 @@ class WebGateway implements AppGateway {
           _url('/generations/status'),
           headers: const <String, String>{'Content-Type': 'application/json'},
           body: jsonEncode(<String, Object?>{
-            'provider': 'bfl',
+            'provider': generation.provider,
             'localId': generation.localId,
             'pollingUrl': generation.pollingUrl,
           }),
@@ -165,7 +202,7 @@ class WebGateway implements AppGateway {
     final updated = Generation.fromJson(_map(payload['generation']));
     if (updated.lastProviderStatusCode == 401 ||
         updated.lastProviderStatusCode == 403) {
-      await clearApiKey();
+      await clearProviderApiKey(generation.provider);
     }
     return updated;
   }
@@ -183,6 +220,10 @@ class WebGateway implements AppGateway {
 
   @override
   Future<LocalSnapshot> clearApiKey() => _action('clearApiKey');
+
+  @override
+  Future<LocalSnapshot> clearProviderApiKey(String provider) =>
+      _action('clearProviderApiKey', provider);
 
   @override
   Future<LocalSnapshot> clearAll() => _action('clearAll');
@@ -213,7 +254,7 @@ class WebGateway implements AppGateway {
     final response = await _client.get(mediaUri(source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ProviderException(
-        'This BFL delivery link is no longer available.',
+        'This provider delivery link is no longer available.',
         status: response.statusCode,
       );
     }

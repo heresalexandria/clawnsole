@@ -12,8 +12,12 @@ String normalizeGenerationStatus(Object? value) {
   final status = value?.toString().trim() ?? '';
   return switch (status.toLowerCase()) {
     'submitting' => 'submitting',
-    'pending' => 'Pending',
-    'ready' || 'success' => 'Ready',
+    'pending' ||
+    'queued' ||
+    'processing' ||
+    'running' ||
+    'in_progress' => 'Pending',
+    'ready' || 'success' || 'succeeded' || 'completed' => 'Ready',
     'task not found' => 'Task not found',
     'error' => 'Error',
     'failed' => 'Failed',

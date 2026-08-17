@@ -109,7 +109,7 @@ class BflApi {
       payload = response.body;
     }
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      return _stringKeyMap(payload);
+      return stringKeyMap(payload);
     }
     final fallback = switch (response.statusCode) {
       401 || 403 => 'BFL rejected this API key.',
@@ -142,6 +142,18 @@ String providerErrorResponse(Object error) => compactProviderResponse(
       : <String, Object?>{'error': generationExceptionMessage(error)},
 );
 
+String providerNamedFailureMessage(
+  String providerName,
+  Object? payload, {
+  required String fallback,
+}) {
+  final message = providerFailureMessage(payload, fallback: fallback);
+  if (fallback.contains(providerName) && message.contains(fallback)) {
+    return fallback;
+  }
+  return message.replaceFirst(RegExp(r'^BFL\b'), providerName);
+}
+
 Uri validatedBflUrl(String value) {
   final url = Uri.tryParse(value);
   if (url == null ||
@@ -155,14 +167,29 @@ Uri validatedBflUrl(String value) {
   return url;
 }
 
-Object? _stringKeyMap(Object? value) {
-  if (value is List<Object?>) return value.map(_stringKeyMap).toList();
+Object? stringKeyMap(Object? value) {
+  if (value is List<Object?>) return value.map(stringKeyMap).toList();
   if (value is Map<Object?, Object?>) {
     return value.map(
-      (key, child) => MapEntry(key.toString(), _stringKeyMap(child)),
+      (key, child) => MapEntry(key.toString(), stringKeyMap(child)),
     );
   }
   return value;
+}
+
+Uri validatedProviderUrl(String value) {
+  final url = Uri.tryParse(value);
+  final host = url?.host.toLowerCase() ?? '';
+  if (url == null ||
+      url.scheme != 'https' ||
+      host.isEmpty ||
+      host == 'localhost' ||
+      host == '127.0.0.1' ||
+      host == '::1' ||
+      host.endsWith('.local')) {
+    throw const ProviderException('The provider URL is invalid.', status: 400);
+  }
+  return url;
 }
 
 double? normalizedProgress(Object? value) {

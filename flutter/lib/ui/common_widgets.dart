@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import '../core/provider_catalog.dart';
 import 'formatters.dart';
 import 'generation_video.dart';
 import 'video_save_sheet.dart';
@@ -306,6 +307,7 @@ class GenerationSpecChips extends StatelessWidget {
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
+        _SpecChip(label: providerById(item.provider).shortName),
         _SpecChip(label: item.mode.label),
         _SpecChip(
           label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
@@ -315,7 +317,14 @@ class GenerationSpecChips extends StatelessWidget {
           icon: Icons.timelapse_rounded,
           label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
         ),
-        _SpecChip(label: config.resolution == 'fhd' ? 'Full HD' : 'HD'),
+        _SpecChip(
+          label: switch (config.resolution) {
+            'fhd' => 'Full HD',
+            'qhd' => '1440p',
+            '4k' => '4K',
+            _ => 'HD',
+          },
+        ),
         if (config.generateAudio)
           const _SpecChip(icon: Icons.graphic_eq_rounded, label: 'Audio'),
         if (config.draft)
@@ -1226,6 +1235,7 @@ class GenerationCost extends StatelessWidget {
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();
     final exact = item.cost != null;
+    final usesUsd = item.billingUnit == 'usd';
     final background = exact
         ? context.colors.primaryContainer
         : context.colors.secondaryContainer;
@@ -1252,7 +1262,7 @@ class GenerationCost extends StatelessWidget {
               Expanded(
                 child: Text(
                   '${exact ? 'Provider charge' : 'Estimated'} · '
-                  '${formatCreditRange(minimum, maximum)} cr',
+                  '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
                   style: TextStyle(
                     fontSize: compact ? 11 : 12,
                     fontWeight: FontWeight.w700,
@@ -1261,7 +1271,9 @@ class GenerationCost extends StatelessWidget {
                 ),
               ),
               Text(
-                formatUsdRange(minimum, maximum),
+                usesUsd
+                    ? providerById(item.provider).shortName
+                    : formatUsdRange(minimum, maximum),
                 style: TextStyle(
                   fontSize: compact ? 11 : 12,
                   fontWeight: FontWeight.w700,
@@ -1275,7 +1287,9 @@ class GenerationCost extends StatelessWidget {
               item.creditsAfter != null) ...<Widget>[
             const SizedBox(height: 5),
             Text(
-              '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
+              usesUsd
+                  ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
+                  : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
               style: TextStyle(
                 fontSize: 10.5,
                 color: foreground.withValues(alpha: .8),

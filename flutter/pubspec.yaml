@@ -1,5 +1,5 @@
 name: clawnsole
-description: "Local-first FLUX video generation for web, iOS, and Android."
+description: "Local-first multi-provider AI video generation for desktop and mobile."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

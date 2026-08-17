@@ -6,17 +6,22 @@ only desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
-- FLUX 3 text-to-video, image-to-video, video continuation, and draft enhance
-- One to ten uploaded or hosted keyframes, with even or explicit timing
-- Start/last-frame workflows, auto or 5–20 second duration, all documented
-  aspect ratios, HD/FHD, synchronized audio, draft mode, and safety tolerance
-- Live BFL credit balance and setting-aware credit/USD estimates
-- Exact API charge plus before/after credit snapshots in generation history
+- BFL FLUX 3, LTX 2.5/2.3, and selected Create-ready Atlas Cloud models
+- Text-to-video and image/reference-to-video across providers, plus FLUX 3
+  video continuation and draft enhance
+- Provider-aware uploaded or hosted references, with FLUX-specific even or
+  explicit keyframe timing
+- Start/last-frame workflows, supported fixed or auto durations, model-specific
+  aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
+- Provider-aware balance checks and setting-aware USD estimates
+- Live Atlas video catalog and no-charge request preflight, with published
+  provider pricing fallbacks
+- Provider-reported charges and before/after balances in generation history
 - Live polling, determinate/indeterminate progress, completed-video playback,
   draft enhancement, reuse, deletion, and device download
 - Uncapped compact history plus referenced local inputs/completed videos, storage
   accounting, reload-safe reuse/playback, and granular clear actions
-- Provider-neutral gateway, catalog, and pricing boundaries for future services
+- Per-provider local keys and a responsive Providers comparison desk
 
 ## Install
 
@@ -52,7 +57,7 @@ accepts extra `flutter run` arguments.
 
 ## Run on iOS or Android
 
-Native builds call `https://api.bfl.ai` directly. The API key and compact
+Native builds call the selected provider directly. API keys and compact
 history are stored in `Clawnsole/clawnsole.json`, with retained media in the
 adjacent `assets/` directory. The OS app sandbox protects both from other apps.
 
@@ -67,9 +72,9 @@ the usual Xcode signing setup.
 
 ## Run on web
 
-Browsers cannot write an application JSON file directly, and BFL does not
+Browsers cannot write an application JSON file directly, and providers do not
 grant arbitrary browser origins API access. Clawnsole therefore includes a
-loopback-only Dart companion that owns the API key, BFL requests, polling,
+loopback-only Dart companion that owns provider keys, requests, polling,
 media proxy, and the local JSON file. No `localStorage` or IndexedDB history is
 used.
 
@@ -117,10 +122,12 @@ the saved key itself.
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate. Xcode signing must already be configured. iOS
   builds are deliberately local-only and are not run or published by GitHub
-  Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY` or point
-  `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_FILE` at a one-line key file. A local,
-  Git-ignored `flutter/.env.ios-review` can set either variable and is loaded by
-  `build_ios` automatically. The script passes the credential only to the iOS
+  Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
+  `CLAWNSOLE_IOS_REVIEW_LTX_API_KEY`, and/or
+  `CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY`. A local, Git-ignored
+  `flutter/.env.ios-review` or repository `.env` is loaded automatically; the
+  ordinary `BFL_API_KEY`, `LTX_API_KEY`, and `ATLAS_CLOUD_KEY` names act as
+  development/App Review fallbacks. The script passes credentials only to the iOS
   compiler; web, Android, and macOS builds do not receive it.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
@@ -131,7 +138,7 @@ the saved key itself.
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.
 
-The iOS review credential is a fallback, not local user data. A saved user key
+Each iOS review credential is a fallback, not local user data. A saved user key
 takes precedence. Clawnsole validates active access at launch and immediately
 before generation; HTTP 401/403 responses during credit checks, submission, or
 polling invalidate the active source. The review credential is never populated
@@ -162,5 +169,7 @@ flutter test
 flutter build web
 ```
 
-The implementation follows BFL’s FLUX 3 documentation, credits endpoint,
-polling guidance, and published pricing calculator.
+The implementation follows the official BFL, LTX, and Atlas Cloud API,
+polling, model capability, and pricing documentation. Atlas models are read
+from its public catalog; 720p Create-ready costs use its calculate endpoint,
+with checked-in starting-rate fallbacks.
