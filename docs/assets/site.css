@@ -165,8 +165,14 @@ nav a:focus-visible,
   color: var(--plum);
 }
 
-.site-header > .button {
+.header-actions {
+  display: flex;
+  gap: 10px;
   justify-self: end;
+}
+
+.header-actions .button {
+  white-space: nowrap;
 }
 
 .button {
@@ -198,6 +204,19 @@ nav a:focus-visible,
 .button-small {
   min-height: 40px;
   padding-inline: 18px;
+}
+
+.button-secondary {
+  color: var(--plum);
+  background: transparent;
+  box-shadow: none;
+}
+
+.button-secondary:hover,
+.button-secondary:focus-visible {
+  color: var(--plum);
+  background: var(--paper-deep);
+  box-shadow: none;
 }
 
 .button-light {
@@ -234,10 +253,19 @@ nav a:focus-visible,
 
 .hero-lede {
   max-width: 610px;
-  margin-bottom: 30px;
+  margin-bottom: 18px;
   color: var(--muted);
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(1.25rem, 2.1vw, 1.7rem);
+  line-height: 1.55;
+}
+
+.provider-support {
+  max-width: 610px;
+  margin-bottom: 28px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
   line-height: 1.55;
 }
 
@@ -246,6 +274,11 @@ nav a:focus-visible,
   gap: 22px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.hero-download-actions {
+  display: grid;
+  gap: 10px;
 }
 
 .text-link {
@@ -295,6 +328,13 @@ nav a:focus-visible,
   background: #251a24;
   box-shadow: var(--shadow);
   transform: rotate(1.1deg);
+}
+
+.hero-screenshot {
+  width: 100%;
+  aspect-ratio: 1497 / 920;
+  object-fit: cover;
+  object-position: center 3.5%;
 }
 
 .screen-top {
@@ -890,7 +930,7 @@ nav a:focus-visible,
 
   .site-header .button-small {
     min-height: 37px;
-    padding-inline: 13px;
+    padding-inline: 10px;
     font-size: 0.68rem;
   }
 
@@ -920,6 +960,12 @@ nav a:focus-visible,
 
   .policy-content ul {
     padding-left: 22px;
+  }
+}
+
+@media (max-width: 390px) {
+  .wordmark > span:last-child {
+    display: none;
   }
 }
 
