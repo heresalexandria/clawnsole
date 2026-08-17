@@ -19,6 +19,7 @@ import 'package:clawnsole/core/update_check.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -911,6 +912,34 @@ void main() {
     expect(find.text('System'), findsOneWidget);
     expect(find.text('Light'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
+  });
+
+  testWidgets('settings credits Alexandria with a linked portrait', (
+    tester,
+  ) async {
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: SettingsScreen(controller: controller)),
+      ),
+    );
+
+    expect(find.text('Made by Alexandria'), findsOneWidget);
+    expect(find.text('Visit heresalexandria.com'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('alexandria-profile-link')),
+      findsOneWidget,
+    );
+    final portrait = tester.widget<CircleAvatar>(
+      find.byType(CircleAvatar).last,
+    );
+    expect(
+      portrait.backgroundImage,
+      const AssetImage('assets/profile-alexandria.jpg'),
+    );
   });
 
   test('form infers every FLUX 3 generation mode from its inputs', () {

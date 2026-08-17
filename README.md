@@ -13,7 +13,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clawnsole-preview-dark.png">
-    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole Providers desk in light mode">
+    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole Settings showing local data controls and the Made by Alexandria profile link">
   </picture>
 </p>
 

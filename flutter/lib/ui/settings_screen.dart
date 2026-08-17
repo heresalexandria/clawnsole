@@ -395,7 +395,65 @@ class _SettingsSide extends StatelessWidget {
         icon: const Icon(Icons.privacy_tip_outlined, size: 16),
         label: const Text('Privacy policy'),
       ),
+      const SizedBox(height: 15),
+      const _CreatorCard(),
     ],
+  );
+}
+
+class _CreatorCard extends StatelessWidget {
+  const _CreatorCard();
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    padding: EdgeInsets.zero,
+    child: Semantics(
+      link: true,
+      label: 'Made by Alexandria — opens heresalexandria.com',
+      child: InkWell(
+        key: const ValueKey('alexandria-profile-link'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => unawaited(launchUrl(Uri.parse(alexandriaWebsiteUrl))),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: <Widget>[
+              const CircleAvatar(
+                radius: 21,
+                backgroundImage: AssetImage('assets/profile-alexandria.jpg'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Made by Alexandria',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Visit heresalexandria.com',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.open_in_new_rounded,
+                size: 17,
+                color: context.colors.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
   );
 }
 

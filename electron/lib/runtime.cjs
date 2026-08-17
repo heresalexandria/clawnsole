@@ -12,6 +12,8 @@ const EXTERNAL_HOSTS = new Set([
   "atlascloud.ai",
   "www.atlascloud.ai",
   "console.atlascloud.ai",
+  "heresalexandria.com",
+  "www.heresalexandria.com",
 ]);
 
 function parseUrl(value) {
