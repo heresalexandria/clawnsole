@@ -181,21 +181,17 @@ class _SideRail extends StatelessWidget {
           InkWell(
             borderRadius: BorderRadius.circular(15),
             onTap: () => unawaited(controller.navigate(AppSection.create)),
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(
-                  color: context.tokens.panelBrass.withValues(alpha: .55),
-                ),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.asset(
-                  'assets/icon.png',
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
+            child: SizedBox.square(
+              dimension: 48,
+              child: Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.asset(
+                    'assets/icon.png',
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
             ),
