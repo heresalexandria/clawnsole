@@ -6,17 +6,42 @@
     <meta name="theme-color" content="#211720">
     <meta
       name="description"
-      content="Clawnsole is a local-first, bring-your-own-key studio for AI video with Black Forest Labs, LTX, and Atlas Cloud."
+      content="Clawnsole is a local-first AI video studio for macOS, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
     >
-    <meta property="og:title" content="Clawnsole — Make it move">
+    <link rel="canonical" href="https://heresalexandria.github.io/clawnsole/">
+    <meta property="og:site_name" content="Clawnsole">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:title" content="Clawnsole — Local-first AI video studio">
     <meta
       property="og:description"
-      content="A local-first, bring-your-own-key studio for AI video with Black Forest Labs, LTX, and Atlas Cloud."
+      content="Clawnsole is a local-first AI video studio for macOS, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
     >
     <meta property="og:type" content="website">
+    <meta property="og:url" content="https://heresalexandria.github.io/clawnsole/">
     <meta
       property="og:image"
-      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-preview.png"
+      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+    >
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta
+      property="og:image:alt"
+      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
+    >
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Clawnsole — Local-first AI video studio">
+    <meta
+      name="twitter:description"
+      content="Clawnsole is a local-first AI video studio for macOS, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+    >
+    <meta
+      name="twitter:image"
+      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+    >
+    <meta
+      name="twitter:image:alt"
+      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
     >
     <title>Clawnsole — Local-first AI video studio</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
@@ -34,12 +59,20 @@
         <a href="#screenshots">Screenshots</a>
         <a href="privacy/">Privacy</a>
       </nav>
-      <a
-        class="button button-small"
-        href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
-      >
-        Download
-      </a>
+      <div class="header-actions">
+        <a
+          class="button button-small button-secondary"
+          href="https://github.com/heresalexandria/clawnsole"
+        >
+          View on GitHub
+        </a>
+        <a
+          class="button button-small"
+          href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
+        >
+          Download
+        </a>
+      </div>
     </header>
 
     <main id="main">
@@ -52,13 +85,25 @@
             Clawnsole mind the render. Your key, projects, and finished films
             stay under your control.
           </p>
+          <p class="provider-support">
+            Currently supported: your Black Forest Labs key for FLUX 3, LTX
+            key for LTX models, or Atlas Cloud key for Seedance models.
+          </p>
           <div class="hero-actions">
-            <a
-              class="button"
-              href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
-            >
-              Download for macOS
-            </a>
+            <div class="hero-download-actions">
+              <a
+                class="button"
+                href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
+              >
+                Download for macOS
+              </a>
+              <a
+                class="button button-secondary"
+                href="https://github.com/heresalexandria/clawnsole"
+              >
+                View on GitHub
+              </a>
+            </div>
             <a class="text-link" href="privacy/">Read the privacy policy <span aria-hidden="true">→</span></a>
           </div>
           <p class="download-note">
@@ -73,10 +118,11 @@
               <b>Clawnsole studio</b>
             </div>
             <img
-              src="assets/clawnsole-preview.png"
-              alt="Clawnsole Settings showing local data controls and the Made by Alexandria profile link"
-              width="1497"
-              height="959"
+              class="hero-screenshot"
+              src="app-store/ipad/01-create.png"
+              alt="Clawnsole Create screen configured for LTX text-to-video generation"
+              width="2048"
+              height="2732"
             >
           </div>
         </div>
