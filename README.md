@@ -13,7 +13,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clawnsole-preview-dark.png">
-    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole interface preview in light mode">
+    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole Providers desk in light mode">
   </picture>
 </p>
 
@@ -25,18 +25,18 @@ Atlas Cloud through one provider-neutral Create and Library workflow.
 
 <p align="center">
   <img src="docs/app-store/iphone/01-create.png" alt="Create an AI video in Clawnsole on iPhone" width="31%">
-  <img src="docs/app-store/iphone/02-frames.png" alt="Configure reference frames in Clawnsole on iPhone" width="31%">
+  <img src="docs/app-store/iphone/02-providers.png" alt="Choose providers and compare model costs in Clawnsole on iPhone" width="31%">
   <img src="docs/app-store/iphone/03-library.png" alt="Browse the local film library in Clawnsole on iPhone" width="31%">
 </p>
 
 ## What it does
 
-- Text-to-video, image-to-video, video continuation, and draft enhancement
-- One to ten start, end, and intermediate keyframes with even or exact timing
-- All documented durations, aspect ratios, resolutions, audio, draft, and safety controls
+- Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation and draft enhancement
+- Up to 30 reference frames, with timing and placement controls where the selected model supports them
+- Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
 - Live polling, manual status refresh, surfaced provider errors, and progress
-- Provider credit balance and setting-aware estimates
-- Exact per-generation credit and USD history
+- Provider balance when exposed by the API, plus setting-aware USD or credit estimates
+- Per-generation estimated and provider-reported cost history
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
@@ -112,7 +112,8 @@ See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 
 ## Privacy and support
 
-Read the [privacy policy](PRIVACY.md) or use the
+Read the [privacy policy](PRIVACY.md), its
+[public web version](https://heresalexandria.github.io/clawnsole/privacy/), or use the
 [issue tracker](https://github.com/heresalexandria/clawnsole/issues) for support.
 Do not post API keys, private prompts, or personal media in a public issue.
 

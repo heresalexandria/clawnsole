@@ -327,7 +327,7 @@ nav a:focus-visible,
   right: 5%;
   bottom: 13px;
   display: grid;
-  min-width: 215px;
+  min-width: 245px;
   padding: 22px 25px;
   border: 1px dashed #bb9760;
   border-radius: 10px;
@@ -349,7 +349,11 @@ nav a:focus-visible,
 .provider-ticket strong {
   padding-block: 2px;
   font-family: Georgia, serif;
-  font-size: 1.55rem;
+  font-size: 1.35rem;
+}
+
+.provider-ticket small + small {
+  margin-top: 2px;
 }
 
 .feature-section,
@@ -934,8 +938,22 @@ nav a:focus-visible,
   }
 
   .phone-gallery {
-    width: 150%;
-    margin-left: -25%;
+    grid-auto-columns: 78%;
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    width: 100%;
+    padding: 8px 0 24px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-snap-type: inline mandatory;
+  }
+
+  .phone-gallery figure {
+    scroll-snap-align: center;
+  }
+
+  .phone-frame-raised {
+    margin-top: 0;
   }
 
   .policy-content ul {

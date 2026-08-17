@@ -72,7 +72,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add electron/package.json electron/package-lock.json flutter/pubspec.yaml
+          git add electron/package.json electron/package-lock.json \
+            flutter/pubspec.yaml flutter/lib/core/app_version.dart
           git commit -m "Release ${{ steps.bump.outputs.tag }}"
           git push origin HEAD:main
 

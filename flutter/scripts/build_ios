@@ -2,7 +2,7 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_review_credentials.sh"
+source "$SCRIPT_DIRECTORY/_review_credentials.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_ios [additional flutter build ipa arguments]"

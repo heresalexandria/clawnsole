@@ -9,6 +9,7 @@
       content="Clawnsole privacy policy: local project storage, direct provider connections, and no developer-operated cloud database."
     >
     <title>Privacy policy — Clawnsole</title>
+    <link rel="icon" href="../assets/favicon.png" type="image/png">
     <link rel="stylesheet" href="../assets/site.css">
   </head>
   <body class="privacy-page">
@@ -40,7 +41,7 @@
           services. Its developer does not operate an account system, analytics
           service, advertising network, or cloud database for the app.
         </p>
-        <p class="policy-date">Effective August 16, 2026</p>
+        <p class="policy-date">Effective August 17, 2026</p>
       </header>
 
       <section class="policy-summary" aria-label="Privacy summary">
@@ -66,6 +67,7 @@
           <strong>On this page</strong>
           <a href="#local-data">Local data</a>
           <a href="#provider-data">Provider processing</a>
+          <a href="#app-review">App Review access</a>
           <a href="#network">Other network requests</a>
           <a href="#developer-data">Developer collection</a>
           <a href="#choices">Your choices</a>
@@ -83,8 +85,8 @@
               this can include:
             </p>
             <ul>
-              <li>your selected provider and API key;</li>
-              <li>prompts, generation settings, provider job identifiers, status, errors, and credit usage;</li>
+              <li>your selected provider and user-supplied provider API keys;</li>
+              <li>prompts, generation settings, provider job identifiers, status, errors, and estimated or provider-reported usage and cost;</li>
               <li>reference images, source video, generated video, and local file references; and</li>
               <li>appearance, retention, and other app preferences.</li>
             </ul>
@@ -101,34 +103,57 @@
             <h2>Data sent to a connected provider</h2>
             <p>
               When you ask Clawnsole to verify an account, check a credit
-              balance, or create, monitor, or download a generation, the app
-              communicates directly with the provider you connected. It sends
-              the provider API key and the information required for that
-              request.
+              balance, load a model catalog or price, or create, monitor, or
+              download a generation, the app communicates directly with the
+              provider you connected. It sends the provider API key and the
+              information required for that request.
             </p>
             <p>
-              Black Forest Labs is currently the only supported generation
-              provider. A request can include prompts, settings, reference
-              images, source video and audio contained in that video, provider
-              job identifiers, and related request metadata.
+              Depending on the provider, model, and task, a request can include
+              prompts, settings, reference images, source video and its audio,
+              provider job identifiers, and related request metadata.
             </p>
             <div class="policy-callout">
               <strong>Provider processing is separate from Clawnsole’s local storage.</strong>
               <p>
-                Black Forest Labs may process and retain inputs, outputs, account
-                identifiers, and technical request information under its own
-                terms and privacy policy. Review those documents before sending
-                private or sensitive material.
+                The selected provider may process and retain inputs, outputs,
+                account identifiers, and technical request information under its
+                own terms and privacy policy. Review the applicable documents
+                before sending private or sensitive material.
               </p>
               <p>
                 <a href="https://bfl.ai/legal/privacy-policy">Black Forest Labs privacy policy <span aria-hidden="true">↗</span></a>
                 <a href="https://bfl.ai/legal/usage-policy">Black Forest Labs usage policy <span aria-hidden="true">↗</span></a>
+                <a href="https://static.lightricks.com/legal/Privacy%20Policy%20-%20LTX%20Platform.pdf">LTX Platform privacy policy <span aria-hidden="true">↗</span></a>
+                <a href="https://www.atlascloud.ai/privacy">Atlas Cloud privacy policy <span aria-hidden="true">↗</span></a>
               </p>
             </div>
             <p>
-              Clawnsole is an independent client and is not affiliated with or
-              endorsed by Black Forest Labs. Adding another provider in a future
-              version will require an update to this policy.
+              Clawnsole currently supports Black Forest Labs (BFL / FLUX 3),
+              LTX, which is operated by Lightricks, and Atlas Cloud. Atlas Cloud
+              is an API aggregation platform and may forward prompts and
+              generation inputs to the underlying model provider selected for
+              the request; that provider’s data-handling and retention policies
+              also apply. Clawnsole is not affiliated with or endorsed by any
+              of these providers.
+            </p>
+          </section>
+
+          <section id="app-review">
+            <p class="eyebrow">Apple testing</p>
+            <h2>App Review provider access</h2>
+            <p>
+              An iOS build prepared for App Review may include temporary
+              provider credentials so Apple can test generation without entering
+              keys manually. These credentials are compiled into that build,
+              are not written to Clawnsole’s local data file, and are never
+              displayed in the interface.
+            </p>
+            <p>
+              Requests made with App Review access are still sent to and
+              processed by the selected provider as described above. A
+              user-supplied key for the same provider takes precedence after it
+              is saved.
             </p>
           </section>
 
@@ -161,9 +186,10 @@
               The app does not use data for advertising or cross-app tracking.
             </p>
             <p>
-              Apple, Google, GitHub, Black Forest Labs, and the platform through
-              which you install or use Clawnsole may process account, download,
-              purchase, diagnostic, crash, or connection information under their
+              Apple, Google, GitHub, the selected generation provider, any
+              underlying model provider, and the platform through which you
+              install or use Clawnsole may process account, download, purchase,
+              diagnostic, crash, request, or connection information under their
               own policies and your settings with those services.
             </p>
           </section>
@@ -174,7 +200,7 @@
             <ul>
               <li>Do not add a provider key if you do not want Clawnsole to contact that provider.</li>
               <li>Choose which prompts and media to submit for each generation.</li>
-              <li>Remove your provider key from Settings at any time.</li>
+              <li>Add, replace, or remove your provider keys from Providers at any time.</li>
               <li>Clear generation history, reset preferences, or delete all local Clawnsole data from Settings.</li>
               <li>Revoke a provider key in the provider’s account dashboard to end its access.</li>
               <li>Contact the provider directly about data it retains on its systems.</li>
@@ -187,15 +213,19 @@
             <p>
               User-supplied provider keys are stored in Clawnsole’s locally
               protected JSON data, not sent to the developer, and never displayed
-              again after saving. Keep provider keys private and revoke a key
-              through the provider if you believe it has been exposed.
+              again after saving. App Review credentials, when present, are
+              compiled into that iOS build and are not written to the local data
+              file or shown in the interface. Keep provider keys private and
+              revoke a key through the provider if you believe it has been exposed.
             </p>
             <p>
               Clawnsole keeps local data until you remove individual records,
               use a clear-data control, or uninstall the app. Removing the app
               may remove data in its sandbox, subject to operating-system backup
               and device-management behavior. Provider-side retention and
-              deletion are controlled by that provider.
+              deletion are controlled by the selected provider and, for an
+              aggregated model, may also be controlled by the underlying model
+              provider.
             </p>
           </section>
 
