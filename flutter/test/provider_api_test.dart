@@ -214,7 +214,7 @@ void main() {
     expect(decoded.apiKeyFor('bfl'), 'bfl-secret');
     expect(decoded.apiKeyFor('ltx'), 'ltx-secret');
     expect(decoded.apiKeyFor('atlas'), 'atlas-secret');
-    expect(decoded.toJson()['schemaVersion'], 7);
+    expect(decoded.toJson()['schemaVersion'], 8);
   });
 
   test('published provider pricing uses the selected tier', () {

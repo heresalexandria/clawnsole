@@ -20,6 +20,8 @@
 Clawnsole is a local-first Flutter video generation workspace with a premium,
 midcentury-inspired interface. It supports Black Forest Labs FLUX 3, LTX, and
 Atlas Cloud through one provider-neutral Create and Library workflow.
+The local Library can be shaped into project folders and reusable tags without
+uploading its catalog anywhere.
 
 ## iPhone
 
@@ -38,6 +40,8 @@ Atlas Cloud through one provider-neutral Create and Library workflow.
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation estimated and provider-reported cost history
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
+- Nested project folders, multi-tag organization, and combined prompt/tag/folder search
+- One-tap folder and tag filters with a desktop folder rail and compact mobile picker
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
 - Local API-key setup with no database, `localStorage`, or IndexedDB history
@@ -77,6 +81,10 @@ web and Electron store the same compact schema in a local file, with retained
 inputs and videos in an adjacent `assets/` directory.
 
 - History is not capped.
+- Folder names, tag labels, and generation assignments live in the same compact
+  local JSON schema and migrate without changing older records.
+- Removing a folder never removes its films; directly filed work returns to
+  **Unfiled**, tags stay intact, and subfolders move up one level.
 - Base64 request payloads and video blobs are never stored in JSON.
 - Removing history prunes media no longer referenced by another generation.
 - Provider delivery links may be temporary; completed videos are retained locally first.

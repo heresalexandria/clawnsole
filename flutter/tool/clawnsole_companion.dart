@@ -285,6 +285,24 @@ class StoreChange<T> {
   final T result;
 }
 
+List<String> _cleanLibraryTags(Iterable<Object?> input) {
+  final tags = <String>[];
+  final seen = <String>{};
+  for (final value in input) {
+    final clean = value
+        .toString()
+        .trim()
+        .replaceFirst(RegExp(r'^#+'), '')
+        .trim();
+    final key = clean.toLowerCase();
+    if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
+    seen.add(key);
+    tags.add(clean);
+    if (tags.length == 12) break;
+  }
+  return tags;
+}
+
 class CompanionApp {
   CompanionApp({
     required CompanionStore store,
@@ -476,6 +494,105 @@ class CompanionApp {
             ? value.map((key, child) => MapEntry(key.toString(), child))
             : <String, Object?>{};
         next = current.copyWith(preferences: AppPreferences.fromJson(map));
+      } else if (action == 'saveLibraryFolder') {
+        final map = value is Map<Object?, Object?>
+            ? value.map((key, child) => MapEntry(key.toString(), child))
+            : <String, Object?>{};
+        final folder = LibraryFolder.fromJson(map);
+        final name = folder.name.trim();
+        if (folder.id.trim().isEmpty || name.isEmpty || name.length > 48) {
+          throw StateError('Folder names must be between 1 and 48 characters.');
+        }
+        final parentId = folder.parentId?.trim().isEmpty == true
+            ? null
+            : folder.parentId;
+        if (parentId != null &&
+            !current.folders.any((item) => item.id == parentId)) {
+          throw StateError('The parent folder no longer exists.');
+        }
+        var ancestorId = parentId;
+        while (ancestorId != null) {
+          if (ancestorId == folder.id) {
+            throw StateError('A folder cannot live inside itself.');
+          }
+          ancestorId = current.folders
+              .where((item) => item.id == ancestorId)
+              .firstOrNull
+              ?.parentId;
+        }
+        if (current.folders.any(
+          (item) =>
+              item.id != folder.id &&
+              item.parentId == parentId &&
+              item.name.toLowerCase() == name.toLowerCase(),
+        )) {
+          throw StateError('A folder named “$name” already exists here.');
+        }
+        final folders = List<LibraryFolder>.from(current.folders);
+        final index = folders.indexWhere((item) => item.id == folder.id);
+        final clean = LibraryFolder(
+          id: folder.id,
+          name: name,
+          createdAt: folder.createdAt,
+          parentId: parentId,
+        );
+        if (index < 0) {
+          folders.add(clean);
+        } else {
+          folders[index] = clean;
+        }
+        next = current.copyWith(folders: folders);
+      } else if (action == 'deleteLibraryFolder') {
+        final folderId = value?.toString() ?? '';
+        final removed = current.folders
+            .where((folder) => folder.id == folderId)
+            .firstOrNull;
+        next = current.copyWith(
+          folders: current.folders
+              .where((folder) => folder.id != folderId)
+              .map(
+                (folder) => folder.parentId == folderId
+                    ? folder.copyWith(
+                        parentId: removed?.parentId,
+                        clearParent: removed?.parentId == null,
+                      )
+                    : folder,
+              )
+              .toList(),
+          generations: current.generations
+              .map(
+                (item) => item.folderId == folderId
+                    ? item.copyWith(clearFolder: true)
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'setGenerationOrganization') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final localId = map['localId']?.toString() ?? '';
+        final rawFolderId = map['folderId']?.toString().trim() ?? '';
+        final folderId = rawFolderId.isEmpty ? null : rawFolderId;
+        if (folderId != null &&
+            !current.folders.any((folder) => folder.id == folderId)) {
+          throw StateError('That folder no longer exists.');
+        }
+        final tags = _cleanLibraryTags(
+          map['tags'] is List<Object?>
+              ? map['tags']! as List<Object?>
+              : const <Object?>[],
+        );
+        var found = false;
+        final generations = current.generations.map((item) {
+          if (item.localId != localId) return item;
+          found = true;
+          return item.copyWith(
+            folderId: folderId,
+            clearFolder: folderId == null,
+            tags: tags,
+          );
+        }).toList();
+        if (!found) throw StateError('That generation no longer exists.');
+        next = current.copyWith(generations: generations);
       } else if (action == 'clearHistory') {
         next = current.copyWith(generations: <Generation>[]);
       } else if (action == 'clearPreferences') {
@@ -525,6 +642,7 @@ class CompanionApp {
         .toSet();
     return LocalSnapshot(
       generations: data.generations,
+      folders: data.folders,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,

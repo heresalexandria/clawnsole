@@ -124,7 +124,7 @@ class _AppShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final body = controller.loading
-        ? const Center(child: CircularProgressIndicator())
+        ? const _LoadingSplash()
         : controller.loadError != null
         ? _ConnectionError(controller: controller)
         : switch (controller.section) {
@@ -161,6 +161,61 @@ class _AppShell extends StatelessWidget {
       bottomNavigationBar: wide ? null : _BottomNav(controller: controller),
     );
   }
+}
+
+class _LoadingSplash extends StatelessWidget {
+  const _LoadingSplash();
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Semantics(
+      label: 'Clawnsole is opening your local studio',
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 94,
+              height: 94,
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: context.colors.surface.withValues(alpha: .9),
+                borderRadius: BorderRadius.circular(25),
+                border: Border.all(color: context.colors.outlineVariant),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .12),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(19),
+                child: Image.asset('assets/icon.png'),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text('Clawnsole', style: Theme.of(context).textTheme.headlineLarge),
+            const SizedBox(height: 7),
+            Text(
+              'Opening your local studio…',
+              style: TextStyle(color: context.colors.onSurfaceVariant),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: 96,
+              child: LinearProgressIndicator(
+                minHeight: 3,
+                borderRadius: BorderRadius.circular(99),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _SideRail extends StatelessWidget {
