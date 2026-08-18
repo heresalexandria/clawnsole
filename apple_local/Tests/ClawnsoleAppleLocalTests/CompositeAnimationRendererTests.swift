@@ -3,52 +3,35 @@ import XCTest
 @testable import ClawnsoleAppleLocal
 
 final class CompositeAnimationRendererTests: XCTestCase {
-  func testSheetLayoutUsesCellsThatMatchOutputOrientation() {
-    XCTAssertEqual(
-      AnimationSheetLayout.forDimensions(width: 320, height: 512),
-      AnimationSheetLayout(columns: 6, rows: 4)
-    )
-    XCTAssertEqual(
-      AnimationSheetLayout.forDimensions(width: 512, height: 320),
-      AnimationSheetLayout(columns: 4, rows: 6)
-    )
-    XCTAssertEqual(
-      AnimationSheetLayout.forDimensions(width: 512, height: 512),
-      AnimationSheetLayout(columns: 5, rows: 5)
-    )
+  func testAnchorPlanKeepsAtMostFourOutputFramesBetweenAnchors() {
+    XCTAssertEqual(AnimationAnchorPlan.anchorCount(forFrameCount: 1), 1)
+    XCTAssertEqual(AnimationAnchorPlan.anchorCount(forFrameCount: 6), 3)
+    XCTAssertEqual(AnimationAnchorPlan.anchorCount(forFrameCount: 18), 6)
+    XCTAssertEqual(AnimationAnchorPlan.anchorCount(forFrameCount: 48), 13)
   }
 
-  func testTimelineUsesExactAndIntermediateAtlasFrames() {
+  func testTimelineUsesExactAndIntermediateAnchorFrames() {
     let first = AnimationTimelineSample.at(
       frameIndex: 0,
       frameCount: 6,
-      keyframeCount: 24
+      keyframeCount: 3
     )
     let middle = AnimationTimelineSample.at(
       frameIndex: 1,
       frameCount: 6,
-      keyframeCount: 24
+      keyframeCount: 3
     )
     let last = AnimationTimelineSample.at(
       frameIndex: 5,
       frameCount: 6,
-      keyframeCount: 24
+      keyframeCount: 3
     )
 
     XCTAssertEqual(first, .init(beforeIndex: 0, afterIndex: 0, fraction: 0))
-    XCTAssertEqual(middle.beforeIndex, 4)
-    XCTAssertEqual(middle.afterIndex, 5)
-    XCTAssertEqual(middle.fraction, 0.6, accuracy: 0.000_001)
-    XCTAssertEqual(last, .init(beforeIndex: 23, afterIndex: 23, fraction: 0))
-  }
-
-  func testAtlasCropsExactlyTwentyFourKeyframes() throws {
-    let layout = AnimationSheetLayout(columns: 6, rows: 4)
-    let sheet = solidImage(width: 600, height: 400)
-    let keyframes = try layout.keyframes(from: sheet)
-
-    XCTAssertEqual(keyframes.count, 24)
-    XCTAssertTrue(keyframes.allSatisfy { $0.width == 100 && $0.height == 100 })
+    XCTAssertEqual(middle.beforeIndex, 0)
+    XCTAssertEqual(middle.afterIndex, 1)
+    XCTAssertEqual(middle.fraction, 0.4, accuracy: 0.000_001)
+    XCTAssertEqual(last, .init(beforeIndex: 2, afterIndex: 2, fraction: 0))
   }
 
   func testContinuityBoardAndTargetCropHavePredictableGeometry() throws {
@@ -68,6 +51,8 @@ final class CompositeAnimationRendererTests: XCTestCase {
     XCTAssertEqual(targetColor.red, 0.82, accuracy: 0.03)
     XCTAssertEqual(targetColor.green, 0.82, accuracy: 0.03)
     XCTAssertEqual(targetColor.blue, 0.82, accuracy: 0.03)
+    XCTAssertTrue(AnimationFrameConsistency.looksLikeContinuityBoard(board))
+    XCTAssertFalse(AnimationFrameConsistency.looksLikeContinuityBoard(frame))
   }
 
   func testCompositePromptsExplainTheSingleReferenceLayout() {
@@ -79,11 +64,16 @@ final class CompositeAnimationRendererTests: XCTestCase {
     XCTAssertTrue(prompt.contains("previous frame bottom left"))
     XCTAssertTrue(prompt.contains("blank target bottom right"))
     XCTAssertLessThanOrEqual(prompt.count, 360)
-  }
 
-  func testConsistencyGateAcceptsAUniformTwentyFourFrameAtlas() {
-    let frames = (0..<24).map { _ in solidImage(width: 32, height: 48) }
-    XCTAssertTrue(AnimationFrameConsistency.acceptsAtlas(frames))
+    let anchorPrompt = CompositeAnimationPromptPlan.anchorOnlyPrompt(
+      lockedPrompt: "same fox and setting",
+      originalPrompt: "the fox waves",
+      fraction: 0.5
+    )
+    XCTAssertTrue(anchorPrompt.contains("immutable design master"))
+    XCTAssertTrue(anchorPrompt.contains("previous anchor twice"))
+    XCTAssertTrue(anchorPrompt.contains("50%"))
+    XCTAssertLessThanOrEqual(anchorPrompt.count, 430)
   }
 
   private func solidImage(width: Int, height: Int) -> CGImage {

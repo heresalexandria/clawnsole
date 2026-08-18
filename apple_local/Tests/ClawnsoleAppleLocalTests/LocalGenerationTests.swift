@@ -24,11 +24,12 @@ final class LocalGenerationTests: XCTestCase {
     XCTAssertEqual(dimensions.height % 64, 0)
   }
 
-  func testMasterPromptRequestsOneStableComposition() {
+  func testMasterPromptRequestsOneStableStartingComposition() {
     let prompt = AnimationPromptPlan.masterFramePrompt(
       lockedPrompt: "Locked hero model sheet."
     )
-    XCTAssertTrue(prompt.contains("one cohesive master frame"))
+    XCTAssertTrue(prompt.contains("one cohesive first frame"))
+    XCTAssertTrue(prompt.contains("recognizable starting pose"))
     XCTAssertTrue(prompt.contains("center 80%"))
     XCTAssertTrue(prompt.contains("one stable background"))
     XCTAssertTrue(prompt.contains("No storyboard"))

@@ -5,45 +5,12 @@ import Foundation
   import Vision
 #endif
 
-struct AnimationSheetLayout: Equatable, Sendable {
-  static let keyframeCount = 24
-
-  let columns: Int
-  let rows: Int
-
-  static func forDimensions(width: Int, height: Int) -> AnimationSheetLayout {
-    if width == height {
-      return AnimationSheetLayout(columns: 5, rows: 5)
-    }
-    return width < height
-      ? AnimationSheetLayout(columns: 6, rows: 4)
-      : AnimationSheetLayout(columns: 4, rows: 6)
-  }
-
-  var description: String {
-    "\(columns)-column by \(rows)-row"
-  }
-
-  func keyframes(from sheet: CGImage) throws -> [CGImage] {
-    let cellWidth = sheet.width / columns
-    let cellHeight = sheet.height / rows
-    guard cellWidth > 0, cellHeight > 0 else {
-      throw LocalGenerationError.imageEncodingFailed
-    }
-    return try (0..<Self.keyframeCount).map { index in
-      let column = index % columns
-      let row = index / columns
-      let rect = CGRect(
-        x: column * cellWidth,
-        y: row * cellHeight,
-        width: cellWidth,
-        height: cellHeight
-      )
-      guard let image = sheet.cropping(to: rect) else {
-        throw LocalGenerationError.imageEncodingFailed
-      }
-      return image
-    }
+enum AnimationAnchorPlan {
+  /// Dense sprite-sheet prompts are not reliably honored by Image Playground.
+  /// Generate one full-size anchor for roughly every four output frames instead.
+  static func anchorCount(forFrameCount frameCount: Int) -> Int {
+    guard frameCount > 1 else { return max(1, frameCount) }
+    return min(frameCount, max(2, Int(ceil(Double(frameCount) / 4.0)) + 1))
   }
 }
 
@@ -84,20 +51,15 @@ struct AnimationTimelineSample: Equatable, Sendable {
 }
 
 enum CompositeAnimationPromptPlan {
-  static func sheetPrompt(
+  static func anchorOnlyPrompt(
     lockedPrompt: String,
-    layout: AnimationSheetLayout
+    originalPrompt: String,
+    fraction: Double
   ) -> String {
-    String(
-      "One \(layout.description) sprite sheet with 24 equal cartoon frames, read left to right then top to bottom. \(lockedPrompt) Advance one smooth action in tiny steps. Identical character, clothing, props, setting, camera, palette, and linework in every cell. Thin plain gutters. No text or numbers."
-        .prefix(470)
-    )
-  }
-
-  static func keyframePrompt(originalPrompt: String, keyframeIndex: Int) -> String {
-    String(
-      "Create only one full-size cartoon frame from reference cell \(keyframeIndex + 1). Preserve its exact character, pose, clothing, props, background, camera, palette, and linework. \(originalPrompt) No grid, panels, collage, text, or redesign."
-        .prefix(300)
+    let percent = Int((fraction * 100).rounded())
+    return String(
+      "Create only one full-size cartoon frame, not a grid. The reference board shows the immutable design master top left and the previous anchor twice. At \(percent)% of the action, advance the pose clearly but preserve the exact character, clothing, props, setting, camera, palette, and linework. \(lockedPrompt) \(originalPrompt) No text or collage."
+        .prefix(430)
     )
   }
 
@@ -114,6 +76,14 @@ enum CompositeAnimationPromptPlan {
     return String(
       "Complete the blank bottom-right cell of this 2 by 2 cartoon continuity board at \(percent)% between the top anchors. Keep the same character, scene, camera, palette, and linework. Return the completed board with the other three cells unchanged. No text."
         .prefix(280)
+    )
+  }
+
+  static func completedAnchorBoardPrompt(fraction: Double) -> String {
+    let percent = Int((fraction * 100).rounded())
+    return String(
+      "Complete only the blank bottom-right cell of this 2 by 2 cartoon board. The top-left cell is the immutable design master; the other filled cells are the previous anchor. Draw the same character and scene at \(percent)% of the requested action. Return the completed board unchanged outside that cell. No text."
+        .prefix(320)
     )
   }
 }
@@ -222,27 +192,63 @@ enum CompositeAnimationRenderer {
 }
 
 enum AnimationFrameConsistency {
-  static func acceptsAtlas(_ keyframes: [CGImage]) -> Bool {
-    guard keyframes.count == AnimationSheetLayout.keyframeCount else {
+  static func looksLikeContinuityBoard(_ image: CGImage) -> Bool {
+    let sampleSize = 64
+    var pixels = [UInt8](repeating: 0, count: sampleSize * sampleSize * 4)
+    guard
+      let context = CGContext(
+        data: &pixels,
+        width: sampleSize,
+        height: sampleSize,
+        bitsPerComponent: 8,
+        bytesPerRow: sampleSize * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      )
+    else {
       return false
     }
-    #if canImport(Vision)
-      do {
-        let prints = try keyframes.map(featurePrint)
-        var adjacentDistances = [Float]()
-        for index in 1..<prints.count {
-          adjacentDistances.append(try distance(prints[index - 1], prints[index]))
+    context.interpolationQuality = .medium
+    context.draw(image, in: CGRect(x: 0, y: 0, width: sampleSize, height: sampleSize))
+
+    func luminance(x: Int, y: Int) -> Double {
+      let offset = (y * sampleSize + x) * 4
+      return
+        Double(pixels[offset]) * 0.2126 + Double(pixels[offset + 1]) * 0.7152
+        + Double(pixels[offset + 2]) * 0.0722
+    }
+    func verticalAverage(columns: ClosedRange<Int>) -> Double {
+      var total = 0.0
+      var count = 0
+      for x in columns {
+        for y in 4..<(sampleSize - 4) {
+          total += luminance(x: x, y: y)
+          count += 1
         }
-        let coherentPairs = adjacentDistances.filter { $0 <= 1.20 }.count
-        let sorted = adjacentDistances.sorted()
-        let median = sorted[sorted.count / 2]
-        return coherentPairs >= 18 && median <= 0.95
-      } catch {
-        return true
       }
-    #else
-      return true
-    #endif
+      return total / Double(count)
+    }
+    func horizontalAverage(rows: ClosedRange<Int>) -> Double {
+      var total = 0.0
+      var count = 0
+      for y in rows {
+        for x in 4..<(sampleSize - 4) {
+          total += luminance(x: x, y: y)
+          count += 1
+        }
+      }
+      return total / Double(count)
+    }
+
+    let verticalSeam = verticalAverage(columns: 31...32)
+    let verticalNeighbors =
+      (verticalAverage(columns: 26...28) + verticalAverage(columns: 35...37)) / 2
+    let horizontalSeam = horizontalAverage(rows: 31...32)
+    let horizontalNeighbors =
+      (horizontalAverage(rows: 26...28) + horizontalAverage(rows: 35...37)) / 2
+    return verticalNeighbors > 20 && horizontalNeighbors > 20
+      && verticalSeam < verticalNeighbors * 0.68
+      && horizontalSeam < horizontalNeighbors * 0.68
   }
 
   static func accepts(
