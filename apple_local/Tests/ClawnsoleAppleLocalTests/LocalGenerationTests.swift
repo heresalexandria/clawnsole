@@ -54,6 +54,7 @@ final class LocalGenerationTests: XCTestCase {
   func testAnimationAttemptsDropRejectedReferenceBeforeFailing() {
     let attempts = AnimationPromptPlan.attempts(
       lockedPrompt: "Locked fox design.",
+      originalPrompt: "A fox waves",
       frameIndex: 1,
       frameCount: 6,
       frameRate: 6,
@@ -63,6 +64,8 @@ final class LocalGenerationTests: XCTestCase {
     XCTAssertEqual(attempts.count, 3)
     XCTAssertEqual(attempts.map(\.includeReference), [true, true, false])
     XCTAssertEqual(attempts.map(\.useFallbackStyle), [false, false, true])
+    XCTAssertEqual(attempts[2].prompt, "A fox waves")
+    XCTAssertFalse(attempts[2].prompt.contains("Locked"))
     XCTAssertLessThanOrEqual(attempts[0].prompt.count, 480)
     XCTAssertLessThanOrEqual(attempts[1].prompt.count, 300)
   }
@@ -70,6 +73,7 @@ final class LocalGenerationTests: XCTestCase {
   func testAnimationAttemptsRetryFirstFrameWithoutReference() {
     let attempts = AnimationPromptPlan.attempts(
       lockedPrompt: "Locked fox design.",
+      originalPrompt: "  A fox\n  waves   slowly  ",
       frameIndex: 0,
       frameCount: 6,
       frameRate: 6,
@@ -79,6 +83,41 @@ final class LocalGenerationTests: XCTestCase {
     XCTAssertEqual(attempts.count, 3)
     XCTAssertTrue(attempts.allSatisfy { !$0.includeReference })
     XCTAssertEqual(attempts.map(\.useFallbackStyle), [false, false, true])
+    XCTAssertEqual(attempts[2].prompt, "A fox waves slowly")
+  }
+
+  func testAnimationCanHoldACompletedFrameAfterAppleRejectsALaterFrame() throws {
+    let image = CGContext(
+      data: nil,
+      width: 2,
+      height: 2,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!.makeImage()!
+    let error = LocalGenerationError.imageCreationFailed(
+      frame: 6,
+      frameCount: 6,
+      attempts: 3,
+      retriedWithoutReference: true,
+      reason: "Unsupported language"
+    )
+
+    XCTAssertThrowsError(
+      try AnimationFrameRecovery.recoveredFrame(
+        after: error,
+        frameIndex: 0,
+        lastSuccessfulFrame: nil
+      )
+    )
+    let recovered = try AnimationFrameRecovery.recoveredFrame(
+      after: error,
+      frameIndex: 5,
+      lastSuccessfulFrame: image
+    )
+    XCTAssertEqual(recovered.width, image.width)
+    XCTAssertEqual(recovered.height, image.height)
   }
 
   func testAnimationFailureNamesFrameAndRecovery() {

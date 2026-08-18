@@ -177,6 +177,15 @@ public struct FrameGenerationAttempt: Equatable, Sendable {
 }
 
 public enum AnimationPromptPlan {
+  public static func originalPromptFallback(for prompt: String) -> String {
+    String(
+      prompt
+        .split(whereSeparator: { $0.isWhitespace })
+        .joined(separator: " ")
+        .prefix(180)
+    )
+  }
+
   public static func fallbackLock(for prompt: String) -> String {
     let direction = String(prompt.prefix(170))
     return String(
@@ -217,6 +226,7 @@ public enum AnimationPromptPlan {
 
   public static func attempts(
     lockedPrompt: String,
+    originalPrompt: String,
     frameIndex: Int,
     frameCount: Int,
     frameRate: Int,
@@ -233,12 +243,13 @@ public enum AnimationPromptPlan {
       frameIndex: frameIndex,
       frameCount: frameCount
     )
+    let original = originalPromptFallback(for: originalPrompt)
     if hasReference {
       return [
         FrameGenerationAttempt(prompt: detailed, includeReference: true),
         FrameGenerationAttempt(prompt: compact, includeReference: true),
         FrameGenerationAttempt(
-          prompt: compact,
+          prompt: original,
           includeReference: false,
           useFallbackStyle: true
         ),
@@ -248,11 +259,28 @@ public enum AnimationPromptPlan {
       FrameGenerationAttempt(prompt: detailed, includeReference: false),
       FrameGenerationAttempt(prompt: compact, includeReference: false),
       FrameGenerationAttempt(
-        prompt: compact,
+        prompt: original,
         includeReference: false,
         useFallbackStyle: true
       ),
     ]
+  }
+}
+
+enum AnimationFrameRecovery {
+  static func recoveredFrame(
+    after error: LocalGenerationError,
+    frameIndex: Int,
+    lastSuccessfulFrame: CGImage?
+  ) throws -> CGImage {
+    guard
+      case .imageCreationFailed = error,
+      frameIndex > 0,
+      let lastSuccessfulFrame
+    else {
+      throw error
+    }
+    return lastSuccessfulFrame
   }
 }
 
@@ -378,6 +406,7 @@ public struct LocalGenerationEngine: Sendable {
 
     var frameURLs = [URL]()
     var previousImagePath = request.referenceImagePath
+    var lastSuccessfulFrame: CGImage?
     for frameIndex in 0..<request.frameCount {
       try Task.checkCancellation()
       progress(
@@ -388,30 +417,50 @@ public struct LocalGenerationEngine: Sendable {
         )
       )
       #if canImport(ImagePlayground)
-        let generatedImage: CGImage
-        if request.mode == .image {
-          generatedImage = try await createImage(
-            creator: creator,
-            concepts: [.text(lockedPrompt)],
-            style: style
+        let image: CGImage
+        do {
+          let generatedImage: CGImage
+          if request.mode == .image {
+            generatedImage = try await createImage(
+              creator: creator,
+              concepts: [.text(lockedPrompt)],
+              style: style
+            )
+          } else {
+            generatedImage = try await createAnimationFrame(
+              creator: creator,
+              lockedPrompt: lockedPrompt,
+              originalPrompt: request.prompt,
+              frameIndex: frameIndex,
+              frameCount: request.frameCount,
+              frameRate: request.frameRate,
+              referencePath: previousImagePath,
+              style: style,
+              progress: progress
+            )
+          }
+          image = try fittedImage(
+            generatedImage,
+            width: dimensions.width,
+            height: dimensions.height
           )
-        } else {
-          generatedImage = try await createAnimationFrame(
-            creator: creator,
-            lockedPrompt: lockedPrompt,
+        } catch let error as LocalGenerationError {
+          guard request.mode == .animation else { throw error }
+          let recoveredFrame = try AnimationFrameRecovery.recoveredFrame(
+            after: error,
             frameIndex: frameIndex,
-            frameCount: request.frameCount,
-            frameRate: request.frameRate,
-            referencePath: previousImagePath,
-            style: style,
-            progress: progress
+            lastSuccessfulFrame: lastSuccessfulFrame
           )
+          progress(
+            .init(
+              status: "Pending",
+              progress: 5 + (Double(frameIndex) / Double(request.frameCount)) * 88,
+              message:
+                "Apple skipped frame \(frameIndex + 1); holding the last successful frame"
+            )
+          )
+          image = recoveredFrame
         }
-        let image = try fittedImage(
-          generatedImage,
-          width: dimensions.width,
-          height: dimensions.height
-        )
       #else
         throw LocalGenerationError.unavailable
       #endif
@@ -421,6 +470,7 @@ public struct LocalGenerationEngine: Sendable {
       try writePNG(image, to: frameURL)
       frameURLs.append(frameURL)
       previousImagePath = frameURL.path
+      lastSuccessfulFrame = image
     }
 
     if request.mode == .image {
@@ -521,6 +571,7 @@ public struct LocalGenerationEngine: Sendable {
     private func createAnimationFrame(
       creator: ImageCreator,
       lockedPrompt: String,
+      originalPrompt: String,
       frameIndex: Int,
       frameCount: Int,
       frameRate: Int,
@@ -533,6 +584,7 @@ public struct LocalGenerationEngine: Sendable {
       }
       let attempts = AnimationPromptPlan.attempts(
         lockedPrompt: lockedPrompt,
+        originalPrompt: originalPrompt,
         frameIndex: frameIndex,
         frameCount: frameCount,
         frameRate: frameRate,
