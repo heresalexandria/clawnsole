@@ -40,11 +40,17 @@ private actor AppleLocalJobManager {
           Task { await self.record(update, for: jobId) }
         }
       } catch {
+        await Task.yield()
+        let previousProgress = jobs[jobId]?.progress ?? 0
+        let failureProgress = max(
+          previousProgress,
+          (error as? LocalGenerationError)?.failureProgress ?? 0
+        )
         record(
           LocalGenerationProgress(
             status: "Error",
-            progress: 0,
-            message: "Local generation failed",
+            progress: failureProgress,
+            message: "Apple Local animation stopped",
             error: error.localizedDescription
           ),
           for: jobId

@@ -18,6 +18,7 @@
 		B5742D824825911D63BD5186 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1E141ACD20AC99140EE60F2 /* Pods_Runner.framework */; };
 		A11E00000000000000000001 /* AppleLocalGenerationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */; };
 		A11E00000000000000000003 /* ClawnsoleAppleLocal in Frameworks */ = {isa = PBXBuildFile; productRef = A11E00000000000000000004 /* ClawnsoleAppleLocal */; };
+		A11E00000000000000000006 /* ClawnsoleAppleLocal in Frameworks */ = {isa = PBXBuildFile; productRef = A11E00000000000000000004 /* ClawnsoleAppleLocal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +85,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11E00000000000000000006 /* ClawnsoleAppleLocal in Frameworks */,
 				8593F7D4088A786F8A899914 /* Pods_RunnerTests.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -188,6 +190,9 @@
 				331C8086294A63A400263BE5 /* PBXTargetDependency */,
 			);
 			name = RunnerTests;
+			packageProductDependencies = (
+				A11E00000000000000000004 /* ClawnsoleAppleLocal */,
+			);
 			productName = RunnerTests;
 			productReference = 331C8081294A63A400263BE5 /* RunnerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -520,6 +525,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KMZ785G889;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.clawnsole.clawnsole.RunnerTests;
@@ -538,6 +544,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KMZ785G889;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.clawnsole.clawnsole.RunnerTests;
@@ -554,6 +561,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KMZ785G889;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.clawnsole.clawnsole.RunnerTests;

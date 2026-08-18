@@ -9,9 +9,13 @@ Clawnsole's iOS app and Electron macOS companion.
 - On iOS/macOS 26 or newer, Apple's Foundation Models framework expands the
   user's prompt into a continuity-locked art-direction prompt. Earlier systems
   use a deterministic continuity template.
-- Image mode writes one PNG. Experimental animation mode generates
-  `duration × frameRate` PNG frames, conditions each new frame on the previous
-  frame as an image concept, then encodes a silent H.264 MP4 locally.
+- Image mode writes one PNG. Experimental animation mode generates sparse,
+  full-size continuity anchors individually, then supplies one locally composed
+  reference board for each in-between frame. The board combines the surrounding
+  anchors, the immediately preceding accepted frame, and a blank target cell.
+  Every generated anchor and frame is checked locally before the silent H.264
+  MP4 is encoded. If Apple cannot maintain continuity, the request fails instead
+  of returning a single-image camera-pan substitute.
 
 The provider is available when Apple Image Playground's programmatic creator is
 available: iOS/iPadOS 18.4+ or macOS 15.4+ on an Apple Intelligence-capable
