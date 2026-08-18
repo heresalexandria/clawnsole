@@ -16,7 +16,8 @@ Uri _configuredBaseUrl(Uri? override) {
   return configured.trim().isEmpty ? Uri.base : Uri.parse(configured);
 }
 
-class WebGateway implements AppGateway, ProviderGateway {
+class WebGateway
+    implements AppGateway, ProviderGateway, LibraryOrganizationGateway {
   WebGateway({http.Client? client, Uri? baseUrl})
     : _client = client ?? http.Client(),
       _baseUrl = _configuredBaseUrl(baseUrl);
@@ -157,6 +158,25 @@ class WebGateway implements AppGateway, ProviderGateway {
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) =>
       _action('setPreferences', preferences.toJson());
+
+  @override
+  Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder) =>
+      _action('saveLibraryFolder', folder.toJson());
+
+  @override
+  Future<LocalSnapshot> deleteLibraryFolder(String folderId) =>
+      _action('deleteLibraryFolder', folderId);
+
+  @override
+  Future<LocalSnapshot> setGenerationOrganization(
+    String localId, {
+    String? folderId,
+    required List<String> tags,
+  }) => _action('setGenerationOrganization', <String, Object?>{
+    'localId': localId,
+    'folderId': folderId,
+    'tags': tags,
+  });
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async {

@@ -32,8 +32,85 @@
 
   <title>Clawnsole</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { background: #f1ebde; }
+    #clawnsole-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: grid;
+      place-items: center;
+      color: #271e25;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 50% 42%, #fbf6eb 0, #f1ebde 58%, #e5dac8 100%);
+      transition: opacity 180ms ease;
+    }
+    #clawnsole-splash .splash-content { text-align: center; }
+    #clawnsole-splash img {
+      width: 92px;
+      height: 92px;
+      border-radius: 24px;
+      box-shadow: 0 14px 34px rgba(39, 30, 37, .2);
+    }
+    #clawnsole-splash strong {
+      display: block;
+      margin-top: 18px;
+      font-family: Georgia, serif;
+      font-size: 27px;
+      font-weight: 600;
+      letter-spacing: -.02em;
+    }
+    #clawnsole-splash span { display: block; margin-top: 7px; color: #6d6267; font-size: 13px; }
+    #clawnsole-splash i {
+      display: block;
+      width: 84px;
+      height: 3px;
+      margin: 18px auto 0;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(83, 43, 78, .16);
+    }
+    #clawnsole-splash i::after {
+      content: "";
+      display: block;
+      width: 42%;
+      height: 100%;
+      border-radius: inherit;
+      background: #532b4e;
+      animation: clawnsole-loading 1.1s ease-in-out infinite alternate;
+    }
+    @keyframes clawnsole-loading { to { transform: translateX(138%); } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #15100c; }
+      #clawnsole-splash {
+        color: #f3ead9;
+        background: radial-gradient(circle at 50% 42%, #30231f 0, #15100c 68%);
+      }
+      #clawnsole-splash span { color: #cfc1b0; }
+      #clawnsole-splash i { background: rgba(217, 179, 108, .18); }
+      #clawnsole-splash i::after { background: #d9b36c; }
+    }
+    @media (prefers-reduced-motion: reduce) { #clawnsole-splash i::after { animation: none; } }
+  </style>
 </head>
 <body>
+  <div id="clawnsole-splash" role="status" aria-label="Clawnsole is opening your local studio">
+    <div class="splash-content">
+      <img src="icons/Icon-192.png" alt="">
+      <strong>Clawnsole</strong>
+      <span>Opening your local studio…</span>
+      <i aria-hidden="true"></i>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('clawnsole-splash');
+      if (!splash) return;
+      splash.style.opacity = '0';
+      window.setTimeout(function () { splash.remove(); }, 200);
+    });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

@@ -18,11 +18,23 @@
                         <subviews>
                             <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="center" image="LaunchImage" translatesAutoresizingMaskIntoConstraints="NO" id="YRO-k0-Ey4">
                             </imageView>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="Clawnsole" textAlignment="center" translatesAutoresizingMaskIntoConstraints="NO" id="qtx-Iv-title">
+                                <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="25"/>
+                                <color key="textColor" red="0.1529411765" green="0.1176470588" blue="0.1450980392" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            </label>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="Opening your local studio…" textAlignment="center" translatesAutoresizingMaskIntoConstraints="NO" id="qtx-Iv-subtitle">
+                                <fontDescription key="fontDescription" type="system" pointSize="13"/>
+                                <color key="textColor" red="0.4274509804" green="0.3843137255" blue="0.4039215686" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            </label>
                         </subviews>
-                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="0.9450980392" green="0.9215686275" blue="0.8705882353" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="1a2-6s-vTC"/>
-                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="4X2-HB-R7a"/>
+                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" constant="-44" id="4X2-HB-R7a"/>
+                            <constraint firstItem="qtx-Iv-title" firstAttribute="top" secondItem="YRO-k0-Ey4" secondAttribute="bottom" constant="14" id="qtx-title-top"/>
+                            <constraint firstItem="qtx-Iv-title" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="qtx-title-center"/>
+                            <constraint firstItem="qtx-Iv-subtitle" firstAttribute="top" secondItem="qtx-Iv-title" secondAttribute="bottom" constant="5" id="qtx-subtitle-top"/>
+                            <constraint firstItem="qtx-Iv-subtitle" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="qtx-subtitle-center"/>
                         </constraints>
                     </view>
                 </viewController>

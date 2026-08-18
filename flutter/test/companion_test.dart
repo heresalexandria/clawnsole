@@ -73,6 +73,107 @@ void main() {
     }
   });
 
+  test('companion persists library folders and generation tags', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-library-test.',
+    );
+    final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final now = DateTime.utc(2026, 8, 17, 12);
+    await store.replace(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'film-one',
+            status: 'Ready',
+            prompt: 'A clean catalog shot.',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+      ),
+    );
+    final application = CompanionApp(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+    const headers = <String, String>{'Content-Type': 'application/json'};
+
+    try {
+      final folderResponse = await http.patch(
+        base.resolve('/state'),
+        headers: headers,
+        body: jsonEncode(<String, Object?>{
+          'action': 'saveLibraryFolder',
+          'value': <String, Object?>{
+            'id': 'folder-one',
+            'name': 'Favorites',
+            'createdAt': now.toIso8601String(),
+          },
+        }),
+      );
+      expect(folderResponse.statusCode, 200);
+
+      final subfolderResponse = await http.patch(
+        base.resolve('/state'),
+        headers: headers,
+        body: jsonEncode(<String, Object?>{
+          'action': 'saveLibraryFolder',
+          'value': <String, Object?>{
+            'id': 'folder-child',
+            'name': 'Portraits',
+            'parentId': 'folder-one',
+            'createdAt': now.add(const Duration(seconds: 1)).toIso8601String(),
+          },
+        }),
+      );
+      expect(subfolderResponse.statusCode, 200);
+
+      final organizeResponse = await http.patch(
+        base.resolve('/state'),
+        headers: headers,
+        body: jsonEncode(<String, Object?>{
+          'action': 'setGenerationOrganization',
+          'value': <String, Object?>{
+            'localId': 'film-one',
+            'folderId': 'folder-one',
+            'tags': <String>['favorite', 'portrait'],
+          },
+        }),
+      );
+      expect(organizeResponse.statusCode, 200);
+      final snapshot = LocalSnapshot.fromJson(
+        (jsonDecode(organizeResponse.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      );
+      expect(snapshot.folders, hasLength(2));
+      expect(
+        snapshot.folders
+            .singleWhere((folder) => folder.id == 'folder-child')
+            .parentId,
+        'folder-one',
+      );
+      expect(snapshot.generations.single.folderId, 'folder-one');
+      expect(snapshot.generations.single.tags, <String>[
+        'favorite',
+        'portrait',
+      ]);
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
   test('companion turns a 503 Error payload into a terminal record', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'clawnsole-status-test.',

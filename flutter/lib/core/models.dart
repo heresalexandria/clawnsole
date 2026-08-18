@@ -226,6 +226,51 @@ class KeyframeLabel {
   );
 }
 
+class LibraryFolder {
+  const LibraryFolder({
+    required this.id,
+    required this.name,
+    required this.createdAt,
+    this.parentId,
+  });
+
+  final String id;
+  final String name;
+  final DateTime createdAt;
+  final String? parentId;
+
+  LibraryFolder copyWith({
+    String? name,
+    String? parentId,
+    bool clearParent = false,
+  }) => LibraryFolder(
+    id: id,
+    name: name ?? this.name,
+    createdAt: createdAt,
+    parentId: clearParent ? null : parentId ?? this.parentId,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    if (parentId != null) 'parentId': parentId,
+  };
+
+  factory LibraryFolder.fromJson(Map<String, Object?> json) => LibraryFolder(
+    id: json['id'] as String? ?? '',
+    name: json['name'] as String? ?? '',
+    createdAt:
+        DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+        DateTime.now().toUtc(),
+    parentId:
+        json['parentId'] is String &&
+            (json['parentId']! as String).trim().isNotEmpty
+        ? (json['parentId']! as String).trim()
+        : null,
+  );
+}
+
 class Generation {
   const Generation({
     required this.localId,
@@ -261,6 +306,8 @@ class Generation {
     this.lastProviderStatusCode,
     this.lastProviderResponse,
     this.lastProviderResponseAt,
+    this.folderId,
+    this.tags = const <String>[],
   });
 
   final String localId;
@@ -296,6 +343,8 @@ class Generation {
   final int? lastProviderStatusCode;
   final String? lastProviderResponse;
   final DateTime? lastProviderResponseAt;
+  final String? folderId;
+  final List<String> tags;
 
   bool get canCheckStatus => pollingUrl?.trim().isNotEmpty == true;
   bool get isWorking =>
@@ -367,6 +416,9 @@ class Generation {
     int? lastProviderStatusCode,
     String? lastProviderResponse,
     DateTime? lastProviderResponseAt,
+    String? folderId,
+    bool clearFolder = false,
+    List<String>? tags,
   }) => Generation(
     localId: localId,
     provider: provider,
@@ -406,6 +458,8 @@ class Generation {
     lastProviderResponse: lastProviderResponse ?? this.lastProviderResponse,
     lastProviderResponseAt:
         lastProviderResponseAt ?? this.lastProviderResponseAt,
+    folderId: clearFolder ? null : folderId ?? this.folderId,
+    tags: tags ?? this.tags,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -450,6 +504,8 @@ class Generation {
       'lastProviderResponseAt': lastProviderResponseAt!
           .toUtc()
           .toIso8601String(),
+    if (folderId != null) 'folderId': folderId,
+    if (tags.isNotEmpty) 'tags': tags,
   };
 
   factory Generation.fromJson(Map<String, Object?> json) => Generation(
@@ -507,6 +563,11 @@ class Generation {
     lastProviderResponseAt: DateTime.tryParse(
       json['lastProviderResponseAt'] as String? ?? '',
     ),
+    folderId: json['folderId'] as String?,
+    tags: (json['tags'] as List<Object?>? ?? const <Object?>[])
+        .whereType<String>()
+        .where((tag) => tag.trim().isNotEmpty)
+        .toList(),
   );
 }
 
@@ -552,6 +613,7 @@ class StoredData {
     this.rejectedIosReviewApiKeyIds = const <String, String>{},
     this.preferences = const AppPreferences(),
     this.generations = const <Generation>[],
+    this.folders = const <LibraryFolder>[],
   });
 
   final String apiKey;
@@ -560,6 +622,7 @@ class StoredData {
   final Map<String, String> rejectedIosReviewApiKeyIds;
   final AppPreferences preferences;
   final List<Generation> generations;
+  final List<LibraryFolder> folders;
 
   StoredData copyWith({
     String? apiKey,
@@ -568,6 +631,7 @@ class StoredData {
     Map<String, String>? rejectedIosReviewApiKeyIds,
     AppPreferences? preferences,
     List<Generation>? generations,
+    List<LibraryFolder>? folders,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -577,6 +641,7 @@ class StoredData {
         rejectedIosReviewApiKeyIds ?? this.rejectedIosReviewApiKeyIds,
     preferences: preferences ?? this.preferences,
     generations: generations ?? this.generations,
+    folders: folders ?? this.folders,
   );
 
   String apiKeyFor(String provider) =>
@@ -615,7 +680,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 8,
+    'schemaVersion': 9,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
@@ -625,6 +690,8 @@ class StoredData {
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
       'rejectedIosReviewApiKeyIds': rejectedIosReviewApiKeyIds,
     'preferences': preferences.toJson(),
+    if (folders.isNotEmpty)
+      'folders': folders.map((folder) => folder.toJson()).toList(),
     'generations': generations.map((item) => item.toJson()).toList(),
   };
 
@@ -652,6 +719,15 @@ class StoredData {
           json['rejectedIosReviewApiKeyId'] as String? ?? '',
       rejectedIosReviewApiKeyIds: rejectedIds,
       preferences: AppPreferences.fromJson(preferences),
+      folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
+          .whereType<Map<Object?, Object?>>()
+          .map(
+            (item) => LibraryFolder.fromJson(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
+          .where((folder) => folder.id.isNotEmpty && folder.name.isNotEmpty)
+          .toList(),
       generations: (json['generations'] as List<Object?>? ?? const [])
           .whereType<Map<Object?, Object?>>()
           .map(
@@ -718,6 +794,7 @@ class LocalSnapshot {
     required this.storage,
     this.connectedProviders = const <String>{},
     this.availableProviders = const <String>{},
+    this.folders = const <LibraryFolder>[],
   });
 
   final List<Generation> generations;
@@ -726,6 +803,7 @@ class LocalSnapshot {
   final StorageStats storage;
   final Set<String> connectedProviders;
   final Set<String> availableProviders;
+  final List<LibraryFolder> folders;
 
   bool hasApiKeyFor(String provider) =>
       connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);
@@ -736,6 +814,7 @@ class LocalSnapshot {
     'hasBflApiKey': hasApiKey,
     'connectedProviders': connectedProviders.toList()..sort(),
     'availableProviders': availableProviders.toList()..sort(),
+    'folders': folders.map((folder) => folder.toJson()).toList(),
     'storage': storage.toJson(),
   };
 
@@ -762,6 +841,14 @@ class LocalSnapshot {
         (json['availableProviders'] as List<Object?>? ?? const <Object?>[])
             .whereType<String>()
             .toSet(),
+    folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
+        .whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => LibraryFolder.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .toList(),
     storage: StorageStats.fromJson(
       (json['storage'] as Map<Object?, Object?>? ?? const {}).map(
         (key, value) => MapEntry(key.toString(), value),

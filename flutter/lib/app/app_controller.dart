@@ -120,6 +120,8 @@ class AppController extends ChangeNotifier {
   AppSection section = AppSection.create;
   LibraryFilter libraryFilter = LibraryFilter.all;
   String librarySearch = '';
+  String libraryFolderView = libraryFolderAll;
+  String? libraryTag;
   String selectedProviderId = 'bfl';
   String selectedModelId = 'flux-3-video';
   double? credits;
@@ -147,6 +149,9 @@ class AppController extends ChangeNotifier {
   final Set<String> _statusChecks = <String>{};
   int _idCounter = 0;
 
+  static const String libraryFolderAll = 'all';
+  static const String libraryFolderUnfiled = 'unfiled';
+
   List<Generation> get generations => snapshot?.generations ?? const [];
   List<VideoProviderDefinition> get providers {
     final available = snapshot?.availableProviders ?? const <String>{};
@@ -156,6 +161,14 @@ class AppController extends ChangeNotifier {
     return videoProviders
         .where((provider) => available.contains(provider.id))
         .toList();
+  }
+
+  List<LibraryFolder> get folders {
+    final values = List<LibraryFolder>.from(
+      snapshot?.folders ?? const <LibraryFolder>[],
+    );
+    values.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return values;
   }
 
   VideoProviderDefinition get selectedProvider =>
@@ -192,10 +205,140 @@ class AppController extends ChangeNotifier {
   );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
 
+  LibraryFolder? folderById(String? folderId) {
+    if (folderId == null) return null;
+    for (final folder in folders) {
+      if (folder.id == folderId) return folder;
+    }
+    return null;
+  }
+
+  List<LibraryFolder> childFolders(String? parentId) =>
+      folders.where((folder) => folder.parentId == parentId).toList();
+
+  List<LibraryFolder> get folderTree {
+    final ordered = <LibraryFolder>[];
+    final visited = <String>{};
+
+    void addChildren(String? parentId) {
+      for (final folder in childFolders(parentId)) {
+        if (!visited.add(folder.id)) continue;
+        ordered.add(folder);
+        addChildren(folder.id);
+      }
+    }
+
+    addChildren(null);
+    for (final folder in folders) {
+      if (visited.add(folder.id)) ordered.add(folder);
+    }
+    return ordered;
+  }
+
+  int folderDepth(String folderId) {
+    var depth = 0;
+    var current = folderById(folderId);
+    final visited = <String>{folderId};
+    while (current?.parentId != null &&
+        visited.add(current!.parentId!) &&
+        depth < 8) {
+      depth += 1;
+      current = folderById(current.parentId);
+    }
+    return depth;
+  }
+
+  String folderPath(String folderId) {
+    final names = <String>[];
+    var current = folderById(folderId);
+    final visited = <String>{};
+    while (current != null && visited.add(current.id)) {
+      names.insert(0, current.name);
+      current = folderById(current.parentId);
+    }
+    return names.join(' / ');
+  }
+
+  Set<String> folderBranch(String folderId) {
+    final ids = <String>{folderId};
+    void addChildren(String parentId) {
+      for (final folder in childFolders(parentId)) {
+        if (ids.add(folder.id)) addChildren(folder.id);
+      }
+    }
+
+    addChildren(folderId);
+    return ids;
+  }
+
+  String get activeFolderLabel => switch (libraryFolderView) {
+    libraryFolderAll => 'All films',
+    libraryFolderUnfiled => 'Unfiled',
+    _ =>
+      folderById(libraryFolderView) == null
+          ? 'All films'
+          : folderPath(libraryFolderView),
+  };
+
+  int folderCount(String folderView) => switch (folderView) {
+    libraryFolderAll => generations.length,
+    libraryFolderUnfiled =>
+      generations.where((item) => folderById(item.folderId) == null).length,
+    _ =>
+      generations
+          .where((item) => folderBranch(folderView).contains(item.folderId))
+          .length,
+  };
+
+  List<String> get libraryTags {
+    final names = <String, String>{};
+    for (final item in generations) {
+      for (final tag in item.tags) {
+        names.putIfAbsent(tag.toLowerCase(), () => tag);
+      }
+    }
+    final tags = names.values.toList();
+    tags.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return tags;
+  }
+
+  int tagCount(String tag) => generations
+      .where(
+        (item) =>
+            item.tags.any((value) => value.toLowerCase() == tag.toLowerCase()),
+      )
+      .length;
+
   List<Generation> get filteredGenerations {
     final query = librarySearch.trim().toLowerCase();
+    final selectedBranch =
+        libraryFolderView != libraryFolderAll &&
+            libraryFolderView != libraryFolderUnfiled
+        ? folderBranch(libraryFolderView)
+        : const <String>{};
     return generations.where((item) {
-      if (query.isNotEmpty && !item.prompt.toLowerCase().contains(query)) {
+      final folderName = item.folderId == null
+          ? ''
+          : folderPath(item.folderId!).toLowerCase();
+      if (query.isNotEmpty &&
+          !item.prompt.toLowerCase().contains(query) &&
+          !folderName.contains(query) &&
+          !item.tags.any((tag) => tag.toLowerCase().contains(query))) {
+        return false;
+      }
+      if (libraryFolderView == libraryFolderUnfiled &&
+          folderById(item.folderId) != null) {
+        return false;
+      }
+      if (libraryFolderView != libraryFolderAll &&
+          libraryFolderView != libraryFolderUnfiled &&
+          !selectedBranch.contains(item.folderId)) {
+        return false;
+      }
+      if (libraryTag != null &&
+          !item.tags.any(
+            (tag) => tag.toLowerCase() == libraryTag!.toLowerCase(),
+          )) {
         return false;
       }
       return switch (libraryFilter) {
@@ -316,6 +459,11 @@ class AppController extends ChangeNotifier {
         ? preferredProvider.id
         : available.firstOrNull?.id ?? 'bfl';
     selectedModelId = modelById(selectedProviderId, value.preferences.model).id;
+    if (libraryFolderView != libraryFolderAll &&
+        libraryFolderView != libraryFolderUnfiled &&
+        !value.folders.any((folder) => folder.id == libraryFolderView)) {
+      libraryFolderView = libraryFolderAll;
+    }
     loadError = null;
     notifyListeners();
   }
@@ -359,6 +507,106 @@ class AppController extends ChangeNotifier {
   void setSearch(String value) {
     librarySearch = value;
     notifyListeners();
+  }
+
+  void setLibraryFolderView(String value) {
+    libraryFolderView = value;
+    notifyListeners();
+  }
+
+  void setLibraryTag(String? value) {
+    libraryTag = value;
+    notifyListeners();
+  }
+
+  List<String> cleanLibraryTags(Iterable<String> input) {
+    final tags = <String>[];
+    final seen = <String>{};
+    for (final value in input) {
+      final clean = value.trim().replaceFirst(RegExp(r'^#+'), '').trim();
+      final key = clean.toLowerCase();
+      if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
+      seen.add(key);
+      tags.add(clean);
+      if (tags.length == 12) break;
+    }
+    return tags;
+  }
+
+  Future<bool> saveLibraryFolder(
+    String name, {
+    LibraryFolder? existing,
+    String? parentId,
+  }) async {
+    final clean = name.trim();
+    if (clean.isEmpty || clean.length > 48) {
+      showNotice('Folder names must be between 1 and 48 characters.');
+      return false;
+    }
+    if (gateway is! LibraryOrganizationGateway) {
+      showNotice('Folder organization is unavailable on this build.');
+      return false;
+    }
+    final organization = gateway as LibraryOrganizationGateway;
+    final now = DateTime.now().toUtc();
+    final folder = LibraryFolder(
+      id:
+          existing?.id ??
+          'folder-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
+      name: clean,
+      createdAt: existing?.createdAt ?? now,
+      parentId: parentId,
+    );
+    try {
+      _apply(await organization.saveLibraryFolder(folder));
+      showNotice(existing == null ? 'Folder created.' : 'Folder updated.');
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
+  }
+
+  Future<bool> deleteLibraryFolder(String folderId) async {
+    if (gateway is! LibraryOrganizationGateway) return false;
+    final organization = gateway as LibraryOrganizationGateway;
+    try {
+      _apply(await organization.deleteLibraryFolder(folderId));
+      if (libraryFolderView == folderId) {
+        libraryFolderView = libraryFolderAll;
+      }
+      showNotice('Folder removed. Its films are unfiled and subfolders kept.');
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
+  }
+
+  Future<bool> organizeGeneration(
+    String localId, {
+    String? folderId,
+    required Iterable<String> tags,
+  }) async {
+    if (gateway is! LibraryOrganizationGateway) {
+      showNotice('Library organization is unavailable on this build.');
+      return false;
+    }
+    final organization = gateway as LibraryOrganizationGateway;
+    try {
+      _apply(
+        await organization.setGenerationOrganization(
+          localId,
+          folderId: folderId,
+          tags: cleanLibraryTags(tags),
+        ),
+      );
+      showNotice('Library organization saved.');
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
   }
 
   void updateForm(void Function(GenerationFormState value) update) {
@@ -762,6 +1010,7 @@ class AppController extends ChangeNotifier {
         hasApiKey: current.hasApiKey,
         connectedProviders: current.connectedProviders,
         availableProviders: current.availableProviders,
+        folders: current.folders,
         storage: current.storage,
       );
     }
@@ -811,6 +1060,7 @@ class AppController extends ChangeNotifier {
       hasApiKey: current.hasApiKey,
       connectedProviders: current.connectedProviders,
       availableProviders: current.availableProviders,
+      folders: current.folders,
       storage: current.storage,
     );
     notifyListeners();

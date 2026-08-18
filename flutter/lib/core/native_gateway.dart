@@ -35,6 +35,20 @@ const _configuredIosReviewAtlasApiKeyId = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_ID',
 );
 
+List<String> _cleanLibraryTags(Iterable<String> input) {
+  final tags = <String>[];
+  final seen = <String>{};
+  for (final value in input) {
+    final clean = value.trim().replaceFirst(RegExp(r'^#+'), '').trim();
+    final key = clean.toLowerCase();
+    if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
+    seen.add(key);
+    tags.add(clean);
+    if (tags.length == 12) break;
+  }
+  return tags;
+}
+
 enum _ApiKeySource { saved, iosReview }
 
 class _ActiveApiKey {
@@ -44,7 +58,8 @@ class _ActiveApiKey {
   final _ApiKeySource source;
 }
 
-class NativeGateway implements AppGateway, ProviderGateway {
+class NativeGateway
+    implements AppGateway, ProviderGateway, LibraryOrganizationGateway {
   NativeGateway({
     LocalDataStore? store,
     BflApi? api,
@@ -172,6 +187,7 @@ class NativeGateway implements AppGateway, ProviderGateway {
     if (appleLocalAvailable) connected.add('apple-local');
     return LocalSnapshot(
       generations: data.generations,
+      folders: data.folders,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
@@ -286,6 +302,114 @@ class NativeGateway implements AppGateway, ProviderGateway {
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
     final next = (await _store.read()).copyWith(preferences: preferences);
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder) async {
+    final name = folder.name.trim();
+    if (folder.id.trim().isEmpty || name.isEmpty || name.length > 48) {
+      throw StateError('Folder names must be between 1 and 48 characters.');
+    }
+    final current = await _store.read();
+    final parentId = folder.parentId?.trim().isEmpty == true
+        ? null
+        : folder.parentId;
+    if (parentId != null &&
+        !current.folders.any((item) => item.id == parentId)) {
+      throw StateError('The parent folder no longer exists.');
+    }
+    var ancestorId = parentId;
+    while (ancestorId != null) {
+      if (ancestorId == folder.id) {
+        throw StateError('A folder cannot live inside itself.');
+      }
+      ancestorId = current.folders
+          .where((item) => item.id == ancestorId)
+          .firstOrNull
+          ?.parentId;
+    }
+    if (current.folders.any(
+      (item) =>
+          item.id != folder.id &&
+          item.parentId == parentId &&
+          item.name.toLowerCase() == name.toLowerCase(),
+    )) {
+      throw StateError('A folder named “$name” already exists here.');
+    }
+    final folders = List<LibraryFolder>.from(current.folders);
+    final index = folders.indexWhere((item) => item.id == folder.id);
+    final clean = LibraryFolder(
+      id: folder.id,
+      name: name,
+      createdAt: folder.createdAt,
+      parentId: parentId,
+    );
+    if (index < 0) {
+      folders.add(clean);
+    } else {
+      folders[index] = clean;
+    }
+    final next = current.copyWith(folders: folders);
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> deleteLibraryFolder(String folderId) async {
+    final current = await _store.read();
+    final removed = current.folders
+        .where((folder) => folder.id == folderId)
+        .firstOrNull;
+    final next = current.copyWith(
+      folders: current.folders
+          .where((folder) => folder.id != folderId)
+          .map(
+            (folder) => folder.parentId == folderId
+                ? folder.copyWith(
+                    parentId: removed?.parentId,
+                    clearParent: removed?.parentId == null,
+                  )
+                : folder,
+          )
+          .toList(),
+      generations: current.generations
+          .map(
+            (item) => item.folderId == folderId
+                ? item.copyWith(clearFolder: true)
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> setGenerationOrganization(
+    String localId, {
+    String? folderId,
+    required List<String> tags,
+  }) async {
+    final current = await _store.read();
+    if (folderId != null &&
+        !current.folders.any((folder) => folder.id == folderId)) {
+      throw StateError('That folder no longer exists.');
+    }
+    final cleanTags = _cleanLibraryTags(tags);
+    var found = false;
+    final generations = current.generations.map((item) {
+      if (item.localId != localId) return item;
+      found = true;
+      return item.copyWith(
+        folderId: folderId,
+        clearFolder: folderId == null,
+        tags: cleanTags,
+      );
+    }).toList();
+    if (!found) throw StateError('That generation no longer exists.');
+    final next = current.copyWith(generations: generations);
     await _store.write(next);
     return _snapshot(next);
   }
