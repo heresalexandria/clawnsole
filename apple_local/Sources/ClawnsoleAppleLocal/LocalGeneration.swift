@@ -6,6 +6,10 @@ import UniformTypeIdentifiers
   import AppKit
 #endif
 
+#if canImport(UIKit)
+  import UIKit
+#endif
+
 #if canImport(ImagePlayground)
   import ImagePlayground
 #endif
@@ -124,6 +128,22 @@ public enum LocalGenerationError: LocalizedError {
   case unavailable
   case noImageReturned
   case imageEncodingFailed
+  case imageCreationFailed(
+    frame: Int,
+    frameCount: Int,
+    attempts: Int,
+    retriedWithoutReference: Bool,
+    reason: String
+  )
+
+  public var failureProgress: Double? {
+    switch self {
+    case .imageCreationFailed(let frame, let frameCount, _, _, _):
+      guard frameCount > 0 else { return 5 }
+      return 5 + (Double(frame - 1) / Double(frameCount)) * 88
+    default: return nil
+    }
+  }
 
   public var errorDescription: String? {
     switch self {
@@ -132,19 +152,37 @@ public enum LocalGenerationError: LocalizedError {
       "Apple Intelligence image creation is not available on this device."
     case .noImageReturned: "Apple Intelligence did not return an image."
     case .imageEncodingFailed: "A generated image could not be encoded."
+    case .imageCreationFailed(
+      let frame,
+      let frameCount,
+      let attempts,
+      let retriedWithoutReference,
+      let reason
+    ):
+      "Apple Image Playground could not create frame \(frame) of \(frameCount) after \(attempts) attempts. \(retriedWithoutReference ? "Clawnsole also retried without the reference frame. " : "")\(reason)"
     }
+  }
+}
+
+public struct FrameGenerationAttempt: Equatable, Sendable {
+  public let prompt: String
+  public let includeReference: Bool
+  public let useFallbackStyle: Bool
+
+  public init(prompt: String, includeReference: Bool, useFallbackStyle: Bool = false) {
+    self.prompt = prompt
+    self.includeReference = includeReference
+    self.useFallbackStyle = useFallbackStyle
   }
 }
 
 public enum AnimationPromptPlan {
   public static func fallbackLock(for prompt: String) -> String {
-    let direction = String(prompt.prefix(420))
+    let direction = String(prompt.prefix(170))
     return String(
       """
-      Cohesive hand-drawn cartoon: \(direction)
-
-      CONTINUITY LOCK: Keep identical characters, faces, proportions, wardrobe, props, palette, line weight, shading, lighting, camera, composition, set geography, scale, and time of day. Advance only the requested action through small plausible poses. No text, logos, cuts, camera jumps, new objects, duplicate limbs, or identity changes.
-      """.prefix(600)
+      Hand-drawn cartoon: \(direction) Keep characters, faces, proportions, wardrobe, props, palette, linework, lighting, camera, and setting identical. Advance only the action in small poses. No text, cuts, extra limbs, or identity changes.
+      """.prefix(320)
     )
   }
 
@@ -156,11 +194,65 @@ public enum AnimationPromptPlan {
   ) -> String {
     let progress = frameCount <= 1 ? 0 : Double(frameIndex) / Double(frameCount - 1)
     let time = Double(frameIndex) / Double(frameRate)
-    return """
+    return String(
+      """
       \(lockedPrompt)
 
-      FRAME INSTRUCTION: Draw frame \(frameIndex + 1) of \(frameCount) at \(String(format: "%.3f", time)) seconds, \(String(format: "%.1f", progress * 100))% through the action. Advance one smooth increment. Preserve every continuity-locked detail. Return one finished frame, not a storyboard.
-      """
+      Frame \(frameIndex + 1)/\(frameCount), \(String(format: "%.2f", time))s, \(String(format: "%.0f", progress * 100))% through the action. Advance one smooth pose. Preserve every locked detail. One finished image, not a storyboard.
+      """.prefix(480)
+    )
+  }
+
+  public static func compactFramePrompt(
+    lockedPrompt: String,
+    frameIndex: Int,
+    frameCount: Int
+  ) -> String {
+    let progress = frameCount <= 1 ? 0 : Double(frameIndex) / Double(frameCount - 1)
+    return String(
+      "Cartoon frame \(frameIndex + 1)/\(frameCount), \(String(format: "%.0f", progress * 100))% through the action. \(lockedPrompt) Same design and camera; advance one small pose. One image only."
+        .prefix(300)
+    )
+  }
+
+  public static func attempts(
+    lockedPrompt: String,
+    frameIndex: Int,
+    frameCount: Int,
+    frameRate: Int,
+    hasReference: Bool
+  ) -> [FrameGenerationAttempt] {
+    let detailed = framePrompt(
+      lockedPrompt: lockedPrompt,
+      frameIndex: frameIndex,
+      frameCount: frameCount,
+      frameRate: frameRate
+    )
+    let compact = compactFramePrompt(
+      lockedPrompt: lockedPrompt,
+      frameIndex: frameIndex,
+      frameCount: frameCount
+    )
+    if hasReference {
+      return [
+        FrameGenerationAttempt(prompt: detailed, includeReference: true),
+        FrameGenerationAttempt(prompt: compact, includeReference: true),
+        FrameGenerationAttempt(
+          prompt: compact,
+          includeReference: false,
+          useFallbackStyle: true
+        ),
+      ]
+    }
+    return [
+      FrameGenerationAttempt(prompt: detailed, includeReference: false),
+      FrameGenerationAttempt(prompt: compact, includeReference: false),
+      FrameGenerationAttempt(
+        prompt: compact,
+        includeReference: false,
+        useFallbackStyle: true
+      ),
+    ]
   }
 }
 
@@ -187,6 +279,23 @@ public struct LocalGenerationEngine: Sendable {
     progress: @escaping @Sendable (LocalGenerationProgress) -> Void
   ) async throws -> URL {
     try request.validate()
+    #if canImport(UIKit)
+      guard await waitForForegroundApplication() else {
+        throw LocalGenerationError.invalidRequest(
+          "Apple Intelligence image creation requires Clawnsole to be open in the foreground."
+        )
+      }
+      let previousIdleTimerSetting = await MainActor.run {
+        let previous = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        return previous
+      }
+      defer {
+        Task { @MainActor in
+          UIApplication.shared.isIdleTimerDisabled = previousIdleTimerSetting
+        }
+      }
+    #endif
     #if canImport(AppKit)
       let activationWindow = await MainActor.run {
         let application = NSApplication.shared
@@ -271,15 +380,6 @@ public struct LocalGenerationEngine: Sendable {
     var previousImagePath = request.referenceImagePath
     for frameIndex in 0..<request.frameCount {
       try Task.checkCancellation()
-      let prompt =
-        request.mode == .image
-        ? lockedPrompt
-        : AnimationPromptPlan.framePrompt(
-          lockedPrompt: lockedPrompt,
-          frameIndex: frameIndex,
-          frameCount: request.frameCount,
-          frameRate: request.frameRate
-        )
       progress(
         .init(
           status: "Pending",
@@ -288,19 +388,25 @@ public struct LocalGenerationEngine: Sendable {
         )
       )
       #if canImport(ImagePlayground)
-        var concepts = [ImagePlaygroundConcept.text(prompt)]
-        if let previousImagePath,
-          let reference = imageConcept(at: URL(fileURLWithPath: previousImagePath))
-        {
-          concepts.append(reference)
+        let generatedImage: CGImage
+        if request.mode == .image {
+          generatedImage = try await createImage(
+            creator: creator,
+            concepts: [.text(lockedPrompt)],
+            style: style
+          )
+        } else {
+          generatedImage = try await createAnimationFrame(
+            creator: creator,
+            lockedPrompt: lockedPrompt,
+            frameIndex: frameIndex,
+            frameCount: request.frameCount,
+            frameRate: request.frameRate,
+            referencePath: previousImagePath,
+            style: style,
+            progress: progress
+          )
         }
-        var generatedImage: CGImage?
-        let images = creator.images(for: concepts, style: style, limit: 1)
-        for try await result in images {
-          generatedImage = result.cgImage
-          break
-        }
-        guard let generatedImage else { throw LocalGenerationError.noImageReturned }
         let image = try fittedImage(
           generatedImage,
           width: dimensions.width,
@@ -362,15 +468,151 @@ public struct LocalGenerationEngine: Sendable {
   }
 
   #if canImport(ImagePlayground)
-    @available(iOS 18.1, macOS 15.1, *)
-    private func imageConcept(at url: URL) -> ImagePlaygroundConcept? {
-      guard
-        let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-        let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-      else {
-        return nil
+    #if canImport(UIKit)
+      private func waitForForegroundApplication() async -> Bool {
+        for _ in 0..<40 {
+          if await MainActor.run(body: { UIApplication.shared.applicationState == .active }) {
+            return true
+          }
+          try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return false
       }
-      return .image(image)
+    #endif
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func imageConcept(at url: URL) -> ImagePlaygroundConcept? {
+      ImagePlaygroundConcept.image(url)
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func createImage(
+      creator: ImageCreator,
+      concepts: [ImagePlaygroundConcept],
+      style: ImagePlaygroundStyle
+    ) async throws -> CGImage {
+      var generatedImage: CGImage?
+      if #available(iOS 26.4, macOS 26.4, *) {
+        var options = ImagePlaygroundOptions()
+        options.creationVariety = .low
+        options.personalization = .disabled
+        let images = creator.images(
+          for: concepts,
+          style: style,
+          options: options,
+          limit: 1
+        )
+        for try await result in images {
+          generatedImage = result.cgImage
+          break
+        }
+      } else {
+        let images = creator.images(for: concepts, style: style, limit: 1)
+        for try await result in images {
+          generatedImage = result.cgImage
+          break
+        }
+      }
+      guard let generatedImage else { throw LocalGenerationError.noImageReturned }
+      return generatedImage
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func createAnimationFrame(
+      creator: ImageCreator,
+      lockedPrompt: String,
+      frameIndex: Int,
+      frameCount: Int,
+      frameRate: Int,
+      referencePath: String?,
+      style: ImagePlaygroundStyle,
+      progress: @escaping @Sendable (LocalGenerationProgress) -> Void
+    ) async throws -> CGImage {
+      let reference = referencePath.flatMap {
+        imageConcept(at: URL(fileURLWithPath: $0))
+      }
+      let attempts = AnimationPromptPlan.attempts(
+        lockedPrompt: lockedPrompt,
+        frameIndex: frameIndex,
+        frameCount: frameCount,
+        frameRate: frameRate,
+        hasReference: reference != nil
+      )
+      var lastReason = "Apple reported an unspecified image-creation failure."
+      var retriedWithoutReference = false
+      var completedAttempts = 0
+      for (attemptIndex, attempt) in attempts.enumerated() {
+        try Task.checkCancellation()
+        if attemptIndex > 0 {
+          retriedWithoutReference =
+            retriedWithoutReference || (reference != nil && !attempt.includeReference)
+          progress(
+            .init(
+              status: "Pending",
+              progress: 5 + (Double(frameIndex) / Double(frameCount)) * 88,
+              message:
+                "Retrying frame \(frameIndex + 1) of \(frameCount) (attempt \(attemptIndex + 1) of \(attempts.count))"
+            )
+          )
+          try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        var concepts = [ImagePlaygroundConcept.text(attempt.prompt)]
+        if attempt.includeReference, let reference {
+          concepts.append(reference)
+        }
+        do {
+          let attemptCreator = attemptIndex == 0 ? creator : try await ImageCreator()
+          completedAttempts += 1
+          return try await createImage(
+            creator: attemptCreator,
+            concepts: concepts,
+            style: attempt.useFallbackStyle ? .illustration : style
+          )
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          lastReason = imageCreationReason(error)
+          if let creatorError = error as? ImageCreator.Error,
+            case .backgroundCreationForbidden = creatorError
+          {
+            break
+          }
+        }
+      }
+      throw LocalGenerationError.imageCreationFailed(
+        frame: frameIndex + 1,
+        frameCount: frameCount,
+        attempts: completedAttempts,
+        retriedWithoutReference: retriedWithoutReference,
+        reason: lastReason
+      )
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func imageCreationReason(_ error: Swift.Error) -> String {
+      guard let creatorError = error as? ImageCreator.Error else {
+        return error.localizedDescription
+      }
+      switch creatorError {
+      case .notSupported: return "Image Playground is not supported on this device."
+      case .unavailable: return "Image Playground is temporarily unavailable."
+      case .creationCancelled: return "Apple cancelled image creation."
+      case .faceInImageTooSmall:
+        return "The face in the reference image is too small for Image Playground."
+      case .unsupportedLanguage:
+        return "Image Playground does not support the prompt language."
+      case .unsupportedInputImage:
+        return "Image Playground rejected the reference image."
+      case .backgroundCreationForbidden:
+        return "Keep Clawnsole open in the foreground while frames are generated."
+      case .creationFailed:
+        return
+          "Apple still reported an image-creation failure after the recovery attempts. "
+          + "Try a shorter prompt or fewer frames."
+      case .conceptsRequirePersonIdentity:
+        return "The prompt requires a person identity that Image Playground could not resolve."
+      @unknown default: return error.localizedDescription
+      }
     }
   #endif
 
@@ -440,7 +682,7 @@ public struct LocalGenerationEngine: Sendable {
             let session = LanguageModelSession(
               model: model,
               instructions: """
-                You are a production animation art director. Expand short requests into one dense visual continuity specification for an image model. Lock character model sheets, wardrobe, palette, line style, materials, set geography, lighting, camera, composition, and a gradual action arc. Never introduce facts that conflict with the request. Stay under 60 words and output only the reusable image prompt.
+                You are a production animation art director. Turn requests into a compact visual continuity specification. Lock characters, wardrobe, palette, line style, setting, lighting, camera, and gradual action. Never conflict with the request. Stay under 36 words and output only the reusable image prompt.
                 """
             )
             let response = try await session.respond(
@@ -448,7 +690,7 @@ public struct LocalGenerationEngine: Sendable {
                 "Expand and continuity-lock this request for \(request.frameCount) frame(s): \(request.prompt)"
             )
             let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !content.isEmpty { return String(content.prefix(600)) }
+            if !content.isEmpty { return String(content.prefix(320)) }
           } catch {
             // The deterministic lock remains usable when Apple Intelligence is busy.
           }

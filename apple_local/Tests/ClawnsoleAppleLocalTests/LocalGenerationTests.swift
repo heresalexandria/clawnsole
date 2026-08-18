@@ -31,10 +31,10 @@ final class LocalGenerationTests: XCTestCase {
       frameCount: 5,
       frameRate: 2
     )
-    XCTAssertTrue(prompt.contains("frame 3 of 5"))
-    XCTAssertTrue(prompt.contains("1.000 seconds"))
-    XCTAssertTrue(prompt.contains("50.0%"))
-    XCTAssertTrue(prompt.contains("Preserve every continuity-locked"))
+    XCTAssertTrue(prompt.contains("Frame 3/5"))
+    XCTAssertTrue(prompt.contains("1.00s"))
+    XCTAssertTrue(prompt.contains("50%"))
+    XCTAssertTrue(prompt.contains("Preserve every locked detail"))
   }
 
   func testFallbackPromptFitsImagePlaygroundConceptBudget() {
@@ -47,8 +47,52 @@ final class LocalGenerationTests: XCTestCase {
       frameCount: 2,
       frameRate: 2
     )
-    XCTAssertLessThanOrEqual(locked.count, 600)
-    XCTAssertLessThanOrEqual(frame.count, 900)
+    XCTAssertLessThanOrEqual(locked.count, 320)
+    XCTAssertLessThanOrEqual(frame.count, 480)
+  }
+
+  func testAnimationAttemptsDropRejectedReferenceBeforeFailing() {
+    let attempts = AnimationPromptPlan.attempts(
+      lockedPrompt: "Locked fox design.",
+      frameIndex: 1,
+      frameCount: 6,
+      frameRate: 6,
+      hasReference: true
+    )
+
+    XCTAssertEqual(attempts.count, 3)
+    XCTAssertEqual(attempts.map(\.includeReference), [true, true, false])
+    XCTAssertEqual(attempts.map(\.useFallbackStyle), [false, false, true])
+    XCTAssertLessThanOrEqual(attempts[0].prompt.count, 480)
+    XCTAssertLessThanOrEqual(attempts[1].prompt.count, 300)
+  }
+
+  func testAnimationAttemptsRetryFirstFrameWithoutReference() {
+    let attempts = AnimationPromptPlan.attempts(
+      lockedPrompt: "Locked fox design.",
+      frameIndex: 0,
+      frameCount: 6,
+      frameRate: 6,
+      hasReference: false
+    )
+
+    XCTAssertEqual(attempts.count, 3)
+    XCTAssertTrue(attempts.allSatisfy { !$0.includeReference })
+    XCTAssertEqual(attempts.map(\.useFallbackStyle), [false, false, true])
+  }
+
+  func testAnimationFailureNamesFrameAndRecovery() {
+    let error = LocalGenerationError.imageCreationFailed(
+      frame: 2,
+      frameCount: 6,
+      attempts: 3,
+      retriedWithoutReference: true,
+      reason: "Apple still reported an image-creation failure."
+    )
+
+    XCTAssertEqual(error.failureProgress, 5 + (1.0 / 6.0) * 88)
+    XCTAssertTrue(error.localizedDescription.contains("frame 2 of 6"))
+    XCTAssertTrue(error.localizedDescription.contains("without the reference frame"))
   }
 
   private func makeRequest(
