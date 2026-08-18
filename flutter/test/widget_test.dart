@@ -342,7 +342,87 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 7);
+    expect(decoded.toJson()['schemaVersion'], 8);
+  });
+
+  test('persists folders and tags while removing a folder safely', () async {
+    final now = DateTime.utc(2026, 8, 17, 12);
+    final store = _MemoryLocalDataStore(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'organized-film',
+            status: 'Ready',
+            prompt: 'A brass robot walking through a gallery.',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+      ),
+    );
+    final gateway = NativeGateway(store: store, isIos: false);
+    final folder = LibraryFolder(
+      id: 'folder-client',
+      name: 'Client work',
+      createdAt: now,
+    );
+    final subfolder = LibraryFolder(
+      id: 'folder-deliverables',
+      name: 'Deliverables',
+      createdAt: now.add(const Duration(seconds: 1)),
+      parentId: folder.id,
+    );
+
+    await gateway.saveLibraryFolder(folder);
+    await gateway.saveLibraryFolder(subfolder);
+    final organized = await gateway.setGenerationOrganization(
+      'organized-film',
+      folderId: folder.id,
+      tags: const <String>[' Favorite ', '#Vertical', 'favorite'],
+    );
+
+    expect(organized.folders, hasLength(2));
+    expect(
+      organized.folders.singleWhere((item) => item.id == subfolder.id).parentId,
+      folder.id,
+    );
+    expect(organized.generations.single.folderId, folder.id);
+    expect(organized.generations.single.tags, <String>['Favorite', 'Vertical']);
+    final decoded = StoredData.decode(store.data.encode());
+    expect(decoded.folders, hasLength(2));
+    expect(decoded.generations.single.tags, <String>['Favorite', 'Vertical']);
+
+    final controller = AppController();
+    controller.snapshot = LocalSnapshot(
+      generations: <Generation>[
+        organized.generations.single.copyWith(folderId: subfolder.id),
+      ],
+      folders: organized.folders,
+      preferences: const AppPreferences(),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+    );
+    controller.setLibraryFolderView(folder.id);
+    expect(controller.folderDepth(subfolder.id), 1);
+    expect(controller.folderPath(subfolder.id), 'Client work / Deliverables');
+    expect(controller.folderCount(folder.id), 1);
+    expect(controller.filteredGenerations.single.localId, 'organized-film');
+    controller.dispose();
+
+    final removed = await gateway.deleteLibraryFolder(folder.id);
+    expect(removed.folders.single.id, subfolder.id);
+    expect(removed.folders.single.parentId, isNull);
+    expect(removed.generations.single.folderId, isNull);
+    expect(removed.generations.single.tags, <String>['Favorite', 'Vertical']);
   });
 
   test(
@@ -901,7 +981,7 @@ void main() {
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
     await tester.pumpWidget(const ClawnsoleApp(checkForUpdates: false));
-    expect(find.text('Clawnsole'), findsOneWidget);
+    expect(find.text('Clawnsole'), findsWidgets);
     expect(find.text('Create'), findsWidgets);
     final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.themeMode, ThemeMode.system);

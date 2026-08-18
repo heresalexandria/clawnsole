@@ -42,4 +42,14 @@ abstract interface class ProviderGateway {
   Future<List<ProviderModelPrice>> listProviderModels(String provider);
 }
 
+abstract interface class LibraryOrganizationGateway {
+  Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder);
+  Future<LocalSnapshot> deleteLibraryFolder(String folderId);
+  Future<LocalSnapshot> setGenerationOrganization(
+    String localId, {
+    String? folderId,
+    required List<String> tags,
+  });
+}
+
 AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();

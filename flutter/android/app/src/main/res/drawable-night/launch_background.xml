@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
-        <color android:color="#F1EBDE" />
+        <color android:color="#15100C" />
     </item>
     <item android:width="112dp" android:height="112dp" android:gravity="center">
         <bitmap
