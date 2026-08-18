@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -308,21 +307,35 @@ class GenerationSpecChips extends StatelessWidget {
       runSpacing: 6,
       children: <Widget>[
         _SpecChip(label: providerById(item.provider).shortName),
-        _SpecChip(label: item.mode.label),
+        _SpecChip(
+          label: item.isImage
+              ? (item.mode == VideoMode.i2v
+                    ? 'Reference to image'
+                    : 'Text to image')
+              : item.provider == 'apple-local'
+              ? 'Frame animation'
+              : item.mode.label,
+        ),
         _SpecChip(
           label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
           leading: _MiniRatioGlyph(ratio: config.aspectRatio),
         ),
-        _SpecChip(
-          icon: Icons.timelapse_rounded,
-          label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
-        ),
+        if (!item.isImage)
+          _SpecChip(
+            icon: Icons.timelapse_rounded,
+            label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
+          ),
+        if (item.provider == 'apple-local' && !item.isImage)
+          _SpecChip(
+            icon: Icons.animation_rounded,
+            label: '${config.frameRate} fps',
+          ),
         _SpecChip(
           label: switch (config.resolution) {
-            'fhd' => 'Full HD',
+            'fhd' => item.provider == 'apple-local' ? '768 px' : 'Full HD',
             'qhd' => '1440p',
             '4k' => '4K',
-            _ => 'HD',
+            _ => item.provider == 'apple-local' ? '512 px' : 'HD',
           },
         ),
         if (config.generateAudio)
@@ -1067,11 +1080,23 @@ class GenerationMedia extends StatefulWidget {
 
 class _GenerationMediaState extends State<GenerationMedia> {
   late Future<Uri?> _uri;
+  Future<Uint8List>? _imageBytes;
+
+  void _load() {
+    _uri = widget.controller.generationMediaUri(widget.item);
+    _imageBytes = widget.item.isImage
+        ? widget.item.resultAsset != null
+              ? widget.controller.gateway.readAsset(widget.item.resultAsset!)
+              : widget.item.resultUrl != null
+              ? widget.controller.gateway.downloadMedia(widget.item.resultUrl!)
+              : null
+        : null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _uri = widget.controller.generationMediaUri(widget.item);
+    _load();
   }
 
   @override
@@ -1079,44 +1104,73 @@ class _GenerationMediaState extends State<GenerationMedia> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.resultUrl != widget.item.resultUrl ||
         oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value) {
-      _uri = widget.controller.generationMediaUri(widget.item);
+      _load();
     }
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<Uri?>(
-    future: _uri,
-    builder: (context, snapshot) {
-      if (snapshot.hasError ||
-          (snapshot.connectionState == ConnectionState.done &&
-              snapshot.data == null)) {
+  Widget build(BuildContext context) {
+    if (widget.item.isImage) {
+      final bytes = _imageBytes;
+      if (bytes == null) {
         return const _MediaPlaceholder(
-          icon: Icons.link_off_rounded,
-          label: 'Video unavailable',
+          icon: Icons.broken_image_outlined,
+          label: 'Image unavailable',
         );
       }
-      if (!snapshot.hasData) {
-        return const _MediaPlaceholder(
-          icon: Icons.hourglass_bottom_rounded,
-          label: 'Loading film',
-        );
-      }
-      return GenerationVideo(
-        uri: snapshot.data!,
-        supportsPhotos: widget.controller.supportsPhotoLibrarySave,
-        onDownload: (destination) async {
-          try {
-            await widget.controller.saveVideo(
-              widget.item,
-              destination: destination,
+      return FutureBuilder<Uint8List>(
+        future: bytes,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const _MediaPlaceholder(
+              icon: Icons.broken_image_outlined,
+              label: 'Image unavailable',
             );
-          } on Object catch (error) {
-            widget.controller.showNotice(error.toString());
           }
+          if (!snapshot.hasData) {
+            return const _MediaPlaceholder(
+              icon: Icons.hourglass_bottom_rounded,
+              label: 'Loading image',
+            );
+          }
+          return Image.memory(snapshot.data!, fit: BoxFit.contain);
         },
       );
-    },
-  );
+    }
+    return FutureBuilder<Uri?>(
+      future: _uri,
+      builder: (context, snapshot) {
+        if (snapshot.hasError ||
+            (snapshot.connectionState == ConnectionState.done &&
+                snapshot.data == null)) {
+          return const _MediaPlaceholder(
+            icon: Icons.link_off_rounded,
+            label: 'Video unavailable',
+          );
+        }
+        if (!snapshot.hasData) {
+          return const _MediaPlaceholder(
+            icon: Icons.hourglass_bottom_rounded,
+            label: 'Loading film',
+          );
+        }
+        return GenerationVideo(
+          uri: snapshot.data!,
+          supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+          onDownload: (destination) async {
+            try {
+              await widget.controller.saveMedia(
+                widget.item,
+                destination: destination,
+              );
+            } on Object catch (error) {
+              widget.controller.showNotice(error.toString());
+            }
+          },
+        );
+      },
+    );
+  }
 }
 
 class GenerationInputPreview extends StatefulWidget {
@@ -1231,6 +1285,7 @@ class GenerationCost extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (item.billingUnit == 'local') return const SizedBox.shrink();
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();

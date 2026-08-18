@@ -30,4 +30,5 @@ fi
 
 cd "$FLUTTER_DIRECTORY"
 flutter build web --debug --dart-define "CLAWNSOLE_PROXY_URL="
+"$REPOSITORY_ROOT/apple_local/scripts/build_macos"
 exec node "$ELECTRON_DIRECTORY/scripts/start.mjs" "$@"

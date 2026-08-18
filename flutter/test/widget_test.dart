@@ -5,6 +5,7 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/apple_local_runtime.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/local_data_store.dart';
@@ -342,7 +343,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 8);
+    expect(decoded.toJson()['schemaVersion'], 9);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -527,6 +528,26 @@ void main() {
 
     expect((await gateway.load()).hasApiKey, isFalse);
   });
+
+  test(
+    'uses Apple Local as the keyless default on a fresh iOS device',
+    () async {
+      final store = _MemoryLocalDataStore();
+      final gateway = NativeGateway(
+        store: store,
+        appleLocalRuntime: _MemoryAppleLocalRuntime(),
+        isIos: true,
+      );
+
+      final snapshot = await gateway.load();
+
+      expect(snapshot.preferences.provider, 'apple-local');
+      expect(snapshot.preferences.model, 'apple-local-image');
+      expect(snapshot.hasApiKeyFor('apple-local'), isTrue);
+      expect(snapshot.availableProviders, contains('apple-local'));
+      expect(store.data.apiKey, isEmpty);
+    },
+  );
 
   test(
     'startup validation clears rejected access and requires another key',
@@ -1178,7 +1199,11 @@ class _MemoryGateway implements AppGateway {
       Uint8List.fromList(<int>[1, 2, 3]);
 
   @override
-  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) async {
+  Future<void> saveMediaToPhotoLibrary(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  ) async {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
   }
@@ -1188,12 +1213,19 @@ class _MemoryLocalDataStore extends LocalDataStore {
   _MemoryLocalDataStore([this.data = const StoredData()]);
 
   StoredData data;
+  bool fileExists = false;
+
+  @override
+  Future<bool> exists() async => fileExists;
 
   @override
   Future<StoredData> read() async => data;
 
   @override
-  Future<void> write(StoredData value) async => data = value;
+  Future<void> write(StoredData value) async {
+    data = value;
+    fileExists = true;
+  }
 
   @override
   Future<StorageStats> stats(int records) async => StorageStats(
@@ -1201,6 +1233,21 @@ class _MemoryLocalDataStore extends LocalDataStore {
     bytes: data.encode().length,
     records: records,
   );
+}
+
+class _MemoryAppleLocalRuntime implements AppleLocalRuntime {
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<Map<String, Object?>> poll(String jobId) async => <String, Object?>{
+    'status': 'Pending',
+    'progress': 10,
+  };
+
+  @override
+  Future<Map<String, Object?>> submit(Map<String, Object?> request) async =>
+      <String, Object?>{'jobId': request['requestId'], 'status': 'Pending'};
 }
 
 class _RejectedCreditsApi extends BflApi {

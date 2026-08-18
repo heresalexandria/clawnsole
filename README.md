@@ -17,11 +17,13 @@
   </picture>
 </p>
 
-Clawnsole is a local-first Flutter video generation workspace with a premium,
-midcentury-inspired interface. It supports Black Forest Labs FLUX 3, LTX, and
-Atlas Cloud through one provider-neutral Create and Library workflow.
-The local Library can be shaped into project folders and reusable tags without
-uploading its catalog anywhere.
+Clawnsole is a local-first Flutter image and video generation workspace with a
+premium, midcentury-inspired interface. Apple Local generates still images and
+experimental frame-by-frame cartoons without API keys or companion-device
+pairing on supported iPhone, iPad, and Apple-silicon Mac builds; FLUX 3, LTX,
+and Atlas Cloud remain available through the same provider-neutral Create and
+Library workflow. The local Library can be shaped into project folders and
+reusable tags without uploading its catalog anywhere.
 
 ## iPhone
 
@@ -33,6 +35,11 @@ uploading its catalog anywhere.
 
 ## What it does
 
+- Keyless Apple Local image generation through the system Image Playground model
+- Experimental silent MP4 cartoons generated as `duration × frame rate` Apple
+  images, with the prior frame reused as the next frame's visual reference
+- Apple Foundation Models prompt expansion on iOS/macOS 26+, with a
+  deterministic continuity-lock fallback on earlier supported systems
 - Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation and draft enhancement
 - Up to 30 reference frames, with timing and placement controls where the selected model supports them
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
@@ -99,6 +106,7 @@ inputs and videos in an adjacent `assets/` directory.
 - `flutter/lib/app/`: application state and composition
 - `flutter/lib/ui/`: shared responsive screens and widgets
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
+- `apple_local/`: shared iOS/macOS Apple-system generation runtime
 - `electron/`: macOS shell, packaging, checksum-verified GitHub updater
 - `.github/workflows/`: PR checks and signed macOS releases
 

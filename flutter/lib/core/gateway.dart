@@ -25,7 +25,11 @@ abstract interface class AppGateway {
   Future<Uint8List> readAsset(AssetReference reference);
   Uri mediaUri(String source);
   Future<Uint8List> downloadMedia(String source);
-  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName);
+  Future<void> saveMediaToPhotoLibrary(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  );
 }
 
 /// Provider-aware operations implemented by the production gateways. Keeping

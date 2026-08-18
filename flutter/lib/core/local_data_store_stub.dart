@@ -3,6 +3,10 @@ import 'dart:typed_data';
 import 'models.dart';
 
 class LocalDataStore {
+  Future<bool> exists() => throw UnsupportedError(
+    'Browser builds use the Clawnsole local companion service.',
+  );
+
   Future<StoredData> read() => throw UnsupportedError(
     'Browser builds use the Clawnsole local companion service.',
   );

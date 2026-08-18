@@ -26,6 +26,8 @@ class VideoModelDefinition {
     this.supportsAudio = true,
     this.supportsDraft = false,
     this.supportsTimedKeyframes = false,
+    this.supportsFrameRate = false,
+    this.outputKind = GenerationOutputKind.video,
   });
 
   final String id;
@@ -44,6 +46,8 @@ class VideoModelDefinition {
   final bool supportsAudio;
   final bool supportsDraft;
   final bool supportsTimedKeyframes;
+  final bool supportsFrameRate;
+  final GenerationOutputKind outputKind;
 
   ProviderModelPrice price(String provider) => ProviderModelPrice(
     provider: provider,
@@ -70,6 +74,8 @@ class VideoProviderDefinition {
     required this.pricingUrl,
     required this.models,
     this.pricingSource = 'Published rate card',
+    this.requiresApiKey = true,
+    this.isLocal = false,
   });
 
   final String id;
@@ -81,6 +87,8 @@ class VideoProviderDefinition {
   final String pricingUrl;
   final String pricingSource;
   final List<VideoModelDefinition> models;
+  final bool requiresApiKey;
+  final bool isLocal;
 
   VideoModelDefinition get defaultModel => models.first;
   String get model => defaultModel.id;
@@ -107,6 +115,60 @@ const _wideRatios = <String>[
   '9:16',
 ];
 const _ltxRatios = <String>['16:9', '9:16'];
+const _localRatios = <String>['16:9', '4:3', '1:1', '3:4', '9:16'];
+const _local512 = VideoResolutionDefinition(
+  'hd',
+  'Standard',
+  '512 px long edge',
+);
+const _local768 = VideoResolutionDefinition('fhd', 'Large', '768 px long edge');
+
+const appleLocalProvider = VideoProviderDefinition(
+  id: 'apple-local',
+  name: 'Apple Local',
+  shortName: 'Local',
+  description:
+      'Keyless image creation through Apple Intelligence on this device. The experimental animation mode renders a sequence of generated frames.',
+  consoleUrl: '',
+  docsUrl: 'https://developer.apple.com/documentation/imageplayground',
+  pricingUrl: '',
+  pricingSource: 'Apple system service · no provider charge',
+  requiresApiKey: false,
+  isLocal: true,
+  models: <VideoModelDefinition>[
+    VideoModelDefinition(
+      id: 'apple-local-image',
+      label: 'Local Image',
+      description: 'One still image generated with Apple Image Playground.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _localRatios,
+      resolutions: <VideoResolutionDefinition>[_local512, _local768],
+      minDuration: 1,
+      maxDuration: 1,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: 0,
+      supportsAudio: false,
+      outputKind: GenerationOutputKind.image,
+    ),
+    VideoModelDefinition(
+      id: 'apple-local-animation',
+      label: 'Frame Animation · Experimental',
+      description:
+          'Builds a simple silent MP4 through one Apple-generated cartoon image per frame.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _localRatios,
+      resolutions: <VideoResolutionDefinition>[_local512, _local768],
+      minDuration: 1,
+      maxDuration: 8,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: 0,
+      supportsAudio: false,
+      supportsFrameRate: true,
+    ),
+  ],
+);
 
 const bflProvider = VideoProviderDefinition(
   id: 'bfl',
@@ -311,6 +373,7 @@ const atlasProvider = VideoProviderDefinition(
 );
 
 const videoProviders = <VideoProviderDefinition>[
+  appleLocalProvider,
   bflProvider,
   ltxProvider,
   atlasProvider,
