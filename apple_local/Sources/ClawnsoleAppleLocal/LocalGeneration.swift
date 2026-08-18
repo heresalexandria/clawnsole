@@ -347,6 +347,14 @@ public struct LocalGenerationEngine: Sendable {
           "Apple Intelligence image creation requires Clawnsole to be in the foreground."
         )
       }
+      let foregroundKeeper = Task { @MainActor in
+        while !Task.isCancelled {
+          NSApplication.shared.activate(ignoringOtherApps: true)
+          activationWindow.orderFrontRegardless()
+          try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+      }
+      defer { foregroundKeeper.cancel() }
       defer { Task { @MainActor in activationWindow.orderOut(nil) } }
     #endif
     let outputDirectory = URL(fileURLWithPath: request.outputDirectory, isDirectory: true)
@@ -415,7 +423,7 @@ public struct LocalGenerationEngine: Sendable {
         .init(
           status: "Pending",
           progress: 5,
-          message: "Generating cohesive master artwork"
+          message: "Generating a 24-pose continuity atlas"
         )
       )
       #if canImport(AppKit)
@@ -425,45 +433,127 @@ public struct LocalGenerationEngine: Sendable {
             window.orderFrontRegardless()
           }
         }
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Give AppKit time to commit foreground activation before Image Playground
+        // performs its stricter foreground-only check.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
       #endif
-      let generatedMasterFrame = try await createAnimationMasterFrame(
-        creator: creator,
-        lockedPrompt: lockedPrompt,
-        originalPrompt: request.prompt,
-        frameCount: request.frameCount,
-        referencePath: request.referenceImagePath,
-        style: style,
-        progress: progress
-      )
-      let masterFrame = try fittedImage(
-        generatedMasterFrame,
+      let layout = AnimationSheetLayout.forDimensions(
         width: dimensions.width,
         height: dimensions.height
       )
+      var compositeKeyframes: [CGImage]?
+      let masterFrame: CGImage
+      do {
+        let sheet = try await createAnimationKeyframeSheet(
+          creator: creator,
+          lockedPrompt: lockedPrompt,
+          originalPrompt: request.prompt,
+          frameCount: request.frameCount,
+          layout: layout,
+          referencePath: request.referenceImagePath,
+          style: style,
+          progress: progress
+        )
+        let keyframes = try layout.keyframes(from: sheet).map {
+          try fittedImage(
+            $0,
+            width: dimensions.width,
+            height: dimensions.height
+          )
+        }
+        guard AnimationFrameConsistency.acceptsAtlas(keyframes) else {
+          throw LocalGenerationError.noImageReturned
+        }
+        compositeKeyframes = keyframes
+        masterFrame = keyframes[0]
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        progress(
+          .init(
+            status: "Pending",
+            progress: 25,
+            message: "Atlas unavailable; generating stable fallback artwork"
+          )
+        )
+        let generatedMasterFrame = try await createAnimationMasterFrame(
+          creator: try await ImageCreator(),
+          lockedPrompt: lockedPrompt,
+          originalPrompt: request.prompt,
+          frameCount: request.frameCount,
+          referencePath: request.referenceImagePath,
+          style: style,
+          progress: progress
+        )
+        masterFrame = try fittedImage(
+          generatedMasterFrame,
+          width: dimensions.width,
+          height: dimensions.height
+        )
+      }
     #else
       throw LocalGenerationError.unavailable
     #endif
 
     let motion = AnimationMotionPlan.forPrompt(request.prompt)
     var frameURLs = [URL]()
+    var previousFrame = masterFrame
     for frameIndex in 0..<request.frameCount {
       try Task.checkCancellation()
       progress(
         .init(
           status: "Pending",
-          progress: 45 + (Double(frameIndex) / Double(request.frameCount)) * 48,
-          message: "Animating cohesive frame \(frameIndex + 1) of \(request.frameCount)"
+          progress: 30 + (Double(frameIndex) / Double(request.frameCount)) * 63,
+          message:
+            compositeKeyframes == nil
+            ? "Animating cohesive frame \(frameIndex + 1) of \(request.frameCount)"
+            : "Completing referenced frame \(frameIndex + 1) of \(request.frameCount)"
         )
       )
-      let image = try CohesiveAnimationRenderer.render(
-        masterFrame: masterFrame,
-        frameIndex: frameIndex,
-        frameCount: request.frameCount,
-        width: dimensions.width,
-        height: dimensions.height,
-        motion: motion
-      )
+      let image: CGImage
+      if let compositeKeyframes {
+        let sample = AnimationTimelineSample.at(
+          frameIndex: frameIndex,
+          frameCount: request.frameCount,
+          keyframeCount: compositeKeyframes.count
+        )
+        do {
+          image = try await createCompositeAnimationFrame(
+            originalPrompt: request.prompt,
+            keyframes: compositeKeyframes,
+            sample: sample,
+            previousFrame: previousFrame,
+            style: style,
+            width: dimensions.width,
+            height: dimensions.height
+          )
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          progress(
+            .init(
+              status: "Pending",
+              progress: 30 + (Double(frameIndex) / Double(request.frameCount)) * 63,
+              message:
+                "Frame \(frameIndex + 1) failed continuity validation; using the stable local fallback"
+            )
+          )
+          image =
+            sample.isKeyframe
+            ? compositeKeyframes[sample.beforeIndex]
+            : previousFrame
+        }
+      } else {
+        image = try CohesiveAnimationRenderer.render(
+          masterFrame: masterFrame,
+          frameIndex: frameIndex,
+          frameCount: request.frameCount,
+          width: dimensions.width,
+          height: dimensions.height,
+          motion: motion
+        )
+      }
+      previousFrame = image
       let frameURL = outputDirectory.appendingPathComponent(
         String(format: "frame-%04d.png", frameIndex)
       )
@@ -547,6 +637,174 @@ public struct LocalGenerationEngine: Sendable {
     }
 
     @available(iOS 18.4, macOS 15.4, *)
+    private func createAnimationKeyframeSheet(
+      creator: ImageCreator,
+      lockedPrompt: String,
+      originalPrompt: String,
+      frameCount: Int,
+      layout: AnimationSheetLayout,
+      referencePath: String?,
+      style: ImagePlaygroundStyle,
+      progress: @escaping @Sendable (LocalGenerationProgress) -> Void
+    ) async throws -> CGImage {
+      let reference = referencePath.flatMap {
+        imageConcept(at: URL(fileURLWithPath: $0))
+      }
+      let prompts = [
+        CompositeAnimationPromptPlan.sheetPrompt(
+          lockedPrompt: lockedPrompt,
+          layout: layout
+        ),
+        CompositeAnimationPromptPlan.sheetPrompt(
+          lockedPrompt: AnimationPromptPlan.originalPromptFallback(for: originalPrompt),
+          layout: layout
+        ),
+      ]
+      var lastError: Swift.Error = LocalGenerationError.noImageReturned
+      for (attemptIndex, prompt) in prompts.enumerated() {
+        try Task.checkCancellation()
+        if attemptIndex > 0 {
+          progress(
+            .init(
+              status: "Pending",
+              progress: 15,
+              message: "Retrying the continuity atlas with a compact direction"
+            )
+          )
+          try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        var concepts = [ImagePlaygroundConcept.text(prompt)]
+        if attemptIndex == 0, let reference {
+          concepts.append(reference)
+        }
+        do {
+          return try await createImage(
+            creator: attemptIndex == 0 ? creator : try await ImageCreator(),
+            concepts: concepts,
+            style: style
+          )
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          lastError = error
+        }
+      }
+      throw LocalGenerationError.imageCreationFailed(
+        frame: 1,
+        frameCount: frameCount,
+        attempts: prompts.count,
+        retriedWithoutReference: reference != nil,
+        reason: imageCreationReason(lastError)
+      )
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func createCompositeAnimationFrame(
+      originalPrompt: String,
+      keyframes: [CGImage],
+      sample: AnimationTimelineSample,
+      previousFrame: CGImage,
+      style: ImagePlaygroundStyle,
+      width: Int,
+      height: Int
+    ) async throws -> CGImage {
+      let before = keyframes[sample.beforeIndex]
+      let after = keyframes[sample.afterIndex]
+
+      if sample.isKeyframe {
+        let candidate = try await createImage(
+          creator: try await ImageCreator(),
+          concepts: [
+            .text(
+              CompositeAnimationPromptPlan.keyframePrompt(
+                originalPrompt: AnimationPromptPlan.originalPromptFallback(
+                  for: originalPrompt
+                ),
+                keyframeIndex: sample.beforeIndex
+              )
+            ),
+            .image(before),
+          ],
+          style: style
+        )
+        let fitted = try fittedImage(candidate, width: width, height: height)
+        guard
+          AnimationFrameConsistency.accepts(
+            candidate: fitted,
+            previous: previousFrame,
+            before: before,
+            after: after
+          )
+        else {
+          throw LocalGenerationError.noImageReturned
+        }
+        return fitted
+      }
+
+      let board = try CompositeAnimationRenderer.continuityBoard(
+        before: before,
+        after: after,
+        previous: previousFrame
+      )
+      do {
+        let candidate = try await createImage(
+          creator: try await ImageCreator(),
+          concepts: [
+            .text(
+              CompositeAnimationPromptPlan.targetOnlyPrompt(
+                originalPrompt: AnimationPromptPlan.originalPromptFallback(
+                  for: originalPrompt
+                ),
+                fraction: sample.fraction
+              )
+            ),
+            .image(board),
+          ],
+          style: style
+        )
+        let fitted = try fittedImage(candidate, width: width, height: height)
+        if AnimationFrameConsistency.accepts(
+          candidate: fitted,
+          previous: previousFrame,
+          before: before,
+          after: after
+        ) {
+          return fitted
+        }
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        // Try literal missing-cell completion before using the stable fallback.
+      }
+
+      let completedBoard = try await createImage(
+        creator: try await ImageCreator(),
+        concepts: [
+          .text(
+            CompositeAnimationPromptPlan.completedBoardPrompt(
+              fraction: sample.fraction
+            )
+          ),
+          .image(board),
+        ],
+        style: style
+      )
+      let target = try CompositeAnimationRenderer.targetCell(from: completedBoard)
+      let fitted = try fittedImage(target, width: width, height: height)
+      guard
+        AnimationFrameConsistency.accepts(
+          candidate: fitted,
+          previous: previousFrame,
+          before: before,
+          after: after
+        )
+      else {
+        throw LocalGenerationError.noImageReturned
+      }
+      return fitted
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
     private func createAnimationMasterFrame(
       creator: ImageCreator,
       lockedPrompt: String,
@@ -575,7 +833,7 @@ public struct LocalGenerationEngine: Sendable {
           progress(
             .init(
               status: "Pending",
-              progress: 5 + Double(attemptIndex) * 10,
+              progress: 25 + Double(attemptIndex) * 2,
               message:
                 "Retrying cohesive master artwork (attempt \(attemptIndex + 1) of \(attempts.count))"
             )

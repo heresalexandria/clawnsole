@@ -3,6 +3,23 @@ import Flutter
 import UIKit
 import XCTest
 
+private final class LocalProgressRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var messages = [String]()
+
+  func append(_ message: String) {
+    lock.lock()
+    messages.append(message)
+    lock.unlock()
+  }
+
+  func snapshot() -> [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return messages
+  }
+}
+
 class RunnerTests: XCTestCase {
   func testAppleLocalAnimationOnPhysicalDevice() async throws {
     #if targetEnvironment(simulator)
@@ -32,7 +49,9 @@ class RunnerTests: XCTestCase {
         modelsDirectory: outputDirectory.appendingPathComponent("models").path
       )
 
+      let recorder = LocalProgressRecorder()
       let result = try await LocalGenerationEngine().generate(request) { update in
+        recorder.append(update.message)
         print("Apple Local physical test: \(update.progress)% \(update.message)")
       }
       XCTAssertEqual(result.pathExtension, "mp4")
@@ -40,6 +59,15 @@ class RunnerTests: XCTestCase {
       XCTAssertGreaterThan(
         try FileManager.default.attributesOfItem(atPath: result.path)[.size] as? Int ?? 0,
         0
+      )
+      let messages = recorder.snapshot()
+      XCTAssertTrue(
+        messages.contains { $0.contains("Completing referenced frame") },
+        "The physical test must exercise the composite-reference frame path."
+      )
+      XCTAssertFalse(
+        messages.contains { $0.contains("failed continuity validation") },
+        "Every generated physical-device frame should pass continuity validation."
       )
     #endif
   }
