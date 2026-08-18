@@ -24,29 +24,38 @@ final class LocalGenerationTests: XCTestCase {
     XCTAssertEqual(dimensions.height % 64, 0)
   }
 
-  func testFramePromptCarriesContinuityAndProgress() {
-    let prompt = AnimationPromptPlan.framePrompt(
-      lockedPrompt: "Locked hero model sheet.",
-      frameIndex: 2,
-      frameCount: 5,
-      frameRate: 2
+  func testMasterPromptRequestsOneStableComposition() {
+    let prompt = AnimationPromptPlan.masterFramePrompt(
+      lockedPrompt: "Locked hero model sheet."
     )
-    XCTAssertTrue(prompt.contains("Frame 3/5"))
-    XCTAssertTrue(prompt.contains("1.00s"))
-    XCTAssertTrue(prompt.contains("50%"))
-    XCTAssertTrue(prompt.contains("Preserve every locked detail"))
+    XCTAssertTrue(prompt.contains("one cohesive master frame"))
+    XCTAssertTrue(prompt.contains("center 80%"))
+    XCTAssertTrue(prompt.contains("one stable background"))
+    XCTAssertTrue(prompt.contains("No storyboard"))
+  }
+
+  func testExpandedLockRejectsAStoryboardAndAcceptsOneCompactSentence() {
+    XCTAssertNil(
+      AnimationPromptPlan.validatedExpandedLock(
+        """
+        1. **Sloth on skateboard**
+        2. **Sloth skateboarding in another scene**
+        """
+      )
+    )
+    XCTAssertEqual(
+      AnimationPromptPlan.validatedExpandedLock(
+        "A friendly brown sloth in a blue shirt rides one red skateboard through a sunny skatepark, with soft cartoon linework and a fixed low camera."
+      ),
+      "A friendly brown sloth in a blue shirt rides one red skateboard through a sunny skatepark, with soft cartoon linework and a fixed low camera."
+    )
   }
 
   func testFallbackPromptFitsImagePlaygroundConceptBudget() {
     let locked = AnimationPromptPlan.fallbackLock(
       for: String(repeating: "A very detailed cartoon direction. ", count: 80)
     )
-    let frame = AnimationPromptPlan.framePrompt(
-      lockedPrompt: locked,
-      frameIndex: 0,
-      frameCount: 2,
-      frameRate: 2
-    )
+    let frame = AnimationPromptPlan.masterFramePrompt(lockedPrompt: locked)
     XCTAssertLessThanOrEqual(locked.count, 320)
     XCTAssertLessThanOrEqual(frame.count, 480)
   }
@@ -55,9 +64,6 @@ final class LocalGenerationTests: XCTestCase {
     let attempts = AnimationPromptPlan.attempts(
       lockedPrompt: "Locked fox design.",
       originalPrompt: "A fox waves",
-      frameIndex: 1,
-      frameCount: 6,
-      frameRate: 6,
       hasReference: true
     )
 
@@ -74,9 +80,6 @@ final class LocalGenerationTests: XCTestCase {
     let attempts = AnimationPromptPlan.attempts(
       lockedPrompt: "Locked fox design.",
       originalPrompt: "  A fox\n  waves   slowly  ",
-      frameIndex: 0,
-      frameCount: 6,
-      frameRate: 6,
       hasReference: false
     )
 
@@ -84,40 +87,6 @@ final class LocalGenerationTests: XCTestCase {
     XCTAssertTrue(attempts.allSatisfy { !$0.includeReference })
     XCTAssertEqual(attempts.map(\.useFallbackStyle), [false, false, true])
     XCTAssertEqual(attempts[2].prompt, "A fox waves slowly")
-  }
-
-  func testAnimationCanHoldACompletedFrameAfterAppleRejectsALaterFrame() throws {
-    let image = CGContext(
-      data: nil,
-      width: 2,
-      height: 2,
-      bitsPerComponent: 8,
-      bytesPerRow: 0,
-      space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    )!.makeImage()!
-    let error = LocalGenerationError.imageCreationFailed(
-      frame: 6,
-      frameCount: 6,
-      attempts: 3,
-      retriedWithoutReference: true,
-      reason: "Unsupported language"
-    )
-
-    XCTAssertThrowsError(
-      try AnimationFrameRecovery.recoveredFrame(
-        after: error,
-        frameIndex: 0,
-        lastSuccessfulFrame: nil
-      )
-    )
-    let recovered = try AnimationFrameRecovery.recoveredFrame(
-      after: error,
-      frameIndex: 5,
-      lastSuccessfulFrame: image
-    )
-    XCTAssertEqual(recovered.width, image.width)
-    XCTAssertEqual(recovered.height, image.height)
   }
 
   func testAnimationFailureNamesFrameAndRecovery() {

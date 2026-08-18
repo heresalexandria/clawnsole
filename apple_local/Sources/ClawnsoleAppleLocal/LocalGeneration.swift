@@ -177,6 +177,23 @@ public struct FrameGenerationAttempt: Equatable, Sendable {
 }
 
 public enum AnimationPromptPlan {
+  public static func validatedExpandedLock(_ candidate: String) -> String? {
+    let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+    guard
+      !trimmed.isEmpty,
+      !trimmed.contains("\n"),
+      !trimmed.contains("**"),
+      !trimmed.contains("#"),
+      !trimmed.hasPrefix("-"),
+      trimmed.range(of: #"^\d+[.)]"#, options: .regularExpression) == nil,
+      (8...45).contains(words.count)
+    else {
+      return nil
+    }
+    return String(trimmed.prefix(320))
+  }
+
   public static func originalPromptFallback(for prompt: String) -> String {
     String(
       prompt
@@ -195,31 +212,19 @@ public enum AnimationPromptPlan {
     )
   }
 
-  public static func framePrompt(
-    lockedPrompt: String,
-    frameIndex: Int,
-    frameCount: Int,
-    frameRate: Int
-  ) -> String {
-    let progress = frameCount <= 1 ? 0 : Double(frameIndex) / Double(frameCount - 1)
-    let time = Double(frameIndex) / Double(frameRate)
+  public static func masterFramePrompt(lockedPrompt: String) -> String {
     return String(
       """
       \(lockedPrompt)
 
-      Frame \(frameIndex + 1)/\(frameCount), \(String(format: "%.2f", time))s, \(String(format: "%.0f", progress * 100))% through the action. Advance one smooth pose. Preserve every locked detail. One finished image, not a storyboard.
+      Draw one cohesive master frame for a short cartoon animation. Show one clear subject in a dynamic mid-action pose. Keep the subject and important props inside the center 80% with safe margin for gentle camera motion. Use one stable background, one composition, and one finished image. No storyboard, panels, text, duplicate subjects, or alternate designs.
       """.prefix(480)
     )
   }
 
-  public static func compactFramePrompt(
-    lockedPrompt: String,
-    frameIndex: Int,
-    frameCount: Int
-  ) -> String {
-    let progress = frameCount <= 1 ? 0 : Double(frameIndex) / Double(frameCount - 1)
+  public static func compactMasterFramePrompt(lockedPrompt: String) -> String {
     return String(
-      "Cartoon frame \(frameIndex + 1)/\(frameCount), \(String(format: "%.0f", progress * 100))% through the action. \(lockedPrompt) Same design and camera; advance one small pose. One image only."
+      "One cohesive cartoon master image. \(lockedPrompt) Dynamic mid-action pose, centered subject, safe margin, stable simple background. One image only; no panels, text, duplicates, or alternate designs."
         .prefix(300)
     )
   }
@@ -227,22 +232,10 @@ public enum AnimationPromptPlan {
   public static func attempts(
     lockedPrompt: String,
     originalPrompt: String,
-    frameIndex: Int,
-    frameCount: Int,
-    frameRate: Int,
     hasReference: Bool
   ) -> [FrameGenerationAttempt] {
-    let detailed = framePrompt(
-      lockedPrompt: lockedPrompt,
-      frameIndex: frameIndex,
-      frameCount: frameCount,
-      frameRate: frameRate
-    )
-    let compact = compactFramePrompt(
-      lockedPrompt: lockedPrompt,
-      frameIndex: frameIndex,
-      frameCount: frameCount
-    )
+    let detailed = masterFramePrompt(lockedPrompt: lockedPrompt)
+    let compact = compactMasterFramePrompt(lockedPrompt: lockedPrompt)
     let original = originalPromptFallback(for: originalPrompt)
     if hasReference {
       return [
@@ -264,23 +257,6 @@ public enum AnimationPromptPlan {
         useFallbackStyle: true
       ),
     ]
-  }
-}
-
-enum AnimationFrameRecovery {
-  static func recoveredFrame(
-    after error: LocalGenerationError,
-    frameIndex: Int,
-    lastSuccessfulFrame: CGImage?
-  ) throws -> CGImage {
-    guard
-      case .imageCreationFailed = error,
-      frameIndex > 0,
-      let lastSuccessfulFrame
-    else {
-      throw error
-    }
-    return lastSuccessfulFrame
   }
 }
 
@@ -404,92 +380,95 @@ public struct LocalGenerationEngine: Sendable {
       )
     )
 
+    #if canImport(ImagePlayground)
+      if request.mode == .image {
+        progress(.init(status: "Pending", progress: 5, message: "Generating local image"))
+        let generatedImage = try await createImage(
+          creator: creator,
+          concepts: [.text(lockedPrompt)],
+          style: style
+        )
+        let image = try fittedImage(
+          generatedImage,
+          width: dimensions.width,
+          height: dimensions.height
+        )
+        let resultURL = outputDirectory.appendingPathComponent("result.png")
+        if FileManager.default.fileExists(atPath: resultURL.path) {
+          try FileManager.default.removeItem(at: resultURL)
+        }
+        try writePNG(image, to: resultURL)
+        progress(
+          .init(
+            status: "Ready",
+            progress: 100,
+            message: "Local image ready",
+            resultPath: resultURL.path,
+            contentType: "image/png",
+            expandedPrompt: lockedPrompt
+          )
+        )
+        return resultURL
+      }
+
+      progress(
+        .init(
+          status: "Pending",
+          progress: 5,
+          message: "Generating cohesive master artwork"
+        )
+      )
+      #if canImport(AppKit)
+        await MainActor.run {
+          NSApplication.shared.activate(ignoringOtherApps: true)
+          for window in NSApplication.shared.windows {
+            window.orderFrontRegardless()
+          }
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+      #endif
+      let generatedMasterFrame = try await createAnimationMasterFrame(
+        creator: creator,
+        lockedPrompt: lockedPrompt,
+        originalPrompt: request.prompt,
+        frameCount: request.frameCount,
+        referencePath: request.referenceImagePath,
+        style: style,
+        progress: progress
+      )
+      let masterFrame = try fittedImage(
+        generatedMasterFrame,
+        width: dimensions.width,
+        height: dimensions.height
+      )
+    #else
+      throw LocalGenerationError.unavailable
+    #endif
+
+    let motion = AnimationMotionPlan.forPrompt(request.prompt)
     var frameURLs = [URL]()
-    var previousImagePath = request.referenceImagePath
-    var lastSuccessfulFrame: CGImage?
     for frameIndex in 0..<request.frameCount {
       try Task.checkCancellation()
       progress(
         .init(
           status: "Pending",
-          progress: 5 + (Double(frameIndex) / Double(request.frameCount)) * 88,
-          message: "Generating frame \(frameIndex + 1) of \(request.frameCount)"
+          progress: 45 + (Double(frameIndex) / Double(request.frameCount)) * 48,
+          message: "Animating cohesive frame \(frameIndex + 1) of \(request.frameCount)"
         )
       )
-      #if canImport(ImagePlayground)
-        let image: CGImage
-        do {
-          let generatedImage: CGImage
-          if request.mode == .image {
-            generatedImage = try await createImage(
-              creator: creator,
-              concepts: [.text(lockedPrompt)],
-              style: style
-            )
-          } else {
-            generatedImage = try await createAnimationFrame(
-              creator: creator,
-              lockedPrompt: lockedPrompt,
-              originalPrompt: request.prompt,
-              frameIndex: frameIndex,
-              frameCount: request.frameCount,
-              frameRate: request.frameRate,
-              referencePath: previousImagePath,
-              style: style,
-              progress: progress
-            )
-          }
-          image = try fittedImage(
-            generatedImage,
-            width: dimensions.width,
-            height: dimensions.height
-          )
-        } catch let error as LocalGenerationError {
-          guard request.mode == .animation else { throw error }
-          let recoveredFrame = try AnimationFrameRecovery.recoveredFrame(
-            after: error,
-            frameIndex: frameIndex,
-            lastSuccessfulFrame: lastSuccessfulFrame
-          )
-          progress(
-            .init(
-              status: "Pending",
-              progress: 5 + (Double(frameIndex) / Double(request.frameCount)) * 88,
-              message:
-                "Apple skipped frame \(frameIndex + 1); holding the last successful frame"
-            )
-          )
-          image = recoveredFrame
-        }
-      #else
-        throw LocalGenerationError.unavailable
-      #endif
+      let image = try CohesiveAnimationRenderer.render(
+        masterFrame: masterFrame,
+        frameIndex: frameIndex,
+        frameCount: request.frameCount,
+        width: dimensions.width,
+        height: dimensions.height,
+        motion: motion
+      )
       let frameURL = outputDirectory.appendingPathComponent(
         String(format: "frame-%04d.png", frameIndex)
       )
       try writePNG(image, to: frameURL)
       frameURLs.append(frameURL)
-      previousImagePath = frameURL.path
-      lastSuccessfulFrame = image
-    }
-
-    if request.mode == .image {
-      let resultURL = outputDirectory.appendingPathComponent("result.png")
-      if FileManager.default.fileExists(atPath: resultURL.path) {
-        try FileManager.default.removeItem(at: resultURL)
-      }
-      try FileManager.default.moveItem(at: frameURLs[0], to: resultURL)
-      progress(
-        .init(
-          status: "Ready",
-          progress: 100,
-          message: "Local image ready",
-          resultPath: resultURL.path,
-          contentType: "image/png",
-          expandedPrompt: lockedPrompt
-        )
-      )
-      return resultURL
     }
 
     progress(.init(status: "Pending", progress: 95, message: "Encoding animation"))
@@ -568,13 +547,11 @@ public struct LocalGenerationEngine: Sendable {
     }
 
     @available(iOS 18.4, macOS 15.4, *)
-    private func createAnimationFrame(
+    private func createAnimationMasterFrame(
       creator: ImageCreator,
       lockedPrompt: String,
       originalPrompt: String,
-      frameIndex: Int,
       frameCount: Int,
-      frameRate: Int,
       referencePath: String?,
       style: ImagePlaygroundStyle,
       progress: @escaping @Sendable (LocalGenerationProgress) -> Void
@@ -585,9 +562,6 @@ public struct LocalGenerationEngine: Sendable {
       let attempts = AnimationPromptPlan.attempts(
         lockedPrompt: lockedPrompt,
         originalPrompt: originalPrompt,
-        frameIndex: frameIndex,
-        frameCount: frameCount,
-        frameRate: frameRate,
         hasReference: reference != nil
       )
       var lastReason = "Apple reported an unspecified image-creation failure."
@@ -601,9 +575,9 @@ public struct LocalGenerationEngine: Sendable {
           progress(
             .init(
               status: "Pending",
-              progress: 5 + (Double(frameIndex) / Double(frameCount)) * 88,
+              progress: 5 + Double(attemptIndex) * 10,
               message:
-                "Retrying frame \(frameIndex + 1) of \(frameCount) (attempt \(attemptIndex + 1) of \(attempts.count))"
+                "Retrying cohesive master artwork (attempt \(attemptIndex + 1) of \(attempts.count))"
             )
           )
           try await Task.sleep(nanoseconds: 500_000_000)
@@ -632,7 +606,7 @@ public struct LocalGenerationEngine: Sendable {
         }
       }
       throw LocalGenerationError.imageCreationFailed(
-        frame: frameIndex + 1,
+        frame: 1,
         frameCount: frameCount,
         attempts: completedAttempts,
         retriedWithoutReference: retriedWithoutReference,
@@ -741,8 +715,9 @@ public struct LocalGenerationEngine: Sendable {
               to:
                 "Expand and continuity-lock this request for \(request.frameCount) frame(s): \(request.prompt)"
             )
-            let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !content.isEmpty { return String(content.prefix(320)) }
+            if let content = AnimationPromptPlan.validatedExpandedLock(response.content) {
+              return content
+            }
           } catch {
             // The deterministic lock remains usable when Apple Intelligence is busy.
           }
