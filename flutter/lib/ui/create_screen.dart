@@ -6,7 +6,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
-import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
@@ -73,15 +72,26 @@ class _CreateHeading extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Eyebrow('Video studio'),
+            Eyebrow(
+              controller.selectedProvider.isLocal
+                  ? controller.selectedModel.outputKind ==
+                            GenerationOutputKind.image
+                        ? 'On-device image studio'
+                        : 'Experimental animation lab'
+                  : 'Video studio',
+            ),
             const SizedBox(height: 10),
             Text(
-              'Make it move.',
+              controller.selectedProvider.isLocal
+                  ? 'Make it local.'
+                  : 'Make it move.',
               style: Theme.of(context).textTheme.displayLarge,
             ),
             const SizedBox(height: 10),
             Text(
-              'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
+              controller.selectedProvider.isLocal
+                  ? 'Create private images or frame-by-frame cartoons on this Apple device, with no account or API key.'
+                  : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
           ],
@@ -133,7 +143,7 @@ class _ProviderPlaque extends StatelessWidget {
     child: PopupMenuButton<String>(
       tooltip: 'Choose provider and model',
       onSelected: (value) => unawaited(_select(value)),
-      itemBuilder: (context) => videoProviders.expand((provider) {
+      itemBuilder: (context) => controller.providers.expand((provider) {
         return <PopupMenuEntry<String>>[
           PopupMenuItem<String>(
             enabled: false,
@@ -479,7 +489,9 @@ class _FramesSection extends StatelessWidget {
         const SizedBox(height: 9),
         Text(
           form.keyframes.isEmpty
-              ? 'Pin up to ${controller.referenceModel.maxKeyframes} images for ${controller.referenceModel.label} — or leave this empty for pure text-to-video.'
+              ? controller.selectedProvider.isLocal
+                    ? 'Add one image to anchor the design, or leave this empty to begin from the continuity-locked text prompt.'
+                    : 'Pin up to ${controller.referenceModel.maxKeyframes} images for ${controller.referenceModel.label} — or leave this empty for pure text-to-video.'
               : form.requiresTimedKeyframes
               ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
               : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.',
@@ -511,11 +523,15 @@ class _FramesSection extends StatelessWidget {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: KeyframeRole.values
-              .map(
-                (role) => _AddFrameButton(controller: controller, role: role),
-              )
-              .toList(),
+          children:
+              (controller.referenceModel.maxKeyframes == 1
+                      ? const <KeyframeRole>[KeyframeRole.start]
+                      : KeyframeRole.values)
+                  .map(
+                    (role) =>
+                        _AddFrameButton(controller: controller, role: role),
+                  )
+                  .toList(),
         ),
       ],
     );
@@ -903,29 +919,38 @@ class _SettingsGrid extends StatelessWidget {
         const SizedBox(height: 10),
         _RatioStrip(controller: controller),
         const SizedBox(height: 20),
-        _DurationControl(controller: controller),
+        if (controller.selectedModel.outputKind ==
+            GenerationOutputKind.video) ...<Widget>[
+          _DurationControl(controller: controller),
+          if (controller.selectedModel.supportsFrameRate) ...<Widget>[
+            const SizedBox(height: 18),
+            _FrameRateControl(controller: controller),
+          ],
+        ],
       ];
       final second = <Widget>[
         const FieldLabel('Finish', icon: Icons.high_quality_rounded),
         const SizedBox(height: 10),
         _ResolutionRow(controller: controller),
         const SizedBox(height: 8),
-        SwitchListTile.adaptive(
-          contentPadding: EdgeInsets.zero,
-          title: const Text(
-            'Synchronized audio',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        if (controller.selectedModel.supportsAudio)
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Synchronized audio',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+            subtitle: const Text(
+              'Dialogue, ambience, and sound',
+              style: TextStyle(fontSize: 11),
+            ),
+            value: controller.form.generateAudio,
+            onChanged: controller.selectedModel.supportsAudio
+                ? (value) => controller.updateForm(
+                    (form) => form.generateAudio = value,
+                  )
+                : null,
           ),
-          subtitle: const Text(
-            'Dialogue, ambience, and sound',
-            style: TextStyle(fontSize: 11),
-          ),
-          value: controller.form.generateAudio,
-          onChanged: controller.selectedModel.supportsAudio
-              ? (value) =>
-                    controller.updateForm((form) => form.generateAudio = value)
-              : null,
-        ),
         if (controller.selectedModel.supportsDraft)
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
@@ -1202,6 +1227,45 @@ class _DurationControl extends StatelessWidget {
   }
 }
 
+class _FrameRateControl extends StatelessWidget {
+  const _FrameRateControl({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final frames = controller.form.frameRate * controller.form.durationSeconds;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          'Frame rate',
+          icon: Icons.animation_rounded,
+          trailing: Text(
+            '$frames generated frames',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          ),
+        ),
+        Slider(
+          min: 1,
+          max: 6,
+          divisions: 5,
+          label: '${controller.form.frameRate} fps',
+          value: controller.form.frameRate.toDouble(),
+          onChanged: (value) => controller.setFrameRate(value.round()),
+        ),
+        Text(
+          '${controller.form.frameRate} fps × ${controller.form.durationSeconds} s. Each frame is generated separately, so higher values take proportionally longer.',
+          style: TextStyle(
+            fontSize: 10.5,
+            color: context.colors.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _ResolutionRow extends StatelessWidget {
   const _ResolutionRow({required this.controller});
 
@@ -1340,6 +1404,59 @@ class _CostPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.selectedProvider.isLocal) {
+      final frames = controller.selectedModel.supportsFrameRate
+          ? controller.form.frameRate * controller.form.durationSeconds
+          : 1;
+      return TexturePanel(
+        surface: PanelSurface.hunterFelt,
+        stitched: true,
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.memory_rounded, color: context.tokens.panelBrass),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'APPLE SYSTEM · NO PROVIDER CHARGE',
+                    style: TextStyle(
+                      color: context.tokens.onPanelMuted,
+                      fontSize: 9,
+                      letterSpacing: 1.4,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    controller.selectedModel.outputKind ==
+                            GenerationOutputKind.image
+                        ? 'One Apple image'
+                        : '$frames Apple frames → silent MP4',
+                    style: TextStyle(
+                      color: context.tokens.onPanel,
+                      fontFamily: 'Fraunces',
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Uses Apple Image Playground with no provider key. On Mac, keep its generation window in front.',
+                    style: TextStyle(
+                      color: context.tokens.onPanelMuted,
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final tokens = context.tokens;
     final estimate = controller.currentEstimate;
     final providerUnits = estimate.providerUnitsMinimum != null;
@@ -1557,7 +1674,8 @@ class _ComposerFooter extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (controller.hasApiKey)
+            if (!controller.selectedProvider.requiresApiKey ||
+                controller.hasApiKey)
               ClawMark(size: 19, color: context.tokens.brass)
             else
               Icon(
@@ -1567,7 +1685,10 @@ class _ComposerFooter extends StatelessWidget {
               ),
             const SizedBox(width: 9),
             Text(
-              controller.hasApiKey ? 'Ready when you are' : 'API key needed',
+              !controller.selectedProvider.requiresApiKey ||
+                      controller.hasApiKey
+                  ? 'Ready when you are'
+                  : 'API key needed',
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
             ),
           ],
@@ -1580,7 +1701,15 @@ class _ComposerFooter extends StatelessWidget {
             border: Border.all(color: context.colors.outlineVariant),
           ),
           child: Text(
-            form.mode.label,
+            controller.selectedModel.outputKind == GenerationOutputKind.image
+                ? (form.mode == VideoMode.i2v
+                      ? 'Reference to image'
+                      : 'Text to image')
+                : controller.selectedProvider.isLocal
+                ? (form.mode == VideoMode.i2v
+                      ? 'Reference animation'
+                      : 'Text animation')
+                : form.mode.label,
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
@@ -1603,7 +1732,13 @@ class _ComposerFooter extends StatelessWidget {
               ),
             )
           : const Icon(Icons.play_arrow_rounded, size: 20),
-      label: const Text('Generate video'),
+      label: Text(
+        controller.selectedModel.outputKind == GenerationOutputKind.image
+            ? 'Generate image'
+            : controller.selectedProvider.isLocal
+            ? 'Generate animation'
+            : 'Generate video',
+      ),
     );
     return LayoutBuilder(
       builder: (context, constraints) {

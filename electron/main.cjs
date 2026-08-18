@@ -46,17 +46,27 @@ async function startBundledRenderer() {
     "companion",
     "clawnsole_companion",
   );
+  const appleLocalGenerator = path.join(
+    process.resourcesPath,
+    "companion",
+    "Clawnsole Apple Local.app",
+  );
   const port = await findOpenPort();
   const localUrl = `http://127.0.0.1:${port}`;
 
-  rendererProcess = spawn(companionExecutable, [
+  const companionArguments = [
     "--port",
     String(port),
     "--data-file",
     path.join(app.getPath("userData"), "clawnsole.json"),
     "--web-root",
     rendererDirectory,
-  ], {
+  ];
+  if (process.arch === "arm64") {
+    companionArguments.push("--apple-local-generator", appleLocalGenerator);
+  }
+
+  rendererProcess = spawn(companionExecutable, companionArguments, {
     cwd: rendererDirectory,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],

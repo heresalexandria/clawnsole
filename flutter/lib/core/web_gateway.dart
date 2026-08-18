@@ -262,8 +262,11 @@ class WebGateway implements AppGateway, ProviderGateway {
   }
 
   @override
-  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) =>
-      throw UnsupportedError(
-        'Saving directly to Photos is available in the iOS and Android apps.',
-      );
+  Future<void> saveMediaToPhotoLibrary(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  ) => throw UnsupportedError(
+    'Saving directly to Photos is available in the iOS and Android apps.',
+  );
 }

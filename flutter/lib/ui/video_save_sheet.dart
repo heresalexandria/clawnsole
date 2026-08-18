@@ -11,10 +11,11 @@ Future<void> saveGenerationVideo(
   final destination = await chooseVideoSaveDestination(
     context,
     supportsPhotos: controller.supportsPhotoLibrarySave,
+    isImage: item.isImage,
   );
   if (destination == null) return;
   try {
-    await controller.saveVideo(item, destination: destination);
+    await controller.saveMedia(item, destination: destination);
   } on Object catch (error) {
     controller.showNotice(error.toString());
   }
@@ -23,6 +24,7 @@ Future<void> saveGenerationVideo(
 Future<VideoSaveDestination?> chooseVideoSaveDestination(
   BuildContext context, {
   required bool supportsPhotos,
+  bool isImage = false,
 }) {
   if (!supportsPhotos) {
     return Future<VideoSaveDestination?>.value(VideoSaveDestination.files);
@@ -38,17 +40,22 @@ Future<VideoSaveDestination?> chooseVideoSaveDestination(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Text('Save video', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              isImage ? 'Save image' : 'Save video',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 6),
             Text(
-              'Choose where Clawnsole should put this video.',
+              'Choose where Clawnsole should put this ${isImage ? 'image' : 'video'}.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Save to Photos'),
-              subtitle: const Text('Add the video to your camera roll'),
+              subtitle: Text(
+                'Add the ${isImage ? 'image' : 'video'} to your camera roll',
+              ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.pop(context, VideoSaveDestination.photos),
             ),

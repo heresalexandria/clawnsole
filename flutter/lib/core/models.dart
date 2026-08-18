@@ -8,6 +8,8 @@ enum LibraryFilter { all, working, ready, failed }
 
 enum VideoMode { t2v, i2v, v2v, draftEnhance }
 
+enum GenerationOutputKind { video, image }
+
 enum KeyframeRole { start, middle, end }
 
 extension KeyframeRoleValue on KeyframeRole {
@@ -95,6 +97,7 @@ class GenerationConfig {
     required this.generateAudio,
     required this.safetyTolerance,
     required this.draft,
+    this.frameRate = 24,
     this.exactTiming = false,
     this.keyframes,
     this.sourceLabel,
@@ -107,6 +110,7 @@ class GenerationConfig {
   final bool generateAudio;
   final int safetyTolerance;
   final bool draft;
+  final int frameRate;
   final bool exactTiming;
   final List<KeyframeLabel>? keyframes;
   final String? sourceLabel;
@@ -115,6 +119,7 @@ class GenerationConfig {
   GenerationConfig copyWith({
     List<KeyframeLabel>? keyframes,
     AssetReference? source,
+    int? frameRate,
   }) => GenerationConfig(
     aspectRatio: aspectRatio,
     duration: duration,
@@ -122,6 +127,7 @@ class GenerationConfig {
     generateAudio: generateAudio,
     safetyTolerance: safetyTolerance,
     draft: draft,
+    frameRate: frameRate ?? this.frameRate,
     exactTiming: exactTiming,
     keyframes: keyframes ?? this.keyframes,
     sourceLabel: sourceLabel,
@@ -135,6 +141,7 @@ class GenerationConfig {
     'generateAudio': generateAudio,
     'safetyTolerance': safetyTolerance,
     'draft': draft,
+    if (frameRate != 24) 'frameRate': frameRate,
     if (exactTiming) 'exactTiming': true,
     if (keyframes != null)
       'keyframes': keyframes!.map((frame) => frame.toJson()).toList(),
@@ -167,6 +174,7 @@ class GenerationConfig {
       generateAudio: json['generateAudio'] != false,
       safetyTolerance: (json['safetyTolerance'] as num?)?.toInt() ?? 2,
       draft: json['draft'] == true,
+      frameRate: (json['frameRate'] as num?)?.toInt() ?? 24,
       exactTiming: json['exactTiming'] == true,
       keyframes: keyframes,
       sourceLabel: json['sourceLabel'] as String?,
@@ -230,6 +238,7 @@ class Generation {
     this.provider = 'bfl',
     this.model = 'flux-3-video',
     this.billingUnit = 'credits',
+    this.outputKind = GenerationOutputKind.video,
     this.requestId,
     this.pollingUrl,
     this.progress,
@@ -258,6 +267,7 @@ class Generation {
   final String provider;
   final String model;
   final String billingUnit;
+  final GenerationOutputKind outputKind;
   final String? requestId;
   final String? pollingUrl;
   final String status;
@@ -291,6 +301,7 @@ class Generation {
   bool get isWorking =>
       isGenerationWorkingStatus(status, canPoll: canCheckStatus);
   bool get isReady => normalizeGenerationStatus(status) == 'Ready';
+  bool get isImage => outputKind == GenerationOutputKind.image;
   bool get isFailed => isGenerationFailureStatus(status);
   bool get isStatusUnavailable =>
       isWorking && lastCheckError?.trim().isNotEmpty == true;
@@ -361,6 +372,7 @@ class Generation {
     provider: provider,
     model: model,
     billingUnit: billingUnit,
+    outputKind: outputKind,
     requestId: requestId ?? this.requestId,
     pollingUrl: pollingUrl ?? this.pollingUrl,
     status: status ?? this.status,
@@ -401,6 +413,7 @@ class Generation {
     'provider': provider,
     'model': model,
     if (billingUnit != 'credits') 'billingUnit': billingUnit,
+    if (outputKind != GenerationOutputKind.video) 'outputKind': outputKind.name,
     if (requestId != null) 'requestId': requestId,
     if (pollingUrl != null) 'pollingUrl': pollingUrl,
     'status': status,
@@ -444,6 +457,9 @@ class Generation {
     provider: json['provider'] as String? ?? 'bfl',
     model: json['model'] as String? ?? 'flux-3-video',
     billingUnit: json['billingUnit'] as String? ?? 'credits',
+    outputKind: json['outputKind'] == GenerationOutputKind.image.name
+        ? GenerationOutputKind.image
+        : GenerationOutputKind.video,
     requestId: json['requestId'] as String?,
     pollingUrl: json['pollingUrl'] as String?,
     status: json['status'] as String? ?? 'Error',
@@ -599,7 +615,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 7,
+    'schemaVersion': 8,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
@@ -701,6 +717,7 @@ class LocalSnapshot {
     required this.hasApiKey,
     required this.storage,
     this.connectedProviders = const <String>{},
+    this.availableProviders = const <String>{},
   });
 
   final List<Generation> generations;
@@ -708,6 +725,7 @@ class LocalSnapshot {
   final bool hasApiKey;
   final StorageStats storage;
   final Set<String> connectedProviders;
+  final Set<String> availableProviders;
 
   bool hasApiKeyFor(String provider) =>
       connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);
@@ -717,6 +735,7 @@ class LocalSnapshot {
     'preferences': preferences.toJson(),
     'hasBflApiKey': hasApiKey,
     'connectedProviders': connectedProviders.toList()..sort(),
+    'availableProviders': availableProviders.toList()..sort(),
     'storage': storage.toJson(),
   };
 
@@ -737,6 +756,10 @@ class LocalSnapshot {
     hasApiKey: json['hasBflApiKey'] == true,
     connectedProviders:
         (json['connectedProviders'] as List<Object?>? ?? const <Object?>[])
+            .whereType<String>()
+            .toSet(),
+    availableProviders:
+        (json['availableProviders'] as List<Object?>? ?? const <Object?>[])
             .whereType<String>()
             .toSet(),
     storage: StorageStats.fromJson(

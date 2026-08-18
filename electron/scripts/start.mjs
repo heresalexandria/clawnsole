@@ -11,6 +11,12 @@ const electronDirectory = path.resolve(scriptDirectory, "..");
 const repositoryRoot = path.resolve(electronDirectory, "..");
 const flutterDirectory = path.join(repositoryRoot, "flutter");
 const webRoot = path.join(flutterDirectory, "build", "web");
+const appleLocalGenerator = path.join(
+  repositoryRoot,
+  "apple_local",
+  "build",
+  "Clawnsole Apple Local.app",
+);
 const requestedPort = process.env.CLAWNSOLE_WEB_PORT?.trim();
 const port = requestedPort ? Number(requestedPort) : await findOpenPort();
 if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -54,6 +60,8 @@ async function run() {
       dataFile,
       "--web-root",
       webRoot,
+      "--apple-local-generator",
+      appleLocalGenerator,
     ],
     {
       cwd: flutterDirectory,

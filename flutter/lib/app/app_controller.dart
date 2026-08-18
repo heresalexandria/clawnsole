@@ -65,6 +65,7 @@ class GenerationFormState {
   String aspectRatio = '16:9';
   bool autoDuration = true;
   int durationSeconds = 8;
+  int frameRate = 2;
   String resolution = 'hd';
   bool generateAudio = true;
   int safetyTolerance = 2;
@@ -147,6 +148,16 @@ class AppController extends ChangeNotifier {
   int _idCounter = 0;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
+  List<VideoProviderDefinition> get providers {
+    final available = snapshot?.availableProviders ?? const <String>{};
+    if (available.isEmpty) {
+      return videoProviders.where((provider) => !provider.isLocal).toList();
+    }
+    return videoProviders
+        .where((provider) => available.contains(provider.id))
+        .toList();
+  }
+
   VideoProviderDefinition get selectedProvider =>
       providerById(selectedProviderId);
   VideoModelDefinition get selectedModel =>
@@ -213,6 +224,7 @@ class AppController extends ChangeNotifier {
       generateAudio: form.generateAudio,
       safetyTolerance: form.safetyTolerance,
       draft: form.draft,
+      frameRate: form.frameRate,
       exactTiming: form.usesTimedKeyframes,
       keyframes: form.mode == VideoMode.i2v
           ? orderedFrames
@@ -269,11 +281,11 @@ class AppController extends ChangeNotifier {
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
-      if (hasApiKey) {
+      if (selectedProvider.requiresApiKey && hasApiKey) {
         unawaited(refreshCredits());
-        unawaited(pollWorking());
       }
-      for (final provider in videoProviders) {
+      if (hasAnyApiKey) unawaited(pollWorking());
+      for (final provider in providers.where((item) => item.requiresApiKey)) {
         unawaited(refreshProviderModels(provider.id));
       }
     } on Object catch (error) {
@@ -287,7 +299,9 @@ class AppController extends ChangeNotifier {
       (_) => unawaited(pollWorking()),
     );
     _creditTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (hasAnyApiKey) unawaited(refreshCredits());
+      if (selectedProvider.requiresApiKey && hasApiKey) {
+        unawaited(refreshCredits());
+      }
     });
   }
 
@@ -295,7 +309,12 @@ class AppController extends ChangeNotifier {
     snapshot = value;
     section = value.preferences.activeSection;
     libraryFilter = value.preferences.libraryFilter;
-    selectedProviderId = providerById(value.preferences.provider).id;
+    final preferredProvider = providerById(value.preferences.provider);
+    final available = providers;
+    selectedProviderId =
+        available.any((provider) => provider.id == preferredProvider.id)
+        ? preferredProvider.id
+        : available.firstOrNull?.id ?? 'bfl';
     selectedModelId = modelById(selectedProviderId, value.preferences.model).id;
     loadError = null;
     notifyListeners();
@@ -382,6 +401,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> selectProvider(String providerId) async {
     final provider = providerById(providerId);
+    if (!providers.any((item) => item.id == provider.id)) return;
     selectedProviderId = provider.id;
     selectedModelId = provider.defaultModel.id;
     _selectCompatibleModel();
@@ -390,7 +410,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       _apply(await gateway.setPreferences(_preferences()));
-      if (hasApiKey) unawaited(refreshCredits());
+      if (provider.requiresApiKey && hasApiKey) unawaited(refreshCredits());
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -414,6 +434,7 @@ class AppController extends ChangeNotifier {
     if (!model.supportsAudio) form.generateAudio = false;
     if (!model.supportsDraft) form.draft = false;
     if (!model.supportsTimedKeyframes) form.exactTiming = false;
+    if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     if (!model.resolutions.any((item) => item.id == form.resolution)) {
       form.resolution = model.resolutions.first.id;
     }
@@ -486,6 +507,9 @@ class AppController extends ChangeNotifier {
     _selectCompatibleModel();
     _normalizeFormForModel();
     if (form.requiresFixedDuration) form.autoDuration = false;
+    if (selectedModel.supportsFrameRate) {
+      form.frameRate = form.frameRate.clamp(1, 6);
+    }
     notifyListeners();
   }
 
@@ -526,6 +550,11 @@ class AppController extends ChangeNotifier {
           ? frame.copyWith(seconds: form.durationSeconds.toDouble())
           : frame;
     }).toList();
+    notifyListeners();
+  }
+
+  void setFrameRate(int value) {
+    form.frameRate = value.clamp(1, 6);
     notifyListeners();
   }
 
@@ -588,14 +617,16 @@ class AppController extends ChangeNotifier {
   String? validate() {
     final provider = selectedProvider;
     final model = selectedModel;
-    if (!hasApiKey) {
+    if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
     }
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
     }
     if (form.mode != VideoMode.draftEnhance && form.prompt.trim().isEmpty) {
-      return 'Describe the video you want to make.';
+      return model.outputKind == GenerationOutputKind.image
+          ? 'Describe the image you want to make.'
+          : 'Describe the animation you want to make.';
     }
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty) return 'Add at least one image frame.';
@@ -604,6 +635,12 @@ class AppController extends ChangeNotifier {
       }
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
+      }
+      if (provider.isLocal &&
+          form.keyframes.any(
+            (frame) => frame.asset == null && frame.retained?.isLocal != true,
+          )) {
+        return 'Apple Local reference images must be uploaded from this device.';
       }
       if (form.requiresFixedDuration && form.autoDuration) {
         return 'Choose a fixed duration for this keyframe layout.';
@@ -652,6 +689,7 @@ class AppController extends ChangeNotifier {
       'generate_audio': form.generateAudio,
       'safety_tolerance': form.safetyTolerance,
       'draft': form.draft,
+      if (selectedModel.supportsFrameRate) 'frame_rate': form.frameRate,
     };
     if (form.mode == VideoMode.i2v) {
       final frames = form.usesTimedKeyframes
@@ -685,17 +723,24 @@ class AppController extends ChangeNotifier {
     final problem = validate();
     if (problem != null) {
       showNotice(problem);
-      if (!hasApiKey) unawaited(navigate(AppSection.providers));
+      if (selectedProvider.requiresApiKey && !hasApiKey) {
+        unawaited(navigate(AppSection.providers));
+      }
       return;
     }
-    if (!await refreshCredits()) return;
+    if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;
     var pending = Generation(
       localId: _uid(),
       provider: selectedProviderId,
       model: selectedModel.id,
-      billingUnit: selectedProviderId == 'bfl' ? 'credits' : 'usd',
+      billingUnit: selectedProvider.isLocal
+          ? 'local'
+          : selectedProviderId == 'bfl'
+          ? 'credits'
+          : 'usd',
+      outputKind: selectedModel.outputKind,
       status: 'submitting',
       progress: 0,
       prompt: form.mode == VideoMode.draftEnhance
@@ -716,6 +761,7 @@ class AppController extends ChangeNotifier {
         preferences: current.preferences,
         hasApiKey: current.hasApiKey,
         connectedProviders: current.connectedProviders,
+        availableProviders: current.availableProviders,
         storage: current.storage,
       );
     }
@@ -764,6 +810,7 @@ class AppController extends ChangeNotifier {
       preferences: current.preferences,
       hasApiKey: current.hasApiKey,
       connectedProviders: current.connectedProviders,
+      availableProviders: current.availableProviders,
       storage: current.storage,
     );
     notifyListeners();
@@ -917,6 +964,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<bool> _refreshCredits() async {
+    if (!selectedProvider.requiresApiKey) return true;
     if (!hasApiKey) return false;
     refreshingCredits = true;
     creditError = null;
@@ -1139,6 +1187,7 @@ class AppController extends ChangeNotifier {
       ..durationSeconds = item.config.duration is num
           ? (item.config.duration as num).toInt()
           : form.durationSeconds
+      ..frameRate = item.config.frameRate
       ..resolution = item.config.resolution
       ..generateAudio = item.config.generateAudio
       ..safetyTolerance = item.config.safetyTolerance
@@ -1188,12 +1237,12 @@ class AppController extends ChangeNotifier {
     unawaited(navigate(AppSection.create));
   }
 
-  Future<String?> saveVideo(
+  Future<String?> saveMedia(
     Generation item, {
     VideoSaveDestination destination = VideoSaveDestination.files,
   }) async {
     if (item.resultAsset == null && item.resultUrl == null) {
-      throw StateError('This video is not available.');
+      throw StateError('This media is not available.');
     }
     final bytes = item.resultAsset != null
         ? await gateway.readAsset(item.resultAsset!)
@@ -1201,17 +1250,26 @@ class AppController extends ChangeNotifier {
     final baseName =
         'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
         '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
+    final contentType =
+        item.resultAsset?.contentType ??
+        (item.isImage ? 'image/png' : 'video/mp4');
+    final extension = item.isImage ? 'png' : 'mp4';
+    final noun = item.isImage ? 'Image' : 'Video';
     if (destination == VideoSaveDestination.photos) {
-      await gateway.saveVideoToPhotoLibrary(bytes, '$baseName.mp4');
-      showNotice('Video saved to Photos.');
+      await gateway.saveMediaToPhotoLibrary(
+        bytes,
+        '$baseName.$extension',
+        contentType,
+      );
+      showNotice('$noun saved to Photos.');
       return null;
     }
     final location = await FilePicker.saveFile(
-      dialogTitle: 'Save Clawnsole video',
-      fileName: '$baseName.mp4',
+      dialogTitle: 'Save Clawnsole ${noun.toLowerCase()}',
+      fileName: '$baseName.$extension',
       bytes: bytes,
-      type: FileType.custom,
-      allowedExtensions: const <String>['mp4'],
+      type: item.isImage ? FileType.image : FileType.custom,
+      allowedExtensions: item.isImage ? null : const <String>['mp4'],
     );
     if (location == null) {
       showNotice(
@@ -1221,9 +1279,14 @@ class AppController extends ChangeNotifier {
       );
       return null;
     }
-    showNotice('Video saved to $location');
+    showNotice('$noun saved to $location');
     return location;
   }
+
+  Future<String?> saveVideo(
+    Generation item, {
+    VideoSaveDestination destination = VideoSaveDestination.files,
+  }) => saveMedia(item, destination: destination);
 
   Future<Uri?> generationMediaUri(Generation item) async {
     if (item.resultAsset != null) return gateway.assetUri(item.resultAsset!);

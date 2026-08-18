@@ -47,6 +47,8 @@ class LocalDataStore {
     '${(await _file()).parent.path}${Platform.pathSeparator}assets',
   );
 
+  Future<bool> exists() async => (await _file()).exists();
+
   String _assetId() {
     final random = Random.secure();
     final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(16);

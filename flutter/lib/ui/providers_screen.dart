@@ -102,7 +102,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
                 return Wrap(
                   spacing: 16,
                   runSpacing: 16,
-                  children: videoProviders
+                  children: widget.controller.providers
                       .map(
                         (provider) => SizedBox(
                           width: width,
@@ -214,7 +214,11 @@ class _ProviderCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     Text(
-                      connected ? 'Connected on this device' : 'Key required',
+                      !provider.requiresApiKey
+                          ? 'Ready on this device'
+                          : connected
+                          ? 'Connected on this device'
+                          : 'Key required',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -247,78 +251,102 @@ class _ProviderCard extends StatelessWidget {
             label: Text(selected ? 'Selected for Create' : 'Use in Create'),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: keyController,
-            obscureText: !keyVisible,
-            autocorrect: false,
-            enableSuggestions: false,
-            onChanged: (_) {},
-            decoration: InputDecoration(
-              labelText: '${provider.shortName} API key',
-              hintText: connected
-                  ? 'Connected — paste a replacement'
-                  : 'Paste key',
-              suffixIcon: IconButton(
-                onPressed: onToggleKey,
-                icon: Icon(
-                  keyVisible
-                      ? Icons.visibility_off_rounded
-                      : Icons.visibility_rounded,
-                ),
+          if (!provider.requiresApiKey) ...<Widget>[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: context.colors.primaryContainer,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Row(
+                children: <Widget>[
+                  Icon(Icons.lock_rounded, size: 17),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Ready without a key when Apple Intelligence image creation is enabled on this device.',
+                      style: TextStyle(fontSize: 11.5),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          if (result != null) ...<Widget>[
-            const SizedBox(height: 8),
-            Text(
-              result!,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color:
-                    result!.contains('rejected') ||
-                        result!.contains('Exception') ||
-                        result!.contains('invalid')
-                    ? context.colors.error
-                    : context.colors.primary,
-              ),
-            ),
-          ],
-          const SizedBox(height: 11),
-          Wrap(
-            spacing: 7,
-            runSpacing: 7,
-            children: <Widget>[
-              FilledButton(
-                onPressed: busy ? null : () => unawaited(onSave()),
-                child: busy
-                    ? const SizedBox.square(
-                        dimension: 15,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(connected ? 'Replace key' : 'Verify & save'),
-              ),
-              TextButton(
-                onPressed: busy ? null : () => unawaited(onVerify()),
-                child: const Text('Test'),
-              ),
-              if (connected)
-                TextButton(
-                  onPressed: onRemove,
-                  child: Text(
-                    'Remove',
-                    style: TextStyle(color: context.colors.error),
+          ] else ...<Widget>[
+            TextField(
+              controller: keyController,
+              obscureText: !keyVisible,
+              autocorrect: false,
+              enableSuggestions: false,
+              onChanged: (_) {},
+              decoration: InputDecoration(
+                labelText: '${provider.shortName} API key',
+                hintText: connected
+                    ? 'Connected — paste a replacement'
+                    : 'Paste key',
+                suffixIcon: IconButton(
+                  onPressed: onToggleKey,
+                  icon: Icon(
+                    keyVisible
+                        ? Icons.visibility_off_rounded
+                        : Icons.visibility_rounded,
                   ),
                 ),
+              ),
+            ),
+            if (result != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                result!,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color:
+                      result!.contains('rejected') ||
+                          result!.contains('Exception') ||
+                          result!.contains('invalid')
+                      ? context.colors.error
+                      : context.colors.primary,
+                ),
+              ),
             ],
-          ),
+            const SizedBox(height: 11),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: <Widget>[
+                FilledButton(
+                  onPressed: busy ? null : () => unawaited(onSave()),
+                  child: busy
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(connected ? 'Replace key' : 'Verify & save'),
+                ),
+                TextButton(
+                  onPressed: busy ? null : () => unawaited(onVerify()),
+                  child: const Text('Test'),
+                ),
+                if (connected)
+                  TextButton(
+                    onPressed: onRemove,
+                    child: Text(
+                      'Remove',
+                      style: TextStyle(color: context.colors.error),
+                    ),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 9),
           Wrap(
             spacing: 12,
             children: <Widget>[
-              _ExternalLink('Console', provider.consoleUrl),
+              if (provider.consoleUrl.isNotEmpty)
+                _ExternalLink('Console', provider.consoleUrl),
               _ExternalLink('Docs', provider.docsUrl),
-              _ExternalLink('Pricing', provider.pricingUrl),
+              if (provider.pricingUrl.isNotEmpty)
+                _ExternalLink('Pricing', provider.pricingUrl),
             ],
           ),
         ],
@@ -411,7 +439,8 @@ class _PricingTable extends StatelessWidget {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
                     SegmentedButton<String>(
-                      segments: videoProviders
+                      segments: controller.providers
+                          .where((item) => item.requiresApiKey)
                           .map(
                             (item) => ButtonSegment<String>(
                               value: item.id,

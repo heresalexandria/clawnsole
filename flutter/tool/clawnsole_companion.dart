@@ -11,9 +11,17 @@ import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 
+import 'apple_local_process_runtime.dart';
+
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
   final store = CompanionStore(File(config.dataFile));
+  final appleLocal = AppleLocalProcessRuntime(
+    config.appleLocalGenerator == null
+        ? null
+        : Directory(config.appleLocalGenerator!),
+  );
+  await appleLocal.initialize();
   final app = CompanionApp(
     store: store,
     api: BflApi(),
@@ -23,6 +31,7 @@ Future<void> main(List<String> arguments) async {
       'atlas': Platform.environment['ATLAS_CLOUD_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
+    appleLocal: appleLocal,
   );
   final server = await HttpServer.bind(
     InternetAddress.loopbackIPv4,
@@ -33,6 +42,7 @@ Future<void> main(List<String> arguments) async {
   );
   stdout.writeln('Local data: ${config.dataFile}');
   if (config.webRoot != null) stdout.writeln('Web root: ${config.webRoot}');
+  if (appleLocal.isAvailable) stdout.writeln('Apple Local: available');
   stdout.writeln('Press Ctrl+C to stop.');
   await for (final request in server) {
     unawaited(app.handle(request));
@@ -44,11 +54,13 @@ class CompanionConfig {
     required this.port,
     required this.dataFile,
     this.webRoot,
+    this.appleLocalGenerator,
   });
 
   final int port;
   final String dataFile;
   final String? webRoot;
+  final String? appleLocalGenerator;
 
   factory CompanionConfig.from(
     List<String> arguments,
@@ -57,6 +69,8 @@ class CompanionConfig {
     var port = int.tryParse(environment['CLAWNSOLE_PROXY_PORT'] ?? '') ?? 8787;
     var dataFile = environment['CLAWNSOLE_FLUTTER_DATA_FILE']?.trim() ?? '';
     var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
+    var appleLocalGenerator =
+        environment['CLAWNSOLE_APPLE_LOCAL_GENERATOR']?.trim() ?? '';
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
         port = int.parse(arguments[++index]);
@@ -66,6 +80,9 @@ class CompanionConfig {
       } else if (arguments[index] == '--web-root' &&
           index + 1 < arguments.length) {
         webRoot = arguments[++index];
+      } else if (arguments[index] == '--apple-local-generator' &&
+          index + 1 < arguments.length) {
+        appleLocalGenerator = arguments[++index];
       }
     }
     if (dataFile.isEmpty) {
@@ -77,6 +94,9 @@ class CompanionConfig {
       port: port,
       dataFile: File(dataFile).absolute.path,
       webRoot: webRoot.isEmpty ? null : Directory(webRoot).absolute.path,
+      appleLocalGenerator: appleLocalGenerator.isEmpty
+          ? null
+          : File(appleLocalGenerator).absolute.path,
     );
   }
 }
@@ -89,6 +109,8 @@ class CompanionStore {
 
   Directory get assets =>
       Directory('${file.parent.path}${Platform.pathSeparator}assets');
+
+  Future<bool> exists() => file.exists();
 
   String _assetId() {
     final random = Random.secure();
@@ -292,15 +314,18 @@ class CompanionApp {
     ProviderApiRouter? providerRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
+    AppleLocalProcessRuntime? appleLocal,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _fallbackApiKeys = fallbackApiKeys,
-       _webRoot = webRoot;
+       _webRoot = webRoot,
+       _appleLocal = appleLocal ?? AppleLocalProcessRuntime(null);
 
   final CompanionStore _store;
   final ProviderApiRouter _providers;
   final Map<String, String> _fallbackApiKeys;
   final Directory? _webRoot;
+  final AppleLocalProcessRuntime _appleLocal;
 
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
@@ -479,7 +504,14 @@ class CompanionApp {
       } else if (action == 'clearHistory') {
         next = current.copyWith(generations: <Generation>[]);
       } else if (action == 'clearPreferences') {
-        next = current.copyWith(preferences: const AppPreferences());
+        next = current.copyWith(
+          preferences: _appleLocal.isAvailable
+              ? const AppPreferences(
+                  provider: 'apple-local',
+                  model: 'apple-local-image',
+                )
+              : const AppPreferences(),
+        );
       } else if (action == 'clearApiKey') {
         next = current.withApiKey('bfl', '');
       } else if (action == 'clearProviderApiKey') {
@@ -497,6 +529,15 @@ class CompanionApp {
 
   Future<LocalSnapshot> _snapshot() async {
     var data = await _store.read();
+    if (_appleLocal.isAvailable && !await _store.exists()) {
+      data = data.copyWith(
+        preferences: const AppPreferences(
+          provider: 'apple-local',
+          model: 'apple-local-image',
+        ),
+      );
+      await _store.replace(data);
+    }
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = data.generations.map((item) {
@@ -523,11 +564,18 @@ class CompanionApp {
         .where((provider) => _activeKey(data, provider.id).isNotEmpty)
         .map((provider) => provider.id)
         .toSet();
+    if (_appleLocal.isAvailable) connected.add('apple-local');
     return LocalSnapshot(
       generations: data.generations,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      availableProviders: <String>{
+        'bfl',
+        'ltx',
+        'atlas',
+        if (_appleLocal.isAvailable) 'apple-local',
+      },
       storage: await _store.stats(data.generations.length),
     );
   }
@@ -647,6 +695,9 @@ class CompanionApp {
       (key, value) => MapEntry(key.toString(), value),
     );
     final provider = generation.provider;
+    if (provider == 'apple-local') {
+      return _submitAppleLocal(generation, cleanInput);
+    }
     final key = _activeKey(data, provider);
     if (key.isEmpty) {
       throw StateError(
@@ -733,6 +784,83 @@ class CompanionApp {
     }
   }
 
+  Future<Generation> _submitAppleLocal(
+    Generation generation,
+    Map<String, Object?> input,
+  ) async {
+    if (!_appleLocal.isAvailable) {
+      throw StateError('Apple Local generation is unavailable on this Mac.');
+    }
+    generation = generation.copyWith(
+      config: await _persistInputs(generation.config, input),
+      updatedAt: DateTime.now().toUtc(),
+    );
+    await _upsert(generation);
+    try {
+      String? referenceImagePath;
+      final frames = generation.config.keyframes;
+      final reference = frames == null || frames.isEmpty
+          ? null
+          : frames.first.source;
+      if (reference != null) {
+        if (!reference.isLocal) {
+          throw StateError(
+            'Apple Local reference images must be uploaded from this Mac.',
+          );
+        }
+        referenceImagePath = _store.assetFile(reference.value).path;
+      }
+      final jobDirectory = Directory(
+        '${_store.file.parent.path}${Platform.pathSeparator}apple-local'
+        '${Platform.pathSeparator}jobs${Platform.pathSeparator}${generation.localId}',
+      );
+      final modelsDirectory = Directory(
+        '${_store.file.parent.path}${Platform.pathSeparator}apple-local'
+        '${Platform.pathSeparator}models',
+      );
+      final duration = generation.config.duration is num
+          ? (generation.config.duration as num).toInt()
+          : 1;
+      final receipt = await _appleLocal.submit(<String, Object?>{
+        'requestId': generation.localId,
+        'mode': generation.isImage ? 'image' : 'animation',
+        'prompt': generation.prompt,
+        'aspectRatio': generation.config.aspectRatio,
+        'resolution': generation.config.resolution,
+        'durationSeconds': duration,
+        'frameRate': generation.config.frameRate,
+        if (referenceImagePath != null)
+          'referenceImagePath': referenceImagePath,
+        'outputDirectory': jobDirectory.path,
+        'modelsDirectory': modelsDirectory.path,
+      });
+      final jobId = receipt['jobId']?.toString();
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError('Apple Local returned an invalid generation receipt.');
+      }
+      generation = generation.copyWith(
+        requestId: jobId,
+        pollingUrl: 'apple-local://$jobId',
+        status: 'Pending',
+        progress: 0,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: jsonEncode(receipt),
+        lastProviderResponseAt: DateTime.now().toUtc(),
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _upsert(generation);
+      return generation;
+    } on Object catch (error) {
+      generation = generation.copyWith(
+        status: 'Error',
+        error: generationExceptionMessage(error),
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _upsert(generation);
+      rethrow;
+    }
+  }
+
   Future<Generation> _poll(Map<String, Object?> body) async {
     final localId = body['localId']?.toString();
     final pollingUrl = body['pollingUrl']?.toString();
@@ -751,6 +879,9 @@ class CompanionApp {
         'The generation was not found.',
         status: 404,
       );
+    }
+    if (current.provider == 'apple-local') {
+      return _pollAppleLocal(current);
     }
     final key = _activeKey(data, current.provider);
     if (key.isEmpty) {
@@ -852,6 +983,77 @@ class CompanionApp {
     }
     await _upsert(next);
     return next;
+  }
+
+  Future<Generation> _pollAppleLocal(Generation current) async {
+    final checkedAt = DateTime.now().toUtc();
+    try {
+      final jobId = current.requestId;
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError('This Apple Local generation has no job id.');
+      }
+      final payload = _appleLocal.poll(jobId);
+      final status = normalizeGenerationStatus(payload['status']);
+      var resultAsset = current.resultAsset;
+      if (status == 'Ready' && resultAsset == null) {
+        final resultPath = payload['resultPath']?.toString();
+        if (resultPath == null || resultPath.isEmpty) {
+          throw StateError(
+            'Apple Local finished without returning a media file.',
+          );
+        }
+        final file = File(resultPath);
+        final contentType =
+            payload['contentType']?.toString() ??
+            (current.isImage ? 'image/png' : 'video/mp4');
+        resultAsset = await _store.writeAsset(
+          await file.readAsBytes(),
+          label:
+              'clawnsole-${current.localId}.${current.isImage ? 'png' : 'mp4'}',
+          contentType: contentType,
+        );
+        try {
+          await file.parent.delete(recursive: true);
+        } on FileSystemException {
+          // A later cleanup can remove an already-consumed job directory.
+        }
+      }
+      final failed = isGenerationFailureStatus(status);
+      final next = current.copyWith(
+        status: status,
+        progress: status == 'Ready'
+            ? 100
+            : normalizedProgress(payload['progress']),
+        resultAsset: resultAsset,
+        error: failed ? payload['error']?.toString() ?? status : null,
+        clearError: !failed,
+        lastCheckedAt: checkedAt,
+        statusCheckCount: current.statusCheckCount + 1,
+        consecutiveCheckFailures: 0,
+        clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(<String, Object?>{
+          'status': status,
+          'progress': payload['progress'],
+          if (payload['message'] != null) 'message': payload['message'],
+          if (payload['error'] != null) 'error': payload['error'],
+        }),
+        lastProviderResponseAt: checkedAt,
+        updatedAt: checkedAt,
+      );
+      await _upsert(next);
+      return next;
+    } on Object catch (error) {
+      final next = current.copyWith(
+        lastCheckedAt: checkedAt,
+        statusCheckCount: current.statusCheckCount + 1,
+        consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
+        lastCheckError: generationExceptionMessage(error),
+        updatedAt: checkedAt,
+      );
+      await _upsert(next);
+      return next;
+    }
   }
 
   AssetReference? _findAsset(List<Generation> generations, String id) {

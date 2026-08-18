@@ -2,9 +2,10 @@
 
 Effective: August 17, 2026
 
-Clawnsole is a local-first client for third-party video generation services. The
-developer of Clawnsole does not operate an account system, analytics service,
-advertising network, or cloud database for the app.
+Clawnsole is a local-first image and video generation app and client for
+third-party generation services. The developer of Clawnsole does not operate an
+account system, analytics service, advertising network, or cloud database for
+the app.
 
 ## Data stored on your device
 
@@ -15,6 +16,7 @@ private local storage. Depending on how you use the app, this can include:
 - prompts, generation settings, provider job identifiers, status, errors, and
   estimated or provider-reported usage and cost;
 - reference images, source video, generated video, and local file references;
+- temporary animation frames when Apple Local is used;
 - appearance, retention, and other app preferences.
 
 Provider keys can be added, replaced, or removed from **Providers**. Generation
@@ -23,6 +25,13 @@ may also remove data held in its application sandbox, subject to the backup and
 device-management behavior of your operating system.
 
 ## Data sent to a generation provider
+
+**Apple Local:** Clawnsole sends prompts and optional reference images to the
+operating system's Apple Image Playground framework instead of a Clawnsole or
+third-party generation API. Apple controls the system model's availability and
+processing behavior. Temporary frames and completed media are stored in the
+app's local container, and MP4 assembly happens locally. On iOS/macOS 26 or
+newer, optional prompt expansion uses Apple's Foundation Models framework.
 
 When you ask Clawnsole to verify a provider account, check a balance, load a
 model catalog or price, or create, monitor, or download a generation, the app

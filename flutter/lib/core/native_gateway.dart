@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -5,6 +6,7 @@ import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'apple_local_runtime.dart';
 import 'bfl_api.dart';
 import 'generation_status.dart';
 import 'gateway.dart';
@@ -54,6 +56,7 @@ class NativeGateway implements AppGateway, ProviderGateway {
     String? iosReviewAtlasApiKey,
     String? iosReviewAtlasApiKeyId,
     ProviderApiRouter? providerRouter,
+    AppleLocalRuntime? appleLocalRuntime,
     bool? isIos,
   }) : _store = store ?? LocalDataStore(),
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
@@ -73,6 +76,8 @@ class NativeGateway implements AppGateway, ProviderGateway {
          'atlas': (iosReviewAtlasApiKeyId ?? _configuredIosReviewAtlasApiKeyId)
              .trim(),
        },
+       _appleLocal =
+           appleLocalRuntime ?? const MethodChannelAppleLocalRuntime(),
        _isIos = isIos ?? Platform.isIOS;
 
   final LocalDataStore _store;
@@ -82,7 +87,13 @@ class NativeGateway implements AppGateway, ProviderGateway {
   final String _iosReviewApiKeyId;
   final Map<String, String> _iosReviewKeys;
   final Map<String, String> _iosReviewKeyIds;
+  final AppleLocalRuntime _appleLocal;
   final bool _isIos;
+  Future<bool>? _appleLocalAvailability;
+
+  Future<bool> _isAppleLocalAvailable() => !_isIos
+      ? Future<bool>.value(false)
+      : _appleLocalAvailability ??= _appleLocal.isAvailable();
 
   String _reviewKey(String provider) =>
       provider == 'bfl' ? _iosReviewApiKey : _iosReviewKeys[provider] ?? '';
@@ -143,16 +154,33 @@ class NativeGateway implements AppGateway, ProviderGateway {
   }
 
   Future<LocalSnapshot> _snapshot([StoredData? input]) async {
-    final data = input ?? await _readFresh();
+    var data = input ?? await _readFresh();
+    final appleLocalAvailable = await _isAppleLocalAvailable();
+    if (appleLocalAvailable && !await _store.exists()) {
+      data = data.copyWith(
+        preferences: const AppPreferences(
+          provider: 'apple-local',
+          model: 'apple-local-image',
+        ),
+      );
+      await _store.write(data);
+    }
     final connected = videoProviders
         .where((provider) => _activeApiKey(provider.id, data) != null)
         .map((provider) => provider.id)
         .toSet();
+    if (appleLocalAvailable) connected.add('apple-local');
     return LocalSnapshot(
       generations: data.generations,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      availableProviders: <String>{
+        'bfl',
+        'ltx',
+        'atlas',
+        if (appleLocalAvailable) 'apple-local',
+      },
       storage: await _store.stats(data.generations.length),
     );
   }
@@ -321,6 +349,9 @@ class NativeGateway implements AppGateway, ProviderGateway {
     var record = submission.record;
     final data = await _readFresh();
     final provider = record.provider;
+    if (provider == 'apple-local') {
+      return _submitAppleLocal(record, submission.input);
+    }
     final credential = _activeApiKey(provider, data);
     final key = credential?.value ?? '';
     if (key.isEmpty) {
@@ -414,8 +445,82 @@ class NativeGateway implements AppGateway, ProviderGateway {
     }
   }
 
+  Future<Generation> _submitAppleLocal(
+    Generation record,
+    Map<String, Object?> input,
+  ) async {
+    if (!await _isAppleLocalAvailable()) {
+      throw StateError(
+        'Apple Local generation is unavailable on this device or simulator.',
+      );
+    }
+    record = record.copyWith(
+      config: await _persistInputs(record.config, input),
+      updatedAt: DateTime.now().toUtc(),
+    );
+    await _replaceGeneration(record);
+    try {
+      String? referenceImagePath;
+      final frames = record.config.keyframes;
+      final reference = frames == null || frames.isEmpty
+          ? null
+          : frames.first.source;
+      if (reference != null) {
+        if (!reference.isLocal) {
+          throw StateError(
+            'Apple Local reference images must be uploaded from this device.',
+          );
+        }
+        referenceImagePath = (await _store.assetUri(reference)).toFilePath();
+      }
+      final duration = record.config.duration is num
+          ? (record.config.duration as num).toInt()
+          : 1;
+      final receipt = await _appleLocal.submit(<String, Object?>{
+        'requestId': record.localId,
+        'mode': record.outputKind == GenerationOutputKind.image
+            ? 'image'
+            : 'animation',
+        'prompt': record.prompt,
+        'aspectRatio': record.config.aspectRatio,
+        'resolution': record.config.resolution,
+        'durationSeconds': duration,
+        'frameRate': record.config.frameRate,
+        if (referenceImagePath != null)
+          'referenceImagePath': referenceImagePath,
+      });
+      final jobId = receipt['jobId']?.toString();
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError('Apple Local returned an invalid generation receipt.');
+      }
+      record = record.copyWith(
+        requestId: jobId,
+        pollingUrl: 'apple-local://$jobId',
+        status: 'Pending',
+        progress: 0,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: jsonEncode(receipt),
+        lastProviderResponseAt: DateTime.now().toUtc(),
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _replaceGeneration(record);
+      return record;
+    } on Object catch (error) {
+      record = record.copyWith(
+        status: 'Error',
+        error: generationExceptionMessage(error),
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _replaceGeneration(record);
+      rethrow;
+    }
+  }
+
   @override
   Future<Generation> poll(Generation generation) async {
+    if (generation.provider == 'apple-local') {
+      return _pollAppleLocal(generation);
+    }
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
     _ActiveApiKey? credential;
@@ -537,6 +642,79 @@ class NativeGateway implements AppGateway, ProviderGateway {
     return next;
   }
 
+  Future<Generation> _pollAppleLocal(Generation generation) async {
+    final checkedAt = DateTime.now().toUtc();
+    try {
+      final jobId = generation.requestId;
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError('This Apple Local generation has no job id.');
+      }
+      final payload = await _appleLocal.poll(jobId);
+      final status = payload['status']?.toString() ?? 'Pending';
+      final normalized = normalizeGenerationStatus(status);
+      AssetReference? resultAsset = generation.resultAsset;
+      if (normalized == 'Ready' && resultAsset == null) {
+        final resultPath = payload['resultPath']?.toString();
+        final contentType =
+            payload['contentType']?.toString() ??
+            (generation.isImage ? 'image/png' : 'video/mp4');
+        if (resultPath == null || resultPath.isEmpty) {
+          throw StateError(
+            'Apple Local finished without returning a media file.',
+          );
+        }
+        final resultFile = File(resultPath);
+        final bytes = await resultFile.readAsBytes();
+        final extension = generation.isImage ? 'png' : 'mp4';
+        resultAsset = await _store.writeAsset(
+          bytes,
+          label: 'clawnsole-${generation.localId}.$extension',
+          contentType: contentType,
+        );
+        try {
+          await resultFile.delete();
+        } on FileSystemException {
+          // The OS clears Apple Local's temporary job directory as needed.
+        }
+      }
+      final failed = isGenerationFailureStatus(normalized);
+      final next = generation.copyWith(
+        status: normalized,
+        progress: normalized == 'Ready'
+            ? 100
+            : normalizedProgress(payload['progress']),
+        resultAsset: resultAsset,
+        error: failed ? payload['error']?.toString() ?? status : null,
+        clearError: !failed,
+        lastCheckedAt: checkedAt,
+        statusCheckCount: generation.statusCheckCount + 1,
+        consecutiveCheckFailures: 0,
+        clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(<String, Object?>{
+          'status': status,
+          'progress': payload['progress'],
+          if (payload['message'] != null) 'message': payload['message'],
+          if (payload['error'] != null) 'error': payload['error'],
+        }),
+        lastProviderResponseAt: checkedAt,
+        updatedAt: checkedAt,
+      );
+      await _replaceGeneration(next);
+      return next;
+    } on Object catch (error) {
+      final next = generation.copyWith(
+        lastCheckedAt: checkedAt,
+        statusCheckCount: generation.statusCheckCount + 1,
+        consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
+        lastCheckError: generationExceptionMessage(error),
+        updatedAt: checkedAt,
+      );
+      await _replaceGeneration(next);
+      return next;
+    }
+  }
+
   @override
   Future<LocalSnapshot> deleteGeneration(String localId) async {
     final current = await _store.read();
@@ -560,8 +738,14 @@ class NativeGateway implements AppGateway, ProviderGateway {
 
   @override
   Future<LocalSnapshot> clearPreferences() async {
+    final localDefault = await _isAppleLocalAvailable();
     final next = (await _store.read()).copyWith(
-      preferences: const AppPreferences(),
+      preferences: localDefault
+          ? const AppPreferences(
+              provider: 'apple-local',
+              model: 'apple-local-image',
+            )
+          : const AppPreferences(),
     );
     await _store.write(next);
     return _snapshot(next);
@@ -617,7 +801,11 @@ class NativeGateway implements AppGateway, ProviderGateway {
   }
 
   @override
-  Future<void> saveVideoToPhotoLibrary(Uint8List bytes, String fileName) async {
+  Future<void> saveMediaToPhotoLibrary(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+  ) async {
     if (!supportsPhotoLibrarySave) {
       throw UnsupportedError(
         'Saving directly to Photos is available in the iOS and Android apps.',
@@ -635,7 +823,11 @@ class NativeGateway implements AppGateway, ProviderGateway {
     final file = File('${directory.path}/$fileName');
     try {
       await file.writeAsBytes(bytes, flush: true);
-      await Gal.putVideo(file.path);
+      if (contentType.startsWith('image/')) {
+        await Gal.putImage(file.path);
+      } else {
+        await Gal.putVideo(file.path);
+      }
     } on GalException catch (error) {
       throw StateError(error.type.message);
     } finally {
