@@ -39,6 +39,19 @@ class UpdateStatus extends ChangeNotifier {
   /// True when this surface can download and install the update itself.
   bool get canSelfUpdate => hasDesktopUpdater && result?.installable == true;
 
+  /// True only after the packaged macOS shell successfully detects an
+  /// installable release across a major-version compatibility boundary.
+  bool get requiresMajorUpdate {
+    final value = result;
+    final latest = value?.latest;
+    return value != null &&
+        value.error == null &&
+        value.available &&
+        canSelfUpdate &&
+        latest != null &&
+        isMajorVersionUpgrade(latest, value.current);
+  }
+
   /// True when a shell is present but declines to install in place, which is
   /// how unpackaged development builds report themselves.
   bool get shellDeclinesInstall =>
