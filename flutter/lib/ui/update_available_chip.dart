@@ -2,17 +2,17 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// The macOS desktop affordance for a release that can be installed in place.
+/// The desktop affordance for a newer release.
 class UpdateAvailableChip extends StatefulWidget {
   const UpdateAvailableChip({
     required this.onPressed,
+    required this.installable,
     super.key,
-    this.compact = false,
     this.version,
   });
 
   final VoidCallback onPressed;
-  final bool compact;
+  final bool installable;
   final String? version;
 
   @override
@@ -53,12 +53,20 @@ class _UpdateAvailableChipState extends State<UpdateAvailableChip>
     return Semantics(
       button: true,
       label: version == null
-          ? 'Update available. Download and install.'
-          : 'Clawnsole $version is available. Download and install.',
+          ? widget.installable
+                ? 'Update available. Download and install.'
+                : 'Update available. View release.'
+          : widget.installable
+          ? 'Clawnsole $version is available. Download and install.'
+          : 'Clawnsole $version is available. View release.',
       child: Tooltip(
-        message: version == null
-            ? 'Download and install the Clawnsole update'
-            : 'Download and install Clawnsole $version',
+        message: widget.installable
+            ? version == null
+                  ? 'Download and install the Clawnsole update'
+                  : 'Download and install Clawnsole $version'
+            : version == null
+            ? 'View the Clawnsole update'
+            : 'View Clawnsole $version',
         child: AnimatedBuilder(
           animation: _controller,
           builder: (context, child) {
@@ -105,8 +113,8 @@ class _UpdateAvailableChipState extends State<UpdateAvailableChip>
                   onTap: widget.onPressed,
                   borderRadius: BorderRadius.circular(999),
                   child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: widget.compact ? 9 : 11,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
                       vertical: 7,
                     ),
                     child: const Text(

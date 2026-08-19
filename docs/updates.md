@@ -1,11 +1,10 @@
 # App updates
 
-Packaged macOS, iOS, and Android builds check GitHub Releases shortly after
-startup and every 24 hours while running. A manual macOS check is always
-available from **Clawnsole → Check for Updates…** or from the version chip
-beside the wordmark in the app's top bar. Native Windows checks when you open
-the version dialog and sends available updates to the GitHub release for a
-manual ZIP download. Development builds explain that they update through git
+Every supported build checks GitHub Releases on startup and every 24 hours
+while running. A manual macOS check is also available from **Clawnsole → Check
+for Updates…** or from the version beside the wordmark in the app's top bar.
+Native Windows and web builds send available updates to the GitHub release for
+a manual download. Development builds explain that they update through git
 instead of replacing themselves.
 
 When GitHub successfully reports a newer **major** version, Clawnsole blocks
@@ -18,12 +17,18 @@ versions are available so users are never sent to a pending review.
 
 ## In-app version chip and update dialog
 
-The Flutter top bar shows the running version. On macOS it checks once per
-launch (`lib/core/update_status.dart`) and replaces the version chip with an
-animated blue-purple **Update Available** chip when a newer installable release
-exists; opening the dialog re-checks immediately. iOS and Android perform the
-automatic compatibility check but leave installation to their stores.
+The Flutter top bar always shows the running version. On viewports at least 900
+pixels wide, a newer release adds an animated blue-purple **Update Available**
+chip beside the version. Packaged macOS can install from that chip; Windows,
+web, and development builds open the update dialog and release link. Compact
+viewports and native mobile apps keep the header uncluttered and flash an update
+notification instead. iOS and Android leave installation to their stores.
+Opening the version dialog re-checks immediately outside store-managed builds.
 `ClawnsoleApp(checkForUpdates: false)` disables network checks in tests.
+
+The launch check is always fresh. Later automatic checks retain the macOS
+shell's persisted 24-hour throttle, while other surfaces query on the shared
+24-hour in-process schedule.
 
 Where the shell can install in place, the dialog's primary action is
 **Download and install <version>** — the same verified pipeline as the system

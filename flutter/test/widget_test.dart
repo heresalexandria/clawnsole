@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
+import 'package:clawnsole/core/app_version.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
@@ -2043,7 +2044,7 @@ void main() {
     await status.backgroundCheck();
     await status.refresh();
 
-    expect(updater.forcedChecks, <bool>[false, false, true]);
+    expect(updater.forcedChecks, <bool>[true, false, true]);
     expect(status.updateAvailable, isTrue);
     expect(status.canSelfUpdate, isTrue);
     expect(status.requiresMajorUpdate, isFalse);
@@ -2163,13 +2164,12 @@ void main() {
     await tester.pumpWidget(
       ClawnsoleApp(gateway: gateway, updateStatus: status),
     );
-    await tester.pump(const Duration(seconds: 4));
     await tester.pump();
-    expect(updater.forcedChecks, <bool>[false]);
+    expect(updater.forcedChecks, <bool>[true]);
 
     await tester.pump(const Duration(hours: 24));
     await tester.pump();
-    expect(updater.forcedChecks, <bool>[false, false]);
+    expect(updater.forcedChecks, <bool>[true, false]);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -2192,7 +2192,6 @@ void main() {
     await tester.pumpWidget(
       ClawnsoleApp(gateway: gateway, updateStatus: status),
     );
-    await tester.pump(const Duration(seconds: 4));
     await tester.pump();
     expect(checks, 1);
 
@@ -2203,9 +2202,45 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('update chip animates and starts the macOS installer', (
+  testWidgets('web and Windows check on startup and every 24 hours', (
     tester,
   ) async {
+    var checks = 0;
+    final status = UpdateStatus.forReleaseTesting(() async {
+      checks += 1;
+      return const UpdateCheckResult(current: '0.10.1', latest: '0.10.1');
+    });
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, updateStatus: status),
+    );
+    await tester.pump();
+    expect(checks, 1);
+
+    await tester.pump(const Duration(hours: 24));
+    await tester.pump();
+    expect(checks, 2);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('desktop keeps the version beside the installable update chip', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     final updater = _MemoryShellUpdater(
       result: const <String, Object?>{
         'ok': true,
@@ -2235,8 +2270,14 @@ void main() {
     );
     await tester.pump();
 
+    expect(status.updateAvailable, isTrue);
+    expect(
+      MediaQuery.sizeOf(tester.element(find.byType(Scaffold))).width,
+      1200,
+    );
     expect(find.byType(UpdateAvailableChip), findsOneWidget);
     expect(find.text('Update Available'), findsOneWidget);
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
     final label = tester.widget<Text>(find.text('Update Available'));
     expect(label.style?.color, Colors.white);
 
@@ -2267,6 +2308,114 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('desktop shows non-installable updates beside the version', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final status = UpdateStatus.forReleaseTesting(
+      () async => const UpdateCheckResult(
+        current: '0.10.1',
+        latest: '0.11.0',
+        available: true,
+      ),
+    );
+    await status.refresh(force: false);
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        checkForUpdates: false,
+        updateStatus: status,
+      ),
+    );
+    await tester.pump();
+
+    expect(status.updateAvailable, isTrue);
+    expect(
+      MediaQuery.sizeOf(tester.element(find.byType(Scaffold))).width,
+      1200,
+    );
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+    expect(find.byType(UpdateAvailableChip), findsOneWidget);
+    final chip = tester.widget<UpdateAvailableChip>(
+      find.byType(UpdateAvailableChip),
+    );
+    expect(chip.installable, isFalse);
+
+    await tester.tap(find.byKey(const Key('update-available-chip')));
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('compact mobile surfaces flash an update notification', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    var storeOpenCount = 0;
+    final status = UpdateStatus.forMobileTesting(
+      () async => const UpdateCheckResult(
+        current: '0.10.1',
+        latest: '0.11.0',
+        available: true,
+      ),
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        updateStatus: status,
+        storeUpdateOpener: (platform) async {
+          expect(platform, TargetPlatform.iOS);
+          storeOpenCount += 1;
+          return true;
+        },
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+    expect(find.byType(UpdateAvailableChip), findsNothing);
+    expect(find.text('Clawnsole 0.11.0 is available.'), findsOneWidget);
+
+    tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed();
+    await tester.pump();
+    expect(storeOpenCount, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('major macOS update blocks the app until installation', (
