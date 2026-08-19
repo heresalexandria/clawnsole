@@ -41,8 +41,6 @@ __pycache__/
 /electron/assets/icon.icns
 /electron/dist/
 /electron/node_modules/
-/apple_local/.build/
-/apple_local/build/
 
 # local machine setup: never commit
 /use_heresalexandria.sh

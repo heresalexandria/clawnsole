@@ -234,8 +234,7 @@ class AppController extends ChangeNotifier {
             : creditsToUsd(item.cost ?? 0)),
   );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
-  bool canReuse(Generation item) =>
-      item.provider != 'apple-local' || item.isImage;
+  bool canReuse(Generation item) => item.provider != 'apple-local';
 
   LibraryFolder? folderById(String? folderId) {
     if (folderId == null) return null;
@@ -1142,7 +1141,7 @@ class AppController extends ChangeNotifier {
           form.keyframes.any(
             (frame) => frame.asset == null && frame.retained?.isLocal != true,
           )) {
-        return 'Apple Local reference images must be uploaded from this device.';
+        return 'On-device reference images must be uploaded from this device.';
       }
       if (form.requiresFixedDuration && form.autoDuration) {
         return 'Choose a fixed duration for this keyframe layout.';
@@ -1424,16 +1423,16 @@ class AppController extends ChangeNotifier {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
         showNotice(
-          '${providerById(item.provider).shortName} reports that this film is ready.',
+          '${providerShortNameForHistory(item.provider)} reports that this film is ready.',
         );
       } else if (updated.isFailed) {
         showNotice(
           updated.error ??
-              '${providerById(item.provider).shortName} reports ${updated.statusLabel}.',
+              '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel}.',
         );
       } else {
         showNotice(
-          '${providerById(item.provider).shortName} reports ${updated.statusLabel.toLowerCase()}.',
+          '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel.toLowerCase()}.',
         );
       }
     } on Object catch (error) {
@@ -1765,9 +1764,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> reuse(Generation item) async {
     if (!canReuse(item)) {
-      showNotice(
-        'Apple Local animation has been retired. Choose another video provider for a new generation.',
-      );
+      showNotice('Apple Local has been retired. Choose another provider.');
       return;
     }
     try {

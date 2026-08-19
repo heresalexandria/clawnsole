@@ -54,3 +54,25 @@ jobs:
         run: npm ci --no-audit --no-fund
       - working-directory: electron
         run: npm test
+
+  macos-package:
+    name: macOS package check
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - name: Build unsigned ARM64 desktop package
+        env:
+          CLAWNSOLE_ELECTRON_ARCH: arm64
+          CLAWNSOLE_ELECTRON_SIGN: 'false'
+        run: ./flutter/scripts/build_macos
+      - name: Smoke test packaged desktop app
+        run: electron/dist/release/mac-arm64/Clawnsole.app/Contents/MacOS/Clawnsole --smoke

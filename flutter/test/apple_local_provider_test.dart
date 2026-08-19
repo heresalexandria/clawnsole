@@ -3,17 +3,10 @@ import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Apple Local is keyless and exposes only still-image generation', () {
-    expect(appleLocalProvider.requiresApiKey, isFalse);
-    expect(appleLocalProvider.isLocal, isTrue);
-    expect(appleLocalProvider.models, hasLength(1));
+  test('Apple Local is absent from the active provider catalog', () {
     expect(
-      modelById('apple-local', 'apple-local-image').outputKind,
-      GenerationOutputKind.image,
-    );
-    expect(
-      modelById('apple-local', 'apple-local-animation').id,
-      'apple-local-image',
+      videoProviders.any((provider) => provider.id == 'apple-local'),
+      isFalse,
     );
   });
 
