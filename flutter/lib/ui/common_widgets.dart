@@ -9,6 +9,7 @@ import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import 'formatters.dart';
+import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'video_save_sheet.dart';
 
@@ -1447,31 +1448,33 @@ class ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
+    final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;
+    final preview = Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+          child: hasMedia
+              ? GenerationMedia(controller: controller, item: item)
+              : isGeneratingVideo
+              ? GenerationLoadingPlaceholder(item: item)
+              : GenerationInputPreview(controller: controller, item: item),
+        ),
+        Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
+      ],
+    );
     return SurfaceCard(
       padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SizedBox(
-            height: hasMedia ? 235 : 110,
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(15),
-                  ),
-                  child: hasMedia
-                      ? GenerationMedia(controller: controller, item: item)
-                      : GenerationInputPreview(
-                          controller: controller,
-                          item: item,
-                        ),
-                ),
-                Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
-              ],
-            ),
-          ),
+          if (isGeneratingVideo)
+            AspectRatio(
+              aspectRatio: generationAspectRatio(item.config.aspectRatio),
+              child: preview,
+            )
+          else
+            SizedBox(height: hasMedia ? 235 : 110, child: preview),
           Padding(
             padding: const EdgeInsets.all(13),
             child: Column(

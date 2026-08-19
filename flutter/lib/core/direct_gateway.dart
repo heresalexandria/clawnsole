@@ -698,11 +698,11 @@ class DirectGateway
         balanceAfter: balanceAfter,
         allowDeterministicQuote: status == 'Ready',
       );
+      final reportedProgress = findProviderProgress(payload);
       next = generation.copyWith(
         status: status,
-        progress: status == 'Ready'
-            ? 100
-            : normalizedProgress(payload['progress']),
+        progress: status == 'Ready' ? 100 : reportedProgress,
+        clearProgress: status != 'Ready' && reportedProgress == null,
         resultUrl: resultUrl,
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
@@ -734,9 +734,11 @@ class DirectGateway
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
       if (payload != null && isGenerationFailureStatus(providerStatus)) {
+        final reportedProgress = findProviderProgress(payload);
         next = generation.copyWith(
           status: providerStatus,
-          progress: normalizedProgress(payload['progress']),
+          progress: reportedProgress,
+          clearProgress: reportedProgress == null,
           error: providerNamedFailureMessage(
             providerById(generation.provider).name,
             payload,

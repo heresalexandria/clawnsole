@@ -193,9 +193,81 @@ Uri validatedProviderUrl(String value) {
 }
 
 double? normalizedProgress(Object? value) {
-  if (value is! num || !value.isFinite) return null;
-  final progress = value <= 1 ? value * 100 : value;
+  final text = value is String ? value.trim() : null;
+  final number = _progressNumber(value);
+  if (number == null || !number.isFinite || number < 0) return null;
+  final progress = text?.endsWith('%') == true
+      ? number
+      : number <= 1
+      ? number * 100
+      : number;
   return progress.toDouble().clamp(0, 100);
+}
+
+double? _progressNumber(Object? value) => switch (value) {
+  num value when value.isFinite => value.toDouble(),
+  String value => double.tryParse(
+    value.trim().replaceFirst(RegExp(r'%$'), '').trim(),
+  ),
+  _ => null,
+};
+
+double? _normalizedPercentage(Object? value) {
+  final number = _progressNumber(value);
+  if (number == null || !number.isFinite || number < 0) return null;
+  return number.clamp(0, 100).toDouble();
+}
+
+/// Finds a provider's reported completion percentage without tying the
+/// generation contract to one provider's response envelope.
+///
+/// Providers currently return progress as numbers, numeric strings, and
+/// percentage strings, using both snake_case and camelCase field names. Some
+/// also nest the field below a status object. Only explicit progress field
+/// names are considered so unrelated percentages cannot move the UI.
+double? findProviderProgress(Object? payload) {
+  final direct = normalizedProgress(payload);
+  if (direct != null) return direct;
+
+  if (payload is Map<Object?, Object?>) {
+    for (final entry in payload.entries) {
+      final key = entry.key.toString().toLowerCase().replaceAll(
+        RegExp(r'[^a-z]'),
+        '',
+      );
+      if (key == 'progress') {
+        final found = findProviderProgress(entry.value);
+        if (found != null) return found;
+      } else if (const <String>{
+        'progresspercentage',
+        'progresspercent',
+        'progresspct',
+        'completionpercentage',
+        'percentcomplete',
+        'pct',
+      }.contains(key)) {
+        // Percentage-named fields use 0–100 semantics. Treating the numeric
+        // value `1` as a fraction would incorrectly display 1% as complete.
+        final found = _normalizedPercentage(entry.value);
+        if (found != null) return found;
+      }
+    }
+    for (final child in payload.values) {
+      if (child is Map<Object?, Object?> || child is List<Object?>) {
+        final found = findProviderProgress(child);
+        if (found != null) return found;
+      }
+    }
+  }
+  if (payload is List<Object?>) {
+    for (final child in payload) {
+      if (child is Map<Object?, Object?> || child is List<Object?>) {
+        final found = findProviderProgress(child);
+        if (found != null) return found;
+      }
+    }
+  }
+  return null;
 }
 
 String? findResultUrl(Object? value, {required bool draft, String key = ''}) {

@@ -23,6 +23,7 @@ import 'package:clawnsole/core/update_status.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -172,6 +173,41 @@ void main() {
     expect(recovered.error, contains('interrupted'));
   });
 
+  test('clears stale progress when a provider stops reporting it', () async {
+    final now = DateTime.utc(2026, 8, 19, 12);
+    final item = Generation(
+      localId: 'stale-progress',
+      status: 'Pending',
+      progress: 38,
+      prompt: 'A slow orbit around a glass sculpture.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      pollingUrl: 'https://api.bfl.ai/v1/get_result?id=stale-progress',
+    );
+    final store = _MemoryLocalDataStore(
+      StoredData(apiKey: 'key', generations: <Generation>[item]),
+    );
+    final gateway = NativeGateway(
+      store: store,
+      api: _StatusWithoutProgressApi(),
+      isIos: false,
+    );
+
+    final updated = await gateway.poll(item);
+
+    expect(updated.progress, isNull);
+    expect((await store.read()).generations.single.progress, isNull);
+  });
+
   testWidgets('shows a failed status check as recoverable, not in progress', (
     tester,
   ) async {
@@ -225,6 +261,53 @@ void main() {
     expect(find.text('503'), findsOneWidget);
     expect(find.text('{"detail":"upstream unavailable"}'), findsOneWidget);
   });
+
+  testWidgets(
+    'shows a particle video placeholder at the generation aspect ratio',
+    (tester) async {
+      final now = DateTime.utc(2026, 8, 19, 12);
+      final item = Generation(
+        localId: 'portrait-video',
+        status: 'Pending',
+        progress: 42,
+        prompt: 'A neon figure moving through a particle field.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '9:16',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final controller = AppController();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: SizedBox(
+                width: 320,
+                child: ActivityCard(controller: controller, item: item),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
+      expect(find.text('Saved generation'), findsNothing);
+      expect(find.text('RENDERING  •  42%'), findsOneWidget);
+      final size = tester.getSize(find.byType(GenerationLoadingPlaceholder));
+      expect(size.width / size.height, closeTo(9 / 16, .01));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
 
   test(
     'round-trips compact history, billing, and durable asset references',
@@ -2382,6 +2465,12 @@ class _RejectedCreditsApi extends BflApi {
   Future<double> getCredits(String apiKey) async {
     throw const ProviderException('BFL rejected this API key.', status: 401);
   }
+}
+
+class _StatusWithoutProgressApi extends BflApi {
+  @override
+  Future<Map<String, Object?>> poll(String apiKey, String pollingUrl) async =>
+      <String, Object?>{'status': 'Pending'};
 }
 
 class _MemoryShellUpdater implements ShellUpdater {

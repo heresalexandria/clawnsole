@@ -371,6 +371,64 @@ void main() {
     expect(result['result'], isA<Map<String, Object?>>());
   });
 
+  test(
+    'ArtCraft maps nested percentage strings while a job is running',
+    () async {
+      final api = ArtCraftApi(
+        client: MockClient(
+          (_) async => http.Response(
+            jsonEncode(<String, Object?>{
+              'state': <String, Object?>{
+                'status': <String, Object?>{
+                  'status': 'started',
+                  'progressPercentage': '37.5%',
+                },
+              },
+            }),
+            200,
+          ),
+        ),
+      );
+
+      final result = await api.poll(
+        'secret',
+        'https://api.storyteller.ai/v1/omni_api/job_status/job/jinf_test',
+      );
+
+      expect(result['status'], 'Pending');
+      expect(result['progress'], 37.5);
+    },
+  );
+
+  test('normalizes provider progress across response shapes', () {
+    expect(normalizedProgress(.42), 42);
+    expect(normalizedProgress('1%'), 1);
+    expect(normalizedProgress('42.5%'), 42.5);
+    expect(
+      findProviderProgress(<String, Object?>{
+        'state': <String, Object?>{
+          'status': <String, Object?>{'progress': '0.73'},
+        },
+      }),
+      73,
+    );
+    expect(
+      findProviderProgress(<String, Object?>{
+        'state': <String, Object?>{
+          'status': <String, Object?>{'progress_percentage': 1},
+        },
+      }),
+      1,
+    );
+    expect(
+      findProviderProgress(<String, Object?>{
+        'discount_percentage': 80,
+        'duration': 10,
+      }),
+      isNull,
+    );
+  });
+
   test('ArtCraft live catalog filters disabled and unknown models', () async {
     final api = ArtCraftApi(
       client: MockClient(
