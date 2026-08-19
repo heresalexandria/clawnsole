@@ -7,10 +7,12 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
+import '../core/reference_prompts.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
 import 'panels.dart';
+import 'reference_prompt_field.dart';
 import 'references_screen.dart';
 
 class CreateScreen extends StatelessWidget {
@@ -571,21 +573,13 @@ class _ComposerState extends State<_Composer> {
           if (!enhancing) ...<Widget>[
             const FieldLabel('Direction', icon: Icons.edit_note_rounded),
             const SizedBox(height: 9),
-            TextFormField(
+            ReferencePromptField(
               key: ValueKey('generation-prompt-${controller.formRevision}'),
-              initialValue: form.prompt,
-              minLines: 4,
-              maxLines: 10,
-              maxLength: 50000,
-              style: const TextStyle(fontSize: 14.5, height: 1.5),
+              prompt: form.prompt,
+              formRevision: controller.formRevision,
+              references: _promptReferenceOptions(form.references),
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
-              decoration: const InputDecoration(
-                hintText:
-                    'A single continuous shot… describe movement, framing, sound, and what must stay consistent.',
-                counterText: '',
-                alignLabelWithHint: true,
-              ),
             ),
             const SizedBox(height: 20),
           ],
@@ -695,6 +689,25 @@ class _ComposerState extends State<_Composer> {
       ),
     );
   }
+}
+
+List<PromptReferenceOption> _promptReferenceOptions(
+  List<MediaReferenceDraft> references,
+) {
+  final mentions = promptReferenceMentions(
+    references.map((reference) => reference.kind),
+  );
+  return references
+      .asMap()
+      .entries
+      .map(
+        (entry) => PromptReferenceOption(
+          id: entry.value.id,
+          mention: mentions[entry.key],
+          label: entry.value.label,
+        ),
+      )
+      .toList();
 }
 
 class _GuidanceInputsSection extends StatelessWidget {
@@ -932,7 +945,9 @@ class _ReferencesSection extends StatelessWidget {
             MediaReferenceTask.extend => 'Continue one reference video while preserving its framing.',
           }} '
           '$limits${durationNotes.isEmpty ? '' : ' · $durationNotes'}. '
-          '${model.referencePromptHint ?? 'Use the numbered order shown here when referring to inputs in the prompt.'}',
+          'Type @ in Direction to mention attached media; Clawnsole adapts '
+          'the tag for ${model.label}. '
+          '${model.referencePromptHint ?? 'References keep the numbered order shown here.'}',
           style: TextStyle(
             color: context.colors.onSurfaceVariant,
             fontSize: 11.5,

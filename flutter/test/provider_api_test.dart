@@ -101,7 +101,7 @@ void main() {
 
       await api.submit('secret', 'ltx-2-3-pro', <String, Object?>{
         'mode': 'i2v',
-        'prompt': 'Cut the scene to the supplied rhythm',
+        'prompt': 'Cut the scene to @Audio 1',
         'duration': 8,
         'resolution': 'fhd',
         'aspect_ratio': '16:9',
@@ -111,6 +111,7 @@ void main() {
 
       expect(requestBody['audio_uri'], 'data:audio/mpeg;base64,audio');
       expect(requestBody['image_uri'], 'https://cdn.test/opening.png');
+      expect(requestBody['prompt'], 'Cut the scene to audio 1');
     },
   );
 
@@ -317,7 +318,7 @@ void main() {
       );
 
       await api.submit('secret', 'seedance_2p0', <String, Object?>{
-        'prompt': 'Use image 1, motion from video 1, and audio 1',
+        'prompt': 'Use @Image 1, motion from @Video1, and @Audio 1',
         'duration': 5,
         'resolution': 'hd',
         'aspect_ratio': '16:9',
@@ -335,6 +336,10 @@ void main() {
       expect(generation['reference_audio_urls'], <String>[
         'https://cdn.test/voice.mp3',
       ]);
+      expect(
+        generation['prompt'],
+        'Use @image1, motion from @video1, and @audio1',
+      );
     },
   );
 
@@ -520,7 +525,7 @@ void main() {
     final payload = api.generationPayload(
       'bytedance/seedance-2.5/reference-to-video',
       <String, Object?>{
-        'prompt': 'Keep the character consistent',
+        'prompt': 'Keep @Image 2 consistent with @Video 1 and @Audio1',
         'duration': 10,
         'aspect_ratio': '16:9',
         'generate_audio': false,
@@ -546,6 +551,10 @@ void main() {
     expect(payload['ratio'], '16:9');
     expect(payload['resolution'], '1080p');
     expect(payload['omni_reference_task_type'], 'extend');
+    expect(
+      payload['prompt'],
+      'Keep @image2 consistent with @video1 and @audio1',
+    );
   });
 
   test('Atlas records the exact accepted route quote on submission', () async {

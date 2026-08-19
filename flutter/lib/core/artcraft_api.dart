@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'bfl_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
+import 'reference_prompts.dart';
 
 class ArtCraftApi {
   ArtCraftApi({http.Client? client, Uri? baseUrl})
@@ -278,9 +279,27 @@ class ArtCraftApi {
 
     final duration = input['duration'];
     final modelDefinition = modelById('artcraft', model);
+    final prompt = translateReferencePrompt(
+      input['prompt']?.toString() ?? '',
+      dialect: artCraftReferencePromptDialect(model),
+      available: promptReferenceMentions(<MediaReferenceKind>[
+        ...List<MediaReferenceKind>.filled(
+          explicitImages.length,
+          MediaReferenceKind.image,
+        ),
+        ...List<MediaReferenceKind>.filled(
+          referenceVideos.length,
+          MediaReferenceKind.video,
+        ),
+        ...List<MediaReferenceKind>.filled(
+          referenceAudios.length,
+          MediaReferenceKind.audio,
+        ),
+      ]),
+    );
     return <String, Object?>{
       'model': model,
-      'prompt': input['prompt']?.toString() ?? '',
+      'prompt': prompt,
       if (duration is num) 'duration_seconds': duration.toInt(),
       if (_aspectRatio(input['aspect_ratio']?.toString(), model) case final ar?)
         'aspect_ratio': ar,

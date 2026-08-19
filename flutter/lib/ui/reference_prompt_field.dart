@@ -1,0 +1,339 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show setEquals;
+
+import '../app/app_theme.dart';
+import '../core/models.dart';
+import '../core/reference_prompts.dart';
+
+class PromptReferenceOption {
+  const PromptReferenceOption({
+    required this.id,
+    required this.mention,
+    required this.label,
+  });
+
+  final String id;
+  final PromptReferenceMention mention;
+  final String label;
+}
+
+class _ReferencePromptEditingController extends TextEditingController {
+  _ReferencePromptEditingController({
+    required super.text,
+    required Set<String> tags,
+  }) : _attachedTags = tags;
+
+  Set<String> _attachedTags;
+
+  void updateTags(Set<String> tags) {
+    if (setEquals(_attachedTags, tags)) return;
+    _attachedTags = tags;
+    notifyListeners();
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final mentionRanges = promptReferenceMatches(text)
+        .where((match) {
+          final mention = parsePromptReferenceMention(match.group(0)!);
+          return mention != null && _attachedTags.contains(mention.normalized);
+        })
+        .map((match) => (start: match.start, end: match.end))
+        .toList();
+    final composing = value.composing;
+    final hasComposing =
+        withComposing &&
+        composing.isValid &&
+        !composing.isCollapsed &&
+        composing.end <= text.length;
+    final boundaries = <int>{
+      0,
+      text.length,
+      for (final range in mentionRanges) ...<int>[range.start, range.end],
+      if (hasComposing) ...<int>[composing.start, composing.end],
+    }.toList()..sort();
+    final colors = Theme.of(context).colorScheme;
+    final children = <InlineSpan>[];
+    for (var index = 0; index < boundaries.length - 1; index += 1) {
+      final start = boundaries[index];
+      final end = boundaries[index + 1];
+      if (start == end) continue;
+      final isMention = mentionRanges.any(
+        (range) => start >= range.start && end <= range.end,
+      );
+      final isComposing =
+          hasComposing && start >= composing.start && end <= composing.end;
+      children.add(
+        TextSpan(
+          text: text.substring(start, end),
+          style: TextStyle(
+            color: isMention ? colors.onPrimaryContainer : null,
+            backgroundColor: isMention ? colors.primaryContainer : null,
+            fontWeight: isMention ? FontWeight.w700 : null,
+            decoration: isComposing ? TextDecoration.underline : null,
+          ),
+        ),
+      );
+    }
+    return TextSpan(style: style, children: children);
+  }
+}
+
+class ReferencePromptField extends StatefulWidget {
+  const ReferencePromptField({
+    required this.prompt,
+    required this.formRevision,
+    required this.references,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String prompt;
+  final int formRevision;
+  final List<PromptReferenceOption> references;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<ReferencePromptField> createState() => _ReferencePromptFieldState();
+}
+
+class _ReferencePromptFieldState extends State<ReferencePromptField> {
+  late final _ReferencePromptEditingController _controller;
+  late final FocusNode _focusNode;
+  _PromptMentionQuery? _query;
+  List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = _ReferencePromptEditingController(
+      text: widget.prompt,
+      tags: _tags(widget.references),
+    )..addListener(_refreshSuggestions);
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void didUpdateWidget(covariant ReferencePromptField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _controller.updateTags(_tags(widget.references));
+    if (oldWidget.formRevision != widget.formRevision ||
+        (_controller.text != widget.prompt &&
+            oldWidget.prompt != widget.prompt)) {
+      _controller.value = TextEditingValue(
+        text: widget.prompt,
+        selection: TextSelection.collapsed(offset: widget.prompt.length),
+      );
+    } else {
+      _refreshSuggestions();
+    }
+  }
+
+  Set<String> _tags(List<PromptReferenceOption> references) =>
+      references.map((reference) => reference.mention.normalized).toSet();
+
+  void _refreshSuggestions() {
+    final query = _mentionQuery(_controller.value, widget.references);
+    final suggestions = query == null
+        ? const <PromptReferenceOption>[]
+        : widget.references.where((reference) {
+            return reference.mention.normalized.startsWith(query.normalized);
+          }).toList();
+    if (!mounted ||
+        (_query == query && _sameOptions(_suggestions, suggestions))) {
+      return;
+    }
+    setState(() {
+      _query = query;
+      _suggestions = suggestions;
+    });
+  }
+
+  bool _sameOptions(
+    List<PromptReferenceOption> left,
+    List<PromptReferenceOption> right,
+  ) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index += 1) {
+      if (left[index].id != right[index].id) return false;
+    }
+    return true;
+  }
+
+  void _select(PromptReferenceOption option) {
+    final query = _query;
+    if (query == null) return;
+    final nextText = _controller.text.replaceRange(
+      query.start,
+      query.end,
+      option.mention.canonical,
+    );
+    final caret = query.start + option.mention.canonical.length;
+    _controller.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: caret),
+    );
+    widget.onChanged(nextText);
+    _focusNode.requestFocus();
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_refreshSuggestions)
+      ..dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      TextFormField(
+        controller: _controller,
+        focusNode: _focusNode,
+        minLines: 4,
+        maxLines: 10,
+        maxLength: 50000,
+        style: const TextStyle(fontSize: 14.5, height: 1.5),
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          hintText: widget.references.isEmpty
+              ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
+              : 'A single continuous shot… type @ to mention an attached reference.',
+          counterText: '',
+          alignLabelWithHint: true,
+        ),
+      ),
+      if (_suggestions.isNotEmpty) ...<Widget>[
+        const SizedBox(height: 6),
+        Container(
+          key: const ValueKey('prompt-reference-suggestions'),
+          decoration: BoxDecoration(
+            color: context.colors.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: context.colors.outlineVariant),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: Colors.black.withValues(alpha: .08),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 260),
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              children: _suggestions
+                  .map(
+                    (option) => InkWell(
+                      key: ValueKey(
+                        'prompt-reference-${option.mention.normalized}',
+                      ),
+                      onTap: () => _select(option),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 9,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Icon(
+                              switch (option.mention.kind) {
+                                MediaReferenceKind.image => Icons.image_rounded,
+                                MediaReferenceKind.video =>
+                                  Icons.video_library_rounded,
+                                MediaReferenceKind.audio =>
+                                  Icons.graphic_eq_rounded,
+                              },
+                              size: 18,
+                              color: context.colors.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              option.mention.canonical,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                option.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: context.colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+class _PromptMentionQuery {
+  const _PromptMentionQuery({
+    required this.start,
+    required this.end,
+    required this.normalized,
+  });
+
+  final int start;
+  final int end;
+  final String normalized;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PromptMentionQuery &&
+      start == other.start &&
+      end == other.end &&
+      normalized == other.normalized;
+
+  @override
+  int get hashCode => Object.hash(start, end, normalized);
+}
+
+_PromptMentionQuery? _mentionQuery(
+  TextEditingValue value,
+  List<PromptReferenceOption> references,
+) {
+  final selection = value.selection;
+  if (!selection.isValid || !selection.isCollapsed) return null;
+  final beforeCaret = value.text.substring(0, selection.extentOffset);
+  final start = beforeCaret.lastIndexOf('@');
+  if (start < 0) return null;
+  final candidate = beforeCaret.substring(start);
+  if (!RegExp(r'^@[A-Za-z]*(?: ?[0-9]*)?$').hasMatch(candidate)) return null;
+  final exact = parsePromptReferenceMention(candidate);
+  if (exact != null &&
+      references.any(
+        (reference) => reference.mention.normalized == exact.normalized,
+      )) {
+    return null;
+  }
+  return _PromptMentionQuery(
+    start: start,
+    end: selection.extentOffset,
+    normalized: candidate.substring(1).replaceAll(' ', '').toLowerCase(),
+  );
+}
