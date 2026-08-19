@@ -550,6 +550,57 @@ void main() {
   );
 
   test(
+    'rejects retired Apple Local animation before calling the runtime',
+    () async {
+      final runtime = _MemoryAppleLocalRuntime();
+      final gateway = NativeGateway(
+        store: _MemoryLocalDataStore(),
+        appleLocalRuntime: runtime,
+        isIos: true,
+      );
+      final now = DateTime.utc(2026, 8, 19);
+      final animation = Generation(
+        localId: 'retired-animation',
+        provider: 'apple-local',
+        model: 'apple-local-animation',
+        billingUnit: 'local',
+        outputKind: GenerationOutputKind.video,
+        status: 'submitting',
+        prompt: 'A fox waves',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 2,
+          resolution: 'hd',
+          generateAudio: false,
+          safetyTolerance: 2,
+          draft: false,
+          frameRate: 3,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      await expectLater(
+        gateway.submit(
+          GenerationSubmission(
+            record: animation,
+            input: const <String, Object?>{},
+          ),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('no longer available'),
+          ),
+        ),
+      );
+      expect(runtime.submitCount, 0);
+    },
+  );
+
+  test(
     'startup validation clears rejected access and requires another key',
     () async {
       final gateway = _MemoryGateway(
@@ -1298,6 +1349,8 @@ class _MemoryLocalDataStore extends LocalDataStore {
 }
 
 class _MemoryAppleLocalRuntime implements AppleLocalRuntime {
+  int submitCount = 0;
+
   @override
   Future<bool> isAvailable() async => true;
 
@@ -1308,8 +1361,13 @@ class _MemoryAppleLocalRuntime implements AppleLocalRuntime {
   };
 
   @override
-  Future<Map<String, Object?>> submit(Map<String, Object?> request) async =>
-      <String, Object?>{'jobId': request['requestId'], 'status': 'Pending'};
+  Future<Map<String, Object?>> submit(Map<String, Object?> request) async {
+    submitCount += 1;
+    return <String, Object?>{
+      'jobId': request['requestId'],
+      'status': 'Pending',
+    };
+  }
 }
 
 class _RejectedCreditsApi extends BflApi {

@@ -82,6 +82,11 @@ public struct LocalGenerationRequest: Codable, Sendable {
     guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw LocalGenerationError.invalidRequest("A prompt is required.")
     }
+    guard mode == .image else {
+      throw LocalGenerationError.invalidRequest(
+        "Apple Local animation is temporarily unavailable."
+      )
+    }
     guard (1...8).contains(durationSeconds) else {
       throw LocalGenerationError.invalidRequest("Duration must be between 1 and 8 seconds.")
     }

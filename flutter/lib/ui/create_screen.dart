@@ -75,10 +75,7 @@ class _CreateHeading extends StatelessWidget {
           children: <Widget>[
             Eyebrow(
               controller.selectedProvider.isLocal
-                  ? controller.selectedModel.outputKind ==
-                            GenerationOutputKind.image
-                        ? 'On-device image studio'
-                        : 'Experimental animation lab'
+                  ? 'On-device image studio'
                   : 'Video studio',
             ),
             const SizedBox(height: 10),
@@ -91,7 +88,7 @@ class _CreateHeading extends StatelessWidget {
             const SizedBox(height: 10),
             Text(
               controller.selectedProvider.isLocal
-                  ? 'Create private images or frame-by-frame cartoons on this Apple device, with no account or API key.'
+                  ? 'Create private still images on this Apple device, with no account or API key.'
                   : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
@@ -1848,10 +1845,6 @@ class _ComposerFooter extends StatelessWidget {
                 ? (form.mode == VideoMode.i2v
                       ? 'Reference to image'
                       : 'Text to image')
-                : controller.selectedProvider.isLocal
-                ? (form.mode == VideoMode.i2v
-                      ? 'Reference animation'
-                      : 'Text animation')
                 : form.mode.label,
             style: TextStyle(
               fontSize: 10.5,
@@ -1878,8 +1871,6 @@ class _ComposerFooter extends StatelessWidget {
       label: Text(
         controller.selectedModel.outputKind == GenerationOutputKind.image
             ? 'Generate image'
-            : controller.selectedProvider.isLocal
-            ? 'Generate animation'
             : 'Generate video',
       ),
     );

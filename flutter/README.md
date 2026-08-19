@@ -6,8 +6,8 @@ only desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
-- Apple Local still-image generation and experimental frame-by-frame cartoon
-  animation on physical iOS devices and Apple-silicon Macs, without API keys
+- Apple Local still-image generation on physical iOS devices and Apple-silicon
+  Macs, without API keys
 - BFL FLUX 3, LTX 2.5/2.3, ArtCraft’s live video catalog, and selected
   Create-ready Atlas Cloud models
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3

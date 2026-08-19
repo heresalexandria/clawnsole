@@ -313,7 +313,7 @@ class GenerationSpecChips extends StatelessWidget {
                     ? 'Reference to image'
                     : 'Text to image')
               : item.provider == 'apple-local'
-              ? 'Frame animation'
+              ? 'Retired frame animation'
               : item.mode.label,
         ),
         _SpecChip(
@@ -1459,13 +1459,14 @@ class ActivityCard extends StatelessWidget {
                         icon: const Icon(Icons.download_rounded, size: 15),
                         label: const Text('Save'),
                       ),
-                    OutlinedButton.icon(
-                      onPressed: () => unawaited(controller.reuse(item)),
-                      icon: const Icon(Icons.replay_rounded, size: 15),
-                      label: Text(
-                        item.isFailed ? 'Retry generation' : 'Reuse inputs',
+                    if (controller.canReuse(item))
+                      OutlinedButton.icon(
+                        onPressed: () => unawaited(controller.reuse(item)),
+                        icon: const Icon(Icons.replay_rounded, size: 15),
+                        label: Text(
+                          item.isFailed ? 'Retry generation' : 'Reuse inputs',
+                        ),
                       ),
-                    ),
                     GenerationStatusButton(
                       controller: controller,
                       item: item,

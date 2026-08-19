@@ -588,6 +588,11 @@ class NativeGateway
     Generation record,
     Map<String, Object?> input,
   ) async {
+    if (!record.isImage || record.model != 'apple-local-image') {
+      throw StateError(
+        'Apple Local animation is no longer available. Choose another video provider.',
+      );
+    }
     if (!await _isAppleLocalAvailable()) {
       throw StateError(
         'Apple Local generation is unavailable on this device or simulator.',
@@ -617,9 +622,7 @@ class NativeGateway
           : 1;
       final receipt = await _appleLocal.submit(<String, Object?>{
         'requestId': record.localId,
-        'mode': record.outputKind == GenerationOutputKind.image
-            ? 'image'
-            : 'animation',
+        'mode': 'image',
         'prompt': record.prompt,
         'aspectRatio': record.config.aspectRatio,
         'resolution': record.config.resolution,

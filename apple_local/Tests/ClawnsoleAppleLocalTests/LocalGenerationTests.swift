@@ -3,10 +3,11 @@ import XCTest
 @testable import ClawnsoleAppleLocal
 
 final class LocalGenerationTests: XCTestCase {
-  func testAnimationFrameCountUsesDurationAndFrameRate() throws {
+  func testAnimationRequestsAreRejectedWhileTheModeIsRetired() {
     let request = makeRequest(mode: .animation, duration: 4, frameRate: 3)
-    try request.validate()
-    XCTAssertEqual(request.frameCount, 12)
+    XCTAssertThrowsError(try request.validate()) { error in
+      XCTAssertTrue(error.localizedDescription.contains("temporarily unavailable"))
+    }
   }
 
   func testImageAlwaysUsesOneFrame() throws {

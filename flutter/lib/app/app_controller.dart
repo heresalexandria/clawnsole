@@ -204,6 +204,8 @@ class AppController extends ChangeNotifier {
             : creditsToUsd(item.cost ?? 0)),
   );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
+  bool canReuse(Generation item) =>
+      item.provider != 'apple-local' || item.isImage;
 
   LibraryFolder? folderById(String? folderId) {
     if (folderId == null) return null;
@@ -1461,6 +1463,12 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> reuse(Generation item) async {
+    if (!canReuse(item)) {
+      showNotice(
+        'Apple Local animation has been retired. Choose another video provider for a new generation.',
+      );
+      return;
+    }
     try {
       await _restoreGenerationSettings(item, includePrompt: true);
     } on Object catch (error) {
