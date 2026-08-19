@@ -329,6 +329,7 @@ class HybridDataStore implements DurableDataStore {
               ? null
               : folderMap[reference.folderId],
           tags: reference.tags,
+          favorite: reference.favorite,
           storage: LibraryStorage.drive,
         ),
       );
@@ -394,6 +395,12 @@ class HybridDataStore implements DurableDataStore {
       if (folderId != null) 'folderId': folderId else 'folderId': null,
       if (source.resultAsset != null)
         'resultAsset': (await _copyAsset(source.resultAsset))?.toJson(),
+      if (source.thumbnailAsset != null)
+        'thumbnailAsset': (await _copyAsset(source.thumbnailAsset))?.toJson(),
+      if (source.timelineThumbnailAsset != null)
+        'timelineThumbnailAsset': (await _copyAsset(
+          source.timelineThumbnailAsset,
+        ))?.toJson(),
     });
   }
 

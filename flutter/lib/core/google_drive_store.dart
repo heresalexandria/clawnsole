@@ -349,6 +349,8 @@ class GoogleDriveStore implements DurableDataStore {
 
     for (final generation in generations) {
       add(generation.resultAsset);
+      add(generation.thumbnailAsset);
+      add(generation.timelineThumbnailAsset);
       add(generation.config.source);
       for (final frame
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {

@@ -681,16 +681,221 @@ class _ComposerState extends State<_Composer> {
           const SizedBox(height: 20),
           _CostPreview(controller: controller),
           const SizedBox(height: 18),
-          Align(
-            alignment: Alignment.centerRight,
-            child: StorageDestinationButton(controller: controller),
-          ),
+          _GenerationDestinationControls(controller: controller),
           const SizedBox(height: 12),
           _ComposerFooter(controller: controller),
         ],
       ),
     );
   }
+}
+
+class _GenerationDestinationControls extends StatelessWidget {
+  const _GenerationDestinationControls({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final storage = controller.effectiveStorage;
+    final folders = controller.foldersFor(
+      LibraryCollection.generated,
+      storage: storage,
+    );
+    final selected = controller.selectedGenerationFolderId;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const FieldLabel('Save generation to', icon: Icons.save_outlined),
+          const SizedBox(height: 10),
+          if (controller.supportsLocalLibrary &&
+              controller.googleDriveConnected)
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: LibraryStorage.values
+                  .map(
+                    (value) => ChoiceChip(
+                      avatar: Icon(
+                        value == LibraryStorage.drive
+                            ? Icons.cloud_outlined
+                            : Icons.devices_outlined,
+                        size: 15,
+                      ),
+                      label: Text(value.shortLabel),
+                      selected: storage == value,
+                      onSelected: (_) =>
+                          unawaited(controller.setDefaultStorage(value)),
+                    ),
+                  )
+                  .toList(),
+            )
+          else
+            Align(
+              alignment: Alignment.centerLeft,
+              child: StorageBadge(storage: storage),
+            ),
+          if (controller.supportsGoogleDrive &&
+              !controller.googleDriveConnected) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              'Connect Google Drive in Settings to generate directly into your Drive library.',
+              style: TextStyle(
+                fontSize: 11,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          PopupMenuButton<String>(
+            key: ValueKey('generation-folder-${storage.name}'),
+            tooltip: 'Choose generation folder',
+            onSelected: (value) => unawaited(
+              controller.setGenerationFolder(value.isEmpty ? null : value),
+            ),
+            itemBuilder: (context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem(
+                value: '',
+                child: Text('Library (top level)'),
+              ),
+              ...controller.folderTree
+                  .where((folder) => folder.storage == storage)
+                  .map(
+                    (folder) => PopupMenuItem(
+                      value: folder.id,
+                      child: Text(controller.folderPath(folder.id)),
+                    ),
+                  ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                border: Border.all(color: context.colors.outlineVariant),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: <Widget>[
+                  const Icon(Icons.folder_outlined, size: 18),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      selected == null
+                          ? 'Library (top level)'
+                          : controller.folderPath(selected),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const Icon(Icons.expand_more_rounded, size: 18),
+                ],
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => unawaited(
+                _showGenerationFolderDialog(
+                  context,
+                  controller,
+                  parentId: selected,
+                ),
+              ),
+              icon: const Icon(Icons.create_new_folder_outlined, size: 17),
+              label: Text(selected == null ? 'New folder' : 'New subfolder'),
+            ),
+          ),
+          if (folders.isEmpty) ...<Widget>[
+            const SizedBox(height: 7),
+            Text(
+              'No ${storage.shortLabel.toLowerCase()} folders yet. You can generate at the top level or create one now.',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showGenerationFolderDialog(
+  BuildContext context,
+  AppController controller, {
+  String? parentId,
+}) async {
+  final name = TextEditingController();
+  var saving = false;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: const Text('New generation folder'),
+        content: TextField(
+          controller: name,
+          autofocus: true,
+          maxLength: 48,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            labelText: 'Folder name',
+            helperText: parentId == null
+                ? 'Created at the top level'
+                : 'Inside ${controller.folderPath(parentId)}',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: saving
+                ? null
+                : () async {
+                    setState(() => saving = true);
+                    final before = controller.folders
+                        .map((item) => item.id)
+                        .toSet();
+                    final saved = await controller.saveLibraryFolder(
+                      name.text,
+                      parentId: parentId,
+                      storage: controller.effectiveStorage,
+                    );
+                    if (!dialogContext.mounted) return;
+                    if (!saved) {
+                      setState(() => saving = false);
+                      return;
+                    }
+                    final created = controller.folders
+                        .where((item) => !before.contains(item.id))
+                        .toList();
+                    await controller.setGenerationFolder(
+                      created.isEmpty ? null : created.first.id,
+                    );
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  },
+            icon: saving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.create_new_folder_outlined),
+            label: const Text('Create'),
+          ),
+        ],
+      ),
+    ),
+  );
+  name.dispose();
 }
 
 List<PromptReferenceOption> _promptReferenceOptions(

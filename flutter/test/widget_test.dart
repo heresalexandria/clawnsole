@@ -536,7 +536,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 13);
+    expect(decoded.toJson()['schemaVersion'], 14);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -670,7 +670,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 13);
+      expect(decoded.toJson()['schemaVersion'], 14);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',

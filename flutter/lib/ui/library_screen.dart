@@ -503,6 +503,11 @@ class _LibraryToolbar extends StatelessWidget {
           ),
           const SizedBox(height: 9),
         ],
+        FavoriteFilterChips(
+          value: controller.libraryFavoriteFilter,
+          onChanged: controller.setLibraryFavoriteFilter,
+        ),
+        const SizedBox(height: 9),
         LayoutBuilder(
           builder: (context, constraints) {
             final filters = Wrap(
@@ -758,6 +763,21 @@ class _GenerationCardState extends State<GenerationCard> {
         else
           GenerationInputPreview(controller: widget.controller, item: item),
         Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
+        Positioned(
+          top: 7,
+          right: 7,
+          child: IconButton.filledTonal(
+            tooltip: item.favorite
+                ? 'Remove from favorites'
+                : 'Add to favorites',
+            onPressed: () =>
+                unawaited(widget.controller.toggleGenerationFavorite(item)),
+            icon: Icon(
+              item.favorite ? Icons.star_rounded : Icons.star_border_rounded,
+              color: item.favorite ? context.tokens.brass : null,
+            ),
+          ),
+        ),
         if (item.isWorking && !item.isStatusUnavailable)
           Positioned(
             bottom: 0,
@@ -925,15 +945,28 @@ class _GenerationCardState extends State<GenerationCard> {
                     if (item.storage == LibraryStorage.local &&
                         widget.controller.googleDriveConnected)
                       OutlinedButton.icon(
-                        onPressed: widget.controller.googleDriveBusy
+                        onPressed:
+                            widget.controller.isCopyingGeneration(item.localId)
                             ? null
                             : () => unawaited(
                                 widget.controller.copyLocalLibraryToGoogleDrive(
                                   generationIds: <String>{item.localId},
                                 ),
                               ),
-                        icon: const Icon(Icons.cloud_upload_outlined, size: 16),
-                        label: const Text('Copy to Drive'),
+                        icon:
+                            widget.controller.isCopyingGeneration(item.localId)
+                            ? const SizedBox.square(
+                                dimension: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.cloud_upload_outlined, size: 16),
+                        label: Text(
+                          widget.controller.isCopyingGeneration(item.localId)
+                              ? 'Copying…'
+                              : 'Copy to Drive',
+                        ),
                       ),
                     GenerationStatusButton(
                       controller: widget.controller,
