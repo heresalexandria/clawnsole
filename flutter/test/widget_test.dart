@@ -1252,6 +1252,10 @@ void main() {
     expect(compareSemanticVersions('v0.10.0', '0.9.0'), greaterThan(0));
     expect(compareSemanticVersions('0.4.0', '0.4.0'), 0);
     expect(compareSemanticVersions('not-a-version', '0.4.0'), isNull);
+    expect(isMajorVersionUpgrade('1.0.0', '0.10.1'), isTrue);
+    expect(isMajorVersionUpgrade('2.0.0', '1.9.9'), isTrue);
+    expect(isMajorVersionUpgrade('0.11.0', '0.10.1'), isFalse);
+    expect(isMajorVersionUpgrade('invalid', '0.10.1'), isFalse);
 
     final installable = UpdateCheckResult.fromShell(<String, Object?>{
       'ok': true,
@@ -1298,6 +1302,37 @@ void main() {
     expect(updater.forcedChecks, <bool>[false, false, true]);
     expect(status.updateAvailable, isTrue);
     expect(status.canSelfUpdate, isTrue);
+    expect(status.requiresMajorUpdate, isFalse);
+  });
+
+  test('only a detected installable major release requires updating', () async {
+    final majorStatus = UpdateStatus.forTesting(
+      _MemoryShellUpdater(
+        result: const <String, Object?>{
+          'ok': true,
+          'current': '0.10.1',
+          'latest': '1.0.0',
+          'available': true,
+          'installable': true,
+        },
+      ),
+    );
+    await majorStatus.refresh(force: false);
+    expect(majorStatus.requiresMajorUpdate, isTrue);
+
+    final offlineStatus = UpdateStatus.forTesting(
+      _MemoryShellUpdater(
+        result: const <String, Object?>{
+          'ok': false,
+          'current': '0.10.1',
+          'available': false,
+          'installable': false,
+          'error': 'The network is unavailable.',
+        },
+      ),
+    );
+    await offlineStatus.refresh(force: false);
+    expect(offlineStatus.requiresMajorUpdate, isFalse);
   });
 
   testWidgets('macOS checks on startup and every 24 hours', (tester) async {
@@ -1397,6 +1432,95 @@ void main() {
     expect(find.text('Update failed'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('major macOS update blocks the app until installation', (
+    tester,
+  ) async {
+    final updater = _MemoryShellUpdater(
+      result: const <String, Object?>{
+        'ok': true,
+        'current': '0.10.1',
+        'latest': '1.0.0',
+        'available': true,
+        'installable': true,
+      },
+    );
+    final status = UpdateStatus.forTesting(updater);
+    await status.refresh(force: false);
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        checkForUpdates: false,
+        updateStatus: status,
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Required update'), findsOneWidget);
+    expect(find.text('Clawnsole 1.0.0 is required.'), findsOneWidget);
+
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+    expect(find.text('Required update'), findsOneWidget);
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    await navigator.maybePop();
+    await tester.pump();
+    expect(find.text('Required update'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('required-major-update-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(updater.startCount, 1);
+    expect(find.text('Update failed'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pump();
+    expect(find.text('Required update'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('offline update detection never blocks the app', (tester) async {
+    final updater = _MemoryShellUpdater(
+      result: const <String, Object?>{
+        'ok': false,
+        'current': '0.10.1',
+        'available': false,
+        'installable': false,
+        'error': 'The network is unavailable.',
+      },
+    );
+    final status = UpdateStatus.forTesting(updater);
+    await status.refresh(force: false);
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        checkForUpdates: false,
+        updateStatus: status,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Required update'), findsNothing);
+    expect(find.text('Clawnsole'), findsWidgets);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

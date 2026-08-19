@@ -12,6 +12,7 @@ import '../ui/claw_mark.dart';
 import '../ui/library_screen.dart';
 import '../ui/panels.dart';
 import '../ui/providers_screen.dart';
+import '../ui/required_major_update_dialog.dart';
 import '../ui/settings_screen.dart';
 import '../ui/update_available_chip.dart';
 import '../ui/update_dialog.dart';
@@ -46,6 +47,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   StreamSubscription<ShellUpdateEvent>? _shellUpdates;
   Timer? _startupUpdateCheck;
   Timer? _periodicUpdateCheck;
+  bool _requiredUpdateDialogOpen = false;
   String? _lastNotice;
   ThemeMode _themeMode = ThemeMode.system;
 
@@ -54,6 +56,8 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     super.initState();
     controller = AppController(gateway: widget.gateway);
     _updateStatus = widget.updateStatus ?? UpdateStatus.instance;
+    _updateStatus.addListener(_handleRequiredUpdate);
+    _handleRequiredUpdate();
     unawaited(controller.initialize());
     // A shell-menu "Check for Updates…" downloads through the same pipe, so
     // surface its progress modal no matter where the update started.
@@ -79,8 +83,35 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     _startupUpdateCheck?.cancel();
     _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
+    _updateStatus.removeListener(_handleRequiredUpdate);
     controller.dispose();
     super.dispose();
+  }
+
+  void _handleRequiredUpdate() {
+    if (!_updateStatus.requiresMajorUpdate || _requiredUpdateDialogOpen) return;
+    _requiredUpdateDialogOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_updateStatus.requiresMajorUpdate) {
+        _requiredUpdateDialogOpen = false;
+        return;
+      }
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null) {
+        _requiredUpdateDialogOpen = false;
+        return;
+      }
+      unawaited(_showRequiredUpdate(navigator));
+    });
+  }
+
+  Future<void> _showRequiredUpdate(NavigatorState navigator) async {
+    try {
+      await showRequiredMajorUpdateDialog(navigator, status: _updateStatus);
+    } finally {
+      _requiredUpdateDialogOpen = false;
+      if (mounted) _handleRequiredUpdate();
+    }
   }
 
   @override

@@ -27,24 +27,23 @@ void reportUpdateFailure(String message) =>
     _updateEvents.add(ShellUpdateEvent(phase: 'error', message: message));
 
 /// Starts a verified in-place macOS update and opens the shared progress UI.
-Future<void> startAvailableUpdate(
+Future<bool> startAvailableUpdate(
   NavigatorState navigator, {
   ShellUpdater? updater,
 }) async {
   final active = updater ?? shellUpdater;
-  if (active == null) return;
+  if (active == null) return false;
   unawaited(showUpdateProgressDialog(navigator));
   try {
     final outcome = await active.start();
-    if (outcome['started'] != true) {
-      reportUpdateFailure(
-        outcome['error']?.toString() ??
-            'Clawnsole could not start this update.',
-      );
-    }
+    if (outcome['started'] == true) return true;
+    reportUpdateFailure(
+      outcome['error']?.toString() ?? 'Clawnsole could not start this update.',
+    );
   } on Object catch (error) {
     reportUpdateFailure(error.toString().replaceFirst('Exception: ', ''));
   }
+  return false;
 }
 
 /// Shows the running version, whether a newer release exists, and — where the
