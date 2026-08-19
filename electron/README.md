@@ -6,12 +6,6 @@ companion serves the Flutter bundle and owns local provider requests, persistenc
 and media on one private loopback origin. No root Next.js app or external runtime
 is required.
 
-Apple-silicon builds also bundle `clawnsole_apple_generator`. The companion
-starts it directly for Apple Local still images through Apple Image Playground.
-The provider is hidden when that helper or Apple Intelligence image creation is
-unavailable. Apple requires image creation to stay in the foreground, so the
-bundled helper shows a small progress window while a local job is running.
-
 ## Canonical commands
 
 From the repository root:

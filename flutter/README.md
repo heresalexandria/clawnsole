@@ -6,8 +6,6 @@ only desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
-- Apple Local still-image generation on physical iOS devices and Apple-silicon
-  Macs, without API keys
 - BFL FLUX 3, LTX 2.5/2.3, ArtCraft’s live video catalog, and selected
   Create-ready Atlas Cloud models
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
@@ -63,13 +61,6 @@ accepts extra `flutter run` arguments.
 Native builds call the selected provider directly. API keys and compact
 history are stored in `Clawnsole/clawnsole.json`, with retained media in the
 adjacent `assets/` directory. The OS app sandbox protects both from other apps.
-
-On physical iOS/iPadOS 18.4+ Apple Intelligence devices, Apple Local is the
-initial provider for a fresh install. It uses the system Image Playground model
-without an API key. On iOS 26+, Apple's Foundation Models framework also
-expands prompts for frame continuity; devices without an available language
-model use the built-in deterministic continuity template. The iOS simulator
-and unsupported devices hide Apple Local.
 
 ```bash
 flutter run -d ios
@@ -145,8 +136,7 @@ the saved key itself.
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
 - `build_macos` packages the Flutter web output and companion in Electron,
-  producing the standalone app, DMG, and updater ZIP. Apple-silicon builds also
-  compile and bundle the keyless Apple Local Swift helper; Intel builds omit it.
+  producing the standalone app, DMG, and updater ZIP.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.
