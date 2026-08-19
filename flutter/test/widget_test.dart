@@ -17,6 +17,7 @@ import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/shell_bridge.dart';
+import 'package:clawnsole/core/store_update.dart';
 import 'package:clawnsole/core/update_check.dart';
 import 'package:clawnsole/core/update_status.dart';
 import 'package:clawnsole/core/web_gateway.dart';
@@ -24,6 +25,8 @@ import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1189,6 +1192,67 @@ void main() {
     expect(offlineStatus.requiresMajorUpdate, isFalse);
   });
 
+  test('mobile major releases require a store update', () async {
+    final status = UpdateStatus.forMobileTesting(
+      () async => const UpdateCheckResult(
+        current: '0.10.1',
+        latest: '1.0.0',
+        available: true,
+      ),
+    );
+    await status.refresh(force: false);
+
+    expect(status.supportsAutomaticChecks, isTrue);
+    expect(status.canSelfUpdate, isFalse);
+    expect(status.requiresStoreUpdate, isTrue);
+    expect(status.requiresMajorUpdate, isTrue);
+
+    final sameMajor = UpdateStatus.forMobileTesting(
+      () async => const UpdateCheckResult(
+        current: '1.0.0',
+        latest: '1.1.0',
+        available: true,
+      ),
+    );
+    await sameMajor.refresh(force: false);
+    expect(sameMajor.requiresMajorUpdate, isFalse);
+
+    final offline = UpdateStatus.forMobileTesting(
+      () async => const UpdateCheckResult(
+        current: '0.10.1',
+        error: 'The network is unavailable.',
+      ),
+    );
+    await offline.refresh(force: false);
+    expect(offline.requiresMajorUpdate, isFalse);
+  });
+
+  test(
+    'mobile store links target the native app with an HTTPS fallback',
+    () async {
+      final ios = clawnsoleStoreDestination(TargetPlatform.iOS)!;
+      expect(ios.name, 'App Store');
+      expect(ios.appUri.toString(), contains('id6801916362'));
+      expect(ios.webUri.host, 'apps.apple.com');
+
+      final android = clawnsoleStoreDestination(TargetPlatform.android)!;
+      expect(android.name, 'Google Play');
+      expect(android.appUri.queryParameters['id'], 'app.clawnsole.clawnsole');
+      expect(android.webUri.host, 'play.google.com');
+
+      final attempts = <Uri>[];
+      final opened = await openClawnsoleStore(
+        TargetPlatform.android,
+        launch: (uri) async {
+          attempts.add(uri);
+          return attempts.length == 2;
+        },
+      );
+      expect(opened, isTrue);
+      expect(attempts, <Uri>[android.appUri, android.webUri]);
+    },
+  );
+
   testWidgets('macOS checks on startup and every 24 hours', (tester) async {
     final updater = _MemoryShellUpdater(
       result: const <String, Object?>{
@@ -1219,6 +1283,35 @@ void main() {
     await tester.pump(const Duration(hours: 24));
     await tester.pump();
     expect(updater.forcedChecks, <bool>[false, false]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('mobile checks on startup and every 24 hours', (tester) async {
+    var checks = 0;
+    final status = UpdateStatus.forMobileTesting(() async {
+      checks += 1;
+      return const UpdateCheckResult(current: '0.10.1', latest: '0.10.1');
+    });
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, updateStatus: status),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(checks, 1);
+
+    await tester.pump(const Duration(hours: 24));
+    await tester.pump();
+    expect(checks, 2);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -1341,6 +1434,66 @@ void main() {
     expect(find.text('Required update'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('major mobile update blocks the app and opens its store', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final status = UpdateStatus.forMobileTesting(
+      () async => const UpdateCheckResult(
+        current: '0.10.1',
+        latest: '1.0.0',
+        available: true,
+      ),
+    );
+    await status.refresh(force: false);
+    var storeOpenCount = 0;
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        checkForUpdates: false,
+        updateStatus: status,
+        storeUpdateOpener: (platform) async {
+          expect(platform, TargetPlatform.iOS);
+          storeOpenCount += 1;
+          return false;
+        },
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Required update'), findsOneWidget);
+    expect(find.text('Open App Store'), findsOneWidget);
+    expect(
+      find.text('Install the update from App Store, then reopen Clawnsole.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('required-major-update-button')));
+    await tester.pump();
+    expect(storeOpenCount, 1);
+    expect(find.text('Required update'), findsOneWidget);
+    expect(
+      find.byKey(const Key('required-major-update-store-error')),
+      findsOneWidget,
+    );
+
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+    expect(find.text('Required update'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('offline update detection never blocks the app', (tester) async {

@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_theme.dart';
 import '../core/app_version.dart';
 import '../core/shell_bridge.dart';
+import '../core/store_update.dart';
 import '../core/update_status.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
@@ -68,7 +70,7 @@ class _VersionDialogState extends State<_VersionDialog> {
     super.initState();
     // Opening the dialog is an explicit ask, so re-check rather than trusting
     // the launch-time result — except where the store owns updates, since a
-    // GitHub tag says nothing about what App Store review has published.
+    // GitHub tag says nothing about what the mobile store has published.
     if (!storeManagedPlatform) unawaited(_status.refresh());
   }
 
@@ -86,6 +88,8 @@ class _VersionDialogState extends State<_VersionDialog> {
       final checking = _status.checking && result == null;
       final available = _status.updateAvailable;
       final canSelfUpdate = _status.canSelfUpdate;
+      final storeName =
+          clawnsoleStoreDestination(defaultTargetPlatform)?.name ?? 'app store';
       return AlertDialog(
         title: Row(
           children: <Widget>[
@@ -106,9 +110,9 @@ class _VersionDialogState extends State<_VersionDialog> {
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
           child: storeManagedPlatform
-              ? const _DialogLine(
+              ? _DialogLine(
                   icon: Icons.storefront_rounded,
-                  text: 'Updates for this app arrive through the App Store.',
+                  text: 'Updates for this app arrive through $storeName.',
                 )
               : checking
               ? const Padding(
@@ -166,7 +170,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                         canSelfUpdate
                             ? 'Clawnsole verifies the download against the release checksums, installs it in place, and reopens itself.'
                             : storeManagedPlatform
-                            ? 'Updates for this app arrive through the App Store.'
+                            ? 'Updates for this app arrive through $storeName.'
                             : _status.shellDeclinesInstall
                             ? 'This development build updates from source with git rather than replacing itself.'
                             : 'The macOS app installs updates in place. This browser preview can open the release instead.',

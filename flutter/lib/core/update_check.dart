@@ -74,7 +74,7 @@ bool isMajorVersionUpgrade(String candidate, String current) {
 }
 
 /// Asks GitHub for the latest stable release. Used on surfaces without a
-/// shell updater; those can only open the release page, not install.
+/// shell updater, including iOS and Android compatibility checks.
 Future<UpdateCheckResult> checkLatestRelease({http.Client? client}) async {
   final http.Client active = client ?? http.Client();
   try {

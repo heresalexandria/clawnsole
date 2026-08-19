@@ -1,17 +1,27 @@
-# Electron desktop updates
+# App updates
 
-Packaged macOS builds check GitHub Releases at most once every 24 hours. A manual
-check is always available from **Clawnsole → Check for Updates…** or from the
-version chip beside the wordmark in the app's top bar. Development builds explain
-that they update through git instead of replacing themselves.
+Packaged macOS, iOS, and Android builds check GitHub Releases shortly after
+startup and every 24 hours while running. A manual macOS check is always
+available from **Clawnsole → Check for Updates…** or from the version chip
+beside the wordmark in the app's top bar. Development builds explain that they
+update through git instead of replacing themselves.
+
+When GitHub successfully reports a newer **major** version, Clawnsole blocks
+continued use until the update begins. macOS uses the verified in-place updater;
+iOS opens App Store product `6801916362`, and Android opens Google Play package
+`app.clawnsole.clawnsole`. The gate is never shown when the request fails, the
+version cannot be parsed, or the newest release remains in the current major
+version. Publish the GitHub release only after the corresponding mobile store
+versions are available so users are never sent to a pending review.
 
 ## In-app version chip and update dialog
 
-The Flutter top bar shows the running version. It checks once per launch
-(`lib/core/update_status.dart`) and marks the chip with a brass dot when a newer
-release exists; opening the dialog re-checks immediately. Store-managed
-platforms (iOS, Android) skip the check entirely because the App Store owns
-their updates, and `ClawnsoleApp(checkForUpdates: false)` disables it in tests.
+The Flutter top bar shows the running version. On macOS it checks once per
+launch (`lib/core/update_status.dart`) and replaces the version chip with an
+animated blue-purple **Update Available** chip when a newer installable release
+exists; opening the dialog re-checks immediately. iOS and Android perform the
+automatic compatibility check but leave installation to their stores.
+`ClawnsoleApp(checkForUpdates: false)` disables network checks in tests.
 
 Where the shell can install in place, the dialog's primary action is
 **Download and install <version>** — the same verified pipeline as the system
