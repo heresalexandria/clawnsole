@@ -28,6 +28,27 @@ test("check results summarize into a compact renderer payload", () => {
   assert.equal(updater.summarize(undefined).htmlUrl, updater.RELEASE_PAGE);
 });
 
+test("a throttled startup restores the last persisted update", () => {
+  const cached = updater.cachedResult("0.10.1", {
+    latestSeen: "0.11.0",
+    latestUrl: "https://github.com/heresalexandria/clawnsole/releases/tag/v0.11.0",
+  }, { isPackaged: true });
+  assert.deepEqual(cached, {
+    ok: true,
+    current: "0.10.1",
+    latest: "0.11.0",
+    available: true,
+    installable: true,
+    htmlUrl: "https://github.com/heresalexandria/clawnsole/releases/tag/v0.11.0",
+    skipped: true,
+  });
+
+  assert.equal(updater.cachedResult("0.11.0", {
+    latestSeen: "0.11.0",
+    latestHasAsset: true,
+  }, { isPackaged: true }).available, false);
+});
+
 test("semantic versions compare numerically", () => {
   assert.deepEqual(updater.parseVersion("v1.2.3"), [1, 2, 3]);
   assert.equal(updater.compareVersions("0.10.0", "0.9.0"), 1);

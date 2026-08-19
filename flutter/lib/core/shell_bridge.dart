@@ -37,7 +37,10 @@ class ShellUpdateEvent {
 /// null on plain web, iOS, and Android.
 abstract class ShellUpdater {
   /// Asks the shell for the latest-release summary.
-  Future<Map<String, Object?>> check();
+  ///
+  /// Background checks leave [force] false so the shell can honor its
+  /// persisted 24-hour throttle. User-requested checks set it to true.
+  Future<Map<String, Object?>> check({bool force = false});
 
   /// Starts the verified download-and-install flow. Progress arrives on
   /// [events]; on success the shell quits and reopens the app itself.
