@@ -268,11 +268,7 @@ class AppController extends ChangeNotifier {
       .fold(0, (total, item) => total + (item.cost ?? 0));
   double get spentUsd => generations.fold(
     0,
-    (total, item) =>
-        total +
-        (item.billingUnit == 'usd'
-            ? item.cost ?? 0
-            : creditsToUsd(item.cost ?? 0)),
+    (total, item) => total + (recordedRealizedCostUsd(item) ?? 0),
   );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
   bool canReuse(Generation item) => item.provider != 'apple-local';
@@ -1725,6 +1721,7 @@ class AppController extends ChangeNotifier {
       localId: _uid(),
       provider: selectedProviderId,
       model: selectedModel.id,
+      canonicalModelId: selectedModel.canonicalId,
       billingUnit: selectedProvider.isLocal
           ? 'local'
           : selectedProviderId == 'bfl' || selectedProviderId == 'artcraft'
@@ -1743,6 +1740,8 @@ class AppController extends ChangeNotifier {
       estimatedCreditsMin: estimate.providerUnitsMinimum ?? estimate.minimumUsd,
       estimatedCreditsMax: estimate.providerUnitsMaximum ?? estimate.maximumUsd,
       estimateBasis: estimate.basis,
+      quotedCostUsdMin: estimate.minimumUsd,
+      quotedCostUsdMax: estimate.maximumUsd,
     );
     final current = snapshot;
     if (current != null) {

@@ -490,6 +490,35 @@ void main() {
     expect(payload['omni_reference_task_type'], 'extend');
   });
 
+  test('Atlas records the exact accepted route quote on submission', () async {
+    final api = AtlasCloudApi(
+      client: MockClient((request) async {
+        final payload = jsonDecode(request.body) as Map<Object?, Object?>;
+        expect(payload['model'], 'kwaivgi/kling-v3.0-pro/text-to-video');
+        expect(payload['sound'], isTrue);
+        if (request.url.path == '/api/v1/model/calculate') {
+          return http.Response('{"code":200,"data":{"price":"0.714"}}', 200);
+        }
+        return http.Response('{"data":{"id":"kling-job"}}', 200);
+      }),
+    );
+
+    final receipt = await api.submit(
+      'secret',
+      'kwaivgi/kling-v3.0-pro/text-to-video',
+      <String, Object?>{
+        'prompt': 'A cinematic reveal',
+        'duration': 5,
+        'resolution': 'fhd',
+        'aspect_ratio': '16:9',
+        'generate_audio': true,
+      },
+    );
+
+    expect(receipt['cost'], .714);
+    expect(receipt['cost_unit'], 'usd');
+  });
+
   test(
     'Atlas uploads local video and audio references before generation',
     () async {
@@ -672,5 +701,143 @@ void main() {
 
     expect(estimate.minimumUsd, .41);
     expect(estimate.basis, 'atlas-live');
+  });
+
+  test('provider selector order and canonical routes are stable', () {
+    final names = videoProviders.map((provider) => provider.name).toList();
+    expect(names, List<String>.from(names)..sort());
+
+    expect(modelById('bfl', 'flux-3-video').canonicalId, 'flux-3');
+    expect(modelById('artcraft', 'flux_3').canonicalId, 'flux-3');
+    expect(
+      modelById('atlas', 'black-forest-labs/flux-3/text-to-video').canonicalId,
+      'flux-3',
+    );
+    expect(
+      modelById('artcraft', 'veo_3p1_fast').canonicalId,
+      modelById('atlas', 'google/veo3.1-fast/text-to-video').canonicalId,
+    );
+  });
+
+  test(
+    'Atlas uses each model family schema instead of one generic payload',
+    () {
+      final api = AtlasCloudApi();
+      const common = <String, Object?>{
+        'prompt': 'Animate this',
+        'duration': 6,
+        'resolution': 'fhd',
+        'aspect_ratio': '9:16',
+        'generate_audio': true,
+        'keyframes': <String>['first', 'last'],
+      };
+
+      final grok = api.generationPayload(
+        'xai/grok-imagine-video-v1.5/image-to-video',
+        common,
+      );
+      expect(grok['image_url'], 'first');
+      expect(grok['aspect_ratio'], '9:16');
+      expect(grok, isNot(contains('ratio')));
+
+      final wan = api.generationPayload(
+        'alibaba/wan-2.7/text-to-video',
+        common,
+      );
+      expect(wan['resolution'], '1080P');
+      expect(wan['ratio'], '9:16');
+      expect(wan, isNot(contains('generate_audio')));
+
+      final veo = api.generationPayload(
+        'google/veo3.1-fast/image-to-video',
+        common,
+      );
+      expect(veo['image'], 'first');
+      expect(veo['last_image'], 'last');
+
+      final kling = api.generationPayload(
+        'kwaivgi/kling-v3.0-pro/image-to-video',
+        common,
+      );
+      expect(kling['end_image'], 'last');
+      expect(kling['sound'], isTrue);
+      expect(kling, isNot(contains('aspect_ratio')));
+
+      final vidu = api.generationPayload(
+        'vidu/q3-turbo/text-to-video',
+        <String, Object?>{...common, 'resolution': 'sd'},
+      );
+      expect(vidu['resolution'], '540p');
+      expect(vidu['style'], 'general');
+
+      final pixverse = api.generationPayload(
+        'pixverse/v6/text-to-video',
+        common,
+      );
+      expect(pixverse['quality'], '1080p');
+      expect(pixverse['sound'], isTrue);
+      expect(pixverse, isNot(contains('resolution')));
+
+      final hailuo = api.generationPayload(
+        'minimax/hailuo-2.3/t2v-standard',
+        common,
+      );
+      expect(hailuo['enable_prompt_expansion'], isTrue);
+      expect(hailuo, isNot(contains('resolution')));
+
+      final flux = api.generationPayload(
+        'black-forest-labs/flux-3/image-to-video',
+        common,
+      );
+      expect(flux['image_url'], 'first');
+      expect(flux['resolution'], '1080p');
+    },
+  );
+
+  test('realized costs persist and compare with their route quote', () {
+    final now = DateTime.utc(2026, 8, 19);
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 10,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    );
+    final generation = Generation(
+      localId: 'cost-route',
+      provider: 'atlas',
+      model: 'black-forest-labs/flux-3/text-to-video',
+      canonicalModelId: 'flux-3',
+      billingUnit: 'usd',
+      status: 'Ready',
+      prompt: 'A route quote',
+      mode: VideoMode.t2v,
+      config: config,
+      createdAt: now,
+      updatedAt: now,
+      quotedCostUsdMin: 1.70,
+      quotedCostUsdMax: 1.70,
+      realizedCostUsd: 1.75,
+      realizedCostSource: 'provider-reported',
+      cost: 1.75,
+    );
+    final decoded = Generation.fromJson(generation.toJson());
+    expect(decoded.canonicalModelId, 'flux-3');
+    expect(decoded.realizedCostUsd, 1.75);
+    expect(decoded.realizedCostSource, 'provider-reported');
+
+    const route = ProviderModelPrice(
+      provider: 'atlas',
+      model: 'black-forest-labs/flux-3/text-to-video',
+      canonicalModelId: 'flux-3',
+      label: 'FLUX 3 · Text',
+      usdPerSecond: .17,
+      modes: <VideoMode>[VideoMode.t2v],
+    );
+    final observation = routeCostObservation(route, <Generation>[decoded]);
+    expect(observation?.realizedUsd, 1.75);
+    expect(observation?.quotedUsd, 1.70);
+    expect(observation?.variancePercent, closeTo(2.941, .001));
   });
 }

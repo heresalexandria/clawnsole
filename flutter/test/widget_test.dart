@@ -1295,8 +1295,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('MODEL & PROVIDER'), findsOneWidget);
     await tester.tap(find.byTooltip('Choose provider and model'));
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('provider-model-search')), findsOneWidget);
 
     const bflOption = ValueKey('provider-model-option-bfl-flux-3-video');
     const artcraftOption = ValueKey(
@@ -1324,6 +1326,143 @@ void main() {
     expect(controller.selectedModelId, 'seedance_2p0');
     controller.dispose();
   });
+
+  testWidgets('provider picker filters models and provider sections', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Choose provider and model'));
+    await tester.pumpAndSettle();
+    final search = find.byKey(const ValueKey('provider-model-search'));
+
+    await tester.enterText(search, 'Veo 3.1 Fast');
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('provider-model-heading-artcraft')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('provider-model-heading-atlas')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('provider-model-heading-bfl')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('provider-model-option-artcraft-veo_3p1_fast')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(search, 'LTX Studio');
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('provider-model-heading-ltx')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('provider-model-heading-artcraft')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('provider-model-option-ltx-ltx-2-3-fast')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(search, 'no such model');
+    await tester.pumpAndSettle();
+    expect(find.text('No models or providers match.'), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets(
+    'provider section headings stay dark and readable in both themes',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1000));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+
+      for (final brightness in Brightness.values) {
+        final controller = AppController(
+          gateway: _MemoryGateway(
+            const LocalSnapshot(
+              generations: <Generation>[],
+              preferences: AppPreferences(),
+              hasApiKey: false,
+              storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+            ),
+          ),
+        );
+        await controller.initialize();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: buildClawnsoleTheme(brightness),
+            home: Scaffold(body: CreateScreen(controller: controller)),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Choose provider and model'));
+        await tester.pumpAndSettle();
+
+        final backgroundFinder = find.byKey(
+          const ValueKey('provider-model-heading-background-bfl'),
+        );
+        final background = tester.widget<ColoredBox>(backgroundFinder).color;
+        final heading = tester.widget<Text>(find.text('BLACK FOREST LABS'));
+        final foreground = heading.style!.color!;
+        final surface = Theme.of(
+          tester.element(backgroundFinder),
+        ).colorScheme.surface;
+        final lighter =
+            foreground.computeLuminance() > background.computeLuminance()
+            ? foreground
+            : background;
+        final darker = identical(lighter, foreground) ? background : foreground;
+        final contrast =
+            (lighter.computeLuminance() + .05) /
+            (darker.computeLuminance() + .05);
+
+        expect(
+          background.computeLuminance(),
+          lessThan(surface.computeLuminance()),
+        );
+        expect(contrast, greaterThanOrEqualTo(4.5));
+        Navigator.of(tester.element(backgroundFinder)).pop();
+        await tester.pumpAndSettle();
+        controller.dispose();
+      }
+    },
+  );
 
   testWidgets(
     'Atlas reference models expose separate image video and audio inputs',

@@ -11,6 +11,7 @@ class VideoResolutionDefinition {
 class VideoModelDefinition {
   const VideoModelDefinition({
     required this.id,
+    this.canonicalModelId,
     required this.label,
     required this.description,
     required this.modes,
@@ -47,6 +48,7 @@ class VideoModelDefinition {
   });
 
   final String id;
+  final String? canonicalModelId;
   final String label;
   final String description;
   final List<VideoMode> modes;
@@ -78,6 +80,8 @@ class VideoModelDefinition {
   final bool supportsFrameRate;
   final GenerationOutputKind outputKind;
 
+  String get canonicalId => canonicalModelId ?? id;
+
   int maxReferences(MediaReferenceKind kind) => switch (kind) {
     MediaReferenceKind.image => maxImageReferences,
     MediaReferenceKind.video => maxVideoReferences,
@@ -105,6 +109,7 @@ class VideoModelDefinition {
   ProviderModelPrice price(String provider) => ProviderModelPrice(
     provider: provider,
     model: id,
+    canonicalModelId: canonicalId,
     label: label,
     usdPerSecond: usdPerSecond,
     referenceUsdPerSecond: referenceUsdPerSecond,
@@ -160,6 +165,7 @@ class VideoProviderDefinition {
 class _ArtCraftModel extends VideoModelDefinition {
   const _ArtCraftModel({
     required super.id,
+    super.canonicalModelId,
     required super.label,
     required super.description,
     required super.aspectRatios,
@@ -248,6 +254,7 @@ const bflProvider = VideoProviderDefinition(
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'flux-3-video',
+      canonicalModelId: 'flux-3',
       label: 'FLUX 3',
       description: 'Multimodal generation, continuation, and draft enhance.',
       modes: VideoMode.values,
@@ -332,6 +339,7 @@ const artCraftProvider = VideoProviderDefinition(
   models: <VideoModelDefinition>[
     _ArtCraftModel(
       id: 'seedance_2p0',
+      canonicalModelId: 'seedance-2.0',
       label: 'Seedance 2.0',
       description: 'Original Seedance with image, video, and audio references.',
       aspectRatios: _artCraftRatios,
@@ -349,6 +357,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'seedance_2p0_fast',
+      canonicalModelId: 'seedance-2.0-fast',
       label: 'Seedance 2.0 Fast',
       description: 'Faster original Seedance 2.0 generation.',
       aspectRatios: _artCraftRatios,
@@ -434,6 +443,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'seedance_2p0_mini',
+      canonicalModelId: 'seedance-2.0-mini',
       label: 'Seedance 2.0 Mini',
       description: 'Economical Volcengine Seedance with rich references.',
       aspectRatios: _artCraftRatios,
@@ -485,6 +495,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'seedance_2p5',
+      canonicalModelId: 'seedance-2.5',
       label: 'Seedance 2.5',
       description: 'Long-form Seedance with up to 30 reference images.',
       aspectRatios: _artCraftRatios,
@@ -549,6 +560,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'flux_3',
+      canonicalModelId: 'flux-3',
       label: 'FLUX 3',
       description: 'Multimodal FLUX video with synchronized audio.',
       aspectRatios: _artCraftAutoRatios,
@@ -561,6 +573,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'flux_3_draft',
+      canonicalModelId: 'flux-3-draft',
       label: 'FLUX 3 Draft',
       description: 'Fast, low-cost FLUX 3 drafts with audio.',
       aspectRatios: _artCraftAutoRatios,
@@ -573,6 +586,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'grok_imagine_video',
+      canonicalModelId: 'grok-imagine-video',
       label: 'Grok Imagine',
       description: 'Fast video generation with up to seven references.',
       aspectRatios: _artCraftGrokRatios,
@@ -586,6 +600,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'grok_imagine_video_1p5',
+      canonicalModelId: 'grok-imagine-video-1.5',
       label: 'Grok Imagine 1.5',
       description: 'Fast, high-quality image-to-video generation.',
       aspectRatios: _artCraftGrokRatios,
@@ -679,6 +694,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'veo_3p1',
+      canonicalModelId: 'veo-3.1',
       label: 'Veo 3.1',
       description: 'Premium Veo with references, audio, and 4K output.',
       aspectRatios: _artCraftVeoRatios,
@@ -693,6 +709,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'veo_3p1_fast',
+      canonicalModelId: 'veo-3.1-fast',
       label: 'Veo 3.1 Fast',
       description: 'Faster Veo 3.1 with references, audio, and 4K output.',
       aspectRatios: _artCraftVeoRatios,
@@ -707,6 +724,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'veo_3p1_lite',
+      canonicalModelId: 'veo-3.1-lite',
       label: 'Veo 3.1 Lite',
       description: 'Economical Veo with first and last frames plus audio.',
       aspectRatios: _artCraftVeoRatios,
@@ -719,6 +737,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'vidu_q3',
+      canonicalModelId: 'vidu-q3',
       label: 'Vidu Q3',
       description: 'Vidu generation with references and synchronized audio.',
       aspectRatios: _artCraftViduRatios,
@@ -732,6 +751,7 @@ const artCraftProvider = VideoProviderDefinition(
     ),
     _ArtCraftModel(
       id: 'vidu_q3_turbo',
+      canonicalModelId: 'vidu-q3-turbo',
       label: 'Vidu Q3 Turbo',
       description:
           'Fast Vidu generation with first and last frames plus audio.',
@@ -746,6 +766,32 @@ const artCraftProvider = VideoProviderDefinition(
   ],
 );
 
+class _AtlasRouteModel extends VideoModelDefinition {
+  const _AtlasRouteModel({
+    required super.id,
+    required super.canonicalModelId,
+    required super.label,
+    required super.description,
+    required super.aspectRatios,
+    required super.resolutions,
+    required super.minDuration,
+    required super.maxDuration,
+    required super.usdPerSecond,
+    super.durationStep = 1,
+    super.supportsAudio = true,
+    bool imageRoute = false,
+    bool supportsEndFrame = false,
+  }) : super(
+         modes: imageRoute
+             ? const <VideoMode>[VideoMode.i2v]
+             : const <VideoMode>[VideoMode.t2v],
+         maxKeyframes: imageRoute ? (supportsEndFrame ? 2 : 1) : 0,
+         referenceUsdPerSecond: imageRoute ? usdPerSecond : null,
+         supportsStartFrame: imageRoute,
+         supportsEndFrame: imageRoute && supportsEndFrame,
+       );
+}
+
 const atlasProvider = VideoProviderDefinition(
   id: 'atlas',
   name: 'Atlas Cloud',
@@ -759,6 +805,7 @@ const atlasProvider = VideoProviderDefinition(
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/text-to-video',
+      canonicalModelId: 'seedance-2.5',
       label: 'Seedance 2.5 · Text',
       description: 'Latest Seedance text-to-video with native audio.',
       modes: <VideoMode>[VideoMode.t2v],
@@ -773,6 +820,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/image-to-video',
+      canonicalModelId: 'seedance-2.5',
       label: 'Seedance 2.5 · Frames',
       description: 'First/last-frame guided Seedance generation.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -790,6 +838,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/reference-to-video',
+      canonicalModelId: 'seedance-2.5',
       label: 'Seedance 2.5 · References',
       description: 'Multimodal generation from images, videos, and audio.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -817,6 +866,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0/text-to-video',
+      canonicalModelId: 'seedance-2.0',
       label: 'Seedance 2.0 · Text',
       description: 'Full-quality Seedance text-to-video with native audio.',
       modes: <VideoMode>[VideoMode.t2v],
@@ -834,6 +884,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0/image-to-video',
+      canonicalModelId: 'seedance-2.0',
       label: 'Seedance 2.0 · Frames',
       description: 'Full-quality first/last-frame Seedance generation.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -854,6 +905,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0/reference-to-video',
+      canonicalModelId: 'seedance-2.0',
       label: 'Seedance 2.0 · References',
       description: 'Multimodal generation from images, videos, and audio.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -880,6 +932,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-fast/text-to-video',
+      canonicalModelId: 'seedance-2.0-fast',
       label: 'Seedance 2.0 Fast · Text',
       description: 'Faster Seedance text-to-video with native audio.',
       modes: <VideoMode>[VideoMode.t2v],
@@ -894,6 +947,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-fast/image-to-video',
+      canonicalModelId: 'seedance-2.0-fast',
       label: 'Seedance 2.0 Fast · Frames',
       description: 'Faster first/last-frame Seedance generation.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -911,6 +965,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-fast/reference-to-video',
+      canonicalModelId: 'seedance-2.0-fast',
       label: 'Seedance 2.0 Fast · References',
       description:
           'Faster multimodal generation from images, video, and audio.',
@@ -935,6 +990,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-mini/text-to-video',
+      canonicalModelId: 'seedance-2.0-mini',
       label: 'Seedance 2.0 Mini · Text',
       description: 'Low-cost Seedance text-to-video.',
       modes: <VideoMode>[VideoMode.t2v],
@@ -949,6 +1005,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-mini/image-to-video',
+      canonicalModelId: 'seedance-2.0-mini',
       label: 'Seedance 2.0 Mini · Frames',
       description: 'Low-cost first/last-frame generation.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -966,6 +1023,7 @@ const atlasProvider = VideoProviderDefinition(
     ),
     VideoModelDefinition(
       id: 'bytedance/seedance-2.0-mini/reference-to-video',
+      canonicalModelId: 'seedance-2.0-mini',
       label: 'Seedance 2.0 Mini · References',
       description: 'Low-cost multi-reference generation.',
       modes: <VideoMode>[VideoMode.i2v],
@@ -987,14 +1045,207 @@ const atlasProvider = VideoProviderDefinition(
           'Name inputs as image 1, video 1, or audio 1 in the prompt.',
       supportsAutoDuration: true,
     ),
+    _AtlasRouteModel(
+      id: 'xai/grok-imagine-video-v1.5/text-to-video',
+      canonicalModelId: 'grok-imagine-video-1.5',
+      label: 'Grok Imagine 1.5 · Text',
+      description: 'xAI text-to-video with native synchronized audio.',
+      aspectRatios: _artCraftCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd],
+      minDuration: 1,
+      maxDuration: 15,
+      usdPerSecond: .08,
+    ),
+    _AtlasRouteModel(
+      id: 'xai/grok-imagine-video-v1.5/image-to-video',
+      canonicalModelId: 'grok-imagine-video-1.5',
+      label: 'Grok Imagine 1.5 · Image',
+      description: 'xAI image-to-video with native synchronized audio.',
+      aspectRatios: _artCraftCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd],
+      minDuration: 1,
+      maxDuration: 15,
+      usdPerSecond: .08,
+      imageRoute: true,
+    ),
+    _AtlasRouteModel(
+      id: 'google/veo3.1-fast/text-to-video',
+      canonicalModelId: 'veo-3.1-fast',
+      label: 'Veo 3.1 Fast · Text',
+      description: 'Fast Veo text generation with optional native audio.',
+      aspectRatios: _ltxRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd, _uhd],
+      minDuration: 4,
+      maxDuration: 8,
+      durationStep: 2,
+      usdPerSecond: .08,
+    ),
+    _AtlasRouteModel(
+      id: 'google/veo3.1-fast/image-to-video',
+      canonicalModelId: 'veo-3.1-fast',
+      label: 'Veo 3.1 Fast · Frames',
+      description: 'Fast Veo generation from first and last frames.',
+      aspectRatios: _ltxRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd, _uhd],
+      minDuration: 4,
+      maxDuration: 8,
+      durationStep: 2,
+      usdPerSecond: .08,
+      imageRoute: true,
+      supportsEndFrame: true,
+    ),
+    _AtlasRouteModel(
+      id: 'alibaba/wan-2.7/text-to-video',
+      canonicalModelId: 'wan-2.7',
+      label: 'Wan 2.7 · Text',
+      description: 'Wan text generation with multi-shot narrative support.',
+      aspectRatios: _artCraftCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd, _qhd],
+      minDuration: 2,
+      maxDuration: 15,
+      usdPerSecond: .10,
+    ),
+    _AtlasRouteModel(
+      id: 'alibaba/wan-2.7/image-to-video',
+      canonicalModelId: 'wan-2.7',
+      label: 'Wan 2.7 · Frames',
+      description: 'Wan generation from first and optional last frames.',
+      aspectRatios: _artCraftCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 2,
+      maxDuration: 15,
+      usdPerSecond: .10,
+      imageRoute: true,
+      supportsEndFrame: true,
+    ),
+    _AtlasRouteModel(
+      id: 'kwaivgi/kling-v3.0-pro/text-to-video',
+      canonicalModelId: 'kling-3.0-pro',
+      label: 'Kling 3.0 Pro · Text',
+      description: 'Kling Pro text generation with optional sound.',
+      aspectRatios: _artCraftKlingRatios,
+      resolutions: <VideoResolutionDefinition>[_fhd],
+      minDuration: 3,
+      maxDuration: 15,
+      usdPerSecond: .095,
+    ),
+    _AtlasRouteModel(
+      id: 'kwaivgi/kling-v3.0-pro/image-to-video',
+      canonicalModelId: 'kling-3.0-pro',
+      label: 'Kling 3.0 Pro · Frames',
+      description: 'Kling Pro generation from first and last frames.',
+      aspectRatios: _artCraftKlingRatios,
+      resolutions: <VideoResolutionDefinition>[_fhd, _qhd],
+      minDuration: 3,
+      maxDuration: 15,
+      usdPerSecond: .095,
+      imageRoute: true,
+      supportsEndFrame: true,
+    ),
+    _AtlasRouteModel(
+      id: 'vidu/q3-turbo/text-to-video',
+      canonicalModelId: 'vidu-q3-turbo',
+      label: 'Vidu Q3 Turbo · Text',
+      description: 'Fast Vidu text generation with optional audio.',
+      aspectRatios: _artCraftViduRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd, _qhd],
+      minDuration: 1,
+      maxDuration: 16,
+      usdPerSecond: .034,
+    ),
+    _AtlasRouteModel(
+      id: 'vidu/q3-turbo/image-to-video',
+      canonicalModelId: 'vidu-q3-turbo',
+      label: 'Vidu Q3 Turbo · Image',
+      description: 'Fast Vidu generation from a starting image.',
+      aspectRatios: _artCraftViduRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd, _qhd],
+      minDuration: 1,
+      maxDuration: 16,
+      usdPerSecond: .034,
+      imageRoute: true,
+    ),
+    _AtlasRouteModel(
+      id: 'pixverse/v6/text-to-video',
+      canonicalModelId: 'pixverse-v6',
+      label: 'PixVerse V6 · Text',
+      description: 'PixVerse text generation with optional sound.',
+      aspectRatios: _artCraftRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 1,
+      maxDuration: 15,
+      usdPerSecond: .025,
+    ),
+    _AtlasRouteModel(
+      id: 'pixverse/v6/image-to-video',
+      canonicalModelId: 'pixverse-v6',
+      label: 'PixVerse V6 · Image',
+      description: 'PixVerse generation from a starting image.',
+      aspectRatios: _artCraftRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 1,
+      maxDuration: 15,
+      usdPerSecond: .025,
+      imageRoute: true,
+    ),
+    _AtlasRouteModel(
+      id: 'minimax/hailuo-2.3/t2v-standard',
+      canonicalModelId: 'hailuo-2.3-standard',
+      label: 'Hailuo 2.3 Standard · Text',
+      description: 'Cinematic MiniMax text-to-video generation.',
+      aspectRatios: <String>['auto'],
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 6,
+      maxDuration: 10,
+      durationStep: 4,
+      usdPerSecond: .28,
+      supportsAudio: false,
+    ),
+    _AtlasRouteModel(
+      id: 'minimax/hailuo-2.3/i2v-standard',
+      canonicalModelId: 'hailuo-2.3-standard',
+      label: 'Hailuo 2.3 Standard · Image',
+      description: 'Cinematic MiniMax generation from a starting image.',
+      aspectRatios: <String>['auto'],
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 6,
+      maxDuration: 10,
+      durationStep: 4,
+      usdPerSecond: .28,
+      supportsAudio: false,
+      imageRoute: true,
+    ),
+    _AtlasRouteModel(
+      id: 'black-forest-labs/flux-3/text-to-video',
+      canonicalModelId: 'flux-3',
+      label: 'FLUX 3 · Text',
+      description: 'FLUX 3 text-to-video with synchronized audio.',
+      aspectRatios: _wideRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 5,
+      maxDuration: 20,
+      usdPerSecond: .17,
+    ),
+    _AtlasRouteModel(
+      id: 'black-forest-labs/flux-3/image-to-video',
+      canonicalModelId: 'flux-3',
+      label: 'FLUX 3 · Image',
+      description: 'FLUX 3 generation from a starting image.',
+      aspectRatios: _wideRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 5,
+      maxDuration: 20,
+      usdPerSecond: .17,
+      imageRoute: true,
+    ),
   ],
 );
 
 const videoProviders = <VideoProviderDefinition>[
-  bflProvider,
-  ltxProvider,
   artCraftProvider,
   atlasProvider,
+  bflProvider,
+  ltxProvider,
 ];
 
 VideoProviderDefinition providerById(String id) => videoProviders.firstWhere(
@@ -1013,12 +1264,23 @@ VideoModelDefinition modelById(String providerId, String modelId) {
   );
 }
 
+String canonicalModelIdFor(String providerId, String modelId) {
+  final baseModelId = modelId.split(':').first;
+  final provider = providerById(providerId);
+  return provider.models
+          .where((model) => model.id == baseModelId)
+          .firstOrNull
+          ?.canonicalId ??
+      baseModelId;
+}
+
 List<ProviderModelPrice> publishedProviderPrices(String providerId) {
   if (providerId == 'bfl') {
     return const <ProviderModelPrice>[
       ProviderModelPrice(
         provider: 'bfl',
         model: 'flux-3-video:draft',
+        canonicalModelId: 'flux-3',
         label: 'FLUX 3 · Draft HD',
         usdPerSecond: .06,
         referenceUsdPerSecond: .06,
@@ -1030,6 +1292,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
       ProviderModelPrice(
         provider: 'bfl',
         model: 'flux-3-video:hd',
+        canonicalModelId: 'flux-3',
         label: 'FLUX 3 · HD',
         usdPerSecond: .17,
         referenceUsdPerSecond: .17,
@@ -1041,6 +1304,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
       ProviderModelPrice(
         provider: 'bfl',
         model: 'flux-3-video:fhd',
+        canonicalModelId: 'flux-3',
         label: 'FLUX 3 · Full HD',
         usdPerSecond: .29,
         referenceUsdPerSecond: .29,
@@ -1061,6 +1325,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         (entry) => ProviderModelPrice(
           provider: 'ltx',
           model: '${model.id}:${entry.key}',
+          canonicalModelId: model.canonicalId,
           label: '${model.label} · ${entry.key}',
           usdPerSecond: entry.value,
           referenceUsdPerSecond: entry.value,

@@ -162,29 +162,26 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     child: PopupMenuButton<String>(
       tooltip: 'Choose provider and model',
       onSelected: (value) => unawaited(_select(value)),
-      constraints: const BoxConstraints(minWidth: 320, maxWidth: 380),
-      itemBuilder: (context) => controller.providers
-          .map<PopupMenuEntry<String>>(
-            (provider) => PopupMenuItem<String>(
-              enabled: false,
-              padding: EdgeInsets.zero,
-              child: _ProviderMenuSection(
-                key: ValueKey('provider-model-section-${provider.id}'),
-                provider: provider,
-                initiallyExpanded: !_collapsedProviders.contains(provider.id),
-                selectedProviderId: controller.selectedProviderId,
-                selectedModelId: controller.selectedModel.id,
-                onExpandedChanged: (expanded) {
-                  if (expanded) {
-                    _collapsedProviders.remove(provider.id);
-                  } else {
-                    _collapsedProviders.add(provider.id);
-                  }
-                },
-              ),
-            ),
-          )
-          .toList(),
+      constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: _ProviderSearchMenu(
+            providers: controller.providers,
+            collapsedProviders: _collapsedProviders,
+            selectedProviderId: controller.selectedProviderId,
+            selectedModelId: controller.selectedModel.id,
+            onExpandedChanged: (providerId, expanded) {
+              if (expanded) {
+                _collapsedProviders.remove(providerId);
+              } else {
+                _collapsedProviders.add(providerId);
+              }
+            },
+          ),
+        ),
+      ],
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -212,7 +209,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'PROVIDER',
+                'MODEL & PROVIDER',
                 style: TextStyle(
                   color: context.tokens.onPanelMuted,
                   fontSize: 8.5,
@@ -250,9 +247,146 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
   );
 }
 
+class _ProviderSearchMenu extends StatefulWidget {
+  const _ProviderSearchMenu({
+    required this.providers,
+    required this.collapsedProviders,
+    required this.selectedProviderId,
+    required this.selectedModelId,
+    required this.onExpandedChanged,
+  });
+
+  final List<VideoProviderDefinition> providers;
+  final Set<String> collapsedProviders;
+  final String selectedProviderId;
+  final String selectedModelId;
+  final void Function(String providerId, bool expanded) onExpandedChanged;
+
+  @override
+  State<_ProviderSearchMenu> createState() => _ProviderSearchMenuState();
+}
+
+class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    final terms = query.split(RegExp(r'\s+')).where((term) => term.isNotEmpty);
+    bool containsAll(String value) {
+      final haystack = value.toLowerCase();
+      return terms.every(haystack.contains);
+    }
+
+    final matches =
+        <
+          ({
+            VideoProviderDefinition provider,
+            List<VideoModelDefinition> models,
+          })
+        >[];
+    for (final provider in widget.providers) {
+      final providerIdentity =
+          '${provider.name} ${provider.shortName} ${provider.id}';
+      final providerMatches = query.isNotEmpty && containsAll(providerIdentity);
+      final models = query.isEmpty || providerMatches
+          ? provider.models
+          : provider.models
+                .where(
+                  (model) => containsAll(
+                    '$providerIdentity ${model.label} ${model.id} ${model.canonicalId}',
+                  ),
+                )
+                .toList();
+      if (models.isNotEmpty) matches.add((provider: provider, models: models));
+    }
+    final menuHeight = (MediaQuery.sizeOf(context).height * .68)
+        .clamp(320.0, 560.0)
+        .toDouble();
+    return SizedBox(
+      width: 400,
+      height: menuHeight,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            child: TextField(
+              key: const ValueKey('provider-model-search'),
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Search models or providers',
+                prefixIcon: const Icon(Icons.search_rounded, size: 19),
+                suffixIcon: query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _search.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                      ),
+                isDense: true,
+              ),
+            ),
+          ),
+          Divider(height: 1, color: context.colors.outlineVariant),
+          Expanded(
+            child: matches.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'No models or providers match.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView(
+                    padding: EdgeInsets.zero,
+                    children: matches
+                        .map(
+                          (match) => _ProviderMenuSection(
+                            key: ValueKey(
+                              'provider-model-section-${match.provider.id}',
+                            ),
+                            provider: match.provider,
+                            models: match.models,
+                            forceExpanded: query.isNotEmpty,
+                            initiallyExpanded: !widget.collapsedProviders
+                                .contains(match.provider.id),
+                            selectedProviderId: widget.selectedProviderId,
+                            selectedModelId: widget.selectedModelId,
+                            onExpandedChanged: (expanded) => widget
+                                .onExpandedChanged(match.provider.id, expanded),
+                          ),
+                        )
+                        .toList(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ProviderMenuSection extends StatefulWidget {
   const _ProviderMenuSection({
     required this.provider,
+    required this.models,
+    required this.forceExpanded,
     required this.initiallyExpanded,
     required this.selectedProviderId,
     required this.selectedModelId,
@@ -261,6 +395,8 @@ class _ProviderMenuSection extends StatefulWidget {
   });
 
   final VideoProviderDefinition provider;
+  final List<VideoModelDefinition> models;
+  final bool forceExpanded;
   final bool initiallyExpanded;
   final String selectedProviderId;
   final String selectedModelId;
@@ -279,103 +415,115 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      InkWell(
-        key: ValueKey('provider-model-heading-${widget.provider.id}'),
-        onTap: _toggle,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  widget.provider.name.toUpperCase(),
-                  style: TextStyle(
-                    color: context.colors.onSurface,
-                    fontSize: 10,
-                    letterSpacing: 1.1,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              Text(
-                '${widget.provider.models.length}',
-                style: TextStyle(
-                  color: context.colors.onSurfaceVariant,
-                  fontSize: 10,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Icon(
-                _expanded
-                    ? Icons.keyboard_arrow_up_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 18,
-                color: context.colors.onSurfaceVariant,
-              ),
-            ],
+  Widget build(BuildContext context) {
+    final expanded = widget.forceExpanded || _expanded;
+    final headingBackground = Theme.of(context).brightness == Brightness.dark
+        ? context.colors.surfaceContainerLowest
+        : context.colors.surfaceContainerHighest;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ColoredBox(
+          key: ValueKey(
+            'provider-model-heading-background-${widget.provider.id}',
           ),
-        ),
-      ),
-      AnimatedSize(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOut,
-        alignment: Alignment.topCenter,
-        child: _expanded
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: widget.provider.models.map((model) {
-                  final selected =
-                      widget.provider.id == widget.selectedProviderId &&
-                      model.id == widget.selectedModelId;
-                  return InkWell(
-                    key: ValueKey(
-                      'provider-model-option-${widget.provider.id}-${model.id}',
-                    ),
-                    onTap: () => Navigator.of(
-                      context,
-                    ).pop('${widget.provider.id}|${model.id}'),
-                    child: Container(
-                      color: selected
-                          ? context.colors.primaryContainer.withValues(
-                              alpha: .5,
-                            )
-                          : null,
-                      padding: const EdgeInsets.fromLTRB(24, 10, 14, 10),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              model.label,
-                              style: TextStyle(
-                                color: context.colors.onSurface,
-                                fontSize: 13,
-                                fontWeight: selected
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          if (selected)
-                            Icon(
-                              Icons.check_rounded,
-                              size: 17,
-                              color: context.colors.primary,
-                            ),
-                        ],
+          color: headingBackground,
+          child: InkWell(
+            key: ValueKey('provider-model-heading-${widget.provider.id}'),
+            onTap: widget.forceExpanded ? null : _toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      widget.provider.name.toUpperCase(),
+                      style: TextStyle(
+                        color: context.colors.onSurface,
+                        fontSize: 10,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                  );
-                }).toList(),
-              )
-            : const SizedBox.shrink(),
-      ),
-      Divider(height: 1, color: context.colors.outlineVariant),
-    ],
-  );
+                  ),
+                  Text(
+                    '${widget.models.length}',
+                    style: TextStyle(
+                      color: context.colors.onSurface.withValues(alpha: .72),
+                      fontSize: 10,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Icon(
+                    expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: context.colors.onSurface.withValues(alpha: .72),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          alignment: Alignment.topCenter,
+          child: expanded
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: widget.models.map((model) {
+                    final selected =
+                        widget.provider.id == widget.selectedProviderId &&
+                        model.id == widget.selectedModelId;
+                    return InkWell(
+                      key: ValueKey(
+                        'provider-model-option-${widget.provider.id}-${model.id}',
+                      ),
+                      onTap: () => Navigator.of(
+                        context,
+                      ).pop('${widget.provider.id}|${model.id}'),
+                      child: Container(
+                        color: selected
+                            ? context.colors.primaryContainer.withValues(
+                                alpha: .5,
+                              )
+                            : null,
+                        padding: const EdgeInsets.fromLTRB(24, 10, 14, 10),
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                model.label,
+                                style: TextStyle(
+                                  color: context.colors.onSurface,
+                                  fontSize: 13,
+                                  fontWeight: selected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                            if (selected)
+                              Icon(
+                                Icons.check_rounded,
+                                size: 17,
+                                color: context.colors.primary,
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                )
+              : const SizedBox.shrink(),
+        ),
+        Divider(height: 1, color: context.colors.outlineVariant),
+      ],
+    );
+  }
 }
 
 class _Composer extends StatefulWidget {

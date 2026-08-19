@@ -37,7 +37,7 @@ media each have independent local folder hierarchies and reusable tags.
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
 - Live polling, manual status refresh, surfaced provider errors, and progress
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
-- Per-generation estimated and provider-reported cost history
+- Per-generation quoted and realized USD cost history with provenance
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - Nested project folders, multi-tag organization, and combined prompt/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
@@ -47,7 +47,8 @@ media each have independent local folder hierarchies and reusable tags.
 - Uncapped compact history with retained media files and granular clear controls
 - Local API-key setup with no database, `localStorage`, or IndexedDB history
 - A Providers desk for per-provider keys, console/docs links, live Atlas model
-  discovery, and 10/15/20/30-second USD comparisons with reference costs
+  discovery, canonical cross-provider model matching, observed quote variance,
+  and route-aware 10/15/20/30-second USD comparisons
 
 ## One product, four targets
 
@@ -147,4 +148,5 @@ Provider contracts and fallback rates follow the official
 [LTX documentation](https://docs.ltx.io), and
 [Atlas Cloud video documentation](https://www.atlascloud.ai/docs/models/video).
 Atlas models are refreshed from its public catalog and Create-ready costs use
-its no-charge request preflight when available.
+schema-aware, no-charge request preflight when available. Equivalent model
+routes retain provider-specific IDs while sharing a canonical comparison ID.

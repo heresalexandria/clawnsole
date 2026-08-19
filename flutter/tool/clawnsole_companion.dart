@@ -932,6 +932,9 @@ class CompanionApp {
     );
     generation = generation.copyWith(
       status: 'submitting',
+      canonicalModelId:
+          generation.canonicalModelId ??
+          canonicalModelIdFor(provider, generation.model),
       estimatedCreditsMin:
           generation.estimatedCreditsMin ??
           estimate.providerUnitsMinimum ??
@@ -941,6 +944,8 @@ class CompanionApp {
           estimate.providerUnitsMaximum ??
           estimate.maximumUsd,
       estimateBasis: generation.estimateBasis ?? estimate.basis,
+      quotedCostUsdMin: generation.quotedCostUsdMin ?? estimate.minimumUsd,
+      quotedCostUsdMax: generation.quotedCostUsdMax ?? estimate.maximumUsd,
       updatedAt: DateTime.now().toUtc(),
     );
     await _upsert(generation);
@@ -964,8 +969,13 @@ class CompanionApp {
           status: 502,
         );
       }
-      final cost = (receipt['cost'] as num?)?.toDouble();
       final liveAfter = await _balanceSafely(provider, key);
+      final realized = resolveProviderCost(
+        generation,
+        receipt,
+        balanceAfter: liveAfter,
+      );
+      final cost = realized.providerUnits;
       generation = generation.copyWith(
         requestId: requestId,
         pollingUrl: pollingUrl,
@@ -973,6 +983,8 @@ class CompanionApp {
         clearProgress: true,
         cost: cost,
         clearCost: cost == null,
+        realizedCostUsd: realized.usd,
+        realizedCostSource: realized.source,
         creditsBefore: creditsBefore,
         creditsAfter:
             liveAfter ??
@@ -1063,6 +1075,16 @@ class CompanionApp {
         }
       }
       final failed = isGenerationFailureStatus(status);
+      final terminal = status == 'Ready' || failed;
+      final balanceAfter = terminal
+          ? await _balanceSafely(current.provider, key)
+          : null;
+      final realized = resolveProviderCost(
+        current,
+        payload,
+        balanceAfter: balanceAfter,
+        allowDeterministicQuote: status == 'Ready',
+      );
       next = current.copyWith(
         status: status,
         progress: status == 'Ready'
@@ -1079,6 +1101,10 @@ class CompanionApp {
             : null,
         error: failureMessage,
         clearError: !failed,
+        cost: realized.providerUnits,
+        realizedCostUsd: realized.usd,
+        realizedCostSource: realized.source,
+        creditsAfter: balanceAfter,
         lastCheckedAt: checkedAt,
         statusCheckCount: current.statusCheckCount + 1,
         consecutiveCheckFailures: 0,
