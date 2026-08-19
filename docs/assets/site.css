@@ -552,6 +552,12 @@ nav a:focus-visible,
   justify-items: start;
 }
 
+.download-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .final-cta p:last-child {
   margin: 14px 0 0;
   color: var(--muted);

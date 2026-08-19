@@ -8,6 +8,8 @@
 
 <p align="center">
   <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"><strong>Download the latest macOS build (Apple silicon)</strong></a>
+  ·
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-windows-x64.zip"><strong>Download the latest Windows build (x64)</strong></a>
 </p>
 
 <p align="center">
@@ -54,11 +56,11 @@ media each have independent local folder hierarchies and reusable tags.
   discovery, canonical cross-provider model matching, observed quote variance,
   and route-aware 10/15/20/30-second USD comparisons
 
-## One product, four targets
+## One product, five targets
 
-Flutter owns all product behavior. Electron is only the macOS lifecycle and
-self-update shell around Flutter's web build and local Dart companion. The old
-root Next.js implementation has been removed.
+Flutter owns all product behavior, including the native Windows app. Electron
+is only the macOS lifecycle and self-update shell around Flutter's web build and
+local Dart companion. The old root Next.js implementation has been removed.
 
 ```bash
 # from the repository root
@@ -66,6 +68,7 @@ root Next.js implementation has been removed.
 ./flutter/scripts/start_ios
 ./flutter/scripts/start_android
 ./flutter/scripts/start_macos
+./flutter/scripts/start_windows
 
 # isolated backend-free browser target
 CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
@@ -79,10 +82,13 @@ The matching deployable builds are:
 ./flutter/scripts/build_ios
 ./flutter/scripts/build_android
 ./flutter/scripts/build_macos
+./flutter/scripts/build_windows
 ./flutter/scripts/build_github_pages
 ```
 
 See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/README.md).
+Windows scripts run on Windows with Visual Studio and its Desktop development
+with C++ workload installed.
 
 ## Persistence
 
@@ -121,12 +127,14 @@ See [standalone web and Google Drive setup](docs/google-drive-web.md).
 - `flutter/lib/ui/`: shared responsive screens and widgets
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
 - `electron/`: macOS shell, packaging, checksum-verified GitHub updater
-- `.github/workflows/`: PR checks and signed macOS releases
+- `flutter/windows/`: native Windows runner and product metadata
+- `.github/workflows/`: PR checks plus parallel macOS and Windows releases
 
 ## Releases and desktop updates
 
 Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
-drives the signed and notarized macOS release workflow. A manual dispatch can
+drives parallel macOS and Windows release builds. macOS is signed and notarized;
+Windows is currently distributed as an unsigned x64 ZIP. A manual dispatch can
 cut a release without a PR or retry the current synchronized version after a
 recoverable failure. iOS builds are intentionally local-only through
 `./flutter/scripts/build_ios`; GitHub never receives the iOS signing material or
@@ -135,7 +143,8 @@ an IPA.
 Packaged Electron builds check GitHub at most once per day and expose
 **Clawnsole → Check for Updates…**. An accepted update downloads the architecture
 matched ZIP, verifies `SHA256SUMS.txt`, replaces the installed app with rollback,
-and reopens it. iOS remains under normal App Store distribution semantics.
+and reopens it. Windows update checks open the GitHub release for a manual ZIP
+download. iOS remains under normal App Store distribution semantics.
 
 See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 

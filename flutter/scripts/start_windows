@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/start_windows [additional flutter run arguments]"
+  echo
+  echo "Run this script from Windows or Git Bash with Visual Studio installed."
+  exit 0
+fi
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    echo "The Clawnsole Windows app must be run on Windows." >&2
+    exit 1
+    ;;
+esac
+
+print_heading "Windows desktop"
+prepare_flutter
+
+flutter run -d windows "$@"

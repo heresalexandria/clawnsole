@@ -1,7 +1,7 @@
 name: Release
 
-# A release-labelled PR merge bumps both app versions and publishes the signed,
-# notarized macOS desktop build. iOS distribution builds stay local-only.
+# A release-labelled PR merge bumps both app versions and publishes macOS and
+# Windows desktop builds. iOS distribution builds stay local-only.
 on:
   pull_request:
     types: [closed]
@@ -159,10 +159,58 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  windows:
+    name: build Windows desktop
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Windows x64 desktop app
+        shell: bash
+        run: ./flutter/scripts/build_windows
+
+      - name: Smoke test Windows desktop app
+        shell: pwsh
+        run: |
+          $executable = "flutter/build/windows/x64/runner/Release/Clawnsole.exe"
+          if (-not (Test-Path $executable)) { throw "Windows executable was not built." }
+          $process = Start-Process -FilePath $executable -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            throw "Clawnsole exited during the Windows smoke test with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path outgoing | Out-Null
+          $source = "flutter/build/windows/x64/runner/Release"
+          $archive = "outgoing/Clawnsole-${{ needs.prepare.outputs.version }}-windows-x64.zip"
+          Compress-Archive -Path "$source/*" -DestinationPath $archive -CompressionLevel Optimal
+          if (-not (Test-Path $archive)) { throw "Windows archive was not created." }
+          Get-Item $archive | Format-List Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-windows-x64
+          path: outgoing/*
+          retention-days: 7
+          if-no-files-found: error
+
   publish:
     name: publish GitHub release
-    needs: [prepare, macos]
-    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && needs.prepare.outputs.skip != 'true'
+    needs: [prepare, macos, windows]
+    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success' && needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -181,8 +229,11 @@ jobs:
           find incoming -type f \( -name '*.dmg' -o -name '*.zip' \) \
             -exec mv {} release/ \;
           versioned_dmg="release/Clawnsole-${{ needs.prepare.outputs.version }}-mac-arm64.dmg"
+          versioned_windows_zip="release/Clawnsole-${{ needs.prepare.outputs.version }}-windows-x64.zip"
           test -f "$versioned_dmg"
+          test -f "$versioned_windows_zip"
           cp "$versioned_dmg" release/Clawnsole-mac-arm64.dmg
+          cp "$versioned_windows_zip" release/Clawnsole-windows-x64.zip
           test -n "$(ls -A release)"
           cd release
           sha256sum * > SHA256SUMS.txt

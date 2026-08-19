@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: ./scripts/build_windows [additional flutter build windows arguments]"
+  echo
+  echo "Run this script from Windows or Git Bash with Visual Studio installed."
+  echo "Dart defines are rejected so provider credentials cannot enter the binary."
+  exit 0
+fi
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    echo "The Clawnsole Windows build requires Windows." >&2
+    exit 1
+    ;;
+esac
+
+for argument in "$@"; do
+  case "$argument" in
+    --dart-define | --dart-define=* | --dart-define-from-file | --dart-define-from-file=*)
+      echo "Windows release builds do not accept Dart defines." >&2
+      exit 1
+      ;;
+  esac
+done
+
+unset DART_DEFINES
+unset BFL_API_KEY LTX_API_KEY ARTCRAFT_KEY ATLAS_CLOUD_KEY
+unset CLAWNSOLE_IOS_REVIEW_BFL_API_KEY CLAWNSOLE_IOS_REVIEW_BFL_API_KEY_ID
+unset CLAWNSOLE_IOS_REVIEW_LTX_API_KEY CLAWNSOLE_IOS_REVIEW_LTX_API_KEY_ID
+unset CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_ID
+unset CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY_ID
+
+print_heading "Windows x64 release build"
+prepare_flutter
+
+flutter build windows --release "$@"
+
+echo
+echo "Windows release: $FLUTTER_DIRECTORY/build/windows/x64/runner/Release"

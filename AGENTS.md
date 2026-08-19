@@ -22,16 +22,16 @@ These instructions apply to the whole repository.
 
 ## Supported surfaces
 
-Clawnsole is one Flutter product delivered through four targets:
+Clawnsole is one Flutter product delivered through five targets:
 
 - `flutter/`: the canonical UI, provider contracts, pricing, persistence, and
-  platform gateways for web, iOS, and Android.
+  platform gateways for web, iOS, Android, and native Windows.
 - `electron/`: a thin macOS shell around the compiled Flutter web app and Dart
   companion. It owns desktop lifecycle, packaging, and self-update only.
 
-Flutter web, iOS, Android, and Electron macOS are supported. Treat functional
-changes as cross-platform by default. A platform exception must be required by
-the platform and documented in the change.
+Flutter web, iOS, Android, native Windows, and Electron macOS are supported.
+Treat functional changes as cross-platform by default. A platform exception
+must be required by the platform and documented in the change.
 
 The retired root Next.js application must not be reintroduced. The canonical
 desktop entry points live beside the other Flutter scripts:
@@ -39,6 +39,8 @@ desktop entry points live beside the other Flutter scripts:
 ```bash
 ./flutter/scripts/start_macos
 ./flutter/scripts/build_macos
+./flutter/scripts/start_windows
+./flutter/scripts/build_windows
 ```
 
 ## Architecture and reuse
@@ -75,16 +77,16 @@ desktop entry points live beside the other Flutter scripts:
 
 - Electron and Flutter versions must remain aligned. Use
   `scripts/release/bump_version.py`; do not bump one package independently.
-- macOS updater asset names, GitHub Actions output names, and Electron Builder's
-  `artifactName` form one tested contract.
+- macOS updater asset names, Windows download asset names, GitHub Actions output
+  names, and Electron Builder's `artifactName` form one tested contract.
 - Published macOS bundles must be Developer ID signed, notarized, stapled, and
   pass Gatekeeper plus strict signature verification before upload.
 - Every published release must contain `SHA256SUMS.txt`. The desktop updater
   refuses unverified downloads.
-- `.github/workflows/release.yml` publishes only signed, notarized macOS builds.
-  iOS distribution builds and signing material stay local to a configured Mac.
-  Android and hosted web release jobs can be added later without changing
-  product code.
+- `.github/workflows/release.yml` publishes signed, notarized macOS builds and
+  unsigned Windows x64 ZIPs in parallel. iOS distribution builds and signing
+  material stay local to a configured Mac. Android and hosted web release jobs
+  can be added later without changing product code.
 
 ## Verification
 
@@ -102,8 +104,10 @@ npm test
 ```
 
 For lifecycle or packaging changes, also exercise
-`flutter/scripts/start_macos` and `flutter/scripts/build_macos`. For native
-Flutter changes, run the matching simulator script and a debug or release build.
+`flutter/scripts/start_macos` and `flutter/scripts/build_macos`. Exercise
+`flutter/scripts/build_windows` and smoke-test `Clawnsole.exe` on Windows for
+Windows runner or packaging changes. For native Flutter changes, run the
+matching simulator script and a debug or release build.
 
 Do not edit or commit generated output such as `electron/dist/`,
 `flutter/build/`, native dependency caches, or local Clawnsole data files.
