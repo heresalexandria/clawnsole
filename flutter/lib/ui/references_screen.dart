@@ -230,13 +230,9 @@ class _ReferenceToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: Wrap(
-      spacing: 9,
-      runSpacing: 9,
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        Wrap(
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final kindFilters = Wrap(
           spacing: 5,
           runSpacing: 5,
           children: <Widget>[
@@ -255,41 +251,65 @@ class _ReferenceToolbar extends StatelessWidget {
               ),
             ),
           ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            SizedBox(
-              width: 245,
-              child: TextField(
-                key: const ValueKey('reference-library-search'),
-                onChanged: controller.setReferenceSearch,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search_rounded, size: 18),
-                  hintText: 'Search names, tags, folders',
-                  isDense: true,
-                ),
-              ),
-            ),
-            DropdownButton<ReferenceSort>(
-              value: controller.referenceSort,
-              onChanged: (value) {
-                if (value != null) controller.setReferenceSort(value);
-              },
-              items: ReferenceSort.values
-                  .map(
-                    (sort) => DropdownMenuItem(
-                      value: sort,
-                      child: Text(_sortLabel(sort)),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-        ),
-      ],
+        );
+        final search = TextField(
+          key: const ValueKey('reference-library-search'),
+          onChanged: controller.setReferenceSearch,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
+            hintText: 'Search names, tags, folders',
+            isDense: true,
+          ),
+        );
+        final sort = DropdownButtonHideUnderline(
+          child: DropdownButton<ReferenceSort>(
+            key: const ValueKey('reference-library-sort'),
+            value: controller.referenceSort,
+            borderRadius: BorderRadius.circular(12),
+            onChanged: (value) {
+              if (value != null) controller.setReferenceSort(value);
+            },
+            items: ReferenceSort.values
+                .map(
+                  (sort) => DropdownMenuItem(
+                    value: sort,
+                    child: Text(_sortLabel(sort)),
+                  ),
+                )
+                .toList(),
+          ),
+        );
+        final controls = constraints.maxWidth < 430
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  search,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: sort),
+                ],
+              )
+            : Row(
+                children: <Widget>[
+                  Expanded(child: search),
+                  const SizedBox(width: 10),
+                  sort,
+                ],
+              );
+
+        if (constraints.maxWidth >= 900) {
+          return Row(
+            children: <Widget>[
+              Expanded(child: kindFilters),
+              const SizedBox(width: 16),
+              SizedBox(width: 500, child: controls),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[kindFilters, const SizedBox(height: 10), controls],
+        );
+      },
     ),
   );
 }
