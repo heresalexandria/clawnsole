@@ -159,8 +159,9 @@ See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 
 ## Privacy and support
 
-Read the [privacy policy](PRIVACY.md), its
-[public web version](https://heresalexandria.github.io/clawnsole/privacy/), or use the
+Read the [privacy policy](PRIVACY.md), the [terms of use](TERMS.md), or their
+public web versions at [Privacy](https://heresalexandria.github.io/clawnsole/privacy/)
+and [Terms](https://heresalexandria.github.io/clawnsole/tos/). Use the
 [issue tracker](https://github.com/heresalexandria/clawnsole/issues) for support.
 Do not post API keys, private prompts, or personal media in a public issue.
 
