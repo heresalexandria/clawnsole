@@ -110,6 +110,11 @@ ProviderModelPrice? _pricedModel(
         : rates[config.resolution] ?? rates['hd']!;
     return (usdPerSecond: creditsToUsd(credits), source: 'published-rate');
   }
+  if (providerId == 'ltx' &&
+      config.references?.any((item) => item.kind == MediaReferenceKind.audio) ==
+          true) {
+    return (usdPerSecond: .10, source: 'published-rate');
+  }
   final pricedModel = _pricedModel(modelId, config, prices);
   if (pricedModel != null && pricedModel.pricingUnit != 'catalog-base') {
     return (
@@ -121,25 +126,8 @@ ProviderModelPrice? _pricedModel(
   }
   if (providerId == 'ltx') {
     const rates = <String, Map<String, double>>{
-      'ltx-2-5-fast': <String, double>{
-        'hd': .09,
-        'fhd': .13,
-        'qhd': .19,
-        '4k': .30,
-      },
-      'ltx-2-5-pro': <String, double>{'hd': .12, 'fhd': .17},
-      'ltx-2-3-fast': <String, double>{
-        'hd': .03,
-        'fhd': .06,
-        'qhd': .12,
-        '4k': .24,
-      },
-      'ltx-2-3-pro': <String, double>{
-        'hd': .04,
-        'fhd': .08,
-        'qhd': .16,
-        '4k': .32,
-      },
+      'ltx-2-3-fast': <String, double>{'fhd': .06, 'qhd': .12, '4k': .24},
+      'ltx-2-3-pro': <String, double>{'fhd': .08, 'qhd': .16, '4k': .32},
     };
     return (
       usdPerSecond:

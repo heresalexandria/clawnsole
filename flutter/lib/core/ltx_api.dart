@@ -53,7 +53,22 @@ class LtxApi {
         .map(_frameSource)
         .where((source) => source.isNotEmpty)
         .toList();
-    final endpoint = mode == 'i2v' ? 'image-to-video' : 'text-to-video';
+    final referenceImages =
+        (input['reference_images'] as List<Object?>? ?? const <Object?>[])
+            .map((item) => item?.toString() ?? '')
+            .where((source) => source.isNotEmpty)
+            .toList();
+    final referenceAudios =
+        (input['reference_audios'] as List<Object?>? ?? const <Object?>[])
+            .map((item) => item?.toString() ?? '')
+            .where((source) => source.isNotEmpty)
+            .toList();
+    final audioDriven = referenceAudios.isNotEmpty;
+    final endpoint = audioDriven
+        ? 'audio-to-video'
+        : mode == 'i2v'
+        ? 'image-to-video'
+        : 'text-to-video';
     final duration = input['duration'];
     final payload = <String, Object?>{
       'model': model,
@@ -65,8 +80,10 @@ class LtxApi {
       ),
       'fps': 24,
       'generate_audio': input['generate_audio'] != false,
-      if (endpoint == 'image-to-video' && frames.isNotEmpty)
-        'image_uri': frames.first,
+      if (audioDriven) 'audio_uri': referenceAudios.first,
+      if (endpoint != 'text-to-video' &&
+          (frames.isNotEmpty || referenceImages.isNotEmpty))
+        'image_uri': frames.isNotEmpty ? frames.first : referenceImages.first,
       if (endpoint == 'image-to-video' && frames.length > 1)
         'last_frame_uri': frames.last,
     };
@@ -114,7 +131,9 @@ class LtxApi {
         url.scheme != _baseUrl.scheme ||
         url.host != _baseUrl.host ||
         url.port != _baseUrl.port ||
-        !RegExp(r'^/v2/(?:text|image)-to-video/[^/]+$').hasMatch(url.path)) {
+        !RegExp(
+          r'^/v2/(?:text|image|audio)-to-video/[^/]+$',
+        ).hasMatch(url.path)) {
       throw const ProviderException(
         'The LTX status URL is invalid.',
         status: 400,

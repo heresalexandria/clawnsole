@@ -468,7 +468,35 @@ class NativeGateway
           ),
         );
       }
-      return config.copyWith(keyframes: frames);
+      final rawReferences = <MediaReferenceKind, List<Object?>>{
+        MediaReferenceKind.image:
+            input['reference_images'] as List<Object?>? ?? const [],
+        MediaReferenceKind.video:
+            input['reference_videos'] as List<Object?>? ?? const [],
+        MediaReferenceKind.audio:
+            input['reference_audios'] as List<Object?>? ?? const [],
+      };
+      final offsets = <MediaReferenceKind, int>{
+        for (final kind in MediaReferenceKind.values) kind: 0,
+      };
+      final references = <MediaReferenceLabel>[];
+      for (final media in config.references ?? const <MediaReferenceLabel>[]) {
+        final index = offsets[media.kind]!;
+        final sources = rawReferences[media.kind]!;
+        offsets[media.kind] = index + 1;
+        references.add(
+          MediaReferenceLabel(
+            label: media.label,
+            kind: media.kind,
+            source: await _store.persistSource(
+              index < sources.length ? sources[index]?.toString() ?? '' : '',
+              label: media.label,
+              retained: media.source,
+            ),
+          ),
+        );
+      }
+      return config.copyWith(keyframes: frames, references: references);
     }
     if (mode == 'v2v' || mode == 'draft_enhance') {
       final source = input[mode == 'v2v' ? 'start_video' : 'draft_cache'];

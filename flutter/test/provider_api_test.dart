@@ -83,6 +83,38 @@ void main() {
   });
 
   test(
+    'LTX Pro maps audio guidance and an optional frame to audio-to-video',
+    () async {
+      late Map<String, Object?> requestBody;
+      final api = LtxApi(
+        client: MockClient((request) async {
+          expect(request.url.path, '/v2/audio-to-video');
+          requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            jsonEncode(<String, String>{'id': 'ltx-a2v'}),
+            202,
+          );
+        }),
+      );
+
+      await api.submit('secret', 'ltx-2-3-pro', <String, Object?>{
+        'mode': 'i2v',
+        'prompt': 'Cut the scene to the supplied rhythm',
+        'duration': 8,
+        'resolution': 'fhd',
+        'aspect_ratio': '16:9',
+        'keyframes': <String>['https://cdn.test/opening.png'],
+        'reference_audios': <String>['data:audio/mpeg;base64,audio'],
+      });
+
+      expect(requestBody['audio_uri'], 'data:audio/mpeg;base64,audio');
+      expect(requestBody['image_uri'], 'https://cdn.test/opening.png');
+    },
+  );
+
+  test(
     'LTX accepts an authenticated not-found response as a key probe',
     () async {
       final api = LtxApi(
@@ -186,7 +218,11 @@ void main() {
     expect(modelById('artcraft', 'seedance_2p5_preview').modes, <VideoMode>[
       VideoMode.i2v,
     ]);
-    expect(modelById('artcraft', 'seedance_2p0').maxKeyframes, 11);
+    final seedance = modelById('artcraft', 'seedance_2p0');
+    expect(seedance.maxKeyframes, 2);
+    expect(seedance.maxImageReferences, 9);
+    expect(seedance.maxVideoReferences, 3);
+    expect(seedance.maxAudioReferences, 3);
     expect(modelById('artcraft', 'kling_2p6_pro').supportsAudio, isTrue);
   });
 
@@ -260,6 +296,47 @@ void main() {
     );
     expect(receipt['cost'], 93.0);
   });
+
+  test(
+    'ArtCraft forwards independent image, video, and audio references',
+    () async {
+      late Map<String, Object?> generation;
+      final api = ArtCraftApi(
+        client: MockClient((request) async {
+          if (request.url.path == '/v1/omni_gen/cost/video') {
+            return http.Response('{"cost_in_credits": 10}', 200);
+          }
+          generation = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            '{"inference_job_token":"jinf_references"}',
+            200,
+          );
+        }),
+      );
+
+      await api.submit('secret', 'seedance_2p0', <String, Object?>{
+        'prompt': 'Use image 1, motion from video 1, and audio 1',
+        'duration': 5,
+        'resolution': 'hd',
+        'aspect_ratio': '16:9',
+        'reference_images': <String>['https://cdn.test/character.png'],
+        'reference_videos': <String>['https://cdn.test/motion.mp4'],
+        'reference_audios': <String>['https://cdn.test/voice.mp3'],
+      });
+
+      expect(generation['reference_image_urls'], <String>[
+        'https://cdn.test/character.png',
+      ]);
+      expect(generation['reference_video_urls'], <String>[
+        'https://cdn.test/motion.mp4',
+      ]);
+      expect(generation['reference_audio_urls'], <String>[
+        'https://cdn.test/voice.mp3',
+      ]);
+    },
+  );
 
   test('ArtCraft maps a completed Omni API status response', () async {
     final api = ArtCraftApi(
@@ -380,7 +457,7 @@ void main() {
     expect(models.single.priceFor(10), .8);
   });
 
-  test('Atlas maps reference models to the documented reference payload', () {
+  test('Atlas maps every supported reference kind and selected quality', () {
     final api = AtlasCloudApi();
     final payload = api.generationPayload(
       'bytedance/seedance-2.5/reference-to-video',
@@ -389,19 +466,80 @@ void main() {
         'duration': 10,
         'aspect_ratio': '16:9',
         'generate_audio': false,
-        'keyframes': <String>[
+        'resolution': 'fhd',
+        'reference_task': 'extend',
+        'reference_images': <String>[
           'data:image/png;base64,one',
           'data:image/png;base64,two',
         ],
+        'reference_videos': <String>['https://cdn.test/motion.mp4'],
+        'reference_audios': <String>['data:audio/mpeg;base64,audio'],
       },
     );
 
     expect(payload['reference_images'], hasLength(2));
+    expect(payload['reference_videos'], <String>[
+      'https://cdn.test/motion.mp4',
+    ]);
+    expect(payload['reference_audios'], <String>[
+      'data:audio/mpeg;base64,audio',
+    ]);
     expect(payload['generate_audio'], isFalse);
     expect(payload['ratio'], '16:9');
+    expect(payload['resolution'], '1080p');
+    expect(payload['omni_reference_task_type'], 'extend');
   });
 
-  test('provider keys round-trip independently through schema 9', () {
+  test(
+    'Atlas uploads local video and audio references before generation',
+    () async {
+      var uploads = 0;
+      late Map<String, Object?> generation;
+      final api = AtlasCloudApi(
+        client: MockClient((request) async {
+          if (request.url.path == '/api/v1/model/uploadMedia') {
+            uploads += 1;
+            return http.Response(
+              jsonEncode(<String, Object?>{
+                'url': 'https://storage.atlascloud.ai/ref-$uploads',
+              }),
+              200,
+            );
+          }
+          generation = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'data': <String, Object?>{'id': 'atlas-job'},
+            }),
+            200,
+          );
+        }),
+      );
+
+      await api.submit(
+        'secret',
+        'bytedance/seedance-2.5/reference-to-video',
+        <String, Object?>{
+          'prompt': 'Follow the references',
+          'duration': 8,
+          'reference_videos': <String>['data:video/mp4;base64,dmlkZW8='],
+          'reference_audios': <String>['data:audio/mpeg;base64,YXVkaW8='],
+        },
+      );
+
+      expect(uploads, 2);
+      expect(generation['reference_videos'], <String>[
+        'https://storage.atlascloud.ai/ref-1',
+      ]);
+      expect(generation['reference_audios'], <String>[
+        'https://storage.atlascloud.ai/ref-2',
+      ]);
+    },
+  );
+
+  test('provider keys round-trip independently through schema 11', () {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
@@ -414,7 +552,7 @@ void main() {
     expect(decoded.apiKeyFor('ltx'), 'ltx-secret');
     expect(decoded.apiKeyFor('artcraft'), 'artcraft-secret');
     expect(decoded.apiKeyFor('atlas'), 'atlas-secret');
-    expect(decoded.toJson()['schemaVersion'], 9);
+    expect(decoded.toJson()['schemaVersion'], 11);
   });
 
   test('ArtCraft resolutions survive history serialization', () {
@@ -436,7 +574,7 @@ void main() {
       draft: false,
     );
 
-    final ltx = estimateCost('ltx', 'ltx-2-5-fast', VideoMode.t2v, config);
+    final ltx = estimateCost('ltx', 'ltx-2-3-fast', VideoMode.t2v, config);
     final atlas = estimateCost(
       'atlas',
       'bytedance/seedance-2.0-mini/text-to-video',
@@ -450,12 +588,59 @@ void main() {
       config,
     );
 
-    expect(ltx.minimumUsd, 1.3);
+    expect(ltx.minimumUsd, .6);
     expect(artcraft.minimumUsd, 1.86);
     expect(atlas.minimumUsd, .39);
     final ltxRows = publishedProviderPrices('ltx');
     expect(ltxRows.first.supportsDuration(15), isFalse);
     expect(ltxRows.first.supportsDuration(20), isTrue);
+  });
+
+  test('catalog applies resolution-dependent provider capabilities', () {
+    final ltxFast = modelById('ltx', 'ltx-2-3-fast');
+    final ltxPro = modelById('ltx', 'ltx-2-3-pro');
+    final seedance4k = modelById(
+      'atlas',
+      'bytedance/seedance-2.0/reference-to-video',
+    );
+
+    expect(ltxFast.resolutions.map((item) => item.id), <String>[
+      'fhd',
+      'qhd',
+      '4k',
+    ]);
+    expect(ltxFast.maxDurationFor('fhd'), 20);
+    expect(ltxFast.maxDurationFor('qhd'), 10);
+    expect(seedance4k.aspectRatiosFor('4k'), <String>['16:9']);
+    expect(
+      ltxPro.supportsResolutionForReferences('fhd', <MediaReferenceKind>[
+        MediaReferenceKind.audio,
+      ]),
+      isTrue,
+    );
+    expect(
+      ltxPro.supportsResolutionForReferences('4k', <MediaReferenceKind>[
+        MediaReferenceKind.audio,
+      ]),
+      isFalse,
+    );
+  });
+
+  test('LTX audio-to-video uses the dedicated published rate', () {
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 10,
+      resolution: 'fhd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+      references: <MediaReferenceLabel>[
+        MediaReferenceLabel(label: 'Dialogue', kind: MediaReferenceKind.audio),
+      ],
+    );
+
+    final estimate = estimateCost('ltx', 'ltx-2-3-pro', VideoMode.i2v, config);
+    expect(estimate.minimumUsd, 1);
   });
 
   test('Atlas live catalog prices override the published fallback', () {
