@@ -63,7 +63,11 @@ class _ActiveApiKey {
 }
 
 class NativeGateway
-    implements AppGateway, ProviderGateway, LibraryOrganizationGateway {
+    implements
+        AppGateway,
+        ProviderGateway,
+        LibraryOrganizationGateway,
+        ReferenceLibraryGateway {
   NativeGateway({
     LocalDataStore? store,
     BflApi? api,
@@ -188,11 +192,14 @@ class NativeGateway
     return LocalSnapshot(
       generations: data.generations,
       folders: data.folders,
+      savedReferences: data.savedReferences,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
       availableProviders: const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
-      storage: await _store.stats(data.generations.length),
+      storage: await _store.stats(
+        data.generations.length + data.savedReferences.length,
+      ),
     );
   }
 
@@ -312,7 +319,9 @@ class NativeGateway
         ? null
         : folder.parentId;
     if (parentId != null &&
-        !current.folders.any((item) => item.id == parentId)) {
+        !current.folders.any(
+          (item) => item.id == parentId && item.collection == folder.collection,
+        )) {
       throw StateError('The parent folder no longer exists.');
     }
     var ancestorId = parentId;
@@ -328,6 +337,7 @@ class NativeGateway
     if (current.folders.any(
       (item) =>
           item.id != folder.id &&
+          item.collection == folder.collection &&
           item.parentId == parentId &&
           item.name.toLowerCase() == name.toLowerCase(),
     )) {
@@ -340,6 +350,7 @@ class NativeGateway
       name: name,
       createdAt: folder.createdAt,
       parentId: parentId,
+      collection: folder.collection,
     );
     if (index < 0) {
       folders.add(clean);
@@ -376,6 +387,13 @@ class NativeGateway
                 : item,
           )
           .toList(),
+      savedReferences: current.savedReferences
+          .map(
+            (item) => item.folderId == folderId
+                ? item.copyWith(clearFolder: true)
+                : item,
+          )
+          .toList(),
     );
     await _store.write(next);
     return _snapshot(next);
@@ -389,7 +407,11 @@ class NativeGateway
   }) async {
     final current = await _store.read();
     if (folderId != null &&
-        !current.folders.any((folder) => folder.id == folderId)) {
+        !current.folders.any(
+          (folder) =>
+              folder.id == folderId &&
+              folder.collection == LibraryCollection.generated,
+        )) {
       throw StateError('That folder no longer exists.');
     }
     final cleanTags = _cleanLibraryTags(tags);
@@ -406,6 +428,75 @@ class NativeGateway
     if (!found) throw StateError('That generation no longer exists.');
     final next = current.copyWith(generations: generations);
     await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> saveReference(
+    SavedReference reference, {
+    String? source,
+  }) async {
+    final name = reference.name.trim();
+    if (reference.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+      throw StateError('Reference names must be between 1 and 80 characters.');
+    }
+    final current = await _store.read();
+    if (reference.folderId != null &&
+        !current.folders.any(
+          (folder) =>
+              folder.id == reference.folderId &&
+              folder.collection == LibraryCollection.references,
+        )) {
+      throw StateError('That reference folder no longer exists.');
+    }
+    final existing = current.savedReferences
+        .where((item) => item.id == reference.id)
+        .firstOrNull;
+    var asset = existing?.asset ?? reference.asset;
+    if (source != null) {
+      asset =
+          await _store.persistSource(
+            source,
+            label: name,
+            retained: reference.asset.value.isEmpty ? null : reference.asset,
+          ) ??
+          asset;
+    }
+    if (asset.value.isEmpty) {
+      throw StateError('Choose reference media before saving.');
+    }
+    final clean = SavedReference(
+      id: reference.id,
+      name: name,
+      kind: reference.kind,
+      asset: asset,
+      createdAt: existing?.createdAt ?? reference.createdAt,
+      updatedAt: DateTime.now().toUtc(),
+      folderId: reference.folderId,
+      tags: _cleanLibraryTags(reference.tags),
+    );
+    final references = List<SavedReference>.from(current.savedReferences);
+    final index = references.indexWhere((item) => item.id == clean.id);
+    if (index < 0) {
+      references.insert(0, clean);
+    } else {
+      references[index] = clean;
+    }
+    final next = current.copyWith(savedReferences: references);
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> deleteReference(String referenceId) async {
+    final current = await _store.read();
+    final next = current.copyWith(
+      savedReferences: current.savedReferences
+          .where((item) => item.id != referenceId)
+          .toList(),
+    );
+    await _store.write(next);
+    await _store.pruneAssets(next.generations, next.savedReferences);
     return _snapshot(next);
   }
 
@@ -731,7 +822,7 @@ class NativeGateway
           .toList(),
     );
     await _store.write(next);
-    await _store.pruneAssets(next.generations);
+    await _store.pruneAssets(next.generations, next.savedReferences);
     return _snapshot(next);
   }
 
@@ -739,7 +830,7 @@ class NativeGateway
   Future<LocalSnapshot> clearHistory() async {
     final next = (await _store.read()).copyWith(generations: <Generation>[]);
     await _store.write(next);
-    await _store.clearAssets();
+    await _store.pruneAssets(next.generations, next.savedReferences);
     return _snapshot(next);
   }
 

@@ -65,6 +65,14 @@ int? compareSemanticVersions(String candidate, String current) {
   return 0;
 }
 
+/// Whether [candidate] crosses a major-version compatibility boundary from
+/// [current]. Invalid or same-major versions are never treated as mandatory.
+bool isMajorVersionUpgrade(String candidate, String current) {
+  final next = parseSemanticVersion(candidate);
+  final running = parseSemanticVersion(current);
+  return next != null && running != null && next.first > running.first;
+}
+
 /// Asks GitHub for the latest stable release. Used on surfaces without a
 /// shell updater; those can only open the release page, not install.
 Future<UpdateCheckResult> checkLatestRelease({http.Client? client}) async {

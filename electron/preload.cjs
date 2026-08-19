@@ -6,7 +6,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 // `window.clawnsole` to offer in-place updates with download progress.
 contextBridge.exposeInMainWorld("clawnsole", {
   shell: "electron",
-  checkForUpdate: () => ipcRenderer.invoke("clawnsole:update:check"),
+  checkForUpdate: (force = false) =>
+    ipcRenderer.invoke("clawnsole:update:check", force === true),
   startUpdate: () => ipcRenderer.invoke("clawnsole:update:start"),
   onUpdateEvent: (callback) => {
     if (typeof callback !== "function") return () => {};

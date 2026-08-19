@@ -19,8 +19,8 @@
 
 Clawnsole is a local-first Flutter video generation workspace with a premium,
 midcentury-inspired interface. Cloud video providers share one provider-neutral
-Create and Library workflow. The local Library can be shaped into project
-folders and reusable tags without uploading its catalog anywhere.
+Create, Library, and References workflow. Generated work and saved reference
+media each have independent local folder hierarchies and reusable tags.
 
 ## iPhone
 
@@ -33,13 +33,15 @@ folders and reusable tags without uploading its catalog anywhere.
 ## What it does
 
 - Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation and draft enhancement
-- Up to 30 reference frames, with timing and placement controls where the selected model supports them
+- Model-aware image, video, and audio references, with timing and placement controls where supported
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
 - Live polling, manual status refresh, surfaced provider errors, and progress
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation estimated and provider-reported cost history
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - Nested project folders, multi-tag organization, and combined prompt/tag/folder search
+- A saved References tab with naming, nested folders, tags, media-type filters,
+  sorting, and Saved/Generated pickers directly in Create
 - One-tap folder and tag filters with a desktop folder rail and compact mobile picker
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
@@ -80,12 +82,15 @@ web and Electron store the same compact schema in a local file, with retained
 inputs and videos in an adjacent `assets/` directory.
 
 - History is not capped.
-- Folder names, tag labels, and generation assignments live in the same compact
-  local JSON schema and migrate without changing older records.
+- Folder names, tag labels, generation assignments, and saved-reference metadata
+  live in the same compact local JSON schema and migrate without changing older records.
 - Removing a folder never removes its films; directly filed work returns to
   **Unfiled**, tags stay intact, and subfolders move up one level.
+- Reference folders follow the same safe removal behavior within their separate
+  hierarchy.
 - Base64 request payloads and video blobs are never stored in JSON.
-- Removing history prunes media no longer referenced by another generation.
+- Removing history prunes media only when it is no longer used by another
+  generation or a saved reference.
 - Provider delivery links may be temporary; completed videos are retained locally first.
 - User-supplied provider keys are plaintext inside the locally protected JSON file
   and are never returned to the web renderer. An optional temporary iOS App

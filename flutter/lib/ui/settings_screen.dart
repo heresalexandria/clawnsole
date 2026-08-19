@@ -306,7 +306,7 @@ class _SettingsSide extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'History is uncapped. Uploaded references and completed videos remain local until their records are removed.',
+              'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
               style: TextStyle(color: context.tokens.onPanelMuted),
             ),
             if (controller.gateway.usesCompanion) ...<Widget>[
@@ -349,11 +349,11 @@ class _SettingsSide extends StatelessWidget {
             _ClearButton(
               icon: Icons.delete_sweep_outlined,
               title: 'Clear history',
-              subtitle: 'Records, retained inputs, and videos',
+              subtitle: 'Generation records and unshared media',
               onTap: () async {
                 if (await confirm(
                   'Clear generation history?',
-                  'This keeps your API key and preferences.',
+                  'This keeps saved references, their folders and tags, your API keys, and preferences.',
                 )) {
                   await controller.clearHistory();
                 }
@@ -368,7 +368,8 @@ class _SettingsSide extends StatelessWidget {
             _ClearButton(
               icon: Icons.warning_amber_rounded,
               title: 'Delete all local data',
-              subtitle: 'History, assets, preferences, and API key',
+              subtitle:
+                  'History, saved references, assets, preferences, and API keys',
               danger: true,
               onTap: () async {
                 if (await confirm(

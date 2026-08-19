@@ -8,7 +8,7 @@ import 'shell_bridge.dart';
 external _ClawnsoleShellJS? get _shellJS;
 
 extension type _ClawnsoleShellJS._(JSObject _) implements JSObject {
-  external JSPromise<JSAny?> checkForUpdate();
+  external JSPromise<JSAny?> checkForUpdate(bool force);
   external JSPromise<JSAny?> startUpdate();
   external void onUpdateEvent(JSFunction callback);
 }
@@ -39,8 +39,8 @@ class _WebShellUpdater implements ShellUpdater {
   Stream<ShellUpdateEvent> get events => _events.stream;
 
   @override
-  Future<Map<String, Object?>> check() async =>
-      _toMap(await _shell.checkForUpdate().toDart);
+  Future<Map<String, Object?>> check({bool force = false}) async =>
+      _toMap(await _shell.checkForUpdate(force).toDart);
 
   @override
   Future<Map<String, Object?>> start() async =>

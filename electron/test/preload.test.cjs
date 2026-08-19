@@ -57,11 +57,18 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.onUpdateEvent, "function");
 
   await bridge.checkForUpdate();
+  await bridge.checkForUpdate(true);
   await bridge.startUpdate();
   assert.deepEqual(
     invoked.map((call) => call.channel),
-    ["clawnsole:update:check", "clawnsole:update:start"],
+    [
+      "clawnsole:update:check",
+      "clawnsole:update:check",
+      "clawnsole:update:start",
+    ],
   );
+  assert.deepEqual(invoked[0].args, [false]);
+  assert.deepEqual(invoked[1].args, [true]);
 });
 
 test("update events reach the renderer and unsubscribe cleanly", () => {

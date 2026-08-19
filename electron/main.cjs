@@ -275,8 +275,8 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
 }
 
 function installRendererBridge() {
-  ipcMain.handle("clawnsole:update:check", async () =>
-    updater.summarize(await updater.check({ force: true })));
+  ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
+    updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
 }
 
@@ -344,8 +344,6 @@ async function startApplication() {
     await verifyRendererBridge();
     console.log("Clawnsole packaged smoke test passed.");
     setTimeout(() => app.quit(), 250).unref();
-  } else if (app.isPackaged) {
-    setTimeout(() => void checkForUpdates(), 3_000).unref();
   }
 }
 
