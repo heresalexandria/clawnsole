@@ -80,7 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 10),
                 Text(
                   widget.controller.supportsGoogleDrive
-                      ? 'Manage appearance, Drive sync, and this browser’s private keys.'
+                      ? 'Manage appearance, Drive sync, and this device’s private keys.'
                       : 'Manage appearance, updates, and Clawnsole’s private local data.',
                 ),
                 const SizedBox(height: 24),
@@ -132,9 +132,9 @@ class _ProviderAccessCard extends StatelessWidget {
                   ),
                   SizedBox(height: 4),
                   Text(
-                    controller.supportsGoogleDrive
-                        ? 'Set an Atlas Cloud key for the verified backend-free Pages route.'
-                        : 'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
+                    controller.supportsLocalLibrary
+                        ? 'Set provider keys and compare live model costs in Providers.'
+                        : 'Set an Atlas Cloud key for the verified backend-free Pages route.',
                   ),
                 ],
               ),
@@ -191,14 +191,18 @@ class _StorageSection extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     controller.supportsGoogleDrive
-                        ? 'Portable project data'
+                        ? controller.supportsLocalLibrary
+                              ? 'Combined project data'
+                              : 'Drive project data'
                         : 'Local project data',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     controller.supportsGoogleDrive
-                        ? 'Drive metadata plus retained reference inputs and finished videos.'
+                        ? controller.supportsLocalLibrary
+                              ? 'Local and Drive metadata, retained inputs, and finished media.'
+                              : 'Drive metadata, retained inputs, and finished media.'
                         : 'Compact JSON plus retained reference inputs and finished videos.',
                   ),
                 ],
@@ -336,7 +340,7 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                     Text(
                       connected
                           ? 'Synced with “${connection.folderName}”.'
-                          : 'Use one portable library across browser devices.',
+                          : 'Use one portable library across every Clawnsole surface.',
                     ),
                   ],
                 ),
@@ -395,9 +399,38 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                   icon: const Icon(Icons.link_off_rounded, size: 18),
                   label: const Text('Disconnect this device'),
                 ),
+                if (widget.controller.supportsLocalLibrary &&
+                    (widget.controller.generations.any(
+                          (item) => item.storage == LibraryStorage.local,
+                        ) ||
+                        widget.controller.savedReferences.any(
+                          (item) => item.storage == LibraryStorage.local,
+                        )))
+                  OutlinedButton.icon(
+                    onPressed: widget.controller.googleDriveBusy
+                        ? null
+                        : widget.controller.copyLocalLibraryToGoogleDrive,
+                    icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                    label: const Text('Copy local library to Drive'),
+                  ),
               ],
             ],
           ),
+          if (connected) ...<Widget>[
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Default for new generations and references',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                StorageDestinationButton(controller: widget.controller),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -408,7 +441,7 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
             child: Text(
               unavailable
                   ? connection.message
-                  : 'Generated media, saved references, history, folders, and non-secret preferences go to Drive. Provider API keys never leave this browser.',
+                  : 'Drive items include generated media, references, folders, and non-secret preferences. Provider API keys never leave this device. Copying local items keeps the originals.',
               style: const TextStyle(fontSize: 11.5, height: 1.4),
             ),
           ),
@@ -485,7 +518,9 @@ class _SettingsSide extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 controller.supportsGoogleDrive
-                    ? 'History and saved references follow your Drive connection. Retained media is pruned only when nothing else uses it.'
+                    ? controller.supportsLocalLibrary
+                          ? 'Local and Drive items appear together with clear badges. Retained media is pruned only when nothing else uses it.'
+                          : 'Drive keeps this browser’s portable library. Retained media is pruned only when nothing else uses it.'
                     : 'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
                 style: TextStyle(color: ink.onMuted),
               ),
@@ -526,7 +561,9 @@ class _SettingsSide extends StatelessWidget {
               const SizedBox(height: 5),
               Text(
                 controller.supportsGoogleDrive
-                    ? 'History, preferences, and assets update in the connected Drive folder. API keys remain device-only.'
+                    ? controller.supportsLocalLibrary
+                          ? 'These actions cover both Local and connected Drive items. API keys remain device-only.'
+                          : 'These actions cover connected Drive items and this browser’s device settings. API keys remain device-only.'
                     : 'These actions update only Clawnsole data on this device.',
               ),
               const SizedBox(height: 12),
@@ -552,7 +589,9 @@ class _SettingsSide extends StatelessWidget {
               _ClearButton(
                 icon: Icons.warning_amber_rounded,
                 title: controller.supportsGoogleDrive
-                    ? 'Delete all Clawnsole data'
+                    ? controller.supportsLocalLibrary
+                          ? 'Delete Local and Drive data'
+                          : 'Delete Drive and device data'
                     : 'Delete all local data',
                 subtitle:
                     'History, saved references, assets, preferences, and device API keys',
@@ -560,10 +599,14 @@ class _SettingsSide extends StatelessWidget {
                 onTap: () async {
                   if (await confirm(
                     controller.supportsGoogleDrive
-                        ? 'Delete all Clawnsole data?'
+                        ? controller.supportsLocalLibrary
+                              ? 'Delete Local and Drive data?'
+                              : 'Delete Drive and device data?'
                         : 'Delete all local data?',
                     controller.supportsGoogleDrive
-                        ? 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus API keys in this browser.'
+                        ? controller.supportsLocalLibrary
+                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus device API keys.'
+                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus settings and API keys from this browser.'
                         : 'This permanently removes the Flutter app’s local JSON file.',
                   )) {
                     await controller.clearAll();

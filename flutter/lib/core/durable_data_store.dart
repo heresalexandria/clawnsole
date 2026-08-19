@@ -16,12 +16,14 @@ abstract interface class DurableDataStore {
     Uint8List bytes, {
     required String label,
     required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
   });
 
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
     AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
   });
 
   Future<Uint8List> readAsset(AssetReference reference);

@@ -86,6 +86,18 @@ opens the thin Electron shell.
 `start_windows` runs the native Flutter desktop app and must be invoked on a
 Windows machine with Visual Studio's Desktop development with C++ workload.
 
+Optional Google Drive support is shared by every surface. Configure the
+platform OAuth client before launching:
+
+- macOS Electron and native Windows:
+  `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID` (and the optional installed-app client
+  secret)
+- Android: `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`, using the registered
+  web client ID; also register the Android package and every signing SHA
+- iOS: `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`; the iOS scripts derive and inject its
+  reversed callback URL scheme
+- standalone web: `CLAWNSOLE_GOOGLE_CLIENT_ID`
+
 Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or
 `CLAWNSOLE_ANDROID_DEVICE_ID` to choose a specific emulator. Every script also
 accepts extra `flutter run` arguments.
@@ -163,6 +175,12 @@ CORS; the other configured provider APIs do not currently allow that origin. See
 [`docs/google-drive-web.md`](../docs/google-drive-web.md) for OAuth, origin, and
 GitHub Pages setup.
 
+Native and companion-backed builds keep their existing local library and show
+it alongside Drive with explicit Local/Drive badges and filters. The default
+destination for new work is remembered. “Copy local library to Drive” creates
+portable copies while retaining the local originals; rerunning it is
+idempotent. Provider API keys never enter the portable Drive file.
+
 ## Build targets
 
 ```bash
@@ -195,10 +213,13 @@ GitHub Pages setup.
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
 - `build_macos` packages the Flutter web output and companion in Electron,
-  producing the standalone app, DMG, and updater ZIP.
+  producing the standalone app, DMG, and updater ZIP. Its Drive refresh token
+  is encrypted with Electron `safeStorage`.
 - `build_windows` creates the native x64 release directory under
   `build/windows/x64/runner/Release`. It rejects Dart defines and clears provider
-  credential variables so API keys cannot be compiled into the executable.
+  credential variables so API keys cannot be compiled into the executable. Its
+  Drive refresh token is stored with the operating-system-backed secure storage
+  plugin.
 - `build_github_pages` creates the separate backend-free app under
   `build/github-pages/app` with `/clawnsole/app/` as its default base path. It
   does not replace or modify the existing `docs/` splash site.

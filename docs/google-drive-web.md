@@ -1,4 +1,10 @@
-# Standalone web and Google Drive
+# Google Drive and standalone web
+
+Clawnsole can connect the same app-owned Drive folder from native Windows,
+Electron macOS, iOS, Android, and the standalone browser build. Native and
+companion-backed surfaces keep their local library too: the UI shows Local and
+Drive items together with explicit badges and filters, and a non-destructive,
+idempotent copy action can fold selected or all local work into Drive.
 
 Clawnsole has two deliberately separate web targets:
 
@@ -35,8 +41,35 @@ folder is reopened by its user-selected name and the Clawnsole app marker, so
 the same Google account can connect to it from another browser. After Clawnsole
 creates the folder, it can be moved anywhere in Drive without breaking sync.
 
-Access tokens are kept in memory and expire. Reconnect from Settings when
-Google asks for authorization again. No refresh token or backend is used.
+Provider API keys and iOS App Review credentials are never serialized into the
+portable file. They stay on each device. Storing paid API keys in Drive is
+intentionally unsupported: shared folders, Drive exports, and account access
+would otherwise broaden who can recover them.
+
+## Native OAuth clients
+
+- **macOS Electron and Windows:** create a Desktop app OAuth client and set
+  `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`. The client secret is optional and can
+  be supplied as `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET`; installed-app
+  secrets are not treated as confidential. Both use system-browser OAuth with
+  a loopback redirect and PKCE. macOS encrypts the refresh token with Electron
+  `safeStorage`; Windows uses operating-system-backed secure storage.
+- **Android:** register `app.clawnsole.clawnsole` and the SHA fingerprints
+  for each signing configuration, create a Web application client in the same
+  project, and set its ID as
+  `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`.
+- **iOS:** register Clawnsole's bundle ID, create an iOS client, and set
+  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`. `start_ios` and `build_ios` derive the
+  reversed callback scheme into an ignored, temporary Xcode configuration.
+
+The mobile Google SDK manages its own sign-in session. Desktop refresh tokens
+are revocable and remain encrypted on the device. Disconnect revokes/forgets
+the local grant but leaves the Drive folder and its contents intact.
+
+For workflow-packaged desktop artifacts, configure repository secrets
+`GOOGLE_DESKTOP_OAUTH_CLIENT_ID` and (when required)
+`GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET`. Builds remain valid without them, but the
+Drive control explains that OAuth is unavailable.
 
 ## GitHub Pages build
 

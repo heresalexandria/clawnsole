@@ -104,6 +104,7 @@
     </div>
   </div>
   <script>
+    var clawnsoleGoogleAccessToken = '';
     window.clawnsoleGoogleDrive = {
       authorize: function (clientId) {
         return new Promise(function (resolve, reject) {
@@ -137,7 +138,8 @@
                   reject(new Error(response.error_description || response.error));
                   return;
                 }
-                resolve(response.access_token || '');
+                clawnsoleGoogleAccessToken = response.access_token || '';
+                resolve(clawnsoleGoogleAccessToken);
               },
               error_callback: function (error) {
                 reject(new Error(error.message || error.type || 'Google authorization was canceled.'));
@@ -147,6 +149,12 @@
           }
           start();
         });
+      },
+      disconnect: function () {
+        if (clawnsoleGoogleAccessToken && window.google && google.accounts && google.accounts.oauth2) {
+          google.accounts.oauth2.revoke(clawnsoleGoogleAccessToken);
+        }
+        clawnsoleGoogleAccessToken = '';
       }
     };
 

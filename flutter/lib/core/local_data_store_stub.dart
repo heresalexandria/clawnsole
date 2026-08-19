@@ -28,6 +28,7 @@ class LocalDataStore implements DurableDataStore {
     Uint8List bytes, {
     required String label,
     required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
   }) => throw UnsupportedError('Browser builds use the local companion.');
 
   @override
@@ -35,6 +36,7 @@ class LocalDataStore implements DurableDataStore {
     String source, {
     required String label,
     AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
   }) => throw UnsupportedError('Browser builds use the local companion.');
 
   @override

@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const {
   app,
@@ -7,6 +8,7 @@ const {
   ipcMain,
   Menu,
   nativeTheme,
+  safeStorage,
   session,
   shell,
 } = require("electron");
@@ -18,6 +20,8 @@ const {
   waitForServer,
 } = require("./lib/runtime.cjs");
 const updater = require("./lib/updater.cjs");
+const packageMetadata = require("./package.json");
+const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
 
 const APP_NAME = "Clawnsole";
 const DEVELOPMENT_URL = process.env.CLAWNSOLE_RENDERER_URL || "http://127.0.0.1:7357";
@@ -28,6 +32,7 @@ let rendererProcess = null;
 let rendererUrl = null;
 let isQuitting = false;
 let updateBusy = false;
+let googleDriveAuth = null;
 
 app.setName(APP_NAME);
 
@@ -267,9 +272,11 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       "[typeof window.clawnsole?.checkForUpdate,"
       + " typeof window.clawnsole?.startUpdate,"
       + " typeof window.clawnsole?.onUpdateEvent,"
+      + " typeof window.clawnsole?.authorizeGoogleDrive,"
+      + " typeof window.clawnsole?.disconnectGoogleDrive,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
-    if (shape === "function,function,function,true") return;
+    if (shape === "function,function,function,function,function,true") return;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`The renderer update bridge is missing (saw ${shape}).`);
@@ -279,6 +286,8 @@ function installRendererBridge() {
   ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
+  ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
+  ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
 }
 
 function protectNavigation(window, localRendererUrl) {
@@ -324,6 +333,26 @@ async function createMainWindow(localRendererUrl) {
 }
 
 async function startApplication() {
+  let packagedOAuth = {};
+  if (app.isPackaged) {
+    try {
+      packagedOAuth = JSON.parse(
+        fs.readFileSync(
+          path.join(process.resourcesPath, "config", "google-oauth.json"),
+          "utf8",
+        ),
+      );
+    } catch {
+      packagedOAuth = {};
+    }
+  }
+  const oauth = configuredOAuth({ ...packageMetadata, ...packagedOAuth });
+  googleDriveAuth = new GoogleDriveAuth({
+    ...oauth,
+    userData: app.getPath("userData"),
+    safeStorage,
+    openExternal: (url) => shell.openExternal(url),
+  });
   installApplicationMenu();
   installRendererBridge();
 

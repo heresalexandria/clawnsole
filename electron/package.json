@@ -36,6 +36,10 @@
       {
         "from": "dist/companion",
         "to": "companion"
+      },
+      {
+        "from": "dist/config",
+        "to": "config"
       }
     ],
     "directories": {

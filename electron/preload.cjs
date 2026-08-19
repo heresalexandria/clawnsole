@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("clawnsole", {
   checkForUpdate: (force = false) =>
     ipcRenderer.invoke("clawnsole:update:check", force === true),
   startUpdate: () => ipcRenderer.invoke("clawnsole:update:start"),
+  authorizeGoogleDrive: () =>
+    ipcRenderer.invoke("clawnsole:drive:authorize"),
+  disconnectGoogleDrive: () =>
+    ipcRenderer.invoke("clawnsole:drive:disconnect"),
   onUpdateEvent: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);

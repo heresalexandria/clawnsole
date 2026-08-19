@@ -7,7 +7,9 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_windows [additional flutter build windows arguments]"
   echo
   echo "Run this script from Windows or Git Bash with Visual Studio installed."
-  echo "Dart defines are rejected so provider credentials cannot enter the binary."
+  echo "Provider credential Dart defines are rejected. Optional Google Desktop"
+  echo "OAuth configuration is read from CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID"
+  echo "and CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET."
   exit 0
 fi
 
@@ -38,7 +40,19 @@ unset CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KE
 print_heading "Windows x64 release build"
 prepare_flutter
 
-flutter build windows --release "$@"
+OAUTH_BUILD_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID=${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID}"
+  )
+fi
+if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET=${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET}"
+  )
+fi
+
+flutter build windows --release "${OAUTH_BUILD_ARGUMENTS[@]}" "$@"
 
 echo
 echo "Windows release: $FLUTTER_DIRECTORY/build/windows/x64/runner/Release"

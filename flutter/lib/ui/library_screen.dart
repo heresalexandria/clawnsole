@@ -248,6 +248,20 @@ class _FolderRow extends StatelessWidget {
                   ),
                 ),
               ),
+              if (folder != null) ...<Widget>[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: folder!.storage.label,
+                  child: Icon(
+                    folder!.storage == LibraryStorage.drive
+                        ? Icons.cloud_outlined
+                        : Icons.devices_outlined,
+                    size: 13,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 5),
               Text(
                 '$count',
                 style: TextStyle(
@@ -411,7 +425,7 @@ class _LibraryHeading extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Eyebrow('Local history'),
+            const Eyebrow('Your library'),
             const SizedBox(height: 10),
             Text(
               'Your films.',
@@ -419,7 +433,9 @@ class _LibraryHeading extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Generation settings, reference inputs, and completed videos stay together on this device.',
+              controller.supportsLocalLibrary
+                  ? 'Local work stays on this device. Drive work follows you to every connected Clawnsole.'
+                  : 'Drive work follows you to every connected Clawnsole.',
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
           ],
@@ -440,58 +456,101 @@ class _LibraryToolbar extends StatelessWidget {
   final AppController controller;
 
   int _count(LibraryFilter filter) => switch (filter) {
-    LibraryFilter.all => controller.generations.length,
-    LibraryFilter.working => controller.workingCount,
-    LibraryFilter.ready => controller.readyCount,
+    LibraryFilter.all =>
+      controller.generations
+          .where(
+            (item) => controller.libraryStorageFilter.matches(item.storage),
+          )
+          .length,
+    LibraryFilter.working =>
+      controller.generations
+          .where(
+            (item) =>
+                controller.libraryStorageFilter.matches(item.storage) &&
+                item.isWorking,
+          )
+          .length,
+    LibraryFilter.ready =>
+      controller.generations
+          .where(
+            (item) =>
+                controller.libraryStorageFilter.matches(item.storage) &&
+                item.isReady,
+          )
+          .length,
     LibraryFilter.failed =>
-      controller.generations.where((item) => item.isFailed).length,
+      controller.generations
+          .where(
+            (item) =>
+                controller.libraryStorageFilter.matches(item.storage) &&
+                item.isFailed,
+          )
+          .length,
   };
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final filters = Wrap(
-          spacing: 5,
-          runSpacing: 5,
-          children: LibraryFilter.values
-              .map(
-                (filter) => _FilterSegment(
-                  filter: filter,
-                  count: _count(filter),
-                  selected: controller.libraryFilter == filter,
-                  onTap: () => unawaited(controller.setLibraryFilter(filter)),
-                ),
-              )
-              .toList(),
-        );
-        final search = TextField(
-          key: const ValueKey('generation-library-search'),
-          onChanged: controller.setSearch,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search_rounded, size: 18),
-            hintText: 'Search prompts, tags, folders',
-            isDense: true,
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (controller.supportsLocalLibrary) ...<Widget>[
+          StorageFilterChips(
+            value: controller.libraryStorageFilter,
+            showLocal: true,
+            onChanged: (value) =>
+                unawaited(controller.setLibraryStorageFilter(value)),
           ),
-          style: const TextStyle(fontSize: 13),
-        );
+          const SizedBox(height: 9),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final filters = Wrap(
+              spacing: 5,
+              runSpacing: 5,
+              children: LibraryFilter.values
+                  .map(
+                    (filter) => _FilterSegment(
+                      filter: filter,
+                      count: _count(filter),
+                      selected: controller.libraryFilter == filter,
+                      onTap: () =>
+                          unawaited(controller.setLibraryFilter(filter)),
+                    ),
+                  )
+                  .toList(),
+            );
+            final search = TextField(
+              key: const ValueKey('generation-library-search'),
+              onChanged: controller.setSearch,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded, size: 18),
+                hintText: 'Search prompts, tags, folders',
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              style: const TextStyle(fontSize: 13),
+            );
 
-        if (constraints.maxWidth >= 760) {
-          return Row(
-            children: <Widget>[
-              Expanded(child: filters),
-              const SizedBox(width: 16),
-              SizedBox(width: 320, child: search),
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[filters, const SizedBox(height: 10), search],
-        );
-      },
+            if (constraints.maxWidth >= 760) {
+              return Row(
+                children: <Widget>[
+                  Expanded(child: filters),
+                  const SizedBox(width: 16),
+                  SizedBox(width: 320, child: search),
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[filters, const SizedBox(height: 10), search],
+            );
+          },
+        ),
+      ],
     ),
   );
 }
@@ -743,6 +802,8 @@ class _GenerationCardState extends State<GenerationCard> {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    StorageBadge(storage: item.storage, compact: true),
+                    const SizedBox(width: 7),
                     Padding(
                       padding: const EdgeInsets.only(top: 3),
                       child: Text(
@@ -860,6 +921,19 @@ class _GenerationCardState extends State<GenerationCard> {
                         label: Text(
                           item.isFailed ? 'Retry generation' : 'Reuse',
                         ),
+                      ),
+                    if (item.storage == LibraryStorage.local &&
+                        widget.controller.googleDriveConnected)
+                      OutlinedButton.icon(
+                        onPressed: widget.controller.googleDriveBusy
+                            ? null
+                            : () => unawaited(
+                                widget.controller.copyLocalLibraryToGoogleDrive(
+                                  generationIds: <String>{item.localId},
+                                ),
+                              ),
+                        icon: const Icon(Icons.cloud_upload_outlined, size: 16),
+                        label: const Text('Copy to Drive'),
                       ),
                     GenerationStatusButton(
                       controller: widget.controller,
@@ -1082,12 +1156,13 @@ Future<bool?> _showFolderEditor(
 }) async {
   final nameController = TextEditingController(text: folder?.name ?? '');
   var selectedParentId = folder?.parentId ?? parentId;
+  var destination =
+      folder?.storage ??
+      controller.folderById(parentId)?.storage ??
+      controller.effectiveStorage;
   final blockedParents = folder == null
       ? const <String>{}
       : controller.folderBranch(folder.id);
-  final parentChoices = controller.folderTree
-      .where((candidate) => !blockedParents.contains(candidate.id))
-      .toList();
   var saving = false;
   final result = await showDialog<bool>(
     context: context,
@@ -1099,6 +1174,32 @@ Future<bool?> _showFolderEditor(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              if (controller.supportsLocalLibrary &&
+                  controller.supportsGoogleDrive &&
+                  folder == null) ...<Widget>[
+                DropdownButtonFormField<LibraryStorage>(
+                  initialValue: destination,
+                  decoration: const InputDecoration(
+                    labelText: 'Save folder in',
+                    prefixIcon: Icon(Icons.storage_outlined),
+                  ),
+                  items: LibraryStorage.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: saving
+                      ? null
+                      : (value) => setState(() {
+                          destination = value ?? destination;
+                          selectedParentId = null;
+                        }),
+                ),
+                const SizedBox(height: 8),
+              ],
               TextField(
                 controller: nameController,
                 autofocus: true,
@@ -1118,6 +1219,7 @@ Future<bool?> _showFolderEditor(
                           nameController.text,
                           existing: folder,
                           parentId: selectedParentId,
+                          storage: destination,
                         );
                         if (dialogContext.mounted && saved) {
                           Navigator.pop(dialogContext, true);
@@ -1138,15 +1240,21 @@ Future<bool?> _showFolderEditor(
                     value: '',
                     child: Text('Library (top level)'),
                   ),
-                  ...parentChoices.map(
-                    (candidate) => DropdownMenuItem(
-                      value: candidate.id,
-                      child: Text(
-                        controller.folderPath(candidate.id),
-                        overflow: TextOverflow.ellipsis,
+                  ...controller.folderTree
+                      .where(
+                        (candidate) =>
+                            candidate.storage == destination &&
+                            !blockedParents.contains(candidate.id),
+                      )
+                      .map(
+                        (candidate) => DropdownMenuItem(
+                          value: candidate.id,
+                          child: Text(
+                            controller.folderPath(candidate.id),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
                 ],
                 onChanged: saving
                     ? null
@@ -1173,6 +1281,7 @@ Future<bool?> _showFolderEditor(
                       nameController.text,
                       existing: folder,
                       parentId: selectedParentId,
+                      storage: destination,
                     );
                     if (dialogContext.mounted && saved) {
                       Navigator.pop(dialogContext, true);
@@ -1354,6 +1463,11 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: context.colors.onSurfaceVariant),
           ),
+          const SizedBox(height: 9),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: StorageBadge(storage: widget.item.storage),
+          ),
           const SizedBox(height: 22),
           DropdownButtonFormField<String>(
             initialValue: folderId ?? '',
@@ -1363,15 +1477,17 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
             ),
             items: <DropdownMenuItem<String>>[
               const DropdownMenuItem(value: '', child: Text('Unfiled')),
-              ...widget.controller.folderTree.map(
-                (folder) => DropdownMenuItem(
-                  value: folder.id,
-                  child: Text(
-                    widget.controller.folderPath(folder.id),
-                    overflow: TextOverflow.ellipsis,
+              ...widget.controller.folderTree
+                  .where((folder) => folder.storage == widget.item.storage)
+                  .map(
+                    (folder) => DropdownMenuItem(
+                      value: folder.id,
+                      child: Text(
+                        widget.controller.folderPath(folder.id),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
-                ),
-              ),
             ],
             onChanged: saving
                 ? null

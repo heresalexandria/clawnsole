@@ -55,16 +55,22 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.checkForUpdate, "function");
   assert.equal(typeof bridge.startUpdate, "function");
   assert.equal(typeof bridge.onUpdateEvent, "function");
+  assert.equal(typeof bridge.authorizeGoogleDrive, "function");
+  assert.equal(typeof bridge.disconnectGoogleDrive, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
   await bridge.startUpdate();
+  await bridge.authorizeGoogleDrive();
+  await bridge.disconnectGoogleDrive();
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
       "clawnsole:update:check",
       "clawnsole:update:check",
       "clawnsole:update:start",
+      "clawnsole:drive:authorize",
+      "clawnsole:drive:disconnect",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);

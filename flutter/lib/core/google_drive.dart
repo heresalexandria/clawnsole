@@ -12,6 +12,7 @@ const clawnsoleDriveAssetsFolder = 'assets';
 /// Removes device-only credentials before data is serialized to Drive.
 StoredData googleDrivePortableData(StoredData data) => StoredData(
   preferences: data.preferences,
+  preferencesUpdatedAt: data.preferencesUpdatedAt,
   generations: data.generations,
   folders: data.folders,
   savedReferences: data.savedReferences,
@@ -52,6 +53,9 @@ StoredData mergeGoogleDriveData({
     apiKey: next.apiKey,
     apiKeys: next.apiKeys,
     preferences: preferencesChanged ? next.preferences : remote.preferences,
+    preferencesUpdatedAt: preferencesChanged
+        ? next.preferencesUpdatedAt
+        : remote.preferencesUpdatedAt,
     generations: generations,
     folders: folders,
     savedReferences: references,
@@ -106,10 +110,29 @@ class GoogleDriveConnection {
 
   bool get isConnected => state == GoogleDriveConnectionState.connected;
   bool get isConfigured => folderName.isNotEmpty || folderId.isNotEmpty;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'state': state.name,
+    'folderName': folderName,
+    'folderId': folderId,
+    'message': message,
+  };
+
+  factory GoogleDriveConnection.fromJson(Map<String, Object?> json) =>
+      GoogleDriveConnection(
+        state: GoogleDriveConnectionState.values.firstWhere(
+          (value) => value.name == json['state'],
+          orElse: () => GoogleDriveConnectionState.disconnected,
+        ),
+        folderName: json['folderName'] as String? ?? '',
+        folderId: json['folderId'] as String? ?? '',
+        message: json['message'] as String? ?? '',
+      );
 }
 
 abstract interface class GoogleDriveGateway {
   GoogleDriveConnection get googleDriveConnection;
+  bool get supportsLocalLibrary;
 
   /// Authorizes Drive and creates or reopens an app-owned folder by name.
   Future<LocalSnapshot> connectGoogleDrive(String folderName);
@@ -118,6 +141,25 @@ abstract interface class GoogleDriveGateway {
   Future<LocalSnapshot> disconnectGoogleDrive();
 
   Future<LocalSnapshot> refreshGoogleDrive();
+
+  /// Copies local records and retained assets into Drive without deleting the
+  /// local originals. Stable `drive-` ids make the operation idempotent.
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  });
+}
+
+class GoogleDriveCopyResult {
+  const GoogleDriveCopyResult({
+    required this.snapshot,
+    required this.generations,
+    required this.references,
+  });
+
+  final LocalSnapshot snapshot;
+  final int generations;
+  final int references;
 }
 
 class GoogleDriveFile {

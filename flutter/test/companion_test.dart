@@ -23,6 +23,33 @@ void main() {
     expect(config.webRoot, endsWith('build/web'));
   });
 
+  test(
+    'local companion copies a retained Drive input into local storage',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-cross-store-test.',
+      );
+      final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      try {
+        final retained = await store.persistSource(
+          'data:image/png;base64,AQID',
+          label: 'reference.png',
+          retained: const AssetReference(
+            kind: 'drive',
+            value: 'drive-file-id',
+            label: 'reference.png',
+            contentType: 'image/png',
+          ),
+        );
+
+        expect(retained?.kind, 'local');
+        expect(await store.readAsset(retained!), <int>[1, 2, 3]);
+      } finally {
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+
   test('companion serves the Flutter bundle and API on one origin', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'clawnsole-companion-test.',
