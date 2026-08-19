@@ -316,6 +316,13 @@ class GenerationSpecChips extends StatelessWidget {
               ? 'Retired frame animation'
               : item.mode.label,
         ),
+        if (config.referenceTask != MediaReferenceTask.reference)
+          _SpecChip(
+            icon: config.referenceTask == MediaReferenceTask.edit
+                ? Icons.auto_fix_high_rounded
+                : Icons.more_time_rounded,
+            label: config.referenceTask.label,
+          ),
         _SpecChip(
           label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
           leading: _MiniRatioGlyph(ratio: config.aspectRatio),
@@ -430,8 +437,11 @@ class ReferenceInputsStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final frames = item.config.keyframes ?? const <KeyframeLabel>[];
+    final references = item.config.references ?? const <MediaReferenceLabel>[];
     final source = item.config.source;
-    if (frames.isEmpty && source == null) return const SizedBox.shrink();
+    if (frames.isEmpty && references.isEmpty && source == null) {
+      return const SizedBox.shrink();
+    }
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -440,6 +450,7 @@ class ReferenceInputsStrip extends StatelessWidget {
         ...frames.map(
           (frame) => _ReferenceThumb(controller: controller, frame: frame),
         ),
+        ...references.map((media) => _MediaReferenceChip(media: media)),
         if (source != null)
           _SourceReferenceChip(
             controller: controller,
@@ -449,6 +460,53 @@ class ReferenceInputsStrip extends StatelessWidget {
       ],
     );
   }
+}
+
+class _MediaReferenceChip extends StatelessWidget {
+  const _MediaReferenceChip({required this.media});
+
+  final MediaReferenceLabel media;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: '${media.kind.label} reference · ${media.label}',
+    child: Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            switch (media.kind) {
+              MediaReferenceKind.image => Icons.image_rounded,
+              MediaReferenceKind.video => Icons.video_library_rounded,
+              MediaReferenceKind.audio => Icons.graphic_eq_rounded,
+            },
+            size: 15,
+            color: context.colors.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 110),
+            child: Text(
+              media.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ReferenceThumb extends StatefulWidget {
@@ -1192,6 +1250,12 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
   Future<Uint8List>? _bytes;
 
   AssetReference? _findReference() {
+    for (final media
+        in widget.item.config.references ?? const <MediaReferenceLabel>[]) {
+      if (media.kind == MediaReferenceKind.image && media.source != null) {
+        return media.source;
+      }
+    }
     for (final frame
         in widget.item.config.keyframes ?? const <KeyframeLabel>[]) {
       if (frame.source != null) return frame.source;
@@ -1423,6 +1487,7 @@ class ActivityCard extends StatelessWidget {
                 const SizedBox(height: 9),
                 GenerationSpecChips(item: item),
                 if (item.config.keyframes?.isNotEmpty == true ||
+                    item.config.references?.isNotEmpty == true ||
                     item.config.source != null) ...<Widget>[
                   const SizedBox(height: 8),
                   ReferenceInputsStrip(controller: controller, item: item),

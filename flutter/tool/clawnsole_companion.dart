@@ -164,7 +164,10 @@ class CompanionStore {
     return null;
   }
 
-  Set<String> _references(List<Generation> generations) {
+  Set<String> _references(
+    List<Generation> generations,
+    List<SavedReference> savedReferences,
+  ) {
     final retained = <String>{};
     void add(AssetReference? reference) {
       if (reference?.isLocal == true) retained.add(reference!.value);
@@ -177,13 +180,23 @@ class CompanionStore {
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
         add(frame.source);
       }
+      for (final media
+          in generation.config.references ?? const <MediaReferenceLabel>[]) {
+        add(media.source);
+      }
+    }
+    for (final reference in savedReferences) {
+      add(reference.asset);
     }
     return retained;
   }
 
-  Future<void> pruneAssets(List<Generation> generations) async {
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) async {
     if (!await assets.exists()) return;
-    final retained = _references(generations);
+    final retained = _references(generations, savedReferences);
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
@@ -408,7 +421,8 @@ class CompanionApp {
           );
           return StoreChange<void>(next, null);
         });
-        await _store.pruneAssets((await _store.read()).generations);
+        final data = await _store.read();
+        await _store.pruneAssets(data.generations, data.savedReferences);
         return await _json(request.response, 200, (await _snapshot()).toJson());
       }
       if (request.method == 'GET' && path == '/assets') {
@@ -476,7 +490,7 @@ class CompanionApp {
 
   Future<void> _stateAction(String action, Object? value) async {
     if (action == 'clearAll') return _store.delete();
-    await _store.mutate<void>((current) {
+    await _store.mutate<void>((current) async {
       StoredData next;
       if (action == 'setApiKey') {
         final key = value?.toString().trim() ?? '';
@@ -510,7 +524,10 @@ class CompanionApp {
             ? null
             : folder.parentId;
         if (parentId != null &&
-            !current.folders.any((item) => item.id == parentId)) {
+            !current.folders.any(
+              (item) =>
+                  item.id == parentId && item.collection == folder.collection,
+            )) {
           throw StateError('The parent folder no longer exists.');
         }
         var ancestorId = parentId;
@@ -526,6 +543,7 @@ class CompanionApp {
         if (current.folders.any(
           (item) =>
               item.id != folder.id &&
+              item.collection == folder.collection &&
               item.parentId == parentId &&
               item.name.toLowerCase() == name.toLowerCase(),
         )) {
@@ -538,6 +556,7 @@ class CompanionApp {
           name: name,
           createdAt: folder.createdAt,
           parentId: parentId,
+          collection: folder.collection,
         );
         if (index < 0) {
           folders.add(clean);
@@ -569,6 +588,13 @@ class CompanionApp {
                     : item,
               )
               .toList(),
+          savedReferences: current.savedReferences
+              .map(
+                (item) => item.folderId == folderId
+                    ? item.copyWith(clearFolder: true)
+                    : item,
+              )
+              .toList(),
         );
       } else if (action == 'setGenerationOrganization') {
         final map = value is Map<Object?, Object?> ? value : const {};
@@ -576,7 +602,11 @@ class CompanionApp {
         final rawFolderId = map['folderId']?.toString().trim() ?? '';
         final folderId = rawFolderId.isEmpty ? null : rawFolderId;
         if (folderId != null &&
-            !current.folders.any((folder) => folder.id == folderId)) {
+            !current.folders.any(
+              (folder) =>
+                  folder.id == folderId &&
+                  folder.collection == LibraryCollection.generated,
+            )) {
           throw StateError('That folder no longer exists.');
         }
         final tags = _cleanLibraryTags(
@@ -596,6 +626,74 @@ class CompanionApp {
         }).toList();
         if (!found) throw StateError('That generation no longer exists.');
         next = current.copyWith(generations: generations);
+      } else if (action == 'saveReference') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final rawReference = map['reference'];
+        final reference = SavedReference.fromJson(
+          rawReference is Map<Object?, Object?>
+              ? rawReference.map(
+                  (key, child) => MapEntry(key.toString(), child),
+                )
+              : const <String, Object?>{},
+        );
+        final name = reference.name.trim();
+        if (reference.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+          throw StateError(
+            'Reference names must be between 1 and 80 characters.',
+          );
+        }
+        if (reference.folderId != null &&
+            !current.folders.any(
+              (folder) =>
+                  folder.id == reference.folderId &&
+                  folder.collection == LibraryCollection.references,
+            )) {
+          throw StateError('That reference folder no longer exists.');
+        }
+        final existing = current.savedReferences
+            .where((item) => item.id == reference.id)
+            .firstOrNull;
+        var asset = existing?.asset ?? reference.asset;
+        final source = map['source']?.toString();
+        if (source != null) {
+          asset =
+              await _store.persistSource(
+                source,
+                label: name,
+                retained: reference.asset.value.isEmpty
+                    ? null
+                    : reference.asset,
+              ) ??
+              asset;
+        }
+        if (asset.value.isEmpty) {
+          throw StateError('Choose reference media before saving.');
+        }
+        final clean = SavedReference(
+          id: reference.id,
+          name: name,
+          kind: reference.kind,
+          asset: asset,
+          createdAt: existing?.createdAt ?? reference.createdAt,
+          updatedAt: DateTime.now().toUtc(),
+          folderId: reference.folderId,
+          tags: _cleanLibraryTags(reference.tags),
+        );
+        final references = List<SavedReference>.from(current.savedReferences);
+        final index = references.indexWhere((item) => item.id == clean.id);
+        if (index < 0) {
+          references.insert(0, clean);
+        } else {
+          references[index] = clean;
+        }
+        next = current.copyWith(savedReferences: references);
+      } else if (action == 'deleteReference') {
+        final id = value?.toString() ?? '';
+        next = current.copyWith(
+          savedReferences: current.savedReferences
+              .where((item) => item.id != id)
+              .toList(),
+        );
       } else if (action == 'clearHistory') {
         next = current.copyWith(generations: <Generation>[]);
       } else if (action == 'clearPreferences') {
@@ -612,7 +710,10 @@ class CompanionApp {
       }
       return StoreChange<void>(next, null);
     });
-    if (action == 'clearHistory') await _store.clearAssets();
+    if (action == 'clearHistory' || action == 'deleteReference') {
+      final data = await _store.read();
+      await _store.pruneAssets(data.generations, data.savedReferences);
+    }
   }
 
   Future<LocalSnapshot> _snapshot() async {
@@ -654,11 +755,14 @@ class CompanionApp {
     return LocalSnapshot(
       generations: data.generations,
       folders: data.folders,
+      savedReferences: data.savedReferences,
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
       availableProviders: const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
-      storage: await _store.stats(data.generations.length),
+      storage: await _store.stats(
+        data.generations.length + data.savedReferences.length,
+      ),
     );
   }
 
@@ -724,7 +828,35 @@ class CompanionApp {
           ),
         );
       }
-      return config.copyWith(keyframes: frames);
+      final rawReferences = <MediaReferenceKind, List<Object?>>{
+        MediaReferenceKind.image:
+            input['reference_images'] as List<Object?>? ?? const [],
+        MediaReferenceKind.video:
+            input['reference_videos'] as List<Object?>? ?? const [],
+        MediaReferenceKind.audio:
+            input['reference_audios'] as List<Object?>? ?? const [],
+      };
+      final offsets = <MediaReferenceKind, int>{
+        for (final kind in MediaReferenceKind.values) kind: 0,
+      };
+      final references = <MediaReferenceLabel>[];
+      for (final media in config.references ?? const <MediaReferenceLabel>[]) {
+        final index = offsets[media.kind]!;
+        final sources = rawReferences[media.kind]!;
+        offsets[media.kind] = index + 1;
+        references.add(
+          MediaReferenceLabel(
+            label: media.label,
+            kind: media.kind,
+            source: await _store.persistSource(
+              index < sources.length ? sources[index]?.toString() ?? '' : '',
+              label: media.label,
+              retained: media.source,
+            ),
+          ),
+        );
+      }
+      return config.copyWith(keyframes: frames, references: references);
     }
     if (mode == 'v2v' || mode == 'draft_enhance') {
       return config.copyWith(
@@ -994,13 +1126,25 @@ class CompanionApp {
     return next;
   }
 
-  AssetReference? _findAsset(List<Generation> generations, String id) {
+  AssetReference? _findAsset(
+    List<Generation> generations,
+    List<SavedReference> savedReferences,
+    String id,
+  ) {
+    for (final reference in savedReferences) {
+      if (reference.asset.isLocal && reference.asset.value == id) {
+        return reference.asset;
+      }
+    }
     for (final generation in generations) {
       final references = <AssetReference?>[
         generation.resultAsset,
         generation.config.source,
         ...(generation.config.keyframes ?? const <KeyframeLabel>[]).map(
           (frame) => frame.source,
+        ),
+        ...(generation.config.references ?? const <MediaReferenceLabel>[]).map(
+          (media) => media.source,
         ),
       ];
       for (final reference in references) {
@@ -1020,7 +1164,8 @@ class CompanionApp {
         status: 400,
       );
     }
-    final reference = _findAsset((await _store.read()).generations, id);
+    final data = await _store.read();
+    final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
         'The local asset was not found.',

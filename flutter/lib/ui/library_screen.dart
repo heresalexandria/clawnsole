@@ -787,6 +787,7 @@ class _GenerationCardState extends State<GenerationCard> {
                 const SizedBox(height: 11),
                 GenerationSpecChips(item: item),
                 if (item.config.keyframes?.isNotEmpty == true ||
+                    item.config.references?.isNotEmpty == true ||
                     item.config.source != null) ...<Widget>[
                   const SizedBox(height: 9),
                   ReferenceInputsStrip(
