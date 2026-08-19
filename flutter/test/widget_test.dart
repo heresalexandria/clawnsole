@@ -1191,6 +1191,84 @@ void main() {
     },
   );
 
+  test('restoring a model constrains the form like selecting it', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        // LTX 2.3 Fast supports neither Auto duration nor timed keyframes.
+        preferences: AppPreferences(provider: 'ltx', model: 'ltx-2-3-fast'),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    expect(controller.selectedModelId, 'ltx-2-3-fast');
+    expect(controller.form.autoDuration, isFalse);
+    expect(controller.form.exactTiming, isFalse);
+    controller.dispose();
+  });
+
+  test('Seedance pinned frames and references are either-or', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(
+          provider: 'artcraft',
+          model: 'seedance_2p5',
+        ),
+        hasApiKey: true,
+        connectedProviders: <String>{'artcraft'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    expect(controller.selectedModelId, 'seedance_2p5');
+
+    // Attaching a reference sets pinned frames aside.
+    controller.addUrlReference(MediaReferenceKind.image);
+    expect(controller.form.references, hasLength(1));
+    expect(controller.framesBlockedByReferences, isTrue);
+    expect(controller.canAddFrame(KeyframeRole.start), isFalse);
+    controller.addUrlFrame(KeyframeRole.start);
+    expect(controller.form.keyframes, isEmpty);
+
+    // Removing the reference restores frames, and pinning a frame then
+    // sets references aside.
+    controller.removeReference(controller.form.references.single.id);
+    expect(controller.canAddFrame(KeyframeRole.start), isTrue);
+    controller.addUrlFrame(KeyframeRole.start);
+    expect(controller.form.keyframes, hasLength(1));
+    expect(controller.referencesBlockedByFrames, isTrue);
+    expect(controller.canAddReference(MediaReferenceKind.image), isFalse);
+    controller.addUrlReference(MediaReferenceKind.image);
+    expect(controller.form.references, isEmpty);
+
+    // A conflicted form (possible through reuse or model switches) cannot
+    // be submitted.
+    controller.form.prompt = 'A machinist polishes a knob.';
+    controller.updateFrame(
+      controller.form.keyframes.single.id,
+      source: 'https://example.com/first.png',
+    );
+    controller.form.references = <MediaReferenceDraft>[
+      MediaReferenceDraft(
+        id: 'ref-1',
+        kind: MediaReferenceKind.image,
+        label: 'style.png',
+        source: 'https://example.com/style.png',
+      ),
+    ];
+    expect(
+      controller.validate(),
+      contains('takes pinned frames or creative references'),
+    );
+    // Let the startup credit refresh settle before tearing down.
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    controller.dispose();
+  });
+
   test('reuse recreates the exact stored request for every mode', () async {
     final gateway = _MemoryGateway(
       const LocalSnapshot(
@@ -1613,6 +1691,73 @@ void main() {
       }
     },
   );
+
+  testWidgets('either-or models set the unused input side aside on Create', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1600));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'seedance_2p5';
+    Future<void> pump() => tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    // Empty form: both sections are offered, each noting the either-or rule.
+    await pump();
+    expect(find.textContaining('sets creative references aside'), findsOne);
+    expect(find.textContaining('sets pinned frames aside'), findsOne);
+    expect(find.text('First frame'), findsOneWidget);
+    expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
+
+    // A pinned frame sets the references side aside.
+    controller.addUrlFrame(KeyframeRole.start);
+    await pump();
+    await tester.pump();
+    expect(
+      find.textContaining('Remove the frames to guide with references'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('add-image-reference')), findsNothing);
+
+    // A reference sets the frames side aside instead.
+    controller.removeFrame(controller.form.keyframes.single.id);
+    controller.addUrlReference(MediaReferenceKind.image);
+    await pump();
+    await tester.pump();
+    expect(
+      find.textContaining('Remove the references below to pin frames'),
+      findsOneWidget,
+    );
+    expect(find.text('First frame'), findsNothing);
+
+    // A conflicted form (through reuse or a model switch) warns on both
+    // sections.
+    controller.form.keyframes = <KeyframeDraft>[
+      const KeyframeDraft(
+        id: 'frame-1',
+        role: KeyframeRole.start,
+        label: 'first.png',
+        source: 'https://example.com/first.png',
+        seconds: 0,
+      ),
+    ];
+    await pump();
+    await tester.pump();
+    expect(find.textContaining('not both — remove one side'), findsNWidgets(2));
+    controller.dispose();
+  });
 
   testWidgets(
     'Atlas reference models expose separate image video and audio inputs',

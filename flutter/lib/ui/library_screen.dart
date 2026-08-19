@@ -8,6 +8,7 @@ import '../core/models.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
+import 'hardware.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatelessWidget {
@@ -526,16 +527,10 @@ class _FilterSegment extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? context.colors.primary
-              : context.colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected
-                ? context.colors.primary
-                : context.colors.outlineVariant,
-          ),
+        decoration: consoleKeyDecoration(
+          context,
+          selected: selected,
+          radius: 10,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

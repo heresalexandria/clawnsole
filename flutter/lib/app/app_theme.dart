@@ -8,6 +8,19 @@ abstract final class ClawnsoleColors {
   static const plum = Color(0xFF532B4E);
   static const plumInk = Color(0xFF271E25);
   static const navy = Color(0xFF26405F);
+
+  /// Evening hunter felt: the money surface in dark mode, and the ink that
+  /// writes on the pale baize in light mode.
+  static const hunter = Color(0xFF2A4633);
+
+  /// Daylight baize: the money surface in light mode.
+  static const baize = Color(0xFFD6E3CB);
+  static const hunterInk = Color(0xFF1D3325);
+  static const hunterInkMuted = Color(0xFF4A6152);
+
+  /// The lit side of a switch that is on, tuned per mode so it reads as a
+  /// signal lamp rather than a dark blot on paper.
+  static const signalGreen = Color(0xFF4A7C55);
   static const brass = Color(0xFF7C5B22);
   static const brassBright = Color(0xFFD9B36C);
   static const cream = Color(0xFFF3EAD9);
@@ -35,6 +48,17 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
     required this.canvas,
     required this.canvasTexture,
     required this.canvasTextureOpacity,
+    required this.money,
+    required this.onMoney,
+    required this.onMoneyMuted,
+    required this.moneyAccent,
+    required this.switchOn,
+    required this.brightness,
+    required this.plumPanel,
+    required this.navyPanel,
+    required this.onContentPanel,
+    required this.onContentPanelMuted,
+    required this.contentPanelBrass,
   });
 
   /// Accent for eyebrows, the claw mark, and small hardware details.
@@ -60,6 +84,38 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
 
   final double canvasTextureOpacity;
 
+  /// The estimated-charge surface. Green is money in both modes, but the
+  /// panel is pale baize on paper and deep hunter felt at night — light mode
+  /// never carries a large dark block.
+  final Color money;
+
+  /// Primary text and numerals on [money].
+  final Color onMoney;
+
+  /// Secondary text on [money].
+  final Color onMoneyMuted;
+
+  /// Brass jewelry on [money]: the coin ring, the rate-card link, stitching.
+  final Color moneyAccent;
+
+  /// The lit side of a hardware switch that is on.
+  final Color switchOn;
+
+  /// Which room these tokens dress. Panels read it to choose their material.
+  final Brightness brightness;
+
+  /// Upholstered *content* panels — the Settings feature panel and the
+  /// provider plaque. Unlike the rail casework they follow the mode: pale
+  /// tinted linen on paper, dark leather at night. In light mode the only
+  /// dark backgrounds left are buttons and the rail.
+  final Color plumPanel;
+  final Color navyPanel;
+
+  /// Text and jewelry on a content panel.
+  final Color onContentPanel;
+  final Color onContentPanelMuted;
+  final Color contentPanelBrass;
+
   static const light = ClawnsoleTokens(
     brass: ClawnsoleColors.brass,
     onPanel: ClawnsoleColors.cream,
@@ -69,6 +125,17 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
     canvas: Color(0xFFF1EBDE),
     canvasTexture: ClawnsoleTextures.linen,
     canvasTextureOpacity: .55,
+    money: ClawnsoleColors.baize,
+    onMoney: ClawnsoleColors.hunterInk,
+    onMoneyMuted: ClawnsoleColors.hunterInkMuted,
+    moneyAccent: ClawnsoleColors.brass,
+    switchOn: ClawnsoleColors.signalGreen,
+    brightness: Brightness.light,
+    plumPanel: Color(0xFFE6DCE4),
+    navyPanel: Color(0xFFDCE3EE),
+    onContentPanel: Color(0xFF29202F),
+    onContentPanelMuted: Color(0xFF60566A),
+    contentPanelBrass: ClawnsoleColors.brass,
   );
 
   static const dark = ClawnsoleTokens(
@@ -80,6 +147,17 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
     canvas: Color(0xFF15100C),
     canvasTexture: ClawnsoleTextures.plumLeather,
     canvasTextureOpacity: .12,
+    money: ClawnsoleColors.hunter,
+    onMoney: ClawnsoleColors.cream,
+    onMoneyMuted: ClawnsoleColors.creamMuted,
+    moneyAccent: ClawnsoleColors.brassBright,
+    switchOn: ClawnsoleColors.hunter,
+    brightness: Brightness.dark,
+    plumPanel: Color(0xFF352A34),
+    navyPanel: Color(0xFF272E3A),
+    onContentPanel: ClawnsoleColors.cream,
+    onContentPanelMuted: ClawnsoleColors.creamMuted,
+    contentPanelBrass: ClawnsoleColors.brassBright,
   );
 
   @override
@@ -92,6 +170,17 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
     Color? canvas,
     String? canvasTexture,
     double? canvasTextureOpacity,
+    Color? money,
+    Color? onMoney,
+    Color? onMoneyMuted,
+    Color? moneyAccent,
+    Color? switchOn,
+    Brightness? brightness,
+    Color? plumPanel,
+    Color? navyPanel,
+    Color? onContentPanel,
+    Color? onContentPanelMuted,
+    Color? contentPanelBrass,
   }) => ClawnsoleTokens(
     brass: brass ?? this.brass,
     onPanel: onPanel ?? this.onPanel,
@@ -101,6 +190,17 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
     canvas: canvas ?? this.canvas,
     canvasTexture: canvasTexture ?? this.canvasTexture,
     canvasTextureOpacity: canvasTextureOpacity ?? this.canvasTextureOpacity,
+    money: money ?? this.money,
+    onMoney: onMoney ?? this.onMoney,
+    onMoneyMuted: onMoneyMuted ?? this.onMoneyMuted,
+    moneyAccent: moneyAccent ?? this.moneyAccent,
+    switchOn: switchOn ?? this.switchOn,
+    brightness: brightness ?? this.brightness,
+    plumPanel: plumPanel ?? this.plumPanel,
+    navyPanel: navyPanel ?? this.navyPanel,
+    onContentPanel: onContentPanel ?? this.onContentPanel,
+    onContentPanelMuted: onContentPanelMuted ?? this.onContentPanelMuted,
+    contentPanelBrass: contentPanelBrass ?? this.contentPanelBrass,
   );
 
   @override
@@ -117,6 +217,25 @@ class ClawnsoleTokens extends ThemeExtension<ClawnsoleTokens> {
       canvasTextureOpacity:
           canvasTextureOpacity +
           (other.canvasTextureOpacity - canvasTextureOpacity) * t,
+      money: Color.lerp(money, other.money, t)!,
+      onMoney: Color.lerp(onMoney, other.onMoney, t)!,
+      onMoneyMuted: Color.lerp(onMoneyMuted, other.onMoneyMuted, t)!,
+      moneyAccent: Color.lerp(moneyAccent, other.moneyAccent, t)!,
+      switchOn: Color.lerp(switchOn, other.switchOn, t)!,
+      brightness: t < .5 ? brightness : other.brightness,
+      plumPanel: Color.lerp(plumPanel, other.plumPanel, t)!,
+      navyPanel: Color.lerp(navyPanel, other.navyPanel, t)!,
+      onContentPanel: Color.lerp(onContentPanel, other.onContentPanel, t)!,
+      onContentPanelMuted: Color.lerp(
+        onContentPanelMuted,
+        other.onContentPanelMuted,
+        t,
+      )!,
+      contentPanelBrass: Color.lerp(
+        contentPanelBrass,
+        other.contentPanelBrass,
+        t,
+      )!,
     );
   }
 }

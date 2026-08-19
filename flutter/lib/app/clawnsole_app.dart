@@ -302,13 +302,22 @@ class _SideRail extends StatelessWidget {
             child: SizedBox.square(
               dimension: 48,
               child: Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.asset(
-                    'assets/icon.png',
-                    width: 44,
-                    height: 44,
-                    fit: BoxFit.cover,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(
+                      color: context.tokens.panelBrass.withValues(alpha: .55),
+                    ),
+                  ),
+                  padding: const EdgeInsets.all(1.5),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Image.asset(
+                      'assets/icon.png',
+                      width: 42,
+                      height: 42,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
               ),

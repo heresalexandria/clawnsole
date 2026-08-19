@@ -695,11 +695,16 @@ class AppController extends ChangeNotifier {
     libraryFilter = value.preferences.libraryFilter;
     final preferredProvider = providerById(value.preferences.provider);
     final available = providers;
+    final previousModelId = selectedModelId;
     selectedProviderId =
         available.any((provider) => provider.id == preferredProvider.id)
         ? preferredProvider.id
         : available.firstOrNull?.id ?? 'bfl';
     selectedModelId = modelById(selectedProviderId, value.preferences.model).id;
+    // A restored model must constrain the form exactly like a selected one,
+    // or a session can reopen with settings the model does not support
+    // (for example Auto duration on a fixed-duration model).
+    if (selectedModelId != previousModelId) _normalizeFormForModel();
     if (libraryFolderView != libraryFolderAll &&
         libraryFolderView != libraryFolderUnfiled &&
         !value.folders.any((folder) => folder.id == libraryFolderView)) {
@@ -1318,7 +1323,19 @@ class AppController extends ChangeNotifier {
     return assets;
   }
 
+  /// Pinned frames are unavailable because this model takes frames or media
+  /// references, never both, and references are already attached.
+  bool get framesBlockedByReferences =>
+      referenceModel.framesExclusiveWithReferences &&
+      form.references.isNotEmpty;
+
+  /// Media references are unavailable because this model takes frames or
+  /// references, never both, and frames are already pinned.
+  bool get referencesBlockedByFrames =>
+      referenceModel.framesExclusiveWithReferences && form.keyframes.isNotEmpty;
+
   bool canAddFrame(KeyframeRole role) =>
+      !framesBlockedByReferences &&
       form.keyframes.length < referenceModel.maxKeyframes &&
       switch (role) {
         KeyframeRole.start => referenceModel.supportsStartFrame,
@@ -1329,6 +1346,7 @@ class AppController extends ChangeNotifier {
           !form.keyframes.any((frame) => frame.role == role));
 
   bool canAddReference(MediaReferenceKind kind) =>
+      !referencesBlockedByFrames &&
       form.referenceCount(kind) < referenceLimit(kind);
 
   int referenceLimit(MediaReferenceKind kind) =>
@@ -1593,6 +1611,12 @@ class AppController extends ChangeNotifier {
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty && form.references.isEmpty) {
         return 'Add at least one supported frame or reference.';
+      }
+      if (model.framesExclusiveWithReferences &&
+          form.keyframes.isNotEmpty &&
+          form.references.isNotEmpty) {
+        return '${model.label} takes pinned frames or creative references, '
+            'not both. Remove one side before generating.';
       }
       if (form.keyframes.length > model.maxKeyframes) {
         return model.maxKeyframes == 0

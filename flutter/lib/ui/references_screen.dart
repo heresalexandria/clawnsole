@@ -439,12 +439,21 @@ class _MediaPlaceholder extends StatelessWidget {
   final MediaReferenceKind kind;
 
   @override
-  Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.plumInk,
-    child: Center(
-      child: Icon(_kindIcon(kind), size: 42, color: ClawnsoleColors.creamMuted),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
+      child: Center(
+        child: Icon(
+          _kindIcon(kind),
+          size: 42,
+          color: dark
+              ? ClawnsoleColors.creamMuted
+              : context.colors.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
 }
 
 class _ReferenceEmpty extends StatelessWidget {
