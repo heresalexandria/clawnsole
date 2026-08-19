@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
+import 'package:clawnsole/core/app_version.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
@@ -1640,7 +1641,7 @@ void main() {
     await status.backgroundCheck();
     await status.refresh();
 
-    expect(updater.forcedChecks, <bool>[false, false, true]);
+    expect(updater.forcedChecks, <bool>[true, false, true]);
     expect(status.updateAvailable, isTrue);
     expect(status.canSelfUpdate, isTrue);
     expect(status.requiresMajorUpdate, isFalse);
@@ -1742,9 +1743,9 @@ void main() {
       result: const <String, Object?>{
         'ok': true,
         'current': '0.10.1',
-        'latest': '0.10.1',
-        'available': false,
-        'installable': false,
+        'latest': '0.11.0',
+        'available': true,
+        'installable': true,
       },
     );
     final status = UpdateStatus.forTesting(updater);
@@ -1760,13 +1761,15 @@ void main() {
     await tester.pumpWidget(
       ClawnsoleApp(gateway: gateway, updateStatus: status),
     );
-    await tester.pump(const Duration(seconds: 4));
     await tester.pump();
-    expect(updater.forcedChecks, <bool>[false]);
+    await tester.pump();
+    expect(updater.forcedChecks, <bool>[true]);
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+    expect(find.byType(UpdateAvailableChip), findsOneWidget);
 
     await tester.pump(const Duration(hours: 24));
     await tester.pump();
-    expect(updater.forcedChecks, <bool>[false, false]);
+    expect(updater.forcedChecks, <bool>[true, false]);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -1775,7 +1778,11 @@ void main() {
     var checks = 0;
     final status = UpdateStatus.forMobileTesting(() async {
       checks += 1;
-      return const UpdateCheckResult(current: '0.10.1', latest: '0.10.1');
+      return const UpdateCheckResult(
+        current: '0.14.0',
+        latest: '0.15.0',
+        available: true,
+      );
     });
     final gateway = _MemoryGateway(
       const LocalSnapshot(
@@ -1789,9 +1796,11 @@ void main() {
     await tester.pumpWidget(
       ClawnsoleApp(gateway: gateway, updateStatus: status),
     );
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
     await tester.pump();
     expect(checks, 1);
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+    expect(find.text('Update'), findsOneWidget);
 
     await tester.pump(const Duration(hours: 24));
     await tester.pump();
@@ -1800,7 +1809,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('update chip animates and starts the macOS installer', (
+  testWidgets('update chip stays beside the version and starts the installer', (
     tester,
   ) async {
     final updater = _MemoryShellUpdater(
@@ -1833,8 +1842,15 @@ void main() {
     await tester.pump();
 
     expect(find.byType(UpdateAvailableChip), findsOneWidget);
-    expect(find.text('Update Available'), findsOneWidget);
-    final label = tester.widget<Text>(find.text('Update Available'));
+    expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+    expect(find.byKey(const Key('installed-version-chip')), findsOneWidget);
+    final label = tester.widget<Text>(
+      find.descendant(
+        of: find.byType(UpdateAvailableChip),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(label.data, anyOf('Update', 'Update Available'));
     expect(label.style?.color, Colors.white);
 
     final ink = tester.widget<Ink>(
@@ -1858,6 +1874,11 @@ void main() {
 
     await tester.tap(find.byKey(const Key('update-available-chip')));
     await tester.pump();
+    await tester.pump();
+    expect(find.text('Clawnsole 0.11.0 is available.'), findsOneWidget);
+    expect(updater.startCount, 0);
+    await tester.tap(find.text('Download and install 0.11.0'));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 20));
     expect(updater.startCount, 1);
     expect(find.text('Update failed'), findsOneWidget);
@@ -1865,6 +1886,63 @@ void main() {
     await tester.pump();
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'mobile update chip stays beside the version and opens the store',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final status = UpdateStatus.forMobileTesting(
+        () async => const UpdateCheckResult(
+          current: '0.14.0',
+          latest: '0.15.0',
+          available: true,
+        ),
+      );
+      await status.refresh(force: false);
+      var storeOpenCount = 0;
+      final gateway = _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+
+      await tester.pumpWidget(
+        ClawnsoleApp(
+          gateway: gateway,
+          checkForUpdates: false,
+          updateStatus: status,
+          storeUpdateOpener: (platform) async {
+            expect(platform, TargetPlatform.iOS);
+            storeOpenCount += 1;
+            return true;
+          },
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('v$clawnsoleVersion'), findsOneWidget);
+      expect(find.text('Update'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('update-available-chip')));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Clawnsole 0.15.0 is available.'), findsOneWidget);
+      expect(find.text('Open App Store'), findsOneWidget);
+
+      await tester.tap(find.text('Open App Store'));
+      await tester.pump();
+      expect(storeOpenCount, 1);
+      expect(find.text('Clawnsole 0.15.0 is available.'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets('major macOS update blocks the app until installation', (
     tester,

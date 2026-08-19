@@ -81,10 +81,14 @@ class UpdateStatus extends ChangeNotifier {
       hasDesktopUpdater && result?.installable != true;
 
   /// Checks once per app launch on macOS, iOS, and Android.
+  ///
+  /// Launch checks deliberately bypass the desktop shell's persisted
+  /// 24-hour throttle. A release may have been published after the previous
+  /// session checked, and opening the app is itself a reason to look again.
   Future<void> autoCheck() async {
     if (_autoChecked || !supportsAutomaticChecks) return;
     _autoChecked = true;
-    await refresh(force: false);
+    await refresh();
   }
 
   /// Re-checks from the 24-hour timer without bypassing the macOS shell's

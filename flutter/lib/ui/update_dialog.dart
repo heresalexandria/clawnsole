@@ -48,36 +48,58 @@ Future<bool> startAvailableUpdate(
   return false;
 }
 
-/// Shows the running version, whether a newer release exists, and — where the
-/// shell can do it — installs that release in place.
-Future<void> showVersionDialog(BuildContext context) => showDialog<void>(
+/// Shows the running version and update options for the active platform.
+Future<void> showVersionDialog(
+  BuildContext context, {
+  UpdateStatus? status,
+  StoreUpdateOpener? storeUpdateOpener,
+}) => showDialog<void>(
   context: context,
-  builder: (context) => const _VersionDialog(),
+  builder: (context) => _VersionDialog(
+    status: status ?? UpdateStatus.instance,
+    storeUpdateOpener: storeUpdateOpener,
+  ),
 );
 
 class _VersionDialog extends StatefulWidget {
-  const _VersionDialog();
+  const _VersionDialog({required this.status, this.storeUpdateOpener});
+
+  final UpdateStatus status;
+  final StoreUpdateOpener? storeUpdateOpener;
 
   @override
   State<_VersionDialog> createState() => _VersionDialogState();
 }
 
 class _VersionDialogState extends State<_VersionDialog> {
-  final UpdateStatus _status = UpdateStatus.instance;
+  late final UpdateStatus _status = widget.status;
+  bool _storeOpenFailed = false;
 
   @override
   void initState() {
     super.initState();
     // Opening the dialog is an explicit ask, so re-check rather than trusting
-    // the launch-time result — except where the store owns updates, since a
-    // GitHub tag says nothing about what the mobile store has published.
-    if (!storeManagedPlatform) unawaited(_status.refresh());
+    // the launch-time result on desktop or mobile.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_status.refresh());
+    });
   }
 
   Future<void> _install() async {
     final navigator = Navigator.of(context);
     navigator.pop();
     await startAvailableUpdate(navigator, updater: _status.desktopUpdater);
+  }
+
+  Future<void> _openStore() async {
+    final opener = widget.storeUpdateOpener ?? openClawnsoleStore;
+    final opened = await opener(defaultTargetPlatform);
+    if (!mounted) return;
+    if (opened) {
+      Navigator.pop(context);
+    } else {
+      setState(() => _storeOpenFailed = true);
+    }
   }
 
   @override
@@ -88,6 +110,7 @@ class _VersionDialogState extends State<_VersionDialog> {
       final checking = _status.checking && result == null;
       final available = _status.updateAvailable;
       final canSelfUpdate = _status.canSelfUpdate;
+      final storeManaged = _status.isStoreManaged;
       final storeName =
           clawnsoleStoreDestination(defaultTargetPlatform)?.name ?? 'app store';
       return AlertDialog(
@@ -109,12 +132,7 @@ class _VersionDialogState extends State<_VersionDialog> {
         ),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 380),
-          child: storeManagedPlatform
-              ? _DialogLine(
-                  icon: Icons.storefront_rounded,
-                  text: 'Updates for this app arrive through $storeName.',
-                )
-              : checking
+          child: checking
               ? const Padding(
                   padding: EdgeInsets.symmetric(vertical: 10),
                   child: Row(
@@ -169,7 +187,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                       Text(
                         canSelfUpdate
                             ? 'Clawnsole verifies the download against the release checksums, installs it in place, and reopens itself.'
-                            : storeManagedPlatform
+                            : storeManaged
                             ? 'Updates for this app arrive through $storeName.'
                             : _status.shellDeclinesInstall
                             ? 'This development build updates from source with git rather than replacing itself.'
@@ -180,12 +198,28 @@ class _VersionDialogState extends State<_VersionDialog> {
                           color: context.colors.onSurfaceVariant,
                         ),
                       ),
-                    ] else
+                    ] else ...<Widget>[
                       _DialogLine(
                         icon: Icons.check_circle_outline_rounded,
                         iconColor: context.tokens.brass,
                         text: 'You are running the latest release.',
                       ),
+                      if (storeManaged) ...<Widget>[
+                        const SizedBox(height: 10),
+                        _DialogLine(
+                          icon: Icons.storefront_rounded,
+                          text:
+                              'Updates for this app arrive through $storeName.',
+                        ),
+                      ],
+                    ],
+                    if (_storeOpenFailed) ...<Widget>[
+                      const SizedBox(height: 10),
+                      _DialogLine(
+                        icon: Icons.error_outline_rounded,
+                        text: 'Clawnsole could not open $storeName.',
+                      ),
+                    ],
                     if (_status.checking && result != null) ...<Widget>[
                       const SizedBox(height: 12),
                       Row(
@@ -209,7 +243,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                 ),
         ),
         actions: <Widget>[
-          if (!storeManagedPlatform && !checking && !available)
+          if (!checking && !available)
             OutlinedButton.icon(
               onPressed: _status.checking
                   ? null
@@ -217,13 +251,19 @@ class _VersionDialogState extends State<_VersionDialog> {
               icon: const Icon(Icons.refresh_rounded, size: 15),
               label: const Text('Check again'),
             ),
-          if (!storeManagedPlatform && !checking && available && canSelfUpdate)
+          if (!checking && available && canSelfUpdate)
             FilledButton.icon(
               onPressed: () => unawaited(_install()),
               icon: const Icon(Icons.download_rounded, size: 16),
               label: Text('Download and install ${result!.latest}'),
             )
-          else if (!storeManagedPlatform && !checking && available)
+          else if (!checking && available && storeManaged)
+            FilledButton.icon(
+              onPressed: () => unawaited(_openStore()),
+              icon: const Icon(Icons.storefront_rounded, size: 15),
+              label: Text('Open $storeName'),
+            )
+          else if (!checking && available)
             FilledButton.icon(
               onPressed: () =>
                   unawaited(launchUrl(Uri.parse(result!.releaseUrl))),

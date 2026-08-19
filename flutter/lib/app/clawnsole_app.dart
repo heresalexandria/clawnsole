@@ -51,7 +51,6 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   late final UpdateStatus _updateStatus;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<ShellUpdateEvent>? _shellUpdates;
-  Timer? _startupUpdateCheck;
   Timer? _periodicUpdateCheck;
   bool _requiredUpdateDialogOpen = false;
   String? _lastNotice;
@@ -73,10 +72,9 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
       if (navigator != null) unawaited(showUpdateProgressDialog(navigator));
     });
     if (widget.checkForUpdates && _updateStatus.supportsAutomaticChecks) {
-      _startupUpdateCheck = Timer(
-        const Duration(seconds: 4),
-        () => unawaited(_updateStatus.autoCheck()),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_updateStatus.autoCheck());
+      });
       _periodicUpdateCheck = Timer.periodic(
         const Duration(hours: 24),
         (_) => unawaited(_updateStatus.backgroundCheck()),
@@ -86,7 +84,6 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
 
   @override
   void dispose() {
-    _startupUpdateCheck?.cancel();
     _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
     _updateStatus.removeListener(_handleRequiredUpdate);
@@ -160,6 +157,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
         return _AppShell(
           controller: controller,
           updateStatus: _updateStatus,
+          storeUpdateOpener: widget.storeUpdateOpener,
           themeMode: _themeMode,
           onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
         );
@@ -172,12 +170,14 @@ class _AppShell extends StatelessWidget {
   const _AppShell({
     required this.controller,
     required this.updateStatus,
+    required this.storeUpdateOpener,
     required this.themeMode,
     required this.onThemeModeChanged,
   });
 
   final AppController controller;
   final UpdateStatus updateStatus;
+  final StoreUpdateOpener? storeUpdateOpener;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
 
@@ -209,6 +209,7 @@ class _AppShell extends StatelessWidget {
                     _TopBar(
                       controller: controller,
                       updateStatus: updateStatus,
+                      storeUpdateOpener: storeUpdateOpener,
                       compact: !wide,
                       themeMode: themeMode,
                       onThemeModeChanged: onThemeModeChanged,
@@ -450,6 +451,7 @@ class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.controller,
     required this.updateStatus,
+    required this.storeUpdateOpener,
     required this.compact,
     required this.themeMode,
     required this.onThemeModeChanged,
@@ -457,112 +459,128 @@ class _TopBar extends StatelessWidget {
 
   final AppController controller;
   final UpdateStatus updateStatus;
+  final StoreUpdateOpener? storeUpdateOpener;
   final bool compact;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 64,
-    padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 26),
-    decoration: BoxDecoration(
-      color: context.colors.surface.withValues(alpha: .84),
-      border: Border(bottom: BorderSide(color: context.colors.outlineVariant)),
-    ),
-    child: Row(
-      children: <Widget>[
-        Expanded(
-          child: Row(
-            children: <Widget>[
-              Flexible(
-                child: InkWell(
-                  onTap: () =>
-                      unawaited(controller.navigate(AppSection.create)),
-                  borderRadius: BorderRadius.circular(9),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 4,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        ClawMark(
-                          size: compact ? 19 : 21,
-                          color: context.tokens.brass,
-                        ),
-                        const SizedBox(width: 9),
-                        Flexible(
-                          child: Text(
-                            'Clawnsole',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontFamily: 'Fraunces',
-                              fontSize: compact ? 19 : 21,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -.3,
-                              color: context.colors.onSurface,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+  Widget build(BuildContext context) {
+    final brand = InkWell(
+      onTap: () => unawaited(controller.navigate(AppSection.create)),
+      borderRadius: BorderRadius.circular(9),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 5, vertical: compact ? 1 : 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ClawMark(size: compact ? 19 : 21, color: context.tokens.brass),
+            const SizedBox(width: 9),
+            Flexible(
+              child: Text(
+                'Clawnsole',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'Fraunces',
+                  fontSize: compact ? 19 : 21,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -.3,
+                  color: context.colors.onSurface,
                 ),
               ),
-              const SizedBox(width: 6),
-              _VersionChip(compact: compact, status: updateStatus),
-            ],
-          ),
+            ),
+          ],
         ),
-        _CreditsPill(controller: controller),
-        const SizedBox(width: 8),
-        if (!compact) ...<Widget>[
-          _KeyPill(controller: controller),
+      ),
+    );
+    final version = _VersionChip(
+      compact: compact,
+      status: updateStatus,
+      storeUpdateOpener: storeUpdateOpener,
+    );
+
+    return Container(
+      height: 64,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 26),
+      decoration: BoxDecoration(
+        color: context.colors.surface.withValues(alpha: .84),
+        border: Border(
+          bottom: BorderSide(color: context.colors.outlineVariant),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: compact
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      SizedBox(height: 25, child: brand),
+                      version,
+                    ],
+                  )
+                : Row(
+                    children: <Widget>[
+                      Flexible(child: brand),
+                      const SizedBox(width: 6),
+                      version,
+                    ],
+                  ),
+          ),
+          _CreditsPill(controller: controller),
           const SizedBox(width: 8),
+          if (!compact) ...<Widget>[
+            _KeyPill(controller: controller),
+            const SizedBox(width: 8),
+          ],
+          _ThemeModeButton(mode: themeMode, onChanged: onThemeModeChanged),
         ],
-        _ThemeModeButton(mode: themeMode, onChanged: onThemeModeChanged),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _VersionChip extends StatelessWidget {
-  const _VersionChip({required this.compact, required this.status});
+  const _VersionChip({
+    required this.compact,
+    required this.status,
+    required this.storeUpdateOpener,
+  });
 
   final bool compact;
   final UpdateStatus status;
+  final StoreUpdateOpener? storeUpdateOpener;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: status,
     builder: (context, _) {
-      final available = status.updateAvailable && status.canSelfUpdate;
       final latest = status.result?.latest;
-      if (available) {
-        return UpdateAvailableChip(
-          compact: compact,
-          version: latest,
-          onPressed: () => unawaited(
-            startAvailableUpdate(
-              Navigator.of(context),
-              updater: status.desktopUpdater,
-            ),
-          ),
-        );
-      }
-      return Tooltip(
-        message: 'About this version and updates',
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: () => unawaited(showVersionDialog(context)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
+      void showUpdates() => unawaited(
+        showVersionDialog(
+          context,
+          status: status,
+          storeUpdateOpener: storeUpdateOpener,
+        ),
+      );
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Tooltip(
+            message: 'About this version and updates',
+            child: InkWell(
+              key: const Key('installed-version-chip'),
+              borderRadius: BorderRadius.circular(999),
+              onTap: showUpdates,
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: compact ? 3 : 6,
+                ),
+                child: Text(
                   'v$clawnsoleVersion',
                   style: TextStyle(
                     fontSize: compact ? 11 : 12,
@@ -571,10 +589,18 @@ class _VersionChip extends StatelessWidget {
                     color: context.colors.onSurfaceVariant,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (status.updateAvailable) ...<Widget>[
+            const SizedBox(width: 4),
+            UpdateAvailableChip(
+              compact: compact,
+              version: latest,
+              onPressed: showUpdates,
+            ),
+          ],
+        ],
       );
     },
   );
