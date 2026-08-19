@@ -459,52 +459,15 @@ class _PricingTable extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SegmentedButton<String>(
-                        segments: <ButtonSegment<String>>[
-                          const ButtonSegment<String>(
-                            value: 'all',
-                            label: Text('Compare'),
-                          ),
-                          ...controller.providers
-                              .where((item) => item.requiresApiKey)
-                              .map(
-                                (item) => ButtonSegment<String>(
-                                  value: item.id,
-                                  label: Text(item.shortName),
-                                ),
-                              ),
-                        ],
-                        selected: <String>{providerId},
-                        onSelectionChanged: (value) =>
-                            onProviderChanged(value.single),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 280,
-                      child: TextField(
-                        controller: searchController,
-                        onChanged: onSearchChanged,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.search_rounded, size: 18),
-                          hintText: 'Search models',
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    FilterChip(
-                      label: const Text('Create-ready'),
-                      selected: createReadyOnly,
-                      onSelected: onCreateReadyChanged,
-                    ),
-                    Text('${models.length} models'),
-                  ],
+                _PricingFilters(
+                  controller: controller,
+                  providerId: providerId,
+                  searchController: searchController,
+                  createReadyOnly: createReadyOnly,
+                  modelCount: models.length,
+                  onProviderChanged: onProviderChanged,
+                  onSearchChanged: onSearchChanged,
+                  onCreateReadyChanged: onCreateReadyChanged,
                 ),
               ],
             ),
@@ -620,6 +583,98 @@ class _PricingTable extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PricingFilters extends StatelessWidget {
+  const _PricingFilters({
+    required this.controller,
+    required this.providerId,
+    required this.searchController,
+    required this.createReadyOnly,
+    required this.modelCount,
+    required this.onProviderChanged,
+    required this.onSearchChanged,
+    required this.onCreateReadyChanged,
+  });
+
+  final AppController controller;
+  final String providerId;
+  final TextEditingController searchController;
+  final bool createReadyOnly;
+  final int modelCount;
+  final ValueChanged<String> onProviderChanged;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<bool> onCreateReadyChanged;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final providerPicker = SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SegmentedButton<String>(
+          segments: <ButtonSegment<String>>[
+            const ButtonSegment<String>(value: 'all', label: Text('Compare')),
+            ...controller.providers
+                .where((item) => item.requiresApiKey)
+                .map(
+                  (item) => ButtonSegment<String>(
+                    value: item.id,
+                    label: Text(item.shortName),
+                  ),
+                ),
+          ],
+          selected: <String>{providerId},
+          onSelectionChanged: (value) => onProviderChanged(value.single),
+        ),
+      );
+      final search = TextField(
+        key: const ValueKey('provider-cost-search'),
+        controller: searchController,
+        onChanged: onSearchChanged,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.search_rounded, size: 18),
+          hintText: 'Search models',
+          isDense: true,
+        ),
+      );
+      final options = Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: <Widget>[
+          FilterChip(
+            label: const Text('Create-ready'),
+            selected: createReadyOnly,
+            onSelected: onCreateReadyChanged,
+          ),
+          Text('$modelCount models'),
+        ],
+      );
+
+      if (constraints.maxWidth >= 760) {
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            providerPicker,
+            SizedBox(width: 280, child: search),
+            options,
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          providerPicker,
+          const SizedBox(height: 10),
+          search,
+          const SizedBox(height: 8),
+          options,
+        ],
+      );
+    },
+  );
 }
 
 String _usd(double value) => '\$${value.toStringAsFixed(value < 1 ? 2 : 2)}';

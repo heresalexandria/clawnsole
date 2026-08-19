@@ -2065,7 +2065,7 @@ void main() {
   testWidgets('opens the saved References tab from desktop navigation', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final gateway = _MemoryGateway(
       const LocalSnapshot(
@@ -2084,11 +2084,69 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Your creative ingredients.'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('reference-library-search')),
-      findsOneWidget,
-    );
+    final search = find.byKey(const ValueKey('reference-library-search'));
+    expect(search, findsOneWidget);
+    expect(tester.getSize(search).width, greaterThanOrEqualTo(300));
     expect(gateway.snapshot.preferences.activeSection, AppSection.references);
+  });
+
+  testWidgets('reference search and sort stack cleanly on mobile', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(activeSection: AppSection.references),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    final search = find.byKey(const ValueKey('reference-library-search'));
+    final sort = find.byKey(const ValueKey('reference-library-sort'));
+    expect(tester.getSize(search).width, greaterThanOrEqualTo(300));
+    expect(
+      tester.getTopLeft(sort).dy,
+      greaterThan(tester.getBottomLeft(search).dy),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('primary screens fit desktop, tablet, and mobile viewports', (
+    tester,
+  ) async {
+    const sizes = <Size>[Size(1440, 1000), Size(1024, 768), Size(390, 844)];
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final size in sizes) {
+      await tester.binding.setSurfaceSize(size);
+      for (final section in AppSection.values) {
+        final gateway = _MemoryGateway(
+          LocalSnapshot(
+            generations: const <Generation>[],
+            preferences: AppPreferences(activeSection: section),
+            hasApiKey: false,
+            storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+          ),
+        );
+        await tester.pumpWidget(
+          ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: '${section.name} should fit ${size.width}×${size.height}',
+        );
+      }
+    }
   });
 
   testWidgets('settings credits Alexandria with a linked portrait', (

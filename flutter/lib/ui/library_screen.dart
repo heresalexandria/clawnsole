@@ -448,13 +448,9 @@ class _LibraryToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        Wrap(
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final filters = Wrap(
           spacing: 5,
           runSpacing: 5,
           children: LibraryFilter.values
@@ -467,24 +463,33 @@ class _LibraryToolbar extends StatelessWidget {
                 ),
               )
               .toList(),
-        ),
-        SizedBox(
-          width: 250,
-          child: TextField(
-            onChanged: controller.setSearch,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded, size: 18),
-              hintText: 'Search prompts, tags, folders',
-              isDense: true,
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
-            style: const TextStyle(fontSize: 13),
+        );
+        final search = TextField(
+          key: const ValueKey('generation-library-search'),
+          onChanged: controller.setSearch,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
+            hintText: 'Search prompts, tags, folders',
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
-        ),
-      ],
+          style: const TextStyle(fontSize: 13),
+        );
+
+        if (constraints.maxWidth >= 760) {
+          return Row(
+            children: <Widget>[
+              Expanded(child: filters),
+              const SizedBox(width: 16),
+              SizedBox(width: 320, child: search),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[filters, const SizedBox(height: 10), search],
+        );
+      },
     ),
   );
 }

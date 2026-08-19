@@ -103,38 +103,55 @@ class _ProviderAccessCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
-    child: Row(
-      children: <Widget>[
-        CircleAvatar(
-          backgroundColor: context.colors.primaryContainer,
-          child: Icon(
-            Icons.hub_rounded,
-            color: context.colors.onPrimaryContainer,
-          ),
-        ),
-        const SizedBox(width: 12),
-        const Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Provider access moved to its own desk',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final summary = Row(
+          children: <Widget>[
+            CircleAvatar(
+              backgroundColor: context.colors.primaryContainer,
+              child: Icon(
+                Icons.hub_rounded,
+                color: context.colors.onPrimaryContainer,
               ),
-              SizedBox(height: 4),
-              Text(
-                'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Provider access moved to its own desk',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        FilledButton.icon(
+            ),
+          ],
+        );
+        final action = FilledButton.icon(
           onPressed: () => unawaited(controller.navigate(AppSection.providers)),
           icon: const Icon(Icons.arrow_forward_rounded, size: 17),
           label: const Text('Open Providers'),
-        ),
-      ],
+        );
+
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[summary, const SizedBox(height: 14), action],
+          );
+        }
+        return Row(
+          children: <Widget>[
+            Expanded(child: summary),
+            const SizedBox(width: 16),
+            action,
+          ],
+        );
+      },
     ),
   );
 }
