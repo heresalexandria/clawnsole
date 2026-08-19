@@ -174,6 +174,107 @@ void main() {
     }
   });
 
+  test(
+    'companion stores uploaded saved references and scoped folders',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-reference-test.',
+      );
+      final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      final application = CompanionApp(store: store, api: BflApi());
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+      const headers = <String, String>{'Content-Type': 'application/json'};
+      final now = DateTime.utc(2026, 8, 19, 12);
+
+      try {
+        final folder = await http.patch(
+          base.resolve('/state'),
+          headers: headers,
+          body: jsonEncode(<String, Object?>{
+            'action': 'saveLibraryFolder',
+            'value': <String, Object?>{
+              'id': 'reference-characters',
+              'name': 'Characters',
+              'collection': 'references',
+              'createdAt': now.toIso8601String(),
+            },
+          }),
+        );
+        expect(folder.statusCode, 200);
+
+        final response = await http.patch(
+          base.resolve('/state'),
+          headers: headers,
+          body: jsonEncode(<String, Object?>{
+            'action': 'saveReference',
+            'value': <String, Object?>{
+              'reference': <String, Object?>{
+                'id': 'saved-character',
+                'name': 'Hero portrait',
+                'kind': 'image',
+                'asset': <String, Object?>{
+                  'kind': 'remote',
+                  'value': '',
+                  'label': 'hero.png',
+                  'contentType': 'image/png',
+                },
+                'createdAt': now.toIso8601String(),
+                'updatedAt': now.toIso8601String(),
+                'folderId': 'reference-characters',
+                'tags': <String>['hero', 'favorite'],
+              },
+              'source': 'data:image/png;base64,AQID',
+            },
+          }),
+        );
+        expect(response.statusCode, 200);
+        final snapshot = LocalSnapshot.fromJson(
+          (jsonDecode(response.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          ),
+        );
+        expect(snapshot.savedReferences.single.name, 'Hero portrait');
+        expect(snapshot.savedReferences.single.asset.isLocal, isTrue);
+        expect(
+          snapshot.savedReferences.single.folderId,
+          'reference-characters',
+        );
+        expect(
+          snapshot.folders.single.collection,
+          LibraryCollection.references,
+        );
+
+        final media = await http.get(
+          base.resolve(
+            '/assets?id=${snapshot.savedReferences.single.asset.value}',
+          ),
+        );
+        expect(media.statusCode, 200);
+        expect(media.bodyBytes, <int>[1, 2, 3]);
+
+        final cleared = await http.patch(
+          base.resolve('/state'),
+          headers: headers,
+          body: jsonEncode(<String, Object?>{'action': 'clearHistory'}),
+        );
+        expect(cleared.statusCode, 200);
+        final retained = await http.get(
+          base.resolve(
+            '/assets?id=${snapshot.savedReferences.single.asset.value}',
+          ),
+        );
+        expect(retained.statusCode, 200);
+        expect(retained.bodyBytes, <int>[1, 2, 3]);
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+
   test('companion turns a 503 Error payload into a terminal record', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'clawnsole-status-test.',

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -19,6 +20,7 @@ import 'package:clawnsole/core/update_check.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -381,7 +383,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 11);
+    expect(decoded.toJson()['schemaVersion'], 12);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -463,6 +465,146 @@ void main() {
     expect(removed.generations.single.folderId, isNull);
     expect(removed.generations.single.tags, <String>['Favorite', 'Vertical']);
   });
+
+  test(
+    'persists saved references in an independent nested folder hierarchy',
+    () async {
+      final now = DateTime.utc(2026, 8, 19, 12);
+      final store = _MemoryLocalDataStore();
+      final gateway = NativeGateway(store: store, isIos: false);
+      final folder = LibraryFolder(
+        id: 'reference-characters',
+        name: 'Characters',
+        createdAt: now,
+        collection: LibraryCollection.references,
+      );
+      final subfolder = LibraryFolder(
+        id: 'reference-heroes',
+        name: 'Heroes',
+        createdAt: now.add(const Duration(seconds: 1)),
+        parentId: folder.id,
+        collection: LibraryCollection.references,
+      );
+      await gateway.saveLibraryFolder(folder);
+      await gateway.saveLibraryFolder(subfolder);
+      final reference = SavedReference(
+        id: 'saved-hero',
+        name: 'Brass hero',
+        kind: MediaReferenceKind.image,
+        asset: const AssetReference(
+          kind: 'remote',
+          value: 'https://cdn.test/hero.png',
+          label: 'hero.png',
+          contentType: 'image/png',
+        ),
+        createdAt: now,
+        updatedAt: now,
+        folderId: subfolder.id,
+        tags: const <String>[' Character ', '#Favorite', 'character'],
+      );
+
+      final saved = await gateway.saveReference(reference);
+
+      expect(saved.savedReferences.single.name, 'Brass hero');
+      expect(saved.savedReferences.single.tags, <String>[
+        'Character',
+        'Favorite',
+      ]);
+      expect(
+        saved.folders.where(
+          (item) => item.collection == LibraryCollection.references,
+        ),
+        hasLength(2),
+      );
+      final decoded = StoredData.decode(store.data.encode());
+      expect(decoded.toJson()['schemaVersion'], 12);
+      expect(
+        decoded.savedReferences.single.asset.value,
+        'https://cdn.test/hero.png',
+      );
+
+      final controller = AppController();
+      controller.snapshot = saved;
+      controller.setReferenceFolderView(folder.id);
+      controller.setReferenceSearch('favorite');
+      expect(controller.filteredSavedReferences.single.id, 'saved-hero');
+      expect(
+        controller.folderPath(
+          subfolder.id,
+          collection: LibraryCollection.references,
+        ),
+        'Characters / Heroes',
+      );
+      controller.dispose();
+
+      final removed = await gateway.deleteLibraryFolder(subfolder.id);
+      expect(removed.savedReferences.single.folderId, isNull);
+      expect(
+        removed.folders.singleWhere((item) => item.id == folder.id).collection,
+        LibraryCollection.references,
+      );
+    },
+  );
+
+  test(
+    'adds saved and generated media candidates to the create form',
+    () async {
+      final controller = AppController()
+        ..selectedProviderId = 'atlas'
+        ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+      final now = DateTime.utc(2026, 8, 19);
+      await controller.addReferenceCandidates(
+        MediaReferenceKind.image,
+        <ReferenceCandidate>[
+          ReferenceCandidate(
+            id: 'saved-character',
+            name: 'Character turnaround',
+            kind: MediaReferenceKind.image,
+            asset: const AssetReference(
+              kind: 'remote',
+              value: 'https://cdn.test/character.png',
+              label: 'character.png',
+              contentType: 'image/png',
+            ),
+            createdAt: now,
+          ),
+        ],
+      );
+      await controller.addReferenceCandidates(
+        MediaReferenceKind.video,
+        <ReferenceCandidate>[
+          ReferenceCandidate(
+            id: 'generated-motion',
+            name: 'Generated motion study',
+            kind: MediaReferenceKind.video,
+            asset: const AssetReference(
+              kind: 'remote',
+              value: 'https://cdn.test/motion.mp4',
+              label: 'motion.mp4',
+              contentType: 'video/mp4',
+            ),
+            createdAt: now,
+            generated: true,
+          ),
+        ],
+      );
+
+      expect(controller.form.references, hasLength(2));
+      expect(
+        controller.form.references.first.savedReferenceId,
+        'saved-character',
+      );
+      expect(controller.form.references.last.savedReferenceId, isNull);
+      final input = controller.buildInputForTesting();
+      expect(input['reference_images'], <String>[
+        'https://cdn.test/character.png',
+      ]);
+      expect(input['reference_videos'], <String>[
+        'https://cdn.test/motion.mp4',
+      ]);
+      controller.dispose();
+    },
+  );
 
   test(
     'uses and invalidates an iOS-only review key without persisting it',
@@ -1229,6 +1371,64 @@ void main() {
     },
   );
 
+  testWidgets('saved reference picker renders search and collection tabs', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 19);
+    final controller = AppController();
+    controller.snapshot = LocalSnapshot(
+      generations: const <Generation>[],
+      savedReferences: <SavedReference>[
+        SavedReference(
+          id: 'saved-image',
+          name: 'Hero turnaround',
+          kind: MediaReferenceKind.image,
+          asset: const AssetReference(
+            kind: 'remote',
+            value: 'https://cdn.test/hero.png',
+            label: 'hero.png',
+            contentType: 'image/png',
+          ),
+          createdAt: now,
+          updatedAt: now,
+          tags: const <String>['hero'],
+        ),
+      ],
+      preferences: const AppPreferences(),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => unawaited(
+              showReferencePicker(
+                context,
+                controller,
+                kind: MediaReferenceKind.image,
+                maximum: 3,
+              ),
+            ),
+            child: const Text('Open picker'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open picker'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Add saved images'), findsOneWidget);
+    expect(find.text('References'), findsOneWidget);
+    expect(find.text('Generated'), findsOneWidget);
+    expect(find.text('Hero turnaround'), findsOneWidget);
+    expect(find.text('0/3 selected'), findsOneWidget);
+  });
+
   test('an empty reference endpoint stays selected while writing a prompt', () {
     final controller = AppController()
       ..selectedProviderId = 'atlas'
@@ -1319,6 +1519,35 @@ void main() {
     expect(find.text('System'), findsOneWidget);
     expect(find.text('Light'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
+  });
+
+  testWidgets('opens the saved References tab from desktop navigation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('References'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your creative ingredients.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('reference-library-search')),
+      findsOneWidget,
+    );
+    expect(gateway.snapshot.preferences.activeSection, AppSection.references);
   });
 
   testWidgets('settings credits Alexandria with a linked portrait', (
@@ -1440,8 +1669,12 @@ class _MemoryGateway implements AppGateway {
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
     snapshot = LocalSnapshot(
       generations: snapshot.generations,
+      folders: snapshot.folders,
+      savedReferences: snapshot.savedReferences,
       preferences: preferences,
       hasApiKey: snapshot.hasApiKey,
+      connectedProviders: snapshot.connectedProviders,
+      availableProviders: snapshot.availableProviders,
       storage: snapshot.storage,
     );
     return snapshot;
@@ -1459,8 +1692,12 @@ class _MemoryGateway implements AppGateway {
       invalidationCount += 1;
       snapshot = LocalSnapshot(
         generations: snapshot.generations,
+        folders: snapshot.folders,
+        savedReferences: snapshot.savedReferences,
         preferences: snapshot.preferences,
         hasApiKey: false,
+        connectedProviders: snapshot.connectedProviders,
+        availableProviders: snapshot.availableProviders,
         storage: snapshot.storage,
       );
       throw creditError!;

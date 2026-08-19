@@ -17,7 +17,11 @@ Uri _configuredBaseUrl(Uri? override) {
 }
 
 class WebGateway
-    implements AppGateway, ProviderGateway, LibraryOrganizationGateway {
+    implements
+        AppGateway,
+        ProviderGateway,
+        LibraryOrganizationGateway,
+        ReferenceLibraryGateway {
   WebGateway({http.Client? client, Uri? baseUrl})
     : _client = client ?? http.Client(),
       _baseUrl = _configuredBaseUrl(baseUrl);
@@ -177,6 +181,19 @@ class WebGateway
     'folderId': folderId,
     'tags': tags,
   });
+
+  @override
+  Future<LocalSnapshot> saveReference(
+    SavedReference reference, {
+    String? source,
+  }) => _action('saveReference', <String, Object?>{
+    'reference': reference.toJson(),
+    if (source != null) 'source': source,
+  });
+
+  @override
+  Future<LocalSnapshot> deleteReference(String referenceId) =>
+      _action('deleteReference', referenceId);
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async {

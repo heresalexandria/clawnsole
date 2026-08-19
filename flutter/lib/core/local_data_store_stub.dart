@@ -37,8 +37,10 @@ class LocalDataStore {
   Future<Uri> assetUri(AssetReference reference) =>
       throw UnsupportedError('Browser builds use the local companion.');
 
-  Future<void> pruneAssets(List<Generation> generations) =>
-      throw UnsupportedError('Browser builds use the local companion.');
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) => throw UnsupportedError('Browser builds use the local companion.');
 
   Future<void> clearAssets() =>
       throw UnsupportedError('Browser builds use the local companion.');

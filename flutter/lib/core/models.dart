@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'generation_status.dart';
 
-enum AppSection { create, library, providers, settings }
+enum AppSection { create, library, references, providers, settings }
 
 enum LibraryFilter { all, working, ready, failed }
 
@@ -15,6 +15,10 @@ enum KeyframeRole { start, middle, end }
 enum MediaReferenceKind { image, video, audio }
 
 enum MediaReferenceTask { reference, edit, extend }
+
+enum LibraryCollection { generated, references }
+
+enum ReferenceSort { newest, oldest, name, kind }
 
 extension MediaReferenceTaskValue on MediaReferenceTask {
   String get label => switch (this) {
@@ -326,22 +330,26 @@ class LibraryFolder {
     required this.name,
     required this.createdAt,
     this.parentId,
+    this.collection = LibraryCollection.generated,
   });
 
   final String id;
   final String name;
   final DateTime createdAt;
   final String? parentId;
+  final LibraryCollection collection;
 
   LibraryFolder copyWith({
     String? name,
     String? parentId,
     bool clearParent = false,
+    LibraryCollection? collection,
   }) => LibraryFolder(
     id: id,
     name: name ?? this.name,
     createdAt: createdAt,
     parentId: clearParent ? null : parentId ?? this.parentId,
+    collection: collection ?? this.collection,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -349,6 +357,8 @@ class LibraryFolder {
     'name': name,
     'createdAt': createdAt.toUtc().toIso8601String(),
     if (parentId != null) 'parentId': parentId,
+    if (collection != LibraryCollection.generated)
+      'collection': collection.name,
   };
 
   factory LibraryFolder.fromJson(Map<String, Object?> json) => LibraryFolder(
@@ -362,7 +372,87 @@ class LibraryFolder {
             (json['parentId']! as String).trim().isNotEmpty
         ? (json['parentId']! as String).trim()
         : null,
+    collection: LibraryCollection.values.firstWhere(
+      (value) => value.name == json['collection'],
+      orElse: () => LibraryCollection.generated,
+    ),
   );
+}
+
+class SavedReference {
+  const SavedReference({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.asset,
+    required this.createdAt,
+    required this.updatedAt,
+    this.folderId,
+    this.tags = const <String>[],
+  });
+
+  final String id;
+  final String name;
+  final MediaReferenceKind kind;
+  final AssetReference asset;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final String? folderId;
+  final List<String> tags;
+
+  SavedReference copyWith({
+    String? name,
+    AssetReference? asset,
+    DateTime? updatedAt,
+    String? folderId,
+    bool clearFolder = false,
+    List<String>? tags,
+  }) => SavedReference(
+    id: id,
+    name: name ?? this.name,
+    kind: kind,
+    asset: asset ?? this.asset,
+    createdAt: createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    folderId: clearFolder ? null : folderId ?? this.folderId,
+    tags: tags ?? this.tags,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'name': name,
+    'kind': kind.name,
+    'asset': asset.toJson(),
+    'createdAt': createdAt.toUtc().toIso8601String(),
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+    if (folderId != null) 'folderId': folderId,
+    if (tags.isNotEmpty) 'tags': tags,
+  };
+
+  factory SavedReference.fromJson(Map<String, Object?> json) {
+    final rawAsset = json['asset'];
+    return SavedReference(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? 'Saved reference',
+      kind: MediaReferenceKindValue.parse(json['kind']),
+      asset: AssetReference.fromJson(
+        rawAsset is Map<Object?, Object?>
+            ? rawAsset.map((key, value) => MapEntry(key.toString(), value))
+            : const <String, Object?>{},
+      ),
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.now().toUtc(),
+      updatedAt:
+          DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
+          DateTime.now().toUtc(),
+      folderId: json['folderId'] as String?,
+      tags: (json['tags'] as List<Object?>? ?? const <Object?>[])
+          .whereType<String>()
+          .where((tag) => tag.trim().isNotEmpty)
+          .toList(),
+    );
+  }
 }
 
 class Generation {
@@ -708,6 +798,7 @@ class StoredData {
     this.preferences = const AppPreferences(),
     this.generations = const <Generation>[],
     this.folders = const <LibraryFolder>[],
+    this.savedReferences = const <SavedReference>[],
   });
 
   final String apiKey;
@@ -717,6 +808,7 @@ class StoredData {
   final AppPreferences preferences;
   final List<Generation> generations;
   final List<LibraryFolder> folders;
+  final List<SavedReference> savedReferences;
 
   StoredData copyWith({
     String? apiKey,
@@ -726,6 +818,7 @@ class StoredData {
     AppPreferences? preferences,
     List<Generation>? generations,
     List<LibraryFolder>? folders,
+    List<SavedReference>? savedReferences,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -736,6 +829,7 @@ class StoredData {
     preferences: preferences ?? this.preferences,
     generations: generations ?? this.generations,
     folders: folders ?? this.folders,
+    savedReferences: savedReferences ?? this.savedReferences,
   );
 
   String apiKeyFor(String provider) =>
@@ -774,7 +868,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 11,
+    'schemaVersion': 12,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
@@ -786,6 +880,8 @@ class StoredData {
     'preferences': preferences.toJson(),
     if (folders.isNotEmpty)
       'folders': folders.map((folder) => folder.toJson()).toList(),
+    if (savedReferences.isNotEmpty)
+      'savedReferences': savedReferences.map((item) => item.toJson()).toList(),
     'generations': generations.map((item) => item.toJson()).toList(),
   };
 
@@ -822,6 +918,21 @@ class StoredData {
           )
           .where((folder) => folder.id.isNotEmpty && folder.name.isNotEmpty)
           .toList(),
+      savedReferences:
+          (json['savedReferences'] as List<Object?>? ?? const <Object?>[])
+              .whereType<Map<Object?, Object?>>()
+              .map(
+                (item) => SavedReference.fromJson(
+                  item.map((key, value) => MapEntry(key.toString(), value)),
+                ),
+              )
+              .where(
+                (item) =>
+                    item.id.isNotEmpty &&
+                    item.name.isNotEmpty &&
+                    item.asset.value.isNotEmpty,
+              )
+              .toList(),
       generations: (json['generations'] as List<Object?>? ?? const [])
           .whereType<Map<Object?, Object?>>()
           .map(
@@ -889,6 +1000,7 @@ class LocalSnapshot {
     this.connectedProviders = const <String>{},
     this.availableProviders = const <String>{},
     this.folders = const <LibraryFolder>[],
+    this.savedReferences = const <SavedReference>[],
   });
 
   final List<Generation> generations;
@@ -898,6 +1010,7 @@ class LocalSnapshot {
   final Set<String> connectedProviders;
   final Set<String> availableProviders;
   final List<LibraryFolder> folders;
+  final List<SavedReference> savedReferences;
 
   bool hasApiKeyFor(String provider) =>
       connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);
@@ -909,6 +1022,7 @@ class LocalSnapshot {
     'connectedProviders': connectedProviders.toList()..sort(),
     'availableProviders': availableProviders.toList()..sort(),
     'folders': folders.map((folder) => folder.toJson()).toList(),
+    'savedReferences': savedReferences.map((item) => item.toJson()).toList(),
     'storage': storage.toJson(),
   };
 
@@ -943,6 +1057,15 @@ class LocalSnapshot {
           ),
         )
         .toList(),
+    savedReferences:
+        (json['savedReferences'] as List<Object?>? ?? const <Object?>[])
+            .whereType<Map<Object?, Object?>>()
+            .map(
+              (item) => SavedReference.fromJson(
+                item.map((key, value) => MapEntry(key.toString(), value)),
+              ),
+            )
+            .toList(),
     storage: StorageStats.fromJson(
       (json['storage'] as Map<Object?, Object?>? ?? const {}).map(
         (key, value) => MapEntry(key.toString(), value),
