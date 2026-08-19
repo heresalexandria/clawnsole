@@ -13,18 +13,27 @@ import '../ui/library_screen.dart';
 import '../ui/panels.dart';
 import '../ui/providers_screen.dart';
 import '../ui/settings_screen.dart';
+import '../ui/update_available_chip.dart';
 import '../ui/update_dialog.dart';
 import 'app_controller.dart';
 import 'app_theme.dart';
 
 class ClawnsoleApp extends StatefulWidget {
-  const ClawnsoleApp({super.key, this.gateway, this.checkForUpdates = true});
+  const ClawnsoleApp({
+    super.key,
+    this.gateway,
+    this.checkForUpdates = true,
+    this.updateStatus,
+  });
 
   final AppGateway? gateway;
 
-  /// Whether to ask once at launch if a newer release exists. Widget tests
-  /// turn this off so they never reach the network.
+  /// Whether the macOS desktop shell checks at launch and every 24 hours.
+  /// Widget tests turn this off so they never reach the network.
   final bool checkForUpdates;
+
+  /// An injectable update state used by focused widget tests.
+  final UpdateStatus? updateStatus;
 
   @override
   State<ClawnsoleApp> createState() => _ClawnsoleAppState();
@@ -32,8 +41,11 @@ class ClawnsoleApp extends StatefulWidget {
 
 class _ClawnsoleAppState extends State<ClawnsoleApp> {
   late final AppController controller;
+  late final UpdateStatus _updateStatus;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<ShellUpdateEvent>? _shellUpdates;
+  Timer? _startupUpdateCheck;
+  Timer? _periodicUpdateCheck;
   String? _lastNotice;
   ThemeMode _themeMode = ThemeMode.system;
 
@@ -41,6 +53,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   void initState() {
     super.initState();
     controller = AppController(gateway: widget.gateway);
+    _updateStatus = widget.updateStatus ?? UpdateStatus.instance;
     unawaited(controller.initialize());
     // A shell-menu "Check for Updates…" downloads through the same pipe, so
     // surface its progress modal no matter where the update started.
@@ -49,18 +62,22 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
       final navigator = _navigatorKey.currentState;
       if (navigator != null) unawaited(showUpdateProgressDialog(navigator));
     });
-    if (widget.checkForUpdates) {
-      unawaited(
-        Future<void>.delayed(
-          const Duration(seconds: 4),
-          UpdateStatus.instance.autoCheck,
-        ),
+    if (widget.checkForUpdates && _updateStatus.hasDesktopUpdater) {
+      _startupUpdateCheck = Timer(
+        const Duration(seconds: 4),
+        () => unawaited(_updateStatus.autoCheck()),
+      );
+      _periodicUpdateCheck = Timer.periodic(
+        const Duration(hours: 24),
+        (_) => unawaited(_updateStatus.backgroundCheck()),
       );
     }
   }
 
   @override
   void dispose() {
+    _startupUpdateCheck?.cancel();
+    _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
     controller.dispose();
     super.dispose();
@@ -101,6 +118,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
         }
         return _AppShell(
           controller: controller,
+          updateStatus: _updateStatus,
           themeMode: _themeMode,
           onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
         );
@@ -112,11 +130,13 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
 class _AppShell extends StatelessWidget {
   const _AppShell({
     required this.controller,
+    required this.updateStatus,
     required this.themeMode,
     required this.onThemeModeChanged,
   });
 
   final AppController controller;
+  final UpdateStatus updateStatus;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
 
@@ -146,6 +166,7 @@ class _AppShell extends StatelessWidget {
                   children: <Widget>[
                     _TopBar(
                       controller: controller,
+                      updateStatus: updateStatus,
                       compact: !wide,
                       themeMode: themeMode,
                       onThemeModeChanged: onThemeModeChanged,
@@ -380,12 +401,14 @@ class _CountBadge extends StatelessWidget {
 class _TopBar extends StatelessWidget {
   const _TopBar({
     required this.controller,
+    required this.updateStatus,
     required this.compact,
     required this.themeMode,
     required this.onThemeModeChanged,
   });
 
   final AppController controller;
+  final UpdateStatus updateStatus;
   final bool compact;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
@@ -441,7 +464,7 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              _VersionChip(compact: compact),
+              _VersionChip(compact: compact, status: updateStatus),
             ],
           ),
         ),
@@ -458,20 +481,31 @@ class _TopBar extends StatelessWidget {
 }
 
 class _VersionChip extends StatelessWidget {
-  const _VersionChip({required this.compact});
+  const _VersionChip({required this.compact, required this.status});
 
   final bool compact;
+  final UpdateStatus status;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: UpdateStatus.instance,
+    animation: status,
     builder: (context, _) {
-      final available = UpdateStatus.instance.updateAvailable;
-      final latest = UpdateStatus.instance.result?.latest;
+      final available = status.updateAvailable && status.canSelfUpdate;
+      final latest = status.result?.latest;
+      if (available) {
+        return UpdateAvailableChip(
+          compact: compact,
+          version: latest,
+          onPressed: () => unawaited(
+            startAvailableUpdate(
+              Navigator.of(context),
+              updater: status.desktopUpdater,
+            ),
+          ),
+        );
+      }
       return Tooltip(
-        message: available
-            ? 'Clawnsole $latest is available'
-            : 'About this version and updates',
+        message: 'About this version and updates',
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
           onTap: () => unawaited(showVersionDialog(context)),
@@ -489,17 +523,6 @@ class _VersionChip extends StatelessWidget {
                     color: context.colors.onSurfaceVariant,
                   ),
                 ),
-                if (available) ...<Widget>[
-                  const SizedBox(width: 5),
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      color: context.tokens.brass,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
