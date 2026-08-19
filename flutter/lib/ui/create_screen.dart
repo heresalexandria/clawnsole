@@ -2534,7 +2534,7 @@ class _RecentWork extends StatelessWidget {
           spacing: 18,
           runSpacing: 8,
           children: <Widget>[
-            _Summary('${controller.generations.length}', 'kept locally'),
+            _Summary('${controller.generations.length}', 'in library'),
             _Summary('${controller.readyCount}', 'complete'),
             _Summary('${controller.workingCount}', 'moving'),
             _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),

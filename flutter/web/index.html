@@ -104,6 +104,52 @@
     </div>
   </div>
   <script>
+    window.clawnsoleGoogleDrive = {
+      authorize: function (clientId) {
+        return new Promise(function (resolve, reject) {
+          var attempts = 0;
+          if (!document.getElementById('clawnsole-google-identity')) {
+            var script = document.createElement('script');
+            script.id = 'clawnsole-google-identity';
+            script.src = 'https://accounts.google.com/gsi/client';
+            script.async = true;
+            script.defer = true;
+            script.onerror = function () {
+              reject(new Error('Google authorization could not be loaded.'));
+            };
+            document.head.appendChild(script);
+          }
+          function start() {
+            if (!window.google || !google.accounts || !google.accounts.oauth2) {
+              attempts += 1;
+              if (attempts > 100) {
+                reject(new Error('Google authorization could not be loaded.'));
+                return;
+              }
+              window.setTimeout(start, 50);
+              return;
+            }
+            var client = google.accounts.oauth2.initTokenClient({
+              client_id: clientId,
+              scope: 'https://www.googleapis.com/auth/drive.file',
+              callback: function (response) {
+                if (response.error) {
+                  reject(new Error(response.error_description || response.error));
+                  return;
+                }
+                resolve(response.access_token || '');
+              },
+              error_callback: function (error) {
+                reject(new Error(error.message || error.type || 'Google authorization was canceled.'));
+              }
+            });
+            client.requestAccessToken({ prompt: '' });
+          }
+          start();
+        });
+      }
+    };
+
     window.addEventListener('flutter-first-frame', function () {
       var splash = document.getElementById('clawnsole-splash');
       if (!splash) return;

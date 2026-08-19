@@ -1,0 +1,436 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:http/http.dart' as http;
+
+import 'models.dart';
+
+const googleDriveFileScope = 'https://www.googleapis.com/auth/drive.file';
+const clawnsoleDriveStateFile = 'clawnsole.json';
+const clawnsoleDriveAssetsFolder = 'assets';
+
+/// Removes device-only credentials before data is serialized to Drive.
+StoredData googleDrivePortableData(StoredData data) => StoredData(
+  preferences: data.preferences,
+  generations: data.generations,
+  folders: data.folders,
+  savedReferences: data.savedReferences,
+);
+
+/// Applies one device's changes to the latest Drive snapshot. This preserves
+/// unrelated additions and updates made by another device between reads.
+StoredData mergeGoogleDriveData({
+  required StoredData base,
+  required StoredData next,
+  required StoredData remote,
+}) {
+  final generations = _mergeById<Generation>(
+    base: base.generations,
+    next: next.generations,
+    remote: remote.generations,
+    id: (item) => item.localId,
+    json: (item) => item.toJson(),
+  )..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  final folders = _mergeById<LibraryFolder>(
+    base: base.folders,
+    next: next.folders,
+    remote: remote.folders,
+    id: (item) => item.id,
+    json: (item) => item.toJson(),
+  );
+  final references = _mergeById<SavedReference>(
+    base: base.savedReferences,
+    next: next.savedReferences,
+    remote: remote.savedReferences,
+    id: (item) => item.id,
+    json: (item) => item.toJson(),
+  )..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  final preferencesChanged =
+      jsonEncode(base.preferences.toJson()) !=
+      jsonEncode(next.preferences.toJson());
+  return StoredData(
+    apiKey: next.apiKey,
+    apiKeys: next.apiKeys,
+    preferences: preferencesChanged ? next.preferences : remote.preferences,
+    generations: generations,
+    folders: folders,
+    savedReferences: references,
+  );
+}
+
+List<T> _mergeById<T>({
+  required List<T> base,
+  required List<T> next,
+  required List<T> remote,
+  required String Function(T item) id,
+  required Map<String, Object?> Function(T item) json,
+}) {
+  final baseById = <String, T>{for (final item in base) id(item): item};
+  final nextById = <String, T>{for (final item in next) id(item): item};
+  final merged = <String, T>{for (final item in remote) id(item): item};
+  for (final removed in baseById.keys.where(
+    (key) => !nextById.containsKey(key),
+  )) {
+    merged.remove(removed);
+  }
+  for (final item in next) {
+    final key = id(item);
+    final previous = baseById[key];
+    if (previous == null ||
+        jsonEncode(json(previous)) != jsonEncode(json(item))) {
+      merged[key] = item;
+    }
+  }
+  return merged.values.toList();
+}
+
+enum GoogleDriveConnectionState {
+  unavailable,
+  disconnected,
+  connecting,
+  connected,
+}
+
+class GoogleDriveConnection {
+  const GoogleDriveConnection({
+    required this.state,
+    this.folderName = '',
+    this.folderId = '',
+    this.message = '',
+  });
+
+  final GoogleDriveConnectionState state;
+  final String folderName;
+  final String folderId;
+  final String message;
+
+  bool get isConnected => state == GoogleDriveConnectionState.connected;
+  bool get isConfigured => folderName.isNotEmpty || folderId.isNotEmpty;
+}
+
+abstract interface class GoogleDriveGateway {
+  GoogleDriveConnection get googleDriveConnection;
+
+  /// Authorizes Drive and creates or reopens an app-owned folder by name.
+  Future<LocalSnapshot> connectGoogleDrive(String folderName);
+
+  /// Forgets the in-memory Drive access token but does not delete cloud data.
+  Future<LocalSnapshot> disconnectGoogleDrive();
+
+  Future<LocalSnapshot> refreshGoogleDrive();
+}
+
+class GoogleDriveFile {
+  const GoogleDriveFile({
+    required this.id,
+    required this.name,
+    required this.mimeType,
+    this.size = 0,
+    this.modifiedTime,
+    this.etag,
+  });
+
+  final String id;
+  final String name;
+  final String mimeType;
+  final int size;
+  final DateTime? modifiedTime;
+  final String? etag;
+
+  factory GoogleDriveFile.fromJson(Map<String, Object?> json, {String? etag}) =>
+      GoogleDriveFile(
+        id: json['id'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        mimeType: json['mimeType'] as String? ?? 'application/octet-stream',
+        size: int.tryParse(json['size']?.toString() ?? '') ?? 0,
+        modifiedTime: DateTime.tryParse(json['modifiedTime'] as String? ?? ''),
+        etag: etag,
+      );
+}
+
+class GoogleDriveContent {
+  const GoogleDriveContent(this.bytes, {this.etag});
+
+  final Uint8List bytes;
+  final String? etag;
+}
+
+/// Small REST client for the subset of Drive used by Clawnsole.
+class GoogleDriveApi {
+  GoogleDriveApi({
+    required String accessToken,
+    http.Client? client,
+    Uri? apiBase,
+    Uri? uploadBase,
+  }) : _accessToken = accessToken,
+       _client = client ?? http.Client(),
+       _apiBase = apiBase ?? Uri.parse('https://www.googleapis.com/drive/v3/'),
+       _uploadBase =
+           uploadBase ??
+           Uri.parse('https://www.googleapis.com/upload/drive/v3/');
+
+  final String _accessToken;
+  final http.Client _client;
+  final Uri _apiBase;
+  final Uri _uploadBase;
+
+  Map<String, String> get _headers => <String, String>{
+    'Authorization': 'Bearer $_accessToken',
+    'Accept': 'application/json',
+  };
+
+  Future<GoogleDriveFile?> findRootFolder(String name) async {
+    final files = await _list(
+      "mimeType = 'application/vnd.google-apps.folder' and "
+      "appProperties has { key='clawnsoleRoot' and value='true' } and "
+      "name = '${_queryValue(name)}' and trashed = false",
+    );
+    return files.firstOrNull;
+  }
+
+  Future<GoogleDriveFile?> findChild(
+    String parentId,
+    String name, {
+    String? appPropertyKey,
+    String? appPropertyValue,
+  }) async {
+    final property = appPropertyKey == null
+        ? ''
+        : " and appProperties has { key='${_queryValue(appPropertyKey)}' "
+              "and value='${_queryValue(appPropertyValue ?? 'true')}' }";
+    final files = await _list(
+      "'${_queryValue(parentId)}' in parents and "
+      "name = '${_queryValue(name)}' and trashed = false$property",
+    );
+    return files.firstOrNull;
+  }
+
+  Future<List<GoogleDriveFile>> listChildren(
+    String parentId, {
+    String? appPropertyKey,
+    String? appPropertyValue,
+  }) {
+    final property = appPropertyKey == null
+        ? ''
+        : " and appProperties has { key='${_queryValue(appPropertyKey)}' "
+              "and value='${_queryValue(appPropertyValue ?? 'true')}' }";
+    return _list(
+      "'${_queryValue(parentId)}' in parents and trashed = false$property",
+    );
+  }
+
+  Future<List<GoogleDriveFile>> _list(String query) async {
+    final response = await _client.get(
+      _apiBase
+          .resolve('files')
+          .replace(
+            queryParameters: <String, String>{
+              'q': query,
+              'spaces': 'drive',
+              'pageSize': '100',
+              'orderBy': 'modifiedTime desc',
+              'fields':
+                  'files(id,name,mimeType,size,modifiedTime,appProperties)',
+            },
+          ),
+      headers: _headers,
+    );
+    final payload = _json(await _expect(response));
+    return (payload['files'] as List<Object?>? ?? const <Object?>[])
+        .whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => GoogleDriveFile.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .where((item) => item.id.isNotEmpty)
+        .toList();
+  }
+
+  Future<GoogleDriveFile> createFolder(
+    String name, {
+    String? parentId,
+    Map<String, String> appProperties = const <String, String>{},
+  }) async {
+    final response = await _client.post(
+      _apiBase
+          .resolve('files')
+          .replace(
+            queryParameters: const <String, String>{
+              'fields': 'id,name,mimeType,size,modifiedTime',
+            },
+          ),
+      headers: <String, String>{
+        ..._headers,
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(<String, Object?>{
+        'name': name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        if (parentId != null) 'parents': <String>[parentId],
+        if (appProperties.isNotEmpty) 'appProperties': appProperties,
+      }),
+    );
+    return GoogleDriveFile.fromJson(
+      _json(await _expect(response)),
+      etag: response.headers['etag'],
+    );
+  }
+
+  Future<GoogleDriveFile> createFile({
+    required String parentId,
+    required String name,
+    required Uint8List bytes,
+    required String contentType,
+    Map<String, String> appProperties = const <String, String>{},
+  }) async {
+    final boundary =
+        'clawnsole-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+    final metadata = utf8.encode(
+      jsonEncode(<String, Object?>{
+        'name': name,
+        'parents': <String>[parentId],
+        if (appProperties.isNotEmpty) 'appProperties': appProperties,
+      }),
+    );
+    final body = BytesBuilder(copy: false)
+      ..add(utf8.encode('--$boundary\r\n'))
+      ..add(
+        utf8.encode('Content-Type: application/json; charset=UTF-8\r\n\r\n'),
+      )
+      ..add(metadata)
+      ..add(utf8.encode('\r\n--$boundary\r\n'))
+      ..add(utf8.encode('Content-Type: $contentType\r\n\r\n'))
+      ..add(bytes)
+      ..add(utf8.encode('\r\n--$boundary--\r\n'));
+    final request =
+        http.Request(
+            'POST',
+            _uploadBase
+                .resolve('files')
+                .replace(
+                  queryParameters: const <String, String>{
+                    'uploadType': 'multipart',
+                    'fields': 'id,name,mimeType,size,modifiedTime',
+                  },
+                ),
+          )
+          ..headers.addAll(<String, String>{
+            ..._headers,
+            'Content-Type': 'multipart/related; boundary=$boundary',
+          })
+          ..bodyBytes = body.takeBytes();
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    return GoogleDriveFile.fromJson(
+      _json(await _expect(response)),
+      etag: response.headers['etag'],
+    );
+  }
+
+  Future<GoogleDriveFile> updateFile(
+    String fileId,
+    Uint8List bytes, {
+    required String contentType,
+    String? etag,
+  }) async {
+    final request =
+        http.Request(
+            'PATCH',
+            _uploadBase
+                .resolve('files/${Uri.encodeComponent(fileId)}')
+                .replace(
+                  queryParameters: const <String, String>{
+                    'uploadType': 'media',
+                    'fields': 'id,name,mimeType,size,modifiedTime',
+                  },
+                ),
+          )
+          ..headers.addAll(<String, String>{
+            ..._headers,
+            'Content-Type': contentType,
+            if (etag != null && etag.isNotEmpty) 'If-Match': etag,
+          })
+          ..bodyBytes = bytes;
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    return GoogleDriveFile.fromJson(
+      _json(await _expect(response)),
+      etag: response.headers['etag'],
+    );
+  }
+
+  Future<GoogleDriveContent> readFile(String fileId) async {
+    final response = await _client.get(
+      _apiBase
+          .resolve('files/${Uri.encodeComponent(fileId)}')
+          .replace(queryParameters: const <String, String>{'alt': 'media'}),
+      headers: _headers,
+    );
+    await _expect(response, decodeBody: false);
+    return GoogleDriveContent(
+      response.bodyBytes,
+      etag: response.headers['etag'],
+    );
+  }
+
+  Future<Uint8List> downloadFile(String fileId) async =>
+      (await readFile(fileId)).bytes;
+
+  Future<void> deleteFile(String fileId) async {
+    final response = await _client.delete(
+      _apiBase.resolve('files/${Uri.encodeComponent(fileId)}'),
+      headers: _headers,
+    );
+    await _expect(response, decodeBody: false);
+  }
+
+  Future<http.Response> _expect(
+    http.Response response, {
+    bool decodeBody = true,
+  }) async {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response;
+    }
+    var message = 'Google Drive returned HTTP ${response.statusCode}.';
+    if (decodeBody || response.body.isNotEmpty) {
+      try {
+        final payload = _json(response);
+        final error = payload['error'];
+        if (error is Map<Object?, Object?>) {
+          message = error['message']?.toString() ?? message;
+        }
+      } on FormatException {
+        // Keep the status-based message for a non-JSON response.
+      }
+    }
+    throw GoogleDriveException(message, status: response.statusCode);
+  }
+
+  Map<String, Object?> _json(http.Response response) {
+    final value = jsonDecode(utf8.decode(response.bodyBytes));
+    if (value is! Map<Object?, Object?>) {
+      throw const FormatException('Google Drive returned invalid JSON.');
+    }
+    return value.map((key, child) => MapEntry(key.toString(), child));
+  }
+
+  String _queryValue(String value) =>
+      value.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
+}
+
+class GoogleDriveException implements Exception {
+  const GoogleDriveException(this.message, {this.status});
+
+  final String message;
+  final int? status;
+
+  @override
+  String toString() => message;
+}
+
+extension<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
