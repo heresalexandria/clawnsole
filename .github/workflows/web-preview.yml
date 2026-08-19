@@ -1,18 +1,10 @@
 name: Standalone web preview
 
 on:
-  pull_request:
-    paths:
-      - 'flutter/**'
-      - '.github/workflows/web-preview.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: standalone-web-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:

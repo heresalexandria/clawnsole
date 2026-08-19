@@ -2,7 +2,7 @@ name: Pull request
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -12,18 +12,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-label:
-    name: release label
+  changes:
+    name: select jobs
     runs-on: ubuntu-latest
+    outputs:
+      flutter: ${{ steps.paths.outputs.flutter }}
+      electron: ${{ steps.paths.outputs.electron }}
+      macos: ${{ steps.paths.outputs.macos }}
+      windows: ${{ steps.paths.outputs.windows }}
     steps:
       - uses: actions/checkout@v7
-      - name: Require one release decision
+        with:
+          fetch-depth: 0
+      - name: Select affected jobs
+        id: paths
+        shell: bash
         env:
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-        run: python3 scripts/release/select_bump.py
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          flutter=false
+          electron=false
+          macos=false
+          windows=false
+
+          while IFS= read -r path; do
+            case "$path" in
+              flutter/*)
+                flutter=true
+                macos=true
+                windows=true
+                ;;
+              electron/*)
+                electron=true
+                macos=true
+                ;;
+              .github/workflows/pr.yml|.github/workflows/web-preview.yml)
+                flutter=true
+                electron=true
+                macos=true
+                windows=true
+                ;;
+              .github/workflows/release.yml|claw.png|icon.png|scripts/prepare_platform_icons|scripts/render_platform_icon.swift)
+                macos=true
+                windows=true
+                ;;
+              .github/pull_request_template.md|.github/workflows/labels.yml|.github/workflows/release-label.yml|.gitignore|AGENTS.md|LICENSE|PRIVACY.md|README.md|docs/*|scripts/release/*)
+                ;;
+              *)
+                # New product paths should receive full coverage until they are
+                # classified explicitly above.
+                flutter=true
+                electron=true
+                macos=true
+                windows=true
+                ;;
+            esac
+          done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+
+          {
+            echo "flutter=$flutter"
+            echo "electron=$electron"
+            echo "macos=$macos"
+            echo "windows=$windows"
+          } >> "$GITHUB_OUTPUT"
 
   flutter:
     name: Flutter checks
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,9 +96,22 @@ jobs:
         run: flutter analyze
       - working-directory: flutter
         run: flutter test
+      - name: Build standalone web app
+        env:
+          CLAWNSOLE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_WEB_BASE_HREF: /clawnsole/app/
+        run: ./flutter/scripts/build_github_pages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: clawnsole-github-pages-app
+          path: flutter/build/github-pages/app
+          if-no-files-found: error
+          retention-days: 14
 
   electron:
     name: Electron checks
+    needs: changes
+    if: needs.changes.outputs.electron == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,6 +127,8 @@ jobs:
 
   macos-package:
     name: macOS package check
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -79,13 +151,16 @@ jobs:
 
   windows-package:
     name: Windows package check
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
+          cache: false
+          pub-cache: false
       - name: Build Windows x64 desktop app
         shell: bash
         run: ./flutter/scripts/build_windows
