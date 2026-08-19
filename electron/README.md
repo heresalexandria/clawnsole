@@ -34,6 +34,12 @@ For local development, `start_macos` loads the ignored repository `.env` so
 test credentials without exposing them to the Flutter renderer. Saved keys
 still take precedence.
 
+Renderer navigation may open only the exact provider and Clawnsole hosts in
+`lib/runtime.cjs`. Explicit media links use a purpose-scoped shell bridge that
+accepts credential-free HTTPS destinations, while release links are restricted
+to this repository's GitHub releases. The bridge also verifies that requests
+come from the active local renderer before handing a URL to macOS.
+
 ## Signing and notarization
 
 Local builds default to ad-hoc/unsigned packaging. Set

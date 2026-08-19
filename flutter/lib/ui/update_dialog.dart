@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_theme.dart';
 import '../core/app_version.dart';
@@ -229,8 +228,12 @@ class _VersionDialogState extends State<_VersionDialog> {
             )
           else if (!storeManagedPlatform && !checking && available)
             FilledButton.icon(
-              onPressed: () =>
-                  unawaited(launchUrl(Uri.parse(result!.releaseUrl))),
+              onPressed: () => unawaited(
+                openExternalUrl(
+                  Uri.parse(result!.releaseUrl),
+                  purpose: ExternalUrlPurpose.release,
+                ),
+              ),
               icon: const Icon(Icons.open_in_new_rounded, size: 15),
               label: const Text('View release'),
             ),

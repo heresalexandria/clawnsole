@@ -3,49 +3,70 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#211720">
+    <meta id="theme-color" name="theme-color" content="#f8f3e8">
+    <meta name="application-name" content="Clawnsole">
     <meta
       name="description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Clawnsole is an AI video generation studio for creating, comparing, and managing video across multiple providers on web, mobile, and desktop."
     >
-    <link rel="canonical" href="https://heresalexandria.github.io/clawnsole/">
+    <link rel="canonical" href="https://clawnsole.app/">
     <meta property="og:site_name" content="Clawnsole">
     <meta property="og:locale" content="en_US">
-    <meta property="og:title" content="Clawnsole — Local-first AI video studio">
+    <meta property="og:title" content="Clawnsole | AI video generation studio">
     <meta
       property="og:description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Create, compare, and manage AI video across multiple providers from one unified studio on web, mobile, and desktop."
     >
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://heresalexandria.github.io/clawnsole/">
+    <meta property="og:url" content="https://clawnsole.app/">
     <meta
       property="og:image"
-      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+      content="https://clawnsole.app/assets/clawnsole-og.jpg"
     >
     <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta
       property="og:image:alt"
-      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
+      content="Clawnsole shown as one unified AI video studio across desktop, tablet, and phone."
     >
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Clawnsole — Local-first AI video studio">
+    <meta name="twitter:title" content="Clawnsole | AI video generation studio">
     <meta
       name="twitter:description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Create, compare, and manage AI video across multiple providers from one unified studio on web, mobile, and desktop."
     >
     <meta
       name="twitter:image"
-      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+      content="https://clawnsole.app/assets/clawnsole-og.jpg"
     >
     <meta
       name="twitter:image:alt"
-      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
+      content="Clawnsole shown as one unified AI video studio across desktop, tablet, and phone."
     >
-    <title>Clawnsole — Local-first AI video studio</title>
+    <title>Clawnsole | AI video generation studio</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="assets/site.css?v=windows-desktop">
+    <link rel="stylesheet" href="assets/site.css?v=unified-studio-theme">
+    <script>
+      try {
+        const theme = localStorage.getItem('clawnsole-site-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {}
+    </script>
+    <script src="assets/theme.js" defer></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Clawnsole",
+        "url": "https://clawnsole.app/",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Web, iOS, Android, macOS, Windows",
+        "description": "Clawnsole is an AI video generation studio for creating, comparing, and managing video across multiple providers on web, mobile, and desktop."
+      }
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -64,8 +85,17 @@
         <a href="#features">Features</a>
         <a href="#screenshots">Screenshots</a>
         <a href="privacy/">Privacy</a>
+        <a href="tos/">Terms</a>
       </nav>
       <div class="header-actions">
+        <label class="theme-picker">
+          <span>Appearance</span>
+          <select data-theme-picker aria-label="Appearance">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
         <a
           class="button button-small button-secondary"
           href="https://github.com/heresalexandria/clawnsole"
@@ -84,16 +114,17 @@
     <main id="main">
       <section class="hero section-shell" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Local-first video studio</p>
-          <h1 id="hero-title">Make it <em>move.</em></h1>
+          <p class="eyebrow">AI video generation studio</p>
+          <h1 id="hero-title">Clawnsole</h1>
           <p class="hero-lede">
-            Direct one continuous moment, pin the important frames, and let
-            Clawnsole mind the render. Your key, projects, and finished films
-            stay under your control.
+            Clawnsole is an AI video generation studio for creating, comparing,
+            and managing video across multiple providers on web, mobile, and
+            desktop.
           </p>
           <p class="provider-support">
-            Currently supported: your Black Forest Labs key for FLUX 3, LTX
-            key for LTX models, or Atlas Cloud key for Seedance models.
+            Use your own provider keys in one consistent workspace. Connect
+            Black Forest Labs, LTX, ArtCraft, or Atlas Cloud to choose from
+            FLUX 3, LTX, Seedance, and other supported video models.
           </p>
           <div class="hero-actions">
             <div class="hero-download-actions">
@@ -147,8 +178,9 @@
             <h2 id="features-title">The controls that matter. Nothing between you and the shot.</h2>
           </div>
           <p>
-            Move between Black Forest Labs, LTX, and Atlas Cloud without moving
-            your project. Each model exposes only the controls it supports.
+            Move between Black Forest Labs, LTX, ArtCraft, and Atlas Cloud
+            without moving your project. Each model exposes only the controls
+            it supports.
           </p>
         </div>
 
@@ -173,16 +205,16 @@
             <span class="feature-number">03</span>
             <h3>Know the cost before the cut</h3>
             <p>
-              Compare 10, 15, 20, and 30-second USD costs—including reference
-              rates—and see a request estimate before rendering.
+              Compare 10, 15, 20, and 30-second USD costs, including reference
+              rates, and see a request estimate before rendering.
             </p>
           </article>
           <article class="feature-card">
             <span class="feature-number">04</span>
-            <h3>Keep a local film library</h3>
+            <h3>Keep every project together</h3>
             <p>
-              Inputs, settings, job state, and completed videos remain together
-              on your device until you remove them.
+              Organize inputs, settings, job state, and completed videos in one
+              library, with optional Google Drive sync across devices.
             </p>
           </article>
         </div>
@@ -191,18 +223,18 @@
       <section class="privacy-band" aria-labelledby="privacy-title">
         <div class="section-shell privacy-band-inner">
           <div class="privacy-seal" aria-hidden="true">
-            <span>LOCAL</span>
+            <span>YOUR</span>
             <strong>BYO</strong>
             <span>KEY</span>
           </div>
           <div>
-            <p class="eyebrow">No Clawnsole cloud</p>
-            <h2 id="privacy-title">Your studio is not our data source.</h2>
+            <p class="eyebrow">Your keys, your choice</p>
+            <h2 id="privacy-title">Connect directly. Stay in control.</h2>
           </div>
           <p>
             Clawnsole has no developer-operated account, analytics service, ad
-            network, or cloud database. It sends a generation only to the
-            provider you connect and stores your project history locally.
+            network, or cloud database. Your generations go only to the
+            provider you connect, and you choose local or Google Drive storage.
           </p>
           <a class="button button-light" href="privacy/">How privacy works</a>
         </div>
@@ -211,7 +243,7 @@
       <section class="screens-section section-shell" id="screenshots" aria-labelledby="screenshots-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">The studio, pocket-sized</p>
+          <p class="eyebrow">The studio, everywhere</p>
             <h2 id="screenshots-title">The same workflow on every screen.</h2>
           </div>
           <p>
@@ -286,9 +318,10 @@
     </main>
 
     <footer class="site-footer section-shell">
-      <span>Clawnsole is independent and is not affiliated with Black Forest Labs, Lightricks/LTX, or Atlas Cloud.</span>
+      <span>Clawnsole is independent and is not affiliated with Black Forest Labs, Lightricks/LTX, ArtCraft, or Atlas Cloud.</span>
       <div>
         <a href="privacy/">Privacy</a>
+        <a href="tos/">Terms</a>
         <a href="https://github.com/heresalexandria/clawnsole">View on GitHub</a>
         <a href="https://github.com/heresalexandria/clawnsole/issues">Support</a>
         <a href="https://heresalexandria.com/">Made by Alexandria</a>

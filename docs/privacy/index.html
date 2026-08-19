@@ -3,14 +3,23 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#211720">
+    <meta id="theme-color" name="theme-color" content="#f8f3e8">
     <meta
       name="description"
       content="Clawnsole privacy policy: local project storage, direct provider connections, and no developer-operated cloud database."
     >
-    <title>Privacy policy — Clawnsole</title>
+    <title>Privacy policy | Clawnsole</title>
     <link rel="icon" href="../assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="../assets/site.css?v=6ff92239">
+    <link rel="stylesheet" href="../assets/site.css?v=unified-studio-theme">
+    <script>
+      try {
+        const theme = localStorage.getItem('clawnsole-site-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {}
+    </script>
+    <script src="../assets/theme.js" defer></script>
   </head>
   <body class="privacy-page">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -29,8 +38,17 @@
         <a href="../#features">Features</a>
         <a href="../#screenshots">Screenshots</a>
         <a href="./" aria-current="page">Privacy</a>
+        <a href="../tos/">Terms</a>
       </nav>
       <div class="header-actions">
+        <label class="theme-picker">
+          <span>Appearance</span>
+          <select data-theme-picker aria-label="Appearance">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
         <a
           class="button button-small"
           href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
@@ -45,9 +63,10 @@
         <p class="eyebrow">Clawnsole privacy policy</p>
         <h1>Privacy without a hidden backend.</h1>
         <p class="policy-intro">
-          Clawnsole is a local-first client for third-party video generation
-          services. Its developer does not operate an account system, analytics
-          service, advertising network, or cloud database for the app.
+          Clawnsole is a unified client for third-party video generation
+          services across web, mobile, and desktop. Its developer does not
+          operate an account system, analytics service, advertising network, or
+          cloud database for the app.
         </p>
         <p class="policy-date">Effective August 19, 2026</p>
       </header>
@@ -290,6 +309,7 @@
       <span>Clawnsole is an independent, open-source client.</span>
       <div>
         <a href="../">Home</a>
+        <a href="../tos/">Terms</a>
         <a href="https://github.com/heresalexandria/clawnsole">Source</a>
         <a href="https://github.com/heresalexandria/clawnsole/issues">Support</a>
       </div>

@@ -4,6 +4,7 @@ const path = require("node:path");
 const {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -15,10 +16,12 @@ const {
 const {
   findOpenPort,
   isAllowedAppUrl,
+  isAllowedExplicitExternalUrl,
   isAllowedExternalUrl,
   isAllowedRendererPermission,
   waitForServer,
 } = require("./lib/runtime.cjs");
+const { installNativeTextContextMenu } = require("./lib/text-context-menu.cjs");
 const updater = require("./lib/updater.cjs");
 const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
@@ -274,20 +277,30 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.onUpdateEvent,"
       + " typeof window.clawnsole?.authorizeGoogleDrive,"
       + " typeof window.clawnsole?.disconnectGoogleDrive,"
+      + " typeof window.clawnsole?.openExternalUrl,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
-    if (shape === "function,function,function,function,function,true") return;
+    if (shape === "function,function,function,function,function,function,true") {
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`The renderer update bridge is missing (saw ${shape}).`);
 }
 
 function installRendererBridge() {
+  installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain });
   ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
   ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
   ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
+  ipcMain.handle("clawnsole:external:open", async (event, url, purpose) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
+    if (!isAllowedExplicitExternalUrl(url, purpose)) return false;
+    await shell.openExternal(url);
+    return true;
+  });
 }
 
 function protectNavigation(window, localRendererUrl) {

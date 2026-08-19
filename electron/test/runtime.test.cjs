@@ -1,8 +1,11 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const {
   findOpenPort,
   isAllowedAppUrl,
+  isAllowedExplicitExternalUrl,
   isAllowedExternalUrl,
   isAllowedRendererPermission,
 } = require("../lib/runtime.cjs");
@@ -58,9 +61,13 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
     true,
   );
   assert.equal(isAllowedExternalUrl("https://www.atlascloud.ai/console"), true);
-  assert.equal(isAllowedExternalUrl("https://console.atlascloud.ai/"), true);
   assert.equal(isAllowedExternalUrl("https://heresalexandria.com/"), true);
-  assert.equal(isAllowedExternalUrl("https://www.heresalexandria.com/"), true);
+  assert.equal(
+    isAllowedExternalUrl(
+      "https://heresalexandria.github.io/clawnsole/privacy/",
+    ),
+    true,
+  );
   assert.equal(isAllowedExternalUrl("http://bfl.ai/pricing"), false);
   assert.equal(isAllowedExternalUrl("http://heresalexandria.com/"), false);
   assert.equal(isAllowedExternalUrl("https://bfl.ai.example.com"), false);
@@ -73,6 +80,83 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
     false,
   );
   assert.equal(isAllowedExternalUrl("https://example.com"), false);
+  assert.equal(isAllowedExternalUrl("https://www.bfl.ai/"), false);
+  assert.equal(isAllowedExternalUrl("https://console.atlascloud.ai/"), false);
+});
+
+test("every provider catalog link is allowlisted for desktop", () => {
+  const catalog = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "flutter",
+      "lib",
+      "core",
+      "provider_catalog.dart",
+    ),
+    "utf8",
+  );
+  const urls = [...catalog.matchAll(
+    /\b(?:consoleUrl|docsUrl|pricingUrl):\s*'([^']+)'/g,
+  )].map((match) => match[1]);
+  assert.ok(urls.length > 0, "provider catalog URLs must be discoverable");
+  for (const url of urls) {
+    assert.equal(isAllowedExternalUrl(url), true, `${url} must be allowlisted`);
+  }
+});
+
+test("explicit external opens are HTTPS and purpose scoped", () => {
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://storage.googleapis.com/output/video.mp4?signature=temporary",
+      "media",
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://atlas-media.oss-us-west-1.aliyuncs.com/video.mp4",
+      "media",
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://github.com/heresalexandria/clawnsole/releases/tag/v0.24.0",
+      "release",
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://github.com/example/repo/releases",
+      "release",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://github.com/heresalexandria/clawnsole/issues",
+      "release",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl("http://cdn.example/video.mp4", "media"),
+    false,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl(
+      "https://user:password@cdn.example/video.mp4",
+      "media",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedExplicitExternalUrl("https://cdn.example/video.mp4", "unknown"),
+    false,
+  );
 });
 
 test("findOpenPort allocates a loopback port", async () => {

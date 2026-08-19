@@ -11,6 +11,16 @@ function loadPreload() {
   const exposed = {};
   const invoked = [];
   const listeners = new Map();
+  const rendererListeners = new Map();
+  const sent = [];
+  const rendererWindow = {
+    document: { activeElement: null },
+    addEventListener: (name, listener, capture) => {
+      assert.equal(capture, true);
+      rendererListeners.set(name, listener);
+    },
+    setTimeout: (callback) => callback(),
+  };
   const electron = {
     contextBridge: {
       exposeInMainWorld: (key, value) => {
@@ -18,6 +28,7 @@ function loadPreload() {
       },
     },
     ipcRenderer: {
+      send: (channel, payload) => sent.push({ channel, payload }),
       invoke: async (channel, ...args) => {
         invoked.push({ channel, args });
         return { channel };
@@ -32,6 +43,8 @@ function loadPreload() {
   };
 
   const load = Module._load;
+  const previousWindow = global.window;
+  global.window = rendererWindow;
   Module._load = function (request, ...rest) {
     if (request === "electron") return electron;
     return load.call(this, request, ...rest);
@@ -42,8 +55,28 @@ function loadPreload() {
     require(preloadPath);
   } finally {
     Module._load = load;
+    if (previousWindow === undefined) delete global.window;
+    else global.window = previousWindow;
   }
-  return { exposed, invoked, listeners };
+  return {
+    exposed,
+    invoked,
+    listeners,
+    rendererListeners,
+    rendererWindow,
+    sent,
+  };
+}
+
+function textElement(overrides = {}) {
+  return {
+    tagName: "TEXTAREA",
+    type: "textarea",
+    value: "Clawnsole",
+    selectionStart: 0,
+    selectionEnd: 0,
+    ...overrides,
+  };
 }
 
 test("the preload publishes the renderer update bridge", async () => {
@@ -57,12 +90,14 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.onUpdateEvent, "function");
   assert.equal(typeof bridge.authorizeGoogleDrive, "function");
   assert.equal(typeof bridge.disconnectGoogleDrive, "function");
+  assert.equal(typeof bridge.openExternalUrl, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
   await bridge.startUpdate();
   await bridge.authorizeGoogleDrive();
   await bridge.disconnectGoogleDrive();
+  await bridge.openExternalUrl("https://cdn.example/video.mp4", "media");
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
@@ -71,10 +106,15 @@ test("the preload publishes the renderer update bridge", async () => {
       "clawnsole:update:start",
       "clawnsole:drive:authorize",
       "clawnsole:drive:disconnect",
+      "clawnsole:external:open",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);
   assert.deepEqual(invoked[1].args, [true]);
+  assert.deepEqual(invoked[5].args, [
+    "https://cdn.example/video.mp4",
+    "media",
+  ]);
 });
 
 test("update events reach the renderer and unsubscribe cleanly", () => {
@@ -97,4 +137,45 @@ test("a non-function subscriber is ignored rather than thrown at", () => {
   assert.equal(typeof unsubscribe, "function");
   assert.equal(listeners.has("clawnsole:update:event"), false);
   unsubscribe();
+});
+
+test("the preload requests a native menu for a renderer text control", () => {
+  const { rendererListeners, sent } = loadPreload();
+  let prevented = false;
+  rendererListeners.get("contextmenu")({
+    target: textElement({ selectionStart: 1, selectionEnd: 3 }),
+    preventDefault: () => (prevented = true),
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(sent, [{
+    channel: "clawnsole:text-context-menu",
+    payload: {
+      hasSelection: true,
+      hasText: true,
+      obscured: false,
+      readOnly: false,
+    },
+  }]);
+});
+
+test("the preload falls back to Flutter's focused DOM editor", () => {
+  const { rendererListeners, rendererWindow, sent } = loadPreload();
+  rendererWindow.document.activeElement = textElement({
+    tagName: "INPUT",
+    type: "password",
+    value: "secret",
+  });
+  rendererListeners.get("pointerdown")({ button: 2 });
+
+  assert.deepEqual(sent, [{
+    channel: "clawnsole:text-context-menu",
+    payload: {
+      hasSelection: false,
+      hasText: true,
+      obscured: true,
+      readOnly: false,
+    },
+  }]);
+  assert.equal(JSON.stringify(sent).includes("secret"), false);
 });
