@@ -251,31 +251,56 @@ enum AnimationFrameConsistency {
       && horizontalSeam < horizontalNeighbors * 0.68
   }
 
-  static func accepts(
-    candidate: CGImage,
+  /// Selects the most visually continuous usable candidate. Feature-print
+  /// distance is deliberately a ranking signal, never a validity gate: a large
+  /// pose change can be correct for an action such as jumping or turning.
+  static func bestCandidate(
+    from candidates: [CGImage],
     previous: CGImage,
     before: CGImage,
     after: CGImage
-  ) -> Bool {
+  ) -> CGImage? {
+    guard let firstCandidate = candidates.first else { return nil }
     #if canImport(Vision)
       do {
-        let candidatePrint = try featurePrint(for: candidate)
-        let previousDistance = try distance(candidatePrint, featurePrint(for: previous))
-        let beforeDistance = try distance(candidatePrint, featurePrint(for: before))
-        let afterDistance = try distance(candidatePrint, featurePrint(for: after))
-        let anchorDistance = try distance(featurePrint(for: before), featurePrint(for: after))
-        let allowedDistance = min(1.35, max(0.80, anchorDistance * 1.6 + 0.20))
-        return previousDistance <= allowedDistance
-          || min(beforeDistance, afterDistance) <= allowedDistance
+        let previousPrint = try featurePrint(for: previous)
+        let beforePrint = try featurePrint(for: before)
+        let afterPrint = try featurePrint(for: after)
+        return try candidates.min { first, second in
+          try continuityScore(
+            for: first,
+            previous: previousPrint,
+            before: beforePrint,
+            after: afterPrint
+          )
+            < continuityScore(
+              for: second,
+              previous: previousPrint,
+              before: beforePrint,
+              after: afterPrint
+            )
+        }
       } catch {
-        return true
+        return firstCandidate
       }
     #else
-      return true
+      return firstCandidate
     #endif
   }
 
   #if canImport(Vision)
+    private static func continuityScore(
+      for candidate: CGImage,
+      previous: VNFeaturePrintObservation,
+      before: VNFeaturePrintObservation,
+      after: VNFeaturePrintObservation
+    ) throws -> Float {
+      let candidatePrint = try featurePrint(for: candidate)
+      return try distance(candidatePrint, previous) * 0.5
+        + distance(candidatePrint, before) * 0.25
+        + distance(candidatePrint, after) * 0.25
+    }
+
     private static func featurePrint(for image: CGImage) throws -> VNFeaturePrintObservation {
       let request = VNGenerateImageFeaturePrintRequest()
       try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])

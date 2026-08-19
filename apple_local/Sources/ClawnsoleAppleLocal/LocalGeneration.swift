@@ -486,8 +486,10 @@ public struct LocalGenerationEngine: Sendable {
               frameCount: anchorCount,
               attempts: 2,
               retriedWithoutReference: false,
-              reason:
-                "Apple could not keep the generated anchor consistent with the character and scene. No static camera-pan substitute was returned."
+              reason: animationFailureReason(
+                error,
+                unit: "animation anchor"
+              )
             )
           }
         }
@@ -534,8 +536,10 @@ public struct LocalGenerationEngine: Sendable {
             frameCount: request.frameCount,
             attempts: 2,
             retriedWithoutReference: false,
-            reason:
-              "Apple could not produce a frame that matched its surrounding anchors. No static camera-pan substitute was returned."
+            reason: animationFailureReason(
+              error,
+              unit: "animation frame"
+            )
           )
         }
       }
@@ -596,7 +600,27 @@ public struct LocalGenerationEngine: Sendable {
       concepts: [ImagePlaygroundConcept],
       style: ImagePlaygroundStyle
     ) async throws -> CGImage {
-      var generatedImage: CGImage?
+      guard
+        let generatedImage = try await createImages(
+          creator: creator,
+          concepts: concepts,
+          style: style,
+          limit: 1
+        ).first
+      else {
+        throw LocalGenerationError.noImageReturned
+      }
+      return generatedImage
+    }
+
+    @available(iOS 18.4, macOS 15.4, *)
+    private func createImages(
+      creator: ImageCreator,
+      concepts: [ImagePlaygroundConcept],
+      style: ImagePlaygroundStyle,
+      limit: Int
+    ) async throws -> [CGImage] {
+      var generatedImages = [CGImage]()
       if #available(iOS 26.4, macOS 26.4, *) {
         var options = ImagePlaygroundOptions()
         options.creationVariety = .low
@@ -605,21 +629,21 @@ public struct LocalGenerationEngine: Sendable {
           for: concepts,
           style: style,
           options: options,
-          limit: 1
+          limit: limit
         )
         for try await result in images {
-          generatedImage = result.cgImage
-          break
+          try Task.checkCancellation()
+          generatedImages.append(result.cgImage)
         }
       } else {
-        let images = creator.images(for: concepts, style: style, limit: 1)
+        let images = creator.images(for: concepts, style: style, limit: limit)
         for try await result in images {
-          generatedImage = result.cgImage
-          break
+          try Task.checkCancellation()
+          generatedImages.append(result.cgImage)
         }
       }
-      guard let generatedImage else { throw LocalGenerationError.noImageReturned }
-      return generatedImage
+      guard !generatedImages.isEmpty else { throw LocalGenerationError.noImageReturned }
+      return generatedImages
     }
 
     @available(iOS 18.4, macOS 15.4, *)
@@ -641,7 +665,7 @@ public struct LocalGenerationEngine: Sendable {
         previous: previousAnchor
       )
       do {
-        let candidate = try await createImage(
+        let candidates = try await createImages(
           creator: try await ImageCreator(),
           concepts: [
             .text(
@@ -655,19 +679,20 @@ public struct LocalGenerationEngine: Sendable {
             ),
             .image(board),
           ],
-          style: style
+          style: style,
+          limit: 3
         )
-        guard !AnimationFrameConsistency.looksLikeContinuityBoard(candidate) else {
-          throw LocalGenerationError.noImageReturned
-        }
-        let fitted = try fittedImage(candidate, width: width, height: height)
-        if AnimationFrameConsistency.accepts(
-          candidate: fitted,
+        let fittedCandidates =
+          try candidates
+          .filter { !AnimationFrameConsistency.looksLikeContinuityBoard($0) }
+          .map { try fittedImage($0, width: width, height: height) }
+        if let bestCandidate = AnimationFrameConsistency.bestCandidate(
+          from: fittedCandidates,
           previous: previousAnchor,
           before: masterFrame,
           after: previousAnchor
         ) {
-          return fitted
+          return bestCandidate
         }
       } catch is CancellationError {
         throw CancellationError()
@@ -687,19 +712,11 @@ public struct LocalGenerationEngine: Sendable {
         ],
         style: style
       )
-      let target = try CompositeAnimationRenderer.targetCell(from: completedBoard)
-      let fitted = try fittedImage(target, width: width, height: height)
-      guard
-        AnimationFrameConsistency.accepts(
-          candidate: fitted,
-          previous: previousAnchor,
-          before: masterFrame,
-          after: previousAnchor
-        )
-      else {
-        throw LocalGenerationError.noImageReturned
+      if AnimationFrameConsistency.looksLikeContinuityBoard(completedBoard) {
+        let target = try CompositeAnimationRenderer.targetCell(from: completedBoard)
+        return try fittedImage(target, width: width, height: height)
       }
-      return fitted
+      return try fittedImage(completedBoard, width: width, height: height)
     }
 
     @available(iOS 18.4, macOS 15.4, *)
@@ -721,7 +738,7 @@ public struct LocalGenerationEngine: Sendable {
         previous: previousFrame
       )
       do {
-        let candidate = try await createImage(
+        let candidates = try await createImages(
           creator: try await ImageCreator(),
           concepts: [
             .text(
@@ -734,24 +751,25 @@ public struct LocalGenerationEngine: Sendable {
             ),
             .image(board),
           ],
-          style: style
+          style: style,
+          limit: 3
         )
-        guard !AnimationFrameConsistency.looksLikeContinuityBoard(candidate) else {
-          throw LocalGenerationError.noImageReturned
-        }
-        let fitted = try fittedImage(candidate, width: width, height: height)
-        if AnimationFrameConsistency.accepts(
-          candidate: fitted,
+        let fittedCandidates =
+          try candidates
+          .filter { !AnimationFrameConsistency.looksLikeContinuityBoard($0) }
+          .map { try fittedImage($0, width: width, height: height) }
+        if let bestCandidate = AnimationFrameConsistency.bestCandidate(
+          from: fittedCandidates,
           previous: previousFrame,
           before: before,
           after: after
         ) {
-          return fitted
+          return bestCandidate
         }
       } catch is CancellationError {
         throw CancellationError()
       } catch {
-        // Try literal missing-cell completion before using the stable fallback.
+        // Literal cell completion is the second reference-preserving attempt.
       }
 
       let completedBoard = try await createImage(
@@ -766,19 +784,20 @@ public struct LocalGenerationEngine: Sendable {
         ],
         style: style
       )
-      let target = try CompositeAnimationRenderer.targetCell(from: completedBoard)
-      let fitted = try fittedImage(target, width: width, height: height)
-      guard
-        AnimationFrameConsistency.accepts(
-          candidate: fitted,
-          previous: previousFrame,
-          before: before,
-          after: after
-        )
-      else {
-        throw LocalGenerationError.noImageReturned
+      if AnimationFrameConsistency.looksLikeContinuityBoard(completedBoard) {
+        let target = try CompositeAnimationRenderer.targetCell(from: completedBoard)
+        return try fittedImage(target, width: width, height: height)
       }
-      return fitted
+      return try fittedImage(completedBoard, width: width, height: height)
+    }
+
+    private func animationFailureReason(_ error: Error, unit: String) -> String {
+      let detail = error.localizedDescription.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+      let suffix = detail.isEmpty ? "" : " Last local error: \(detail)"
+      return
+        "Apple returned no usable standalone \(unit) after ranked candidate selection and reference-board recovery.\(suffix)"
     }
 
     @available(iOS 18.4, macOS 15.4, *)

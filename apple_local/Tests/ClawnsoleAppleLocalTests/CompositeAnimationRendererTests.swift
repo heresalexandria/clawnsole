@@ -76,6 +76,34 @@ final class CompositeAnimationRendererTests: XCTestCase {
     XCTAssertLessThanOrEqual(anchorPrompt.count, 430)
   }
 
+  func testConsistencyRanksCandidatesWithoutRejectingLargePoseChanges() throws {
+    let reference = patternedImage(inverted: false)
+    let visuallyDistantCandidate = patternedImage(inverted: true)
+
+    let selected = try XCTUnwrap(
+      AnimationFrameConsistency.bestCandidate(
+        from: [visuallyDistantCandidate, reference],
+        previous: reference,
+        before: reference,
+        after: reference
+      )
+    )
+
+    let selectedColor = centerColor(of: selected)
+    let referenceColor = centerColor(of: reference)
+    XCTAssertEqual(selectedColor.red, referenceColor.red, accuracy: 0.01)
+    XCTAssertEqual(selectedColor.green, referenceColor.green, accuracy: 0.01)
+    XCTAssertEqual(selectedColor.blue, referenceColor.blue, accuracy: 0.01)
+    XCTAssertNotNil(
+      AnimationFrameConsistency.bestCandidate(
+        from: [visuallyDistantCandidate],
+        previous: reference,
+        before: reference,
+        after: reference
+      )
+    )
+  }
+
   private func solidImage(width: Int, height: Int) -> CGImage {
     let context = CGContext(
       data: nil,
@@ -88,6 +116,31 @@ final class CompositeAnimationRendererTests: XCTestCase {
     )!
     context.setFillColor(CGColor(red: 0.5, green: 0.3, blue: 0.8, alpha: 1))
     context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage()!
+  }
+
+  private func patternedImage(inverted: Bool) -> CGImage {
+    let size = 96
+    let context = CGContext(
+      data: nil,
+      width: size,
+      height: size,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    let background = inverted ? 0.9 : 0.1
+    let foreground = inverted ? 0.1 : 0.9
+    context.setFillColor(
+      CGColor(red: background, green: background * 0.7, blue: 0.2, alpha: 1)
+    )
+    context.fill(CGRect(x: 0, y: 0, width: size, height: size))
+    context.setFillColor(
+      CGColor(red: foreground, green: 0.2, blue: foreground * 0.8, alpha: 1)
+    )
+    context.fill(CGRect(x: 12, y: 12, width: 30, height: 68))
+    context.fill(CGRect(x: 54, y: 20, width: 30, height: 24))
     return context.makeImage()!
   }
 
