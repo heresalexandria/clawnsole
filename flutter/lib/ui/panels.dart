@@ -5,37 +5,113 @@ import '../app/app_theme.dart';
 /// The material a [TexturePanel] is upholstered or veneered with.
 enum PanelSurface { plumLeather, navyLeather, burlwood, hunterFelt }
 
-extension on PanelSurface {
-  /// Bundled photograph, or null for a solid finish.
-  String? get asset => switch (this) {
-    PanelSurface.plumLeather => ClawnsoleTextures.plumLeather,
-    PanelSurface.navyLeather => ClawnsoleTextures.navyLeather,
-    PanelSurface.burlwood => ClawnsoleTextures.burlwood,
-    PanelSurface.hunterFelt => null,
-  };
+/// Foreground colors for content placed on a [PanelSurface].
+@immutable
+class PanelInk {
+  const PanelInk({
+    required this.on,
+    required this.onMuted,
+    required this.accent,
+  });
+
+  /// Primary text and icons.
+  final Color on;
+
+  /// Secondary text.
+  final Color onMuted;
+
+  /// Brass jewelry: the claw, small marks, keylines.
+  final Color accent;
+}
+
+extension PanelSurfaceMaterial on PanelSurface {
+  /// Whether this panel is casework — the cabinet the app is built into,
+  /// which stays dark in both modes. Everything else is content, and in
+  /// light mode content never sits on a dark background.
+  bool get isCasework => this == PanelSurface.burlwood;
+
+  /// Bundled photograph, or null for a solid finish. Content panels are
+  /// upholstered in leather at night and in pale tinted linen on paper.
+  String? asset(ClawnsoleTokens tokens) {
+    final dark = tokens.brightness == Brightness.dark;
+    return switch (this) {
+      PanelSurface.burlwood => ClawnsoleTextures.burlwood,
+      PanelSurface.plumLeather =>
+        dark ? ClawnsoleTextures.plumLeather : ClawnsoleTextures.linen,
+      PanelSurface.navyLeather =>
+        dark ? ClawnsoleTextures.navyLeather : ClawnsoleTextures.linen,
+      PanelSurface.hunterFelt => null,
+    };
+  }
 
   /// Flat stand-in while the texture decodes, and the finish itself for
   /// solid surfaces.
-  Color get ground => switch (this) {
-    PanelSurface.plumLeather => const Color(0xFF352A34),
-    PanelSurface.navyLeather => const Color(0xFF272E3A),
+  Color ground(ClawnsoleTokens tokens) => switch (this) {
+    PanelSurface.plumLeather => tokens.plumPanel,
+    PanelSurface.navyLeather => tokens.navyPanel,
     PanelSurface.burlwood => const Color(0xFF3A2417),
-    PanelSurface.hunterFelt => const Color(0xFF2A4633),
+    PanelSurface.hunterFelt => tokens.money,
   };
 
-  /// Hue-shifts the photographed material toward the brand palette.
-  Color? get tint => switch (this) {
-    PanelSurface.plumLeather => const Color(0xFF4A2C48),
-    PanelSurface.navyLeather => const Color(0xFF2A3D60),
-    PanelSurface.burlwood => null,
-    PanelSurface.hunterFelt => null,
+  /// Hue-shifts the photographed material toward the brand palette. Only the
+  /// dark leathers are tinted; a pale panel takes its color from [ground] and
+  /// uses the linen purely as tooth, because tinting a light photograph pushes
+  /// it straight to candy.
+  Color? tint(ClawnsoleTokens tokens) {
+    if (tokens.brightness == Brightness.light && !isCasework) return null;
+    return switch (this) {
+      PanelSurface.plumLeather => const Color(0xFF4A2C48),
+      PanelSurface.navyLeather => const Color(0xFF2A3D60),
+      PanelSurface.burlwood => null,
+      PanelSurface.hunterFelt => null,
+    };
+  }
+
+  /// How strongly the photograph reads. Pale panels want a whisper of weave
+  /// over their color; dark upholstery is the photograph itself.
+  double textureOpacity(ClawnsoleTokens tokens) =>
+      tokens.brightness == Brightness.light && !isCasework ? .35 : 1;
+
+  /// Linen is a small tile and repeats; the leathers and burl are shot to
+  /// cover a panel.
+  bool tilesTexture(ClawnsoleTokens tokens) =>
+      tokens.brightness == Brightness.light && !isCasework;
+
+  /// Thread color for a stitched border on this surface.
+  Color stitch(ClawnsoleTokens tokens) => switch (this) {
+    PanelSurface.hunterFelt => tokens.moneyAccent,
+    PanelSurface.burlwood => tokens.stitch,
+    _ => tokens.contentPanelBrass,
+  };
+
+  /// Colors for text and icons placed on this panel.
+  PanelInk ink(ClawnsoleTokens tokens) => switch (this) {
+    // Casework is dark in both modes, so its content stays cream.
+    PanelSurface.burlwood => PanelInk(
+      on: tokens.onPanel,
+      onMuted: tokens.onPanelMuted,
+      accent: tokens.panelBrass,
+    ),
+    PanelSurface.hunterFelt => PanelInk(
+      on: tokens.onMoney,
+      onMuted: tokens.onMoneyMuted,
+      accent: tokens.moneyAccent,
+    ),
+    _ => PanelInk(
+      on: tokens.onContentPanel,
+      onMuted: tokens.onContentPanelMuted,
+      accent: tokens.contentPanelBrass,
+    ),
   };
 }
 
-/// A dark upholstered panel: leather or burlwood, optionally stitched.
+/// An upholstered panel: leather, burlwood, or felt, optionally stitched.
 ///
-/// Panels stay dark in both appearance modes, like the furniture they borrow
-/// from; use [ClawnsoleTokens.onPanel] colors for their content.
+/// The leather and wood panels stay dark in both appearance modes, like the
+/// furniture they borrow from; use [ClawnsoleTokens.onPanel] colors for their
+/// content. The hunter felt is the exception — it is the money surface, so it
+/// reads as pale baize on paper and deep felt at night, and its content uses
+/// the [ClawnsoleTokens.onMoney] colors.
 class TexturePanel extends StatelessWidget {
   const TexturePanel({
     required this.child,
@@ -56,13 +132,14 @@ class TexturePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final asset = surface.asset;
-    final tint = surface.tint;
+    final tokens = context.tokens;
+    final asset = surface.asset(tokens);
+    final tint = surface.tint(tokens);
     Widget content = Padding(padding: padding, child: child);
     if (stitched) {
       content = CustomPaint(
         foregroundPainter: _StitchPainter(
-          color: context.tokens.stitch.withValues(alpha: .45),
+          color: surface.stitch(tokens).withValues(alpha: .45),
           borderRadius: borderRadius,
         ),
         child: content,
@@ -70,13 +147,18 @@ class TexturePanel extends StatelessWidget {
     }
     return Container(
       decoration: BoxDecoration(
-        color: surface.ground,
+        color: surface.ground(tokens),
         borderRadius: borderRadius,
         image: asset == null
             ? null
             : DecorationImage(
                 image: AssetImage(asset),
-                fit: BoxFit.cover,
+                fit: surface.tilesTexture(tokens) ? BoxFit.none : BoxFit.cover,
+                repeat: surface.tilesTexture(tokens)
+                    ? ImageRepeat.repeat
+                    : ImageRepeat.noRepeat,
+                opacity: surface.textureOpacity(tokens),
+                filterQuality: FilterQuality.medium,
                 colorFilter: tint == null
                     ? null
                     : ColorFilter.mode(tint, BlendMode.color),
@@ -84,7 +166,10 @@ class TexturePanel extends StatelessWidget {
         boxShadow: shadowed
             ? <BoxShadow>[
                 BoxShadow(
-                  color: context.colors.shadow.withValues(alpha: .18),
+                  color: context.colors.shadow.withValues(
+                    // Pale panels sit on paper; they need lift, not drama.
+                    alpha: tokens.brightness == Brightness.dark ? .18 : .1,
+                  ),
                   blurRadius: 18,
                   offset: const Offset(0, 6),
                 ),

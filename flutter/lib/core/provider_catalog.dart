@@ -28,6 +28,7 @@ class VideoModelDefinition {
     this.maxImageReferences = 0,
     this.maxVideoReferences = 0,
     this.maxAudioReferences = 0,
+    this.framesExclusiveWithReferences = false,
     this.maxReferenceVideoSeconds,
     this.maxReferenceAudioSeconds,
     this.requiresVisualReferenceForAudio = false,
@@ -65,6 +66,11 @@ class VideoModelDefinition {
   final int maxImageReferences;
   final int maxVideoReferences;
   final int maxAudioReferences;
+
+  /// The provider accepts pinned keyframes or media references in one
+  /// request, never both (Seedance routes behind ArtCraft's Omni API).
+  final bool framesExclusiveWithReferences;
+
   final int? maxReferenceVideoSeconds;
   final int? maxReferenceAudioSeconds;
   final bool requiresVisualReferenceForAudio;
@@ -179,6 +185,7 @@ class _ArtCraftModel extends VideoModelDefinition {
     super.maxImageReferences,
     super.maxVideoReferences,
     super.maxAudioReferences,
+    super.framesExclusiveWithReferences,
     super.maxReferenceVideoSeconds,
     super.maxReferenceAudioSeconds,
     super.requiresVisualReferenceForAudio,
@@ -350,6 +357,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -368,6 +376,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -385,6 +394,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -402,6 +412,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -419,6 +430,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -436,6 +448,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -454,6 +467,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -471,6 +485,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -488,6 +503,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -506,6 +522,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 30,
       maxVideoReferences: 10,
       maxAudioReferences: 10,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
       usdPerSecond: .268,
@@ -522,6 +539,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 30,
       maxVideoReferences: 10,
       maxAudioReferences: 10,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
       usdPerSecond: .316,

@@ -17,9 +17,17 @@ than inventing new colors or sizes.
   shadows and gray boxes.
 - **Brass is jewelry.** The brass/gold tones mark small, precious things:
   the claw, eyebrows, stitching, icons, counts. Never large fills.
-- **Plum acts, navy informs, green is money.** Primary actions and selected
-  states are plum. Informational chips and in-progress states lean navy.
-  The estimated-charge panel is hunter green, and nothing else is.
+- **Plum acts, navy informs, green is money — and "on."** Primary actions and
+  selected states are plum. Informational chips and in-progress states lean
+  navy. Green belongs to the estimated-charge panel and to the lit side of
+  hardware switches; nothing else uses it. Green is the one family that
+  **changes value between modes**: pale baize with hunter ink on paper, deep
+  hunter felt with cream at night. It is never a large dark block in light
+  mode.
+- **Hardware is honest.** Values are set with real-feeling hardware — a
+  machined knob in a recessed groove, metal toggles, counter-window
+  readouts — echoing the app icon. No status lamps or ornament beyond the
+  control itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
@@ -33,17 +41,28 @@ through `TexturePanel` (`flutter/lib/ui/panels.dart`).
 
 | Material | Asset | Used for |
 | --- | --- | --- |
-| Walnut burl | `wood_burl.jpg` | Side rail, mobile bottom nav |
-| Plum leather | `leather_plum.jpg` | Settings feature panel, dark canvas grain |
-| Navy leather | `leather_navy.jpg` | Provider plaque |
-| Hunter felt (solid) | — | Estimated-charge panel |
-| Cream linen | `linen_cream.jpg` | Light-mode canvas |
+| Walnut burl | `wood_burl.jpg` | Side rail, mobile bottom nav — casework, dark in both modes |
+| Plum leather | `leather_plum.jpg` | Settings feature panel (dark mode), dark canvas grain |
+| Navy leather | `leather_navy.jpg` | Provider plaque (dark mode) |
+| Baize / hunter felt (solid) | — | Estimated-charge panel; follows the mode |
+| Cream linen | `linen_cream.jpg` | Light-mode canvas, and the tooth on pale content panels |
 
 Rules:
 
-- Panels are **always dark**, in both appearance modes, like the furniture
-  they borrow from. Their content uses `tokens.onPanel` (cream),
-  `tokens.onPanelMuted`, and `tokens.panelBrass` — never scheme colors.
+- **In light mode the only dark backgrounds are buttons and the rail / tab
+  bar.** Nothing else — no card, panel, well, or readout — is a dark block on
+  paper. `PanelSurface.isCasework` draws the line: the walnut burl is the
+  cabinet the app is built into and stays dark in both modes; every other
+  panel is *content* and follows the mode. A test walks all four surfaces and
+  fails if a content panel is dark on paper.
+- Content panels are pale on paper and dark at night: plum and navy become
+  tinted panel colors under a whisper of linen weave (35 %), and the hunter
+  felt becomes baize. At night they return to the leather photographs and
+  deep felt.
+- Ask a panel for its colors rather than reaching for tokens directly:
+  `surface.ink(tokens)` returns `on` / `onMuted` / `accent` already resolved
+  for that surface and mode. Casework keeps cream ink; content panels use ink
+  on paper and cream at night. Every pair clears 4.5:1.
 - Leather panels may be **stitched** (`stitched: true`): a dashed brass
   thread inset 9 px, dash 5.5 / gap 4.5, 1.2 px wide at 45 % opacity.
 - The photographs are hue-shifted toward the palette with a
@@ -74,8 +93,11 @@ Two `ColorScheme`s plus a `ClawnsoleTokens` theme extension. Key hex values
 | Error | madder `#96342B` | `#F0B3A8` | |
 | Tokens.brass | `#7C5B22` | `#D9B36C` | eyebrows, claw, icons, badges |
 | Panel foregrounds | cream `#F3EAD9` / muted `#CFC1B0` / brass `#D9B36C` | same | on all panels |
-| Hunter felt | `#2A4633` | same | cost panel only |
-| plumInk | `#271E25` | same | video chrome, media ghosts, snackbar, tooltips |
+| Money surface | baize `#D6E3CB` | hunter felt `#2A4633` | estimated-charge panel |
+| onMoney / muted | `#1D3325` / `#4A6152` | cream / cream-muted | text on the money panel |
+| moneyAccent | brass `#7C5B22` | brass `#D9B36C` | coin ring, stitch, rate-card link |
+| switchOn | signal `#4A7C55` | hunter `#2A4633` | lit side of a hardware switch |
+| plumInk | `#271E25` | same | video chrome, snackbar, tooltips (media ghosts follow the mode) |
 
 Dark mode is deliberately a **warm evening study**: espresso neutrals with
 no violet cast, so the wood, navy, green, and plum read as one room. In
@@ -118,6 +140,35 @@ tight leading, slight negative tracking); titles 16.5/14.5/13 at 700; body
 - Spacing rhythm: 4-pt grid; 20 px card padding; 18–22 px between
   sections inside a card; 24–28 px page gutters (16 under 620 px).
 
+### Hardware controls (`flutter/lib/ui/hardware.dart`)
+
+The value-setting controls are skeuomorphic console hardware, drawn in code
+(no bitmaps) so they render identically on every platform and in both modes:
+
+- **`HardwareSlider`** — a machined brushed-steel knob (knurled rim, sweep-
+  gradient face, lit plum indicator line) traveling a recessed groove. The
+  traveled side fills lit plum with a soft glow; divisions show as small
+  in-groove tick dots. Replaces every Material slider.
+- **`HardwareSwitch` / `HardwareSwitchTile`** — a metal handle sliding in a
+  recessed pill well. The traveled side lights **hunter green** (the cost
+  panel's `#2A4633`) when on; off is simply the empty well. No status lamps.
+  The tile's whole row is tappable.
+- **`CounterReadout`** — a recessed counter window (Fraunces numerals) that
+  states a control's current value: duration (`10 s` / `AUTO`), frame rate
+  (`3 fps`), safety (`2 / 4`).
+- **`consoleKeyDecoration`** — selection tiles (ratio strip, resolution pair,
+  library filters) read as console keys: a faint raised gradient when idle,
+  a lit plum gradient with a soft glow when selected.
+
+The grooves, wells, and readout windows are recessed into the surface they
+sit on — shadowed warm cream with ink numerals in light mode, warm
+near-black with cream numerals in dark mode — so light mode stays paper and
+cream rather than sprouting reverse-type islands. The same rule covers media
+ghosts (empty frame, reference, and library placeholders): they follow the
+mode instead of always sitting on plum ink. Only the machined metal, the
+navy plaque, the hunter cost panel, and a switch's lit green side stay dark
+in light mode.
+
 ## 6. Shell anatomy
 
 - **Top bar (64 px):** brass claw + "Clawnsole" (Fraunces 21/19) as the
@@ -152,7 +203,11 @@ Generate button. Layout order:
    URL/timing fields when relevant), three add buttons (First / Middle /
    Last, each offering *Upload an image* or *Paste an image URL*), and the
    Custom-timing pill. Provider rules are stated in one sentence under the
-   header.
+   header. Models that take pinned frames **or** creative references but
+   never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
+   family) say so up front; attaching one side quietly sets the other aside
+   with an explanation, and a conflicted form (via reuse or a model switch)
+   warns in madder and cannot submit.
 3. **"Or start from…"** — two quiet text buttons disclose the
    video-continuation and draft-enhance panels. An attached source
    collapses the irrelevant sections and explains what is set aside;
@@ -161,12 +216,14 @@ Generate button. Layout order:
 4. **Frame** — the ratio strip: one tile per aspect ratio with a *drawn
    glyph of the actual shape* (bounded 28×18) plus label; Auto uses the
    free-crop glyph. Selected tile fills plum.
-5. **Duration** — the slider is **always live**; dragging it immediately
-   sets a fixed duration (clearing Auto), and the Auto pill re-enables
-   provider choice. Layouts that require fixed timing disable Auto and say
-   why.
-6. **Finish** — HD / Full HD segmented pair, audio and fast-draft
-   switches, safety-tolerance slider with `n / 4` readout.
+5. **Duration** — the knob slider is **always live**; dragging it
+   immediately sets a fixed duration (clearing Auto), and the Auto pill
+   re-enables provider choice. The counter readout beside the label states
+   the current value (`10 s`, or `AUTO`). Layouts that require fixed timing
+   disable Auto and say why.
+6. **Finish** — HD / Full HD console keys, audio and fast-draft hardware
+   switches (lit hunter green when on), safety-tolerance knob with an
+   `n / 4` readout.
 7. **Estimated charge** — the stitched hunter-green panel: brass coin,
    credits range in Fraunces, USD in brass, balance before/after, basis
    note, rate-card link.

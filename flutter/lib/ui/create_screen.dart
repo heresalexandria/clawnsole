@@ -11,6 +11,7 @@ import '../core/reference_prompts.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
+import 'hardware.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
@@ -157,96 +158,92 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
   }
 
   @override
-  Widget build(BuildContext context) => TexturePanel(
-    surface: PanelSurface.navyLeather,
-    stitched: true,
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-    child: PopupMenuButton<String>(
-      tooltip: 'Choose provider and model',
-      onSelected: (value) => unawaited(_select(value)),
-      constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
-      itemBuilder: (context) => <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: _ProviderSearchMenu(
-            providers: controller.providers,
-            collapsedProviders: _collapsedProviders,
-            selectedProviderId: controller.selectedProviderId,
-            selectedModelId: controller.selectedModel.id,
-            onExpandedChanged: (providerId, expanded) {
-              if (expanded) {
-                _collapsedProviders.remove(providerId);
-              } else {
-                _collapsedProviders.add(providerId);
-              }
-            },
-          ),
-        ),
-      ],
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: context.tokens.panelBrass),
-              color: Colors.white.withValues(alpha: .06),
+  Widget build(BuildContext context) {
+    final ink = PanelSurface.navyLeather.ink(context.tokens);
+    return TexturePanel(
+      surface: PanelSurface.navyLeather,
+      stitched: true,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+      child: PopupMenuButton<String>(
+        tooltip: 'Choose provider and model',
+        onSelected: (value) => unawaited(_select(value)),
+        constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
+        itemBuilder: (context) => <PopupMenuEntry<String>>[
+          PopupMenuItem<String>(
+            enabled: false,
+            padding: EdgeInsets.zero,
+            child: _ProviderSearchMenu(
+              providers: controller.providers,
+              collapsedProviders: _collapsedProviders,
+              selectedProviderId: controller.selectedProviderId,
+              selectedModelId: controller.selectedModel.id,
+              onExpandedChanged: (providerId, expanded) {
+                if (expanded) {
+                  _collapsedProviders.remove(providerId);
+                } else {
+                  _collapsedProviders.add(providerId);
+                }
+              },
             ),
-            child: Text(
-              controller.selectedProvider.shortName,
-              style: TextStyle(
-                color: context.tokens.panelBrass,
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                letterSpacing: .5,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'MODEL & PROVIDER',
-                style: TextStyle(
-                  color: context.tokens.onPanelMuted,
-                  fontSize: 8.5,
-                  letterSpacing: 1.6,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                controller.selectedProvider.name,
-                style: TextStyle(
-                  color: context.tokens.onPanel,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                controller.selectedModel.label,
-                style: TextStyle(
-                  color: context.tokens.onPanelMuted,
-                  fontSize: 10.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 12),
-          Icon(
-            Icons.unfold_more_rounded,
-            size: 17,
-            color: context.tokens.panelBrass,
           ),
         ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: ink.accent),
+                color: ink.on.withValues(alpha: .06),
+              ),
+              child: Text(
+                controller.selectedProvider.shortName,
+                style: TextStyle(
+                  color: ink.accent,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .5,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'MODEL & PROVIDER',
+                  style: TextStyle(
+                    color: ink.onMuted,
+                    fontSize: 8.5,
+                    letterSpacing: 1.6,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  controller.selectedProvider.name,
+                  style: TextStyle(
+                    color: ink.on,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  controller.selectedModel.label,
+                  style: TextStyle(color: ink.onMuted, fontSize: 10.5),
+                ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Icon(Icons.unfold_more_rounded, size: 17, color: ink.accent),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ProviderSearchMenu extends StatefulWidget {
@@ -811,6 +808,26 @@ class _FramesSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final form = controller.form;
+    final model = controller.selectedModel;
+    final setAside = controller.framesBlockedByReferences;
+    final conflicted =
+        model.framesExclusiveWithReferences &&
+        form.keyframes.isNotEmpty &&
+        form.references.isNotEmpty;
+    final caption = conflicted
+        ? '${model.label} takes pinned frames or creative references, not both — remove one side before generating.'
+        : setAside
+        ? 'Creative references are attached, and ${model.label} takes frames or references — never both. Remove the references below to pin frames instead.'
+        : form.keyframes.isEmpty
+        ? controller.selectedProvider.isLocal
+              ? 'Add one image to anchor the design, or leave this empty to begin from the continuity-locked text prompt.'
+              : model.supportsTimedKeyframes
+              ? 'Pin up to ${model.maxKeyframes} images at exact moments in ${model.label}.'
+              : 'Set the first${model.supportsEndFrame ? ' and optional last' : ''} frame for ${model.label}.'
+                    '${model.framesExclusiveWithReferences ? ' Pinning a frame sets creative references aside.' : ''}'
+        : form.requiresTimedKeyframes
+        ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
+        : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -819,7 +836,7 @@ class _FramesSection extends StatelessWidget {
           icon: Icons.collections_rounded,
           trailing: form.keyframes.isEmpty
               ? null
-              : !controller.selectedModel.supportsTimedKeyframes
+              : !model.supportsTimedKeyframes
               ? null
               : TogglePill(
                   label: 'Custom timing',
@@ -831,17 +848,11 @@ class _FramesSection extends StatelessWidget {
         ),
         const SizedBox(height: 9),
         Text(
-          form.keyframes.isEmpty
-              ? controller.selectedProvider.isLocal
-                    ? 'Add one image to anchor the design, or leave this empty to begin from the continuity-locked text prompt.'
-                    : controller.selectedModel.supportsTimedKeyframes
-                    ? 'Pin up to ${controller.selectedModel.maxKeyframes} images at exact moments in ${controller.selectedModel.label}.'
-                    : 'Set the first${controller.selectedModel.supportsEndFrame ? ' and optional last' : ''} frame for ${controller.selectedModel.label}.'
-              : form.requiresTimedKeyframes
-              ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
-              : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.',
+          caption,
           style: TextStyle(
-            color: context.colors.onSurfaceVariant,
+            color: conflicted
+                ? context.colors.error
+                : context.colors.onSurfaceVariant,
             fontSize: 11.5,
             height: 1.4,
           ),
@@ -864,25 +875,25 @@ class _FramesSection extends StatelessWidget {
                 .toList(),
           ),
         ],
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: KeyframeRole.values
-              .where(
-                (role) => switch (role) {
-                  KeyframeRole.start =>
-                    controller.selectedModel.supportsStartFrame,
-                  KeyframeRole.middle =>
-                    controller.selectedModel.supportsTimedKeyframes,
-                  KeyframeRole.end => controller.selectedModel.supportsEndFrame,
-                },
-              )
-              .map(
-                (role) => _AddFrameButton(controller: controller, role: role),
-              )
-              .toList(),
-        ),
+        if (!setAside) ...<Widget>[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: KeyframeRole.values
+                .where(
+                  (role) => switch (role) {
+                    KeyframeRole.start => model.supportsStartFrame,
+                    KeyframeRole.middle => model.supportsTimedKeyframes,
+                    KeyframeRole.end => model.supportsEndFrame,
+                  },
+                )
+                .map(
+                  (role) => _AddFrameButton(controller: controller, role: role),
+                )
+                .toList(),
+          ),
+        ],
       ],
     );
   }
@@ -909,6 +920,11 @@ class _ReferencesSection extends StatelessWidget {
     }.join(' · ');
     final required =
         !model.modes.contains(VideoMode.t2v) && model.maxKeyframes == 0;
+    final setAside = controller.referencesBlockedByFrames;
+    final conflicted =
+        model.framesExclusiveWithReferences &&
+        form.keyframes.isNotEmpty &&
+        form.references.isNotEmpty;
     return Column(
       key: const ValueKey('media-references-section'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -920,7 +936,9 @@ class _ReferencesSection extends StatelessWidget {
           icon: Icons.perm_media_rounded,
         ),
         const SizedBox(height: 9),
-        if (model.referenceTasks.length > 1) ...<Widget>[
+        if (!setAside &&
+            !conflicted &&
+            model.referenceTasks.length > 1) ...<Widget>[
           Wrap(
             spacing: 7,
             runSpacing: 7,
@@ -939,22 +957,29 @@ class _ReferencesSection extends StatelessWidget {
           const SizedBox(height: 9),
         ],
         Text(
-          '${switch (form.referenceTask) {
-            MediaReferenceTask.reference => 'Guide identity, style, motion, or sound without pinning media to a timeline.',
-            MediaReferenceTask.edit => 'Change one reference video while preserving its length and framing.',
-            MediaReferenceTask.extend => 'Continue one reference video while preserving its framing.',
-          }} '
-          '$limits${durationNotes.isEmpty ? '' : ' · $durationNotes'}. '
-          'Type @ in Direction to mention attached media; Clawnsole adapts '
-          'the tag for ${model.label}. '
-          '${model.referencePromptHint ?? 'References keep the numbered order shown here.'}',
+          conflicted
+              ? '${model.label} takes pinned frames or creative references, not both — remove one side before generating.'
+              : setAside
+              ? 'Frames are pinned above, and ${model.label} takes frames or references — never both. Remove the frames to guide with references instead.'
+              : '${switch (form.referenceTask) {
+                      MediaReferenceTask.reference => 'Guide identity, style, motion, or sound without pinning media to a timeline.',
+                      MediaReferenceTask.edit => 'Change one reference video while preserving its length and framing.',
+                      MediaReferenceTask.extend => 'Continue one reference video while preserving its framing.',
+                    }} '
+                    '$limits${durationNotes.isEmpty ? '' : ' · $durationNotes'}. '
+                    'Type @ in Direction to mention attached media; Clawnsole '
+                    'adapts the tag for ${model.label}. '
+                    '${model.referencePromptHint ?? 'References keep the numbered order shown here.'}'
+                    '${model.framesExclusiveWithReferences && form.references.isEmpty ? ' Attaching a reference sets pinned frames aside.' : ''}',
           style: TextStyle(
-            color: context.colors.onSurfaceVariant,
+            color: conflicted
+                ? context.colors.error
+                : context.colors.onSurfaceVariant,
             fontSize: 11.5,
             height: 1.4,
           ),
         ),
-        if (model.requiresVisualReferenceForAudio) ...<Widget>[
+        if (!setAside && model.requiresVisualReferenceForAudio) ...<Widget>[
           const SizedBox(height: 5),
           Text(
             'Audio guidance requires at least one image or video reference for this model.',
@@ -986,22 +1011,24 @@ class _ReferencesSection extends StatelessWidget {
                 .toList(),
           ),
         ],
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: MediaReferenceKind.values
-              .where(
-                (kind) =>
-                    model.maxReferences(kind) > 0 ||
-                    form.referenceCount(kind) > 0,
-              )
-              .map(
-                (kind) =>
-                    _AddReferenceButton(controller: controller, kind: kind),
-              )
-              .toList(),
-        ),
+        if (!setAside) ...<Widget>[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: MediaReferenceKind.values
+                .where(
+                  (kind) =>
+                      model.maxReferences(kind) > 0 ||
+                      form.referenceCount(kind) > 0,
+                )
+                .map(
+                  (kind) =>
+                      _AddReferenceButton(controller: controller, kind: kind),
+                )
+                .toList(),
+          ),
+        ],
       ],
     );
   }
@@ -1021,7 +1048,7 @@ class _ReferenceTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     key: ValueKey('media-reference-${reference.id}'),
-    width: 152,
+    width: 148,
     padding: const EdgeInsets.all(7),
     decoration: BoxDecoration(
       color: context.colors.surfaceContainerLow,
@@ -1042,19 +1069,29 @@ class _ReferenceTile extends StatelessWidget {
                     reference.kind == MediaReferenceKind.image &&
                         reference.asset != null
                     ? Image.memory(reference.asset!.bytes, fit: BoxFit.cover)
-                    : Container(
-                        color: ClawnsoleColors.plumInk,
-                        child: Icon(
-                          switch (reference.kind) {
-                            MediaReferenceKind.image => Icons.image_rounded,
-                            MediaReferenceKind.video =>
-                              Icons.video_library_rounded,
-                            MediaReferenceKind.audio =>
-                              Icons.graphic_eq_rounded,
-                          },
-                          color: ClawnsoleColors.creamMuted,
-                          size: 24,
-                        ),
+                    : Builder(
+                        builder: (context) {
+                          final dark =
+                              Theme.of(context).brightness == Brightness.dark;
+                          return Container(
+                            color: dark
+                                ? ClawnsoleColors.plumInk
+                                : context.colors.surfaceContainer,
+                            child: Icon(
+                              switch (reference.kind) {
+                                MediaReferenceKind.image => Icons.image_rounded,
+                                MediaReferenceKind.video =>
+                                  Icons.video_library_rounded,
+                                MediaReferenceKind.audio =>
+                                  Icons.graphic_eq_rounded,
+                              },
+                              color: dark
+                                  ? ClawnsoleColors.creamMuted
+                                  : context.colors.onSurfaceVariant,
+                              size: 24,
+                            ),
+                          );
+                        },
                       ),
               ),
             ),
@@ -1279,7 +1316,7 @@ class _FrameTile extends StatelessWidget {
         ? 'First'
         : 'Last';
     return Container(
-      width: 132,
+      width: 148,
       padding: const EdgeInsets.all(7),
       decoration: BoxDecoration(
         color: context.colors.surfaceContainerLow,
@@ -1397,14 +1434,19 @@ class _FrameLinkGhost extends StatelessWidget {
   const _FrameLinkGhost();
 
   @override
-  Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.plumInk,
-    child: const Icon(
-      Icons.link_rounded,
-      color: ClawnsoleColors.creamMuted,
-      size: 18,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
+      child: Icon(
+        Icons.link_rounded,
+        color: dark
+            ? ClawnsoleColors.creamMuted
+            : context.colors.onSurfaceVariant,
+        size: 18,
+      ),
+    );
+  }
 }
 
 class _AddFrameButton extends StatelessWidget {
@@ -1655,16 +1697,9 @@ class _SettingsGrid extends StatelessWidget {
         _ResolutionRow(controller: controller),
         const SizedBox(height: 8),
         if (controller.selectedModel.supportsAudio)
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Synchronized audio',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-            subtitle: const Text(
-              'Dialogue, ambience, and sound',
-              style: TextStyle(fontSize: 11),
-            ),
+          HardwareSwitchTile(
+            title: 'Synchronized audio',
+            subtitle: 'Dialogue, ambience, and sound',
             value: controller.form.generateAudio,
             onChanged: controller.selectedModel.supportsAudio
                 ? (value) => controller.updateForm(
@@ -1673,16 +1708,9 @@ class _SettingsGrid extends StatelessWidget {
                 : null,
           ),
         if (controller.selectedModel.supportsDraft)
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Fast draft',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-            ),
-            subtitle: const Text(
-              'HD preview now, enhance later',
-              style: TextStyle(fontSize: 11),
-            ),
+          HardwareSwitchTile(
+            title: 'Fast draft',
+            subtitle: 'HD preview now, enhance later',
             value: controller.form.draft,
             onChanged: (value) =>
                 controller.updateForm((form) => form.draft = value),
@@ -1795,17 +1823,7 @@ class _RatioStrip extends StatelessWidget {
             duration: const Duration(milliseconds: 140),
             width: 58,
             padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: selected
-                  ? context.colors.primary
-                  : context.colors.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(11),
-              border: Border.all(
-                color: selected
-                    ? context.colors.primary
-                    : context.colors.outlineVariant,
-              ),
-            ),
+            decoration: consoleKeyDecoration(context, selected: selected),
             child: Column(
               children: <Widget>[
                 SizedBox(
@@ -1882,20 +1900,30 @@ class _DurationControl extends StatelessWidget {
         FieldLabel(
           'Duration',
           icon: Icons.timelapse_rounded,
-          trailing: TogglePill(
-            label: 'Auto',
-            selected: form.autoDuration,
-            onChanged:
-                form.requiresFixedDuration ||
-                    !model.supportsAutoDuration ||
-                    form.referenceTask == MediaReferenceTask.edit
-                ? null
-                : (value) => controller.updateForm(
-                    (form) => form.autoDuration = value,
-                  ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              CounterReadout(
+                form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
+                unit: form.autoDuration ? null : 's',
+              ),
+              const SizedBox(width: 8),
+              TogglePill(
+                label: 'Auto',
+                selected: form.autoDuration,
+                onChanged:
+                    form.requiresFixedDuration ||
+                        !model.supportsAutoDuration ||
+                        form.referenceTask == MediaReferenceTask.edit
+                    ? null
+                    : (value) => controller.updateForm(
+                        (form) => form.autoDuration = value,
+                      ),
+              ),
+            ],
           ),
         ),
-        Slider(
+        HardwareSlider(
           min: model.minDuration.toDouble(),
           max: maximumDuration.toDouble(),
           divisions:
@@ -1915,15 +1943,14 @@ class _DurationControl extends StatelessWidget {
             ),
             Expanded(
               child: Text(
-                form.autoDuration
-                    ? 'Auto — the provider chooses'
-                    : '${form.durationSeconds} seconds',
+                form.autoDuration ? 'Auto — the provider chooses' : '',
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
+                style: TextStyle(
+                  fontSize: 10.5,
                   fontWeight: FontWeight.w700,
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
             ),
@@ -1966,12 +1993,9 @@ class _FrameRateControl extends StatelessWidget {
         FieldLabel(
           'Frame rate',
           icon: Icons.animation_rounded,
-          trailing: Text(
-            '$frames generated frames',
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-          ),
+          trailing: CounterReadout('${controller.form.frameRate}', unit: 'fps'),
         ),
-        Slider(
+        HardwareSlider(
           min: 1,
           max: 6,
           divisions: 5,
@@ -1980,7 +2004,7 @@ class _FrameRateControl extends StatelessWidget {
           onChanged: (value) => controller.setFrameRate(value.round()),
         ),
         Text(
-          '${controller.form.frameRate} fps × ${controller.form.durationSeconds} s. Each frame is generated separately, so higher values take proportionally longer.',
+          '${controller.form.frameRate} fps × ${controller.form.durationSeconds} s = $frames frames. Each frame is generated separately, so higher values take proportionally longer.',
           style: TextStyle(
             fontSize: 10.5,
             color: context.colors.onSurfaceVariant,
@@ -2051,17 +2075,7 @@ class _ResolutionButton extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 140),
         padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-        decoration: BoxDecoration(
-          color: active
-              ? context.colors.primary
-              : context.colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: active
-                ? context.colors.primary
-                : context.colors.outlineVariant,
-          ),
-        ),
+        decoration: consoleKeyDecoration(context, selected: active),
         child: Column(
           children: <Widget>[
             Text(
@@ -2104,15 +2118,16 @@ class _SafetyControl extends StatelessWidget {
       FieldLabel(
         'Safety tolerance',
         icon: Icons.shield_outlined,
-        trailing: Text(
-          '${controller.form.safetyTolerance} / 4',
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+        trailing: CounterReadout(
+          '${controller.form.safetyTolerance}',
+          unit: '/ 4',
         ),
       ),
-      Slider(
+      HardwareSlider(
         min: 0,
         max: 4,
         divisions: 4,
+        label: '${controller.form.safetyTolerance} / 4',
         value: controller.form.safetyTolerance.toDouble(),
         onChanged: (value) => controller.updateForm(
           (form) => form.safetyTolerance = value.round(),
@@ -2139,7 +2154,7 @@ class _CostPreview extends StatelessWidget {
         padding: const EdgeInsets.all(18),
         child: Row(
           children: <Widget>[
-            Icon(Icons.memory_rounded, color: context.tokens.panelBrass),
+            Icon(Icons.memory_rounded, color: context.tokens.moneyAccent),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -2148,7 +2163,7 @@ class _CostPreview extends StatelessWidget {
                   Text(
                     'APPLE SYSTEM · NO PROVIDER CHARGE',
                     style: TextStyle(
-                      color: context.tokens.onPanelMuted,
+                      color: context.tokens.onMoneyMuted,
                       fontSize: 9,
                       letterSpacing: 1.4,
                       fontWeight: FontWeight.w700,
@@ -2161,7 +2176,7 @@ class _CostPreview extends StatelessWidget {
                         ? 'One Apple image'
                         : '$frames Apple frames → silent MP4',
                     style: TextStyle(
-                      color: context.tokens.onPanel,
+                      color: context.tokens.onMoney,
                       fontFamily: 'Fraunces',
                       fontSize: 19,
                       fontWeight: FontWeight.w600,
@@ -2171,7 +2186,7 @@ class _CostPreview extends StatelessWidget {
                   Text(
                     'Uses Apple Image Playground with no provider key. On Mac, keep its generation window in front.',
                     style: TextStyle(
-                      color: context.tokens.onPanelMuted,
+                      color: context.tokens.onMoneyMuted,
                       fontSize: 10.5,
                     ),
                   ),
@@ -2231,12 +2246,12 @@ class _CostPreview extends StatelessWidget {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: tokens.panelBrass),
-                      color: Colors.white.withValues(alpha: .05),
+                      border: Border.all(color: tokens.moneyAccent),
+                      color: tokens.onMoney.withValues(alpha: .05),
                     ),
                     child: Icon(
                       Icons.toll_rounded,
-                      color: tokens.panelBrass,
+                      color: tokens.moneyAccent,
                       size: 17,
                     ),
                   ),
@@ -2249,7 +2264,7 @@ class _CostPreview extends StatelessWidget {
                         Text(
                           'ESTIMATED CHARGE',
                           style: TextStyle(
-                            color: tokens.onPanelMuted,
+                            color: tokens.onMoneyMuted,
                             fontSize: 9,
                             letterSpacing: 1.6,
                             fontWeight: FontWeight.w700,
@@ -2265,7 +2280,7 @@ class _CostPreview extends StatelessWidget {
                                 ),
                           style: TextStyle(
                             fontFamily: 'Fraunces',
-                            color: tokens.onPanel,
+                            color: tokens.onMoney,
                             fontSize: 21,
                             fontWeight: FontWeight.w600,
                           ),
@@ -2284,7 +2299,7 @@ class _CostPreview extends StatelessWidget {
                     : controller.selectedModel.label,
                 style: TextStyle(
                   fontFamily: 'Fraunces',
-                  color: tokens.panelBrass,
+                  color: tokens.moneyAccent,
                   fontSize: 19,
                   fontWeight: FontWeight.w600,
                 ),
@@ -2292,7 +2307,7 @@ class _CostPreview extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Divider(color: tokens.onPanel.withValues(alpha: .14)),
+          Divider(color: tokens.onMoney.withValues(alpha: .14)),
           const SizedBox(height: 11),
           Row(
             children: <Widget>[
@@ -2327,14 +2342,14 @@ class _CostPreview extends StatelessWidget {
               Text(
                 '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
                 '${estimate.basis == 'provider-history' ? 'Calibrated from exact charges.' : 'Based on the provider’s current published or live rate.'}',
-                style: TextStyle(color: tokens.onPanelMuted, fontSize: 10.5),
+                style: TextStyle(color: tokens.onMoneyMuted, fontSize: 10.5),
               ),
               TextButton(
                 onPressed: () => unawaited(
                   launchUrl(Uri.parse(controller.selectedProvider.pricingUrl)),
                 ),
                 style: TextButton.styleFrom(
-                  foregroundColor: tokens.panelBrass,
+                  foregroundColor: tokens.moneyAccent,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   textStyle: const TextStyle(
                     fontSize: 10.5,
@@ -2364,7 +2379,7 @@ class _BalanceLine extends StatelessWidget {
       Text(
         label.toUpperCase(),
         style: TextStyle(
-          color: context.tokens.onPanelMuted,
+          color: context.tokens.onMoneyMuted,
           fontSize: 8.5,
           letterSpacing: 1.2,
           fontWeight: FontWeight.w700,
@@ -2374,7 +2389,7 @@ class _BalanceLine extends StatelessWidget {
       Text(
         value,
         style: TextStyle(
-          color: context.tokens.onPanel,
+          color: context.tokens.onMoney,
           fontSize: 12.5,
           fontWeight: FontWeight.w700,
         ),
