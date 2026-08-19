@@ -85,7 +85,7 @@ class ArtCraftApi {
       ),
     );
     if (body is! Map<String, Object?> || body['models'] is! List<Object?>) {
-      throw const ProviderException(
+      throw ProviderException(
         'ArtCraft returned an invalid model catalog.',
         status: 502,
       );
@@ -226,7 +226,7 @@ class ArtCraftApi {
         .toList();
     final media = <_ArtCraftMediaSource>[];
     for (final frame in frames) {
-      media.add(await _materializeImage(key, frame));
+      media.add(await _materialize(key, frame, MediaReferenceKind.image));
     }
 
     _ArtCraftMediaSource? start;
@@ -244,7 +244,33 @@ class ArtCraftApi {
         references = media.sublist(1, referenceEnd);
       }
     }
-    references = await _normalizeReferenceGroup(key, references);
+    final explicitImages = await _materializeAll(
+      key,
+      input['reference_images'],
+      MediaReferenceKind.image,
+    );
+    references = await _normalizeReferenceGroup(key, <_ArtCraftMediaSource>[
+      ...references,
+      ...explicitImages,
+    ], MediaReferenceKind.image);
+    final referenceVideos = await _normalizeReferenceGroup(
+      key,
+      await _materializeAll(
+        key,
+        input['reference_videos'],
+        MediaReferenceKind.video,
+      ),
+      MediaReferenceKind.video,
+    );
+    final referenceAudios = await _normalizeReferenceGroup(
+      key,
+      await _materializeAll(
+        key,
+        input['reference_audios'],
+        MediaReferenceKind.audio,
+      ),
+      MediaReferenceKind.audio,
+    );
 
     final duration = input['duration'];
     final modelDefinition = modelById('artcraft', model);
@@ -269,7 +295,36 @@ class ArtCraftApi {
         'reference_image_media_tokens': references
             .map((item) => item.token!)
             .toList(),
+      if (referenceVideos.isNotEmpty && referenceVideos.first.url != null)
+        'reference_video_urls': referenceVideos
+            .map((item) => item.url!)
+            .toList(),
+      if (referenceVideos.isNotEmpty && referenceVideos.first.token != null)
+        'reference_video_media_tokens': referenceVideos
+            .map((item) => item.token!)
+            .toList(),
+      if (referenceAudios.isNotEmpty && referenceAudios.first.url != null)
+        'reference_audio_urls': referenceAudios
+            .map((item) => item.url!)
+            .toList(),
+      if (referenceAudios.isNotEmpty && referenceAudios.first.token != null)
+        'reference_audio_media_tokens': referenceAudios
+            .map((item) => item.token!)
+            .toList(),
     };
+  }
+
+  Future<List<_ArtCraftMediaSource>> _materializeAll(
+    String key,
+    Object? raw,
+    MediaReferenceKind kind,
+  ) async {
+    final result = <_ArtCraftMediaSource>[];
+    for (final value in raw is List<Object?> ? raw : const <Object?>[]) {
+      final source = value?.toString() ?? '';
+      if (source.isNotEmpty) result.add(await _materialize(key, source, kind));
+    }
+    return result;
   }
 
   Future<double?> _quote(Map<String, Object?> payload) async {
@@ -290,20 +345,21 @@ class ArtCraftApi {
     return (body['cost_in_credits'] as num?)?.toDouble();
   }
 
-  Future<_ArtCraftMediaSource> _materializeImage(
+  Future<_ArtCraftMediaSource> _materialize(
     String key,
     String value,
+    MediaReferenceKind kind,
   ) async {
     if (value.startsWith('https://')) {
       validatedProviderUrl(value);
       return _ArtCraftMediaSource(url: value);
     }
     final comma = value.indexOf(',');
-    if (!value.startsWith('data:image/') ||
+    if (!value.startsWith('data:${kind.name}/') ||
         comma < 0 ||
         !value.substring(0, comma).contains(';base64')) {
-      throw const ProviderException(
-        'ArtCraft reference images must be image uploads or public HTTPS URLs.',
+      throw ProviderException(
+        'ArtCraft reference ${kind.pluralLabel} must be uploads or public HTTPS URLs.',
         status: 400,
       );
     }
@@ -311,20 +367,21 @@ class ArtCraftApi {
     try {
       bytes = base64Decode(value.substring(comma + 1));
     } on FormatException {
-      throw const ProviderException(
-        'An ArtCraft reference image is not valid base64 data.',
+      throw ProviderException(
+        'An ArtCraft reference ${kind.label.toLowerCase()} is not valid base64 data.',
         status: 400,
       );
     }
     final mimeType = value.substring(5, value.indexOf(';'));
     return _ArtCraftMediaSource(
-      token: await _uploadImage(key, bytes, mimeType: mimeType),
+      token: await _uploadMedia(key, bytes, kind: kind, mimeType: mimeType),
     );
   }
 
   Future<List<_ArtCraftMediaSource>> _normalizeReferenceGroup(
     String key,
     List<_ArtCraftMediaSource> sources,
+    MediaReferenceKind kind,
   ) async {
     if (sources.isEmpty ||
         sources.every((source) => source.url != null) ||
@@ -339,21 +396,28 @@ class ArtCraftApi {
       }
       final response = await _request(
         _client.get(validatedProviderUrl(source.url!)),
-        'download a reference image',
+        'download a reference ${kind.label.toLowerCase()}',
         timeout: const Duration(minutes: 2),
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ProviderException(
-          'ArtCraft could not download a mixed reference image.',
+          'ArtCraft could not download mixed reference ${kind.pluralLabel}.',
           status: response.statusCode,
         );
       }
       normalized.add(
         _ArtCraftMediaSource(
-          token: await _uploadImage(
+          token: await _uploadMedia(
             key,
             response.bodyBytes,
-            mimeType: response.headers['content-type'] ?? 'image/jpeg',
+            kind: kind,
+            mimeType:
+                response.headers['content-type'] ??
+                switch (kind) {
+                  MediaReferenceKind.image => 'image/jpeg',
+                  MediaReferenceKind.video => 'video/mp4',
+                  MediaReferenceKind.audio => 'audio/mpeg',
+                },
           ),
         ),
       );
@@ -361,21 +425,26 @@ class ArtCraftApi {
     return normalized;
   }
 
-  Future<String> _uploadImage(
+  Future<String> _uploadMedia(
     String key,
     List<int> bytes, {
+    required MediaReferenceKind kind,
     required String mimeType,
   }) async {
     final extension = switch (mimeType.split(';').first.toLowerCase()) {
       'image/png' => 'png',
       'image/gif' => 'gif',
       'image/webp' => 'webp',
+      'video/quicktime' => 'mov',
+      'video/mp4' => 'mp4',
+      'audio/wav' || 'audio/x-wav' => 'wav',
+      'audio/mpeg' => 'mp3',
       _ => 'jpg',
     };
     final request =
         http.MultipartRequest(
             'POST',
-            _baseUrl.resolve('/v1/omni_api/upload/image'),
+            _baseUrl.resolve('/v1/omni_api/upload/${kind.name}'),
           )
           ..headers.addAll(_headers(key))
           ..fields['uuid_idempotency_token'] = _uuid()
@@ -383,17 +452,17 @@ class ArtCraftApi {
             http.MultipartFile.fromBytes(
               'file',
               bytes,
-              filename: 'clawnsole-reference.$extension',
+              filename: 'clawnsole-${kind.name}-reference.$extension',
             ),
           );
     final streamed = await _requestStreamed(
       _client.send(request),
-      'upload a reference image',
+      'upload a reference ${kind.label.toLowerCase()}',
     );
     final body = await _read(await http.Response.fromStream(streamed));
     if (body is! Map<String, Object?> || body['media_file_token'] is! String) {
-      throw const ProviderException(
-        'ArtCraft returned an invalid image upload receipt.',
+      throw ProviderException(
+        'ArtCraft returned an invalid ${kind.label.toLowerCase()} upload receipt.',
         status: 502,
       );
     }

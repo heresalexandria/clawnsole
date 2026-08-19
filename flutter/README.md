@@ -6,12 +6,12 @@ only desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
-- BFL FLUX 3, LTX 2.5/2.3, ArtCraft’s live video catalog, and selected
+- BFL FLUX 3, LTX 2.3, ArtCraft’s live video catalog, and selected
   Create-ready Atlas Cloud models
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
   video continuation and draft enhance
-- Provider-aware uploaded or hosted references, with FLUX-specific even or
-  explicit keyframe timing
+- Model-aware multi-upload image, video, and audio references, kept distinct
+  from first/last or explicitly timed keyframes
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
@@ -23,6 +23,28 @@ only desktop lifecycle, packaging, and self-update.
 - Uncapped compact history plus referenced local inputs/completed videos, storage
   accounting, reload-safe reuse/playback, and granular clear actions
 - Per-provider local keys and a responsive Providers comparison desk
+
+### Input capability contract
+
+The Create screen derives its controls from the selected model rather than
+treating every image as a keyframe:
+
+- BFL FLUX 3 exposes up to ten ordered/timed keyframes and one continuation
+  video.
+- LTX 2.3 exposes first/last-frame interpolation; Pro also exposes one
+  audio-driven input up to 20 seconds.
+- ArtCraft’s checked-in create-ready catalog mirrors the public Omni catalog’s
+  model-specific start/end, image, video, and audio limits; the live catalog
+  still determines current availability and rate rows.
+- Atlas Seedance 2.5 References exposes 30 images, 10 videos, and 10 audio
+  clips (30 seconds total per media kind), plus explicit new-video, edit, and
+  extend tasks. Seedance 2.0 References variants expose 9 images, 3 videos, and
+  3 audio clips (15 seconds total). Their Frames endpoints remain deliberately
+  limited to first and optional last images.
+
+Image, video, and audio references are ordered independently and retained as
+separate local assets. Provider upload adapters convert local media into the
+token or hosted-asset form required by ArtCraft and Atlas before submission.
 
 ## Install
 

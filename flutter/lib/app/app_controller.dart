@@ -60,6 +60,36 @@ class KeyframeDraft {
       );
 }
 
+class MediaReferenceDraft {
+  const MediaReferenceDraft({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.source,
+    this.asset,
+    this.retained,
+  });
+
+  final String id;
+  final String label;
+  final MediaReferenceKind kind;
+  final String source;
+  final PickedAsset? asset;
+  final AssetReference? retained;
+
+  String get requestSource => asset?.dataUrl ?? source.trim();
+
+  MediaReferenceDraft copyWith({String? label, String? source}) =>
+      MediaReferenceDraft(
+        id: id,
+        label: label ?? this.label,
+        kind: kind,
+        source: source ?? this.source,
+        asset: asset,
+        retained: source == null ? retained : null,
+      );
+}
+
 class GenerationFormState {
   String prompt = '';
   String aspectRatio = '16:9';
@@ -72,20 +102,22 @@ class GenerationFormState {
   bool draft = false;
   bool exactTiming = false;
   List<KeyframeDraft> keyframes = <KeyframeDraft>[];
+  List<MediaReferenceDraft> references = <MediaReferenceDraft>[];
+  MediaReferenceTask referenceTask = MediaReferenceTask.reference;
   PickedAsset? videoAsset;
   String videoUrl = '';
   PickedAsset? draftAsset;
   String draftUrl = '';
 
   /// The generation mode implied by what is attached. There is no mode
-  /// picker: a draft cache wins, then a starting video, then keyframes,
-  /// and plain text otherwise.
+  /// picker: a draft cache wins, then a starting video, then keyframes or
+  /// creative references, and plain text otherwise.
   VideoMode get mode {
     if (draftAsset != null || draftUrl.trim().isNotEmpty) {
       return VideoMode.draftEnhance;
     }
     if (videoAsset != null || videoUrl.trim().isNotEmpty) return VideoMode.v2v;
-    if (keyframes.isNotEmpty) return VideoMode.i2v;
+    if (keyframes.isNotEmpty || references.isNotEmpty) return VideoMode.i2v;
     return VideoMode.t2v;
   }
 
@@ -108,6 +140,9 @@ class GenerationFormState {
   bool get usesTimedKeyframes => exactTiming || requiresTimedKeyframes;
   bool get requiresFixedDuration =>
       mode == VideoMode.i2v && (usesTimedKeyframes || keyframes.length > 2);
+
+  int referenceCount(MediaReferenceKind kind) =>
+      references.where((item) => item.kind == kind).length;
 }
 
 class AppController extends ChangeNotifier {
@@ -175,12 +210,7 @@ class AppController extends ChangeNotifier {
       providerById(selectedProviderId);
   VideoModelDefinition get selectedModel =>
       modelById(selectedProviderId, selectedModelId);
-  VideoModelDefinition get referenceModel => selectedModel.maxKeyframes > 0
-      ? selectedModel
-      : selectedProvider.models.firstWhere(
-          (model) => model.modes.contains(VideoMode.i2v),
-          orElse: () => selectedModel,
-        );
+  VideoModelDefinition get referenceModel => selectedModel;
   bool get hasApiKey => hasApiKeyFor(selectedProviderId);
   bool hasApiKeyFor(String provider) =>
       snapshot?.hasApiKeyFor(provider) ?? false;
@@ -385,6 +415,21 @@ class AppController extends ChangeNotifier {
                 )
                 .toList()
           : null,
+      references: form.mode == VideoMode.i2v
+          ? form.references
+                .map(
+                  (item) => MediaReferenceLabel(
+                    label: item.label,
+                    kind: item.kind,
+                    source:
+                        item.asset?.retained ??
+                        item.retained ??
+                        _reference(null, item.source, item.label),
+                  ),
+                )
+                .toList()
+          : null,
+      referenceTask: form.referenceTask,
       sourceLabel: switch (form.mode) {
         VideoMode.v2v =>
           form.videoAsset?.name ??
@@ -614,8 +659,13 @@ class AppController extends ChangeNotifier {
     update(form);
     _selectCompatibleModel();
     if (form.draft && selectedModel.supportsDraft) form.resolution = 'hd';
-    if (!selectedModel.resolutions.any((item) => item.id == form.resolution)) {
-      form.resolution = selectedModel.resolutions.first.id;
+    final resolutions = availableResolutions;
+    if (!resolutions.any((item) => item.id == form.resolution)) {
+      form.resolution = resolutions.first.id;
+    }
+    final ratios = availableAspectRatios;
+    if (!ratios.contains(form.aspectRatio)) {
+      form.aspectRatio = ratios.contains('16:9') ? '16:9' : ratios.first;
     }
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
@@ -634,17 +684,52 @@ class AppController extends ChangeNotifier {
 
   int _validDuration(int value) {
     final model = selectedModel;
-    final clamped = value.clamp(model.minDuration, model.maxDuration);
+    final maximum = model.maxDurationFor(form.resolution);
+    final clamped = value.clamp(model.minDuration, maximum);
     final offset = clamped - model.minDuration;
     return model.minDuration +
         (offset ~/ model.durationStep) * model.durationStep;
   }
 
+  List<VideoResolutionDefinition> get availableResolutions {
+    final referenceKinds = MediaReferenceKind.values.where(
+      (kind) => form.referenceCount(kind) > 0,
+    );
+    return selectedModel.resolutions
+        .where(
+          (item) => selectedModel.supportsResolutionForReferences(
+            item.id,
+            referenceKinds,
+          ),
+        )
+        .toList();
+  }
+
+  List<String> get availableAspectRatios =>
+      form.referenceTask != MediaReferenceTask.reference &&
+          selectedModel.referenceTasks.length > 1
+      ? const <String>['auto']
+      : selectedModel.aspectRatiosFor(form.resolution);
+
   void _selectCompatibleModel() {
-    if (selectedModel.modes.contains(form.mode)) return;
-    final compatible = selectedProvider.models
-        .where((model) => model.modes.contains(form.mode))
-        .firstOrNull;
+    bool accepts(VideoModelDefinition model) {
+      if (form.mode == VideoMode.t2v &&
+          form.keyframes.isEmpty &&
+          form.references.isEmpty &&
+          (model.maxKeyframes > 0 || model.supportsMediaReferences)) {
+        return true;
+      }
+      if (!model.modes.contains(form.mode)) return false;
+      if (!model.referenceTasks.contains(form.referenceTask)) return false;
+      if (form.keyframes.length > model.maxKeyframes) return false;
+      for (final kind in MediaReferenceKind.values) {
+        if (form.referenceCount(kind) > model.maxReferences(kind)) return false;
+      }
+      return true;
+    }
+
+    if (accepts(selectedModel)) return;
+    final compatible = selectedProvider.models.where(accepts).firstOrNull;
     if (compatible != null) selectedModelId = compatible.id;
   }
 
@@ -678,19 +763,22 @@ class AppController extends ChangeNotifier {
 
   void _normalizeFormForModel() {
     final model = selectedModel;
-    form.durationSeconds = _validDuration(form.durationSeconds);
     if (!model.supportsAutoDuration) form.autoDuration = false;
     if (!model.supportsAudio) form.generateAudio = false;
     if (!model.supportsDraft) form.draft = false;
     if (!model.supportsTimedKeyframes) form.exactTiming = false;
-    if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
-    if (!model.resolutions.any((item) => item.id == form.resolution)) {
-      form.resolution = model.resolutions.first.id;
+    if (!model.referenceTasks.contains(form.referenceTask)) {
+      form.referenceTask = MediaReferenceTask.reference;
     }
-    if (!model.aspectRatios.contains(form.aspectRatio)) {
-      form.aspectRatio = model.aspectRatios.contains('16:9')
-          ? '16:9'
-          : model.aspectRatios.first;
+    if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
+    final resolutions = availableResolutions;
+    if (!resolutions.any((item) => item.id == form.resolution)) {
+      form.resolution = resolutions.first.id;
+    }
+    form.durationSeconds = _validDuration(form.durationSeconds);
+    final ratios = availableAspectRatios;
+    if (!ratios.contains(form.aspectRatio)) {
+      form.aspectRatio = ratios.contains('16:9') ? '16:9' : ratios.first;
     }
   }
 
@@ -716,10 +804,57 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  Future<List<PickedAsset>> _pickMany(FileType type) async {
+    final result = await FilePicker.pickFiles(
+      type: type,
+      allowMultiple: true,
+      withData: true,
+    );
+    final assets = <PickedAsset>[];
+    for (final file in result?.files ?? const <PlatformFile>[]) {
+      final bytes = file.bytes;
+      if (bytes == null) {
+        throw StateError('A selected file could not be read.');
+      }
+      assets.add(
+        PickedAsset(
+          name: file.name,
+          bytes: bytes,
+          mimeType:
+              lookupMimeType(file.name, headerBytes: bytes) ??
+              'application/octet-stream',
+        ),
+      );
+    }
+    return assets;
+  }
+
   bool canAddFrame(KeyframeRole role) =>
       form.keyframes.length < referenceModel.maxKeyframes &&
+      switch (role) {
+        KeyframeRole.start => referenceModel.supportsStartFrame,
+        KeyframeRole.middle => referenceModel.supportsTimedKeyframes,
+        KeyframeRole.end => referenceModel.supportsEndFrame,
+      } &&
       (role == KeyframeRole.middle ||
           !form.keyframes.any((frame) => frame.role == role));
+
+  bool canAddReference(MediaReferenceKind kind) =>
+      form.referenceCount(kind) < referenceLimit(kind);
+
+  int referenceLimit(MediaReferenceKind kind) =>
+      kind == MediaReferenceKind.video &&
+          form.referenceTask != MediaReferenceTask.reference
+      ? selectedModel.maxVideoReferences.clamp(0, 1)
+      : selectedModel.maxReferences(kind);
+
+  void setReferenceTask(MediaReferenceTask task) {
+    if (!selectedModel.referenceTasks.contains(task)) return;
+    form.referenceTask = task;
+    if (task != MediaReferenceTask.reference) form.aspectRatio = 'auto';
+    if (task == MediaReferenceTask.edit) form.autoDuration = true;
+    notifyListeners();
+  }
 
   double _suggestedFrameTime(KeyframeRole role) => switch (role) {
     KeyframeRole.start => 0,
@@ -774,6 +909,71 @@ class AppController extends ChangeNotifier {
 
   void addUrlFrame(KeyframeRole role) =>
       _appendFrame(role, label: '${role.label} URL');
+
+  void _appendReference(
+    MediaReferenceKind kind, {
+    required String label,
+    PickedAsset? asset,
+  }) {
+    if (!canAddReference(kind)) return;
+    form.references = <MediaReferenceDraft>[
+      ...form.references,
+      MediaReferenceDraft(
+        id: _uid(),
+        label: label,
+        kind: kind,
+        source: '',
+        asset: asset,
+      ),
+    ];
+    _selectCompatibleModel();
+    _normalizeFormForModel();
+    notifyListeners();
+  }
+
+  Future<void> addMediaReferences(MediaReferenceKind kind) async {
+    if (!canAddReference(kind)) return;
+    try {
+      final picked = await _pickMany(switch (kind) {
+        MediaReferenceKind.image => FileType.image,
+        MediaReferenceKind.video => FileType.video,
+        MediaReferenceKind.audio => FileType.audio,
+      });
+      final available = referenceLimit(kind) - form.referenceCount(kind);
+      for (final asset in picked.take(available)) {
+        _appendReference(kind, label: asset.name, asset: asset);
+      }
+      if (picked.length > available) {
+        showNotice(
+          '${selectedModel.label} accepts up to '
+          '${referenceLimit(kind)} ${kind.pluralLabel}.',
+        );
+      }
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  void addUrlReference(MediaReferenceKind kind) =>
+      _appendReference(kind, label: '${kind.label} URL');
+
+  void updateReference(String id, String source) {
+    form.references = form.references.map((item) {
+      if (item.id != id) return item;
+      return item.copyWith(
+        source: source,
+        label: source.trim().isNotEmpty ? source : null,
+      );
+    }).toList();
+    notifyListeners();
+  }
+
+  void removeReference(String id) {
+    form.references = form.references.where((item) => item.id != id).toList();
+    _selectCompatibleModel();
+    _normalizeFormForModel();
+    notifyListeners();
+  }
 
   void setExactTiming(bool value) {
     form.exactTiming = value;
@@ -869,6 +1069,14 @@ class AppController extends ChangeNotifier {
     if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
     }
+    if (form.mode == VideoMode.t2v && !model.modes.contains(VideoMode.t2v)) {
+      if (model.supportsMediaReferences) {
+        return 'Add at least one image, video, or audio reference for ${model.label}.';
+      }
+      if (model.maxKeyframes > 0) {
+        return 'Add a first frame for ${model.label}.';
+      }
+    }
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
     }
@@ -878,12 +1086,56 @@ class AppController extends ChangeNotifier {
           : 'Describe the animation you want to make.';
     }
     if (form.mode == VideoMode.i2v) {
-      if (form.keyframes.isEmpty) return 'Add at least one image frame.';
+      if (form.keyframes.isEmpty && form.references.isEmpty) {
+        return 'Add at least one supported frame or reference.';
+      }
       if (form.keyframes.length > model.maxKeyframes) {
-        return '${model.label} accepts up to ${model.maxKeyframes} guide images.';
+        return model.maxKeyframes == 0
+            ? '${model.label} uses media references instead of keyframes.'
+            : '${model.label} accepts up to ${model.maxKeyframes} keyframes.';
       }
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
+      }
+      if (form.keyframes.any(
+        (frame) => switch (frame.role) {
+          KeyframeRole.start => !model.supportsStartFrame,
+          KeyframeRole.middle => !model.supportsTimedKeyframes,
+          KeyframeRole.end => !model.supportsEndFrame,
+        },
+      )) {
+        return '${model.label} does not support this keyframe layout.';
+      }
+      for (final kind in MediaReferenceKind.values) {
+        final count = form.referenceCount(kind);
+        final maximum = referenceLimit(kind);
+        if (count > maximum) {
+          return maximum == 0
+              ? '${model.label} does not accept reference ${kind.pluralLabel}.'
+              : '${model.label} accepts up to $maximum ${kind.pluralLabel}.';
+        }
+      }
+      if (form.references.any((item) => item.requestSource.isEmpty)) {
+        return 'Every reference needs an upload or HTTPS URL.';
+      }
+      if (form.referenceTask != MediaReferenceTask.reference) {
+        if (form.referenceCount(MediaReferenceKind.video) != 1) {
+          return '${form.referenceTask.label} needs exactly one reference video.';
+        }
+        if (form.aspectRatio != 'auto') {
+          return '${form.referenceTask.label} preserves the reference video’s aspect ratio.';
+        }
+        if (form.referenceTask == MediaReferenceTask.edit &&
+            !form.autoDuration) {
+          return 'Video editing must leave duration on Auto.';
+        }
+      }
+      if (model.requiresVisualReferenceForAudio &&
+          form.referenceCount(MediaReferenceKind.audio) > 0 &&
+          form.keyframes.isEmpty &&
+          form.referenceCount(MediaReferenceKind.image) == 0 &&
+          form.referenceCount(MediaReferenceKind.video) == 0) {
+        return '${model.label} needs an image or video when audio references are attached.';
       }
       if (provider.isLocal &&
           form.keyframes.any(
@@ -895,9 +1147,10 @@ class AppController extends ChangeNotifier {
         return 'Choose a fixed duration for this keyframe layout.';
       }
       if (form.usesTimedKeyframes) {
+        final maximumDuration = model.maxDurationFor(form.resolution);
         final seconds = form.keyframes.map((frame) => frame.seconds).toList();
-        if (seconds.any((value) => value < 0 || value > model.maxDuration)) {
-          return 'Keyframe timing must stay between 0 and ${model.maxDuration} seconds.';
+        if (seconds.any((value) => value < 0 || value > maximumDuration)) {
+          return 'Keyframe timing must stay between 0 and $maximumDuration seconds.';
         }
         if (seconds.toSet().length != seconds.length) {
           return 'Each timed keyframe needs a unique time.';
@@ -950,7 +1203,26 @@ class AppController extends ChangeNotifier {
           : _orderedFrames()
                 .map<Object?>((frame) => frame.requestSource)
                 .toList();
-      return <String, Object?>{...common, 'mode': 'i2v', 'keyframes': frames};
+      final references = <MediaReferenceKind, List<String>>{
+        for (final kind in MediaReferenceKind.values)
+          kind: form.references
+              .where((item) => item.kind == kind)
+              .map((item) => item.requestSource)
+              .toList(),
+      };
+      return <String, Object?>{
+        ...common,
+        'mode': 'i2v',
+        if (selectedModel.referenceTasks.length > 1)
+          'reference_task': form.referenceTask.name,
+        if (frames.isNotEmpty) 'keyframes': frames,
+        if (references[MediaReferenceKind.image]!.isNotEmpty)
+          'reference_images': references[MediaReferenceKind.image]!,
+        if (references[MediaReferenceKind.video]!.isNotEmpty)
+          'reference_videos': references[MediaReferenceKind.video]!,
+        if (references[MediaReferenceKind.audio]!.isNotEmpty)
+          'reference_audios': references[MediaReferenceKind.audio]!,
+      };
     }
     if (form.mode == VideoMode.v2v) {
       return <String, Object?>{
@@ -1415,6 +1687,29 @@ class AppController extends ChangeNotifier {
         ),
       );
     }
+    final retainedReferences = <MediaReferenceDraft>[];
+    for (final media
+        in item.config.references ?? const <MediaReferenceLabel>[]) {
+      final reference = media.source;
+      PickedAsset? asset;
+      if (reference?.isLocal == true) {
+        try {
+          asset = await _retainedAsset(reference!);
+        } on Object {
+          // Keep the saved reference label if its retained file moved.
+        }
+      }
+      retainedReferences.add(
+        MediaReferenceDraft(
+          id: _uid(),
+          label: media.label,
+          kind: media.kind,
+          source: reference?.kind == 'remote' ? reference!.value : '',
+          asset: asset,
+          retained: reference,
+        ),
+      );
+    }
     PickedAsset? retainedSource;
     if ((item.mode == VideoMode.v2v || item.mode == VideoMode.draftEnhance) &&
         item.config.source?.isLocal == true) {
@@ -1429,6 +1724,10 @@ class AppController extends ChangeNotifier {
         );
       }
     }
+    final restoredTask =
+        selectedModel.referenceTasks.contains(item.config.referenceTask)
+        ? item.config.referenceTask
+        : MediaReferenceTask.reference;
     form
       ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
           ? item.prompt
@@ -1445,6 +1744,8 @@ class AppController extends ChangeNotifier {
       ..draft = item.config.draft
       ..exactTiming = item.config.exactTiming
       ..keyframes = retainedFrames
+      ..references = retainedReferences
+      ..referenceTask = restoredTask
       ..videoAsset = item.mode == VideoMode.v2v ? retainedSource : null
       ..videoUrl =
           item.mode == VideoMode.v2v && item.config.source?.kind == 'remote'

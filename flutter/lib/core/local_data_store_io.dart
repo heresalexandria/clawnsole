@@ -165,6 +165,10 @@ class LocalDataStore {
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
         add(frame.source);
       }
+      for (final media
+          in generation.config.references ?? const <MediaReferenceLabel>[]) {
+        add(media.source);
+      }
     }
     return retained;
   }

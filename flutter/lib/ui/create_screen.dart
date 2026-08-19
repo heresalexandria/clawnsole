@@ -493,7 +493,7 @@ class _ComposerState extends State<_Composer> {
               ),
             ],
           ] else
-            _FramesSection(controller: controller),
+            _GuidanceInputsSection(controller: controller),
           if (!draftActive && !videoActive) ...<Widget>[
             const SizedBox(height: 14),
             Wrap(
@@ -544,6 +544,47 @@ class _ComposerState extends State<_Composer> {
           _ComposerFooter(controller: controller),
         ],
       ),
+    );
+  }
+}
+
+class _GuidanceInputsSection extends StatelessWidget {
+  const _GuidanceInputsSection({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final model = controller.selectedModel;
+    final showFrames =
+        model.maxKeyframes > 0 || controller.form.keyframes.isNotEmpty;
+    final showReferences =
+        model.supportsMediaReferences || controller.form.references.isNotEmpty;
+    if (!showFrames && !showReferences) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: context.colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: context.colors.outlineVariant),
+        ),
+        child: Text(
+          '${model.label} is a text-only endpoint. Choose a Frames or References model to attach media.',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11.5,
+            height: 1.4,
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (showFrames) _FramesSection(controller: controller),
+        if (showFrames && showReferences) const SizedBox(height: 22),
+        if (showReferences) _ReferencesSection(controller: controller),
+      ],
     );
   }
 }
@@ -612,7 +653,7 @@ class _FramesSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         FieldLabel(
-          'Reference frames · optional',
+          'Keyframes · optional',
           icon: Icons.collections_rounded,
           trailing: form.keyframes.isEmpty
               ? null
@@ -631,7 +672,9 @@ class _FramesSection extends StatelessWidget {
           form.keyframes.isEmpty
               ? controller.selectedProvider.isLocal
                     ? 'Add one image to anchor the design, or leave this empty to begin from the continuity-locked text prompt.'
-                    : 'Pin up to ${controller.referenceModel.maxKeyframes} images for ${controller.referenceModel.label} — or leave this empty for pure text-to-video.'
+                    : controller.selectedModel.supportsTimedKeyframes
+                    ? 'Pin up to ${controller.selectedModel.maxKeyframes} images at exact moments in ${controller.selectedModel.label}.'
+                    : 'Set the first${controller.selectedModel.supportsEndFrame ? ' and optional last' : ''} frame for ${controller.selectedModel.label}.'
               : form.requiresTimedKeyframes
               ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
               : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.',
@@ -663,17 +706,340 @@ class _FramesSection extends StatelessWidget {
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children:
-              (controller.referenceModel.maxKeyframes == 1
-                      ? const <KeyframeRole>[KeyframeRole.start]
-                      : KeyframeRole.values)
-                  .map(
-                    (role) =>
-                        _AddFrameButton(controller: controller, role: role),
-                  )
-                  .toList(),
+          children: KeyframeRole.values
+              .where(
+                (role) => switch (role) {
+                  KeyframeRole.start =>
+                    controller.selectedModel.supportsStartFrame,
+                  KeyframeRole.middle =>
+                    controller.selectedModel.supportsTimedKeyframes,
+                  KeyframeRole.end => controller.selectedModel.supportsEndFrame,
+                },
+              )
+              .map(
+                (role) => _AddFrameButton(controller: controller, role: role),
+              )
+              .toList(),
         ),
       ],
+    );
+  }
+}
+
+class _ReferencesSection extends StatelessWidget {
+  const _ReferencesSection({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    final model = controller.selectedModel;
+    final limits = MediaReferenceKind.values
+        .where((kind) => model.maxReferences(kind) > 0)
+        .map((kind) => '${controller.referenceLimit(kind)} ${kind.pluralLabel}')
+        .join(' · ');
+    final durationNotes = <String>{
+      if (model.maxReferenceVideoSeconds != null)
+        '${model.maxReferenceVideoSeconds}s total video',
+      if (model.maxReferenceAudioSeconds != null)
+        '${model.maxReferenceAudioSeconds}s total audio',
+    }.join(' · ');
+    final required =
+        !model.modes.contains(VideoMode.t2v) && model.maxKeyframes == 0;
+    return Column(
+      key: const ValueKey('media-references-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          required
+              ? 'Creative references · required'
+              : 'Creative references · optional',
+          icon: Icons.perm_media_rounded,
+        ),
+        const SizedBox(height: 9),
+        if (model.referenceTasks.length > 1) ...<Widget>[
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: model.referenceTasks
+                .map(
+                  (task) => ChoiceChip(
+                    key: ValueKey('reference-task-${task.name}'),
+                    label: Text(task.label),
+                    selected: form.referenceTask == task,
+                    onSelected: (_) => controller.setReferenceTask(task),
+                    showCheckmark: false,
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 9),
+        ],
+        Text(
+          '${switch (form.referenceTask) {
+            MediaReferenceTask.reference => 'Guide identity, style, motion, or sound without pinning media to a timeline.',
+            MediaReferenceTask.edit => 'Change one reference video while preserving its length and framing.',
+            MediaReferenceTask.extend => 'Continue one reference video while preserving its framing.',
+          }} '
+          '$limits${durationNotes.isEmpty ? '' : ' · $durationNotes'}. '
+          '${model.referencePromptHint ?? 'Use the numbered order shown here when referring to inputs in the prompt.'}',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11.5,
+            height: 1.4,
+          ),
+        ),
+        if (model.requiresVisualReferenceForAudio) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            'Audio guidance requires at least one image or video reference for this model.',
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+        if (form.references.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: form.references
+                .asMap()
+                .entries
+                .map(
+                  (entry) => _ReferenceTile(
+                    controller: controller,
+                    reference: entry.value,
+                    number: form.references
+                        .take(entry.key + 1)
+                        .where((item) => item.kind == entry.value.kind)
+                        .length,
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: MediaReferenceKind.values
+              .where(
+                (kind) =>
+                    model.maxReferences(kind) > 0 ||
+                    form.referenceCount(kind) > 0,
+              )
+              .map(
+                (kind) =>
+                    _AddReferenceButton(controller: controller, kind: kind),
+              )
+              .toList(),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReferenceTile extends StatelessWidget {
+  const _ReferenceTile({
+    required this.controller,
+    required this.reference,
+    required this.number,
+  });
+
+  final AppController controller;
+  final MediaReferenceDraft reference;
+  final int number;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: ValueKey('media-reference-${reference.id}'),
+    width: 152,
+    padding: const EdgeInsets.all(7),
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(13),
+      border: Border.all(color: context.colors.outlineVariant),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Stack(
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: 76,
+                width: double.infinity,
+                child:
+                    reference.kind == MediaReferenceKind.image &&
+                        reference.asset != null
+                    ? Image.memory(reference.asset!.bytes, fit: BoxFit.cover)
+                    : Container(
+                        color: ClawnsoleColors.plumInk,
+                        child: Icon(
+                          switch (reference.kind) {
+                            MediaReferenceKind.image => Icons.image_rounded,
+                            MediaReferenceKind.video =>
+                              Icons.video_library_rounded,
+                            MediaReferenceKind.audio =>
+                              Icons.graphic_eq_rounded,
+                          },
+                          color: ClawnsoleColors.creamMuted,
+                          size: 24,
+                        ),
+                      ),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              left: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2.5,
+                ),
+                decoration: BoxDecoration(
+                  color: ClawnsoleColors.plumInk.withValues(alpha: .82),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '${reference.kind.label} $number'.toUpperCase(),
+                  style: const TextStyle(
+                    color: ClawnsoleColors.cream,
+                    fontSize: 8,
+                    letterSpacing: .8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 3,
+              right: 3,
+              child: IconButton.filledTonal(
+                tooltip: 'Remove ${reference.kind.label.toLowerCase()}',
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                padding: EdgeInsets.zero,
+                onPressed: () => controller.removeReference(reference.id),
+                icon: const Icon(Icons.close_rounded, size: 14),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          reference.label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
+        ),
+        if (reference.asset == null) ...<Widget>[
+          const SizedBox(height: 6),
+          TextFormField(
+            key: ValueKey('media-reference-url-${reference.id}'),
+            initialValue: reference.source,
+            onChanged: (value) =>
+                controller.updateReference(reference.id, value),
+            decoration: const InputDecoration(
+              hintText: 'https://…',
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            ),
+            style: const TextStyle(fontSize: 10.5),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+class _AddReferenceButton extends StatelessWidget {
+  const _AddReferenceButton({required this.controller, required this.kind});
+
+  final AppController controller;
+  final MediaReferenceKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = controller.canAddReference(kind);
+    final count = controller.form.referenceCount(kind);
+    final maximum = controller.referenceLimit(kind);
+    return PopupMenuButton<String>(
+      key: ValueKey('add-${kind.name}-reference'),
+      enabled: enabled,
+      tooltip: enabled
+          ? 'Add reference ${kind.pluralLabel}'
+          : '$maximum ${kind.pluralLabel} attached',
+      onSelected: (choice) {
+        if (choice == 'upload') {
+          unawaited(controller.addMediaReferences(kind));
+        } else {
+          controller.addUrlReference(kind);
+        }
+      },
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem(
+          value: 'upload',
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.upload_file_rounded, size: 17),
+              const SizedBox(width: 9),
+              Text('Upload ${kind.pluralLabel}'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'url',
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.add_link_rounded, size: 17),
+              const SizedBox(width: 9),
+              Text('Paste ${kind.label.toLowerCase()} URL'),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: enabled
+                ? context.colors.outline.withValues(alpha: .55)
+                : context.colors.outlineVariant,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              enabled ? Icons.add_rounded : Icons.check_rounded,
+              size: 15,
+              color: enabled
+                  ? context.colors.primary
+                  : context.colors.onSurfaceVariant,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '${kind.label} $count/$maximum',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: enabled
+                    ? context.colors.onSurface
+                    : context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1202,7 +1568,7 @@ class _RatioStrip extends StatelessWidget {
   Widget build(BuildContext context) => Wrap(
     spacing: 7,
     runSpacing: 7,
-    children: controller.selectedModel.aspectRatios.map((ratio) {
+    children: controller.availableAspectRatios.map((ratio) {
       final selected = controller.form.aspectRatio == ratio;
       return Tooltip(
         message: _hints[ratio] ?? ratio,
@@ -1294,6 +1660,7 @@ class _DurationControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final form = controller.form;
     final model = controller.selectedModel;
+    final maximumDuration = model.maxDurationFor(form.resolution);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1303,7 +1670,10 @@ class _DurationControl extends StatelessWidget {
           trailing: TogglePill(
             label: 'Auto',
             selected: form.autoDuration,
-            onChanged: form.requiresFixedDuration || !model.supportsAutoDuration
+            onChanged:
+                form.requiresFixedDuration ||
+                    !model.supportsAutoDuration ||
+                    form.referenceTask == MediaReferenceTask.edit
                 ? null
                 : (value) => controller.updateForm(
                     (form) => form.autoDuration = value,
@@ -1312,9 +1682,9 @@ class _DurationControl extends StatelessWidget {
         ),
         Slider(
           min: model.minDuration.toDouble(),
-          max: model.maxDuration.toDouble(),
+          max: maximumDuration.toDouble(),
           divisions:
-              (model.maxDuration - model.minDuration) ~/ model.durationStep,
+              (maximumDuration - model.minDuration) ~/ model.durationStep,
           label: '${form.durationSeconds} s',
           value: form.durationSeconds.toDouble(),
           onChanged: (value) => controller.setDurationSeconds(value.round()),
@@ -1343,7 +1713,7 @@ class _DurationControl extends StatelessWidget {
               ),
             ),
             Text(
-              '${model.maxDuration} s',
+              '$maximumDuration s',
               style: TextStyle(
                 fontSize: 10.5,
                 color: context.colors.onSurfaceVariant,
@@ -1414,7 +1784,7 @@ class _ResolutionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final resolutions = controller.selectedModel.resolutions;
+      final resolutions = controller.availableResolutions;
       final width = resolutions.length <= 2
           ? (constraints.maxWidth - 8) / resolutions.length
           : (constraints.maxWidth - 8) / 2;
@@ -1845,6 +2215,8 @@ class _ComposerFooter extends StatelessWidget {
                 ? (form.mode == VideoMode.i2v
                       ? 'Reference to image'
                       : 'Text to image')
+                : form.referenceTask != MediaReferenceTask.reference
+                ? form.referenceTask.label
                 : form.mode.label,
             style: TextStyle(
               fontSize: 10.5,

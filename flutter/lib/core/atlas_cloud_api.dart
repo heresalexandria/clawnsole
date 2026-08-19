@@ -231,7 +231,10 @@ class AtlasCloudApi {
     String model,
     Map<String, Object?> input,
   ) async {
-    final payload = generationPayload(model, input);
+    final payload = generationPayload(
+      model,
+      await _uploadBinaryReferences(key, input),
+    );
     final body = await _read(
       await _request(
         _client.post(
@@ -258,6 +261,87 @@ class AtlasCloudApi {
           .resolve('/api/v1/model/prediction/$id')
           .toString(),
     };
+  }
+
+  Future<Map<String, Object?>> _uploadBinaryReferences(
+    String key,
+    Map<String, Object?> input,
+  ) async {
+    final prepared = Map<String, Object?>.from(input);
+    for (final field in const <String>[
+      'reference_videos',
+      'reference_audios',
+    ]) {
+      final values = input[field] as List<Object?>?;
+      if (values == null) continue;
+      final uploaded = <String>[];
+      for (final raw in values) {
+        final source = raw?.toString() ?? '';
+        uploaded.add(
+          source.startsWith('data:') ? await _uploadMedia(key, source) : source,
+        );
+      }
+      prepared[field] = uploaded;
+    }
+    return prepared;
+  }
+
+  Future<String> _uploadMedia(String key, String dataUrl) async {
+    final comma = dataUrl.indexOf(',');
+    if (comma < 0 || !dataUrl.substring(0, comma).contains(';base64')) {
+      throw const ProviderException(
+        'An Atlas Cloud media upload is malformed.',
+        status: 400,
+      );
+    }
+    final mimeType = dataUrl.substring(5, dataUrl.indexOf(';'));
+    late final List<int> bytes;
+    try {
+      bytes = base64Decode(dataUrl.substring(comma + 1));
+    } on FormatException {
+      throw const ProviderException(
+        'An Atlas Cloud media upload is not valid base64 data.',
+        status: 400,
+      );
+    }
+    final extension = switch (mimeType.toLowerCase()) {
+      'video/quicktime' => 'mov',
+      'video/mp4' => 'mp4',
+      'audio/wav' || 'audio/x-wav' => 'wav',
+      'audio/mpeg' => 'mp3',
+      _ => 'bin',
+    };
+    final request =
+        http.MultipartRequest(
+            'POST',
+            _baseUrl.resolve('/api/v1/model/uploadMedia'),
+          )
+          ..headers.addAll(_headers(key))
+          ..files.add(
+            http.MultipartFile.fromBytes(
+              'file',
+              bytes,
+              filename: 'clawnsole-reference.$extension',
+            ),
+          );
+    final streamed = await _requestStreamed(
+      _client.send(request),
+      'upload reference media',
+    );
+    final body = await _read(await http.Response.fromStream(streamed));
+    final envelope = _map(body);
+    final data = _map(envelope['data']);
+    final url =
+        envelope['url']?.toString() ??
+        data['url']?.toString() ??
+        data['download_url']?.toString();
+    if (url == null || url.isEmpty) {
+      throw const ProviderException(
+        'Atlas Cloud returned an invalid media upload receipt.',
+        status: 502,
+      );
+    }
+    return url;
   }
 
   Future<Map<String, Object?>> poll(String key, String pollingUrl) async {
@@ -294,19 +378,51 @@ class AtlasCloudApi {
         .map(_frameSource)
         .where((source) => source.isNotEmpty)
         .toList();
+    final referenceImages =
+        (input['reference_images'] as List<Object?>? ?? const <Object?>[])
+            .map((item) => item?.toString() ?? '')
+            .where((source) => source.isNotEmpty)
+            .toList();
+    final referenceVideos =
+        (input['reference_videos'] as List<Object?>? ?? const <Object?>[])
+            .map((item) => item?.toString() ?? '')
+            .where((source) => source.isNotEmpty)
+            .toList();
+    final referenceAudios =
+        (input['reference_audios'] as List<Object?>? ?? const <Object?>[])
+            .map((item) => item?.toString() ?? '')
+            .where((source) => source.isNotEmpty)
+            .toList();
     final duration = input['duration'];
     final payload = <String, Object?>{
       'model': model,
       'prompt': input['prompt']?.toString() ?? '',
       'duration': duration == 'auto' ? -1 : duration,
-      'resolution': '720p',
+      'resolution': switch (input['resolution']) {
+        'sd' => '480p',
+        'fhd' => '1080p',
+        'qhd' => '1440p-SR',
+        '4k' => '4k',
+        _ => '720p',
+      },
       'ratio': input['aspect_ratio'] == 'auto'
           ? 'adaptive'
           : input['aspect_ratio']?.toString() ?? '16:9',
       'generate_audio': input['generate_audio'] != false,
     };
     if (model.contains('/reference-to-video')) {
-      payload['reference_images'] = frames;
+      final images = referenceImages.isEmpty ? frames : referenceImages;
+      if (images.isNotEmpty) payload['reference_images'] = images;
+      if (referenceVideos.isNotEmpty) {
+        payload['reference_videos'] = referenceVideos;
+      }
+      if (referenceAudios.isNotEmpty) {
+        payload['reference_audios'] = referenceAudios;
+      }
+      if (model.contains('seedance-2.5/')) {
+        final task = input['reference_task'];
+        if (task is String) payload['omni_reference_task_type'] = task;
+      }
     } else if (model.contains('/image-to-video')) {
       if (frames.isNotEmpty) payload['image'] = frames.first;
       if (frames.length > 1) payload['last_image'] = frames.last;
@@ -333,6 +449,19 @@ class AtlasCloudApi {
   ) async {
     try {
       return await request.timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      throw ProviderException(
+        'Atlas Cloud did not respond while Clawnsole tried to $operation.',
+      );
+    }
+  }
+
+  Future<http.StreamedResponse> _requestStreamed(
+    Future<http.StreamedResponse> request,
+    String operation,
+  ) async {
+    try {
+      return await request.timeout(const Duration(minutes: 4));
     } on TimeoutException {
       throw ProviderException(
         'Atlas Cloud did not respond while Clawnsole tried to $operation.',

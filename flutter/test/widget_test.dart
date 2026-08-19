@@ -238,6 +238,7 @@ void main() {
               safetyTolerance: 2,
               draft: false,
               exactTiming: true,
+              referenceTask: MediaReferenceTask.edit,
               keyframes: <KeyframeLabel>[
                 KeyframeLabel(
                   label: 'start.png',
@@ -249,6 +250,29 @@ void main() {
                     label: 'start.png',
                     contentType: 'image/png',
                     bytes: 42,
+                  ),
+                ),
+              ],
+              references: <MediaReferenceLabel>[
+                MediaReferenceLabel(
+                  label: 'motion.mp4',
+                  kind: MediaReferenceKind.video,
+                  source: AssetReference(
+                    kind: 'local',
+                    value: 'asset-motion',
+                    label: 'motion.mp4',
+                    contentType: 'video/mp4',
+                    bytes: 84,
+                  ),
+                ),
+                MediaReferenceLabel(
+                  label: 'voice.mp3',
+                  kind: MediaReferenceKind.audio,
+                  source: AssetReference(
+                    kind: 'remote',
+                    value: 'https://cdn.test/voice.mp3',
+                    label: 'voice.mp3',
+                    contentType: 'audio/mpeg',
                   ),
                 ),
               ],
@@ -284,12 +308,27 @@ void main() {
       expect(decoded.generations.single.creditsAfter, 364);
       expect(decoded.generations.single.config.exactTiming, isTrue);
       expect(
+        decoded.generations.single.config.referenceTask,
+        MediaReferenceTask.edit,
+      );
+      expect(
         decoded.generations.single.config.keyframes!.single.role,
         KeyframeRole.start,
       );
       expect(
         decoded.generations.single.config.keyframes!.single.source!.value,
         'asset-input',
+      );
+      expect(
+        decoded.generations.single.config.references!.map((item) => item.kind),
+        <MediaReferenceKind>[
+          MediaReferenceKind.video,
+          MediaReferenceKind.audio,
+        ],
+      );
+      expect(
+        decoded.generations.single.config.references!.first.source!.value,
+        'asset-motion',
       );
       expect(decoded.generations.single.resultAsset!.value, 'asset-video');
       expect(decoded.generations.single.lastCheckedAt, now);
@@ -342,7 +381,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 9);
+    expect(decoded.toJson()['schemaVersion'], 11);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -757,6 +796,50 @@ void main() {
   });
 
   test(
+    'builds model-aware mixed media references without keyframe semantics',
+    () {
+      final controller = AppController()
+        ..selectedProviderId = 'atlas'
+        ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+      controller.addUrlReference(MediaReferenceKind.image);
+      controller.addUrlReference(MediaReferenceKind.video);
+      controller.addUrlReference(MediaReferenceKind.audio);
+      final references = controller.form.references;
+      controller.updateReference(
+        references
+            .singleWhere((item) => item.kind == MediaReferenceKind.image)
+            .id,
+        'https://cdn.test/character.png',
+      );
+      controller.updateReference(
+        references
+            .singleWhere((item) => item.kind == MediaReferenceKind.video)
+            .id,
+        'https://cdn.test/motion.mp4',
+      );
+      controller.updateReference(
+        references
+            .singleWhere((item) => item.kind == MediaReferenceKind.audio)
+            .id,
+        'https://cdn.test/voice.mp3',
+      );
+
+      final input = controller.buildInputForTesting();
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(input.containsKey('keyframes'), isFalse);
+      expect(input['reference_images'], <String>[
+        'https://cdn.test/character.png',
+      ]);
+      expect(input['reference_videos'], <String>[
+        'https://cdn.test/motion.mp4',
+      ]);
+      expect(input['reference_audios'], <String>['https://cdn.test/voice.mp3']);
+      expect(controller.form.referenceCount(MediaReferenceKind.image), 1);
+      expect(controller.selectedModel.maxImageReferences, 30);
+    },
+  );
+
+  test(
     'restores duration and frame settings from the previous generation',
     () async {
       final now = DateTime.utc(2026, 8, 15);
@@ -1094,6 +1177,69 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.selectedProviderId, 'artcraft');
     expect(controller.selectedModelId, 'seedance_2p0');
+    controller.dispose();
+  });
+
+  testWidgets(
+    'Atlas reference models expose separate image video and audio inputs',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1200));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = AppController()
+        ..selectedProviderId = 'atlas'
+        ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(body: CreateScreen(controller: controller)),
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
+      expect(find.byKey(const ValueKey('add-video-reference')), findsOneWidget);
+      expect(find.byKey(const ValueKey('add-audio-reference')), findsOneWidget);
+      expect(find.textContaining('30 images'), findsOneWidget);
+      expect(find.textContaining('10 videos'), findsOneWidget);
+      expect(find.textContaining('10 audio clips'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reference-task-reference')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('reference-task-edit')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reference-task-extend')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('reference-task-edit')));
+      controller.addUrlReference(MediaReferenceKind.video);
+      controller.addUrlReference(MediaReferenceKind.video);
+      expect(controller.form.referenceTask, MediaReferenceTask.edit);
+      expect(controller.form.aspectRatio, 'auto');
+      expect(controller.form.autoDuration, isTrue);
+      expect(controller.form.referenceCount(MediaReferenceKind.video), 1);
+      expect(controller.buildInputForTesting()['reference_task'], 'edit');
+      controller.dispose();
+    },
+  );
+
+  test('an empty reference endpoint stays selected while writing a prompt', () {
+    final controller = AppController()
+      ..selectedProviderId = 'atlas'
+      ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+
+    controller.updateForm((form) => form.prompt = 'Follow @Video1.');
+
+    expect(
+      controller.selectedModelId,
+      'bytedance/seedance-2.5/reference-to-video',
+    );
     controller.dispose();
   });
 

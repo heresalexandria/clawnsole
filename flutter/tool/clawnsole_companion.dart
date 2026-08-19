@@ -177,6 +177,10 @@ class CompanionStore {
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
         add(frame.source);
       }
+      for (final media
+          in generation.config.references ?? const <MediaReferenceLabel>[]) {
+        add(media.source);
+      }
     }
     return retained;
   }
@@ -724,7 +728,35 @@ class CompanionApp {
           ),
         );
       }
-      return config.copyWith(keyframes: frames);
+      final rawReferences = <MediaReferenceKind, List<Object?>>{
+        MediaReferenceKind.image:
+            input['reference_images'] as List<Object?>? ?? const [],
+        MediaReferenceKind.video:
+            input['reference_videos'] as List<Object?>? ?? const [],
+        MediaReferenceKind.audio:
+            input['reference_audios'] as List<Object?>? ?? const [],
+      };
+      final offsets = <MediaReferenceKind, int>{
+        for (final kind in MediaReferenceKind.values) kind: 0,
+      };
+      final references = <MediaReferenceLabel>[];
+      for (final media in config.references ?? const <MediaReferenceLabel>[]) {
+        final index = offsets[media.kind]!;
+        final sources = rawReferences[media.kind]!;
+        offsets[media.kind] = index + 1;
+        references.add(
+          MediaReferenceLabel(
+            label: media.label,
+            kind: media.kind,
+            source: await _store.persistSource(
+              index < sources.length ? sources[index]?.toString() ?? '' : '',
+              label: media.label,
+              retained: media.source,
+            ),
+          ),
+        );
+      }
+      return config.copyWith(keyframes: frames, references: references);
     }
     if (mode == 'v2v' || mode == 'draft_enhance') {
       return config.copyWith(
@@ -1001,6 +1033,9 @@ class CompanionApp {
         generation.config.source,
         ...(generation.config.keyframes ?? const <KeyframeLabel>[]).map(
           (frame) => frame.source,
+        ),
+        ...(generation.config.references ?? const <MediaReferenceLabel>[]).map(
+          (media) => media.source,
         ),
       ];
       for (final reference in references) {

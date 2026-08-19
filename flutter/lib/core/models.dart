@@ -12,6 +12,44 @@ enum GenerationOutputKind { video, image }
 
 enum KeyframeRole { start, middle, end }
 
+enum MediaReferenceKind { image, video, audio }
+
+enum MediaReferenceTask { reference, edit, extend }
+
+extension MediaReferenceTaskValue on MediaReferenceTask {
+  String get label => switch (this) {
+    MediaReferenceTask.reference => 'New video',
+    MediaReferenceTask.edit => 'Edit video',
+    MediaReferenceTask.extend => 'Extend video',
+  };
+
+  static MediaReferenceTask parse(Object? value) =>
+      MediaReferenceTask.values.firstWhere(
+        (task) => task.name == value,
+        orElse: () => MediaReferenceTask.reference,
+      );
+}
+
+extension MediaReferenceKindValue on MediaReferenceKind {
+  String get label => switch (this) {
+    MediaReferenceKind.image => 'Image',
+    MediaReferenceKind.video => 'Video',
+    MediaReferenceKind.audio => 'Audio',
+  };
+
+  String get pluralLabel => switch (this) {
+    MediaReferenceKind.image => 'images',
+    MediaReferenceKind.video => 'videos',
+    MediaReferenceKind.audio => 'audio clips',
+  };
+
+  static MediaReferenceKind parse(Object? value) =>
+      MediaReferenceKind.values.firstWhere(
+        (kind) => kind.name == value,
+        orElse: () => MediaReferenceKind.image,
+      );
+}
+
 extension KeyframeRoleValue on KeyframeRole {
   String get label => switch (this) {
     KeyframeRole.start => 'First frame',
@@ -100,6 +138,8 @@ class GenerationConfig {
     this.frameRate = 24,
     this.exactTiming = false,
     this.keyframes,
+    this.references,
+    this.referenceTask = MediaReferenceTask.reference,
     this.sourceLabel,
     this.source,
   });
@@ -113,11 +153,15 @@ class GenerationConfig {
   final int frameRate;
   final bool exactTiming;
   final List<KeyframeLabel>? keyframes;
+  final List<MediaReferenceLabel>? references;
+  final MediaReferenceTask referenceTask;
   final String? sourceLabel;
   final AssetReference? source;
 
   GenerationConfig copyWith({
     List<KeyframeLabel>? keyframes,
+    List<MediaReferenceLabel>? references,
+    MediaReferenceTask? referenceTask,
     AssetReference? source,
     int? frameRate,
   }) => GenerationConfig(
@@ -130,6 +174,8 @@ class GenerationConfig {
     frameRate: frameRate ?? this.frameRate,
     exactTiming: exactTiming,
     keyframes: keyframes ?? this.keyframes,
+    references: references ?? this.references,
+    referenceTask: referenceTask ?? this.referenceTask,
     sourceLabel: sourceLabel,
     source: source ?? this.source,
   );
@@ -145,6 +191,10 @@ class GenerationConfig {
     if (exactTiming) 'exactTiming': true,
     if (keyframes != null)
       'keyframes': keyframes!.map((frame) => frame.toJson()).toList(),
+    if (references != null)
+      'references': references!.map((item) => item.toJson()).toList(),
+    if (referenceTask != MediaReferenceTask.reference)
+      'referenceTask': referenceTask.name,
     if (sourceLabel != null) 'sourceLabel': sourceLabel,
     if (source != null) 'source': source!.toJson(),
   };
@@ -165,6 +215,14 @@ class GenerationConfig {
           : KeyframeRole.middle;
       return KeyframeLabel.fromJson(item, fallbackRole: legacyRole);
     }).toList();
+    final references = (json['references'] as List<Object?>?)
+        ?.whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => MediaReferenceLabel.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .toList();
     return GenerationConfig(
       aspectRatio: json['aspectRatio'] is String
           ? json['aspectRatio']! as String
@@ -180,6 +238,8 @@ class GenerationConfig {
       frameRate: (json['frameRate'] as num?)?.toInt() ?? 24,
       exactTiming: json['exactTiming'] == true,
       keyframes: keyframes,
+      references: references,
+      referenceTask: MediaReferenceTaskValue.parse(json['referenceTask']),
       sourceLabel: json['sourceLabel'] as String?,
       source: json['source'] is Map<Object?, Object?>
           ? AssetReference.fromJson(
@@ -190,6 +250,37 @@ class GenerationConfig {
           : null,
     );
   }
+}
+
+class MediaReferenceLabel {
+  const MediaReferenceLabel({
+    required this.label,
+    required this.kind,
+    this.source,
+  });
+
+  final String label;
+  final MediaReferenceKind kind;
+  final AssetReference? source;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'label': label,
+    'kind': kind.name,
+    if (source != null) 'source': source!.toJson(),
+  };
+
+  factory MediaReferenceLabel.fromJson(Map<String, Object?> json) =>
+      MediaReferenceLabel(
+        label: json['label'] as String? ?? 'Reference media',
+        kind: MediaReferenceKindValue.parse(json['kind']),
+        source: json['source'] is Map<Object?, Object?>
+            ? AssetReference.fromJson(
+                (json['source']! as Map<Object?, Object?>).map(
+                  (key, value) => MapEntry(key.toString(), value),
+                ),
+              )
+            : null,
+      );
 }
 
 class KeyframeLabel {
@@ -683,7 +774,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 9,
+    'schemaVersion': 11,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
