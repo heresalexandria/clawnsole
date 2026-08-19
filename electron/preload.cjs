@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("clawnsole", {
     ipcRenderer.invoke("clawnsole:drive:authorize"),
   disconnectGoogleDrive: () =>
     ipcRenderer.invoke("clawnsole:drive:disconnect"),
+  openExternalUrl: (url, purpose) =>
+    ipcRenderer.invoke("clawnsole:external:open", url, purpose),
   onUpdateEvent: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);

@@ -15,6 +15,7 @@ const {
 const {
   findOpenPort,
   isAllowedAppUrl,
+  isAllowedExplicitExternalUrl,
   isAllowedExternalUrl,
   isAllowedRendererPermission,
   waitForServer,
@@ -274,9 +275,12 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.onUpdateEvent,"
       + " typeof window.clawnsole?.authorizeGoogleDrive,"
       + " typeof window.clawnsole?.disconnectGoogleDrive,"
+      + " typeof window.clawnsole?.openExternalUrl,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
-    if (shape === "function,function,function,function,function,true") return;
+    if (shape === "function,function,function,function,function,function,true") {
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`The renderer update bridge is missing (saw ${shape}).`);
@@ -288,6 +292,12 @@ function installRendererBridge() {
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
   ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
   ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
+  ipcMain.handle("clawnsole:external:open", async (event, url, purpose) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
+    if (!isAllowedExplicitExternalUrl(url, purpose)) return false;
+    await shell.openExternal(url);
+    return true;
+  });
 }
 
 function protectNavigation(window, localRendererUrl) {

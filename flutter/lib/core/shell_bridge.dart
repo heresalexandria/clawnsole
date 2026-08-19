@@ -1,6 +1,20 @@
 import 'shell_bridge_stub.dart'
     if (dart.library.js_interop) 'shell_bridge_web.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
+enum ExternalUrlPurpose { media, release }
+
+/// Opens an explicit user-selected URL through the desktop shell when present.
+/// Other targets retain their platform URL-launcher behavior.
+Future<bool> openExternalUrl(
+  Uri url, {
+  required ExternalUrlPurpose purpose,
+}) async {
+  final shellResult = await openShellExternalUrl(url, purpose);
+  return shellResult ?? launchUrl(url);
+}
+
 /// Progress reported by the desktop shell while it updates the app.
 class ShellUpdateEvent {
   const ShellUpdateEvent({

@@ -11,6 +11,16 @@ extension type _ClawnsoleShellJS._(JSObject _) implements JSObject {
   external JSPromise<JSAny?> checkForUpdate(bool force);
   external JSPromise<JSAny?> startUpdate();
   external void onUpdateEvent(JSFunction callback);
+  external JSPromise<JSBoolean> openExternalUrl(JSString url, JSString purpose);
+}
+
+Future<bool?> openShellExternalUrl(Uri url, ExternalUrlPurpose purpose) async {
+  final shell = _shellJS;
+  if (shell == null) return null;
+  return (await shell
+          .openExternalUrl(url.toString().toJS, purpose.name.toJS)
+          .toDart)
+      .toDart;
 }
 
 Map<String, Object?> _toMap(JSAny? value) {
