@@ -231,6 +231,13 @@ class DirectGateway
   }
 
   @override
+  Future<CostEstimate?> quoteProviderCost(
+    String provider,
+    String model,
+    Map<String, Object?> input,
+  ) => _providers.quote(provider, model, input);
+
+  @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
     final next = (await _store.read()).copyWith(preferences: preferences);
     await _store.write(next);

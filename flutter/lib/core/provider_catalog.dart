@@ -287,16 +287,16 @@ const ltxProvider = VideoProviderDefinition(
     VideoModelDefinition(
       id: 'ltx-2-3-fast',
       label: 'LTX 2.3 Fast',
-      description: 'Economical long-form generation up to 4K.',
+      description: 'Economical 720p–4K long-form generation.',
       modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
       aspectRatios: _ltxRatios,
-      resolutions: <VideoResolutionDefinition>[_fhd, _qhd, _uhd],
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd, _qhd, _uhd],
       minDuration: 6,
       maxDuration: 20,
       durationStep: 2,
       maxKeyframes: 2,
-      usdPerSecond: .06,
-      referenceUsdPerSecond: .06,
+      usdPerSecond: .03,
+      referenceUsdPerSecond: .03,
       supportsStartFrame: true,
       supportsEndFrame: true,
       maxDurationByResolution: <String, int>{'qhd': 10, '4k': 10},
@@ -304,16 +304,16 @@ const ltxProvider = VideoProviderDefinition(
     VideoModelDefinition(
       id: 'ltx-2-3-pro',
       label: 'LTX 2.3 Pro',
-      description: 'High-fidelity 1080p–4K video generation.',
+      description: 'High-fidelity 720p–4K video generation.',
       modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
       aspectRatios: _ltxRatios,
-      resolutions: <VideoResolutionDefinition>[_fhd, _qhd, _uhd],
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd, _qhd, _uhd],
       minDuration: 6,
       maxDuration: 10,
       durationStep: 2,
       maxKeyframes: 2,
-      usdPerSecond: .08,
-      referenceUsdPerSecond: .08,
+      usdPerSecond: .04,
+      referenceUsdPerSecond: .04,
       supportsStartFrame: true,
       supportsEndFrame: true,
       maxAudioReferences: 1,
@@ -335,7 +335,7 @@ const artCraftProvider = VideoProviderDefinition(
   docsUrl: 'https://storyteller-docs.netlify.app/',
   pricingUrl: 'https://app.getartcraft.com/pricing',
   pricingSource:
-      'Live model availability · published default credit quotes converted at \$0.01/credit',
+      'Live configuration quotes with published defaults · \$0.01/credit',
   models: <VideoModelDefinition>[
     _ArtCraftModel(
       id: 'seedance_2p0',
@@ -1311,8 +1311,18 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
   }
   if (providerId == 'ltx') {
     const rates = <String, Map<String, double>>{
-      'ltx-2-3-fast': <String, double>{'1080p': .06, '1440p': .12, '4K': .24},
-      'ltx-2-3-pro': <String, double>{'1080p': .08, '1440p': .16, '4K': .32},
+      'ltx-2-3-fast': <String, double>{
+        '720p': .03,
+        '1080p': .06,
+        '1440p': .12,
+        '4K': .24,
+      },
+      'ltx-2-3-pro': <String, double>{
+        '720p': .04,
+        '1080p': .08,
+        '1440p': .16,
+        '4K': .32,
+      },
     };
     return ltxProvider.models.expand((model) {
       return rates[model.id]!.entries.map(

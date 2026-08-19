@@ -213,6 +213,11 @@ class AppController extends ChangeNotifier {
   Timer? _pollTimer;
   Timer? _creditTimer;
   Future<bool>? _creditRefreshFuture;
+  Timer? _estimateTimer;
+  String? _estimateSignature;
+  int _estimateRevision = 0;
+  int? _liveEstimateRevision;
+  CostEstimate? _liveEstimate;
   Timer? _noticeTimer;
   bool _polling = false;
   final Set<String> _retentionAttempts = <String>{};
@@ -639,14 +644,19 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  CostEstimate get currentEstimate => estimateCost(
-    selectedProviderId,
-    selectedModel.id,
-    form.mode,
-    currentConfig,
-    generations,
-    providerPrices[selectedProviderId] ?? const <ProviderModelPrice>[],
-  );
+  CostEstimate get currentEstimate {
+    if (_liveEstimateRevision == _estimateRevision && _liveEstimate != null) {
+      return _liveEstimate!;
+    }
+    return estimateCost(
+      selectedProviderId,
+      selectedModel.id,
+      form.mode,
+      currentConfig,
+      generations,
+      providerPrices[selectedProviderId] ?? const <ProviderModelPrice>[],
+    );
+  }
 
   Future<void> initialize() async {
     try {
@@ -661,6 +671,7 @@ class AppController extends ChangeNotifier {
       for (final provider in providers.where((item) => item.requiresApiKey)) {
         unawaited(refreshProviderModels(provider.id));
       }
+      _invalidateProviderEstimate();
     } on Object catch (error) {
       loadError = _message(error);
     } finally {
@@ -1144,6 +1155,7 @@ class AppController extends ChangeNotifier {
     }
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1215,6 +1227,7 @@ class AppController extends ChangeNotifier {
     selectedModelId = provider.defaultModel.id;
     _selectCompatibleModel();
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     notifyListeners();
     try {
@@ -1228,6 +1241,7 @@ class AppController extends ChangeNotifier {
   Future<void> selectModel(String modelId) async {
     selectedModelId = modelById(selectedProviderId, modelId).id;
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     notifyListeners();
     try {
       _apply(await gateway.setPreferences(_preferences()));
@@ -1741,6 +1755,7 @@ class AppController extends ChangeNotifier {
       return;
     }
     if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
+    await refreshProviderEstimate();
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;
     var pending = Generation(
@@ -2115,6 +2130,55 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  void _invalidateProviderEstimate() {
+    final signature = <Object?>[
+      selectedProviderId,
+      selectedModel.id,
+      form.mode,
+      form.duration,
+      form.resolution,
+      form.generateAudio,
+    ].join('|');
+    if (_estimateSignature == signature) return;
+    _estimateSignature = signature;
+    _estimateTimer?.cancel();
+    _estimateRevision += 1;
+    _liveEstimate = null;
+    _liveEstimateRevision = null;
+    if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
+    _estimateTimer = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(refreshProviderEstimate()),
+    );
+  }
+
+  Future<void> refreshProviderEstimate() async {
+    _estimateTimer?.cancel();
+    if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
+    final revision = _estimateRevision;
+    final input = <String, Object?>{
+      'prompt': form.prompt.trim(),
+      'aspect_ratio': form.aspectRatio,
+      'duration': form.duration,
+      'resolution': form.resolution,
+      'generate_audio': form.generateAudio,
+    };
+    try {
+      final estimate = await (gateway as ProviderGateway).quoteProviderCost(
+        selectedProviderId,
+        selectedModel.id,
+        input,
+      );
+      if (revision != _estimateRevision || estimate == null) return;
+      _liveEstimate = estimate;
+      _liveEstimateRevision = revision;
+      notifyListeners();
+    } on Object {
+      // The published provider-unit estimate remains available if a live
+      // quote is temporarily unavailable.
+    }
+  }
+
   Future<void> deleteGeneration(String localId) async {
     _apply(await gateway.deleteGeneration(localId));
     showNotice('Generation record removed.');
@@ -2426,6 +2490,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _pollTimer?.cancel();
     _creditTimer?.cancel();
+    _estimateTimer?.cancel();
     _noticeTimer?.cancel();
     super.dispose();
   }

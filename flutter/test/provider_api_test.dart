@@ -462,18 +462,57 @@ void main() {
     expect(models.last.createReady, isFalse);
   });
 
-  test('ArtCraft accepts authenticated not-found as a key probe', () async {
+  test('ArtCraft reads the authenticated credit balance', () async {
     final api = ArtCraftApi(
       client: MockClient((request) async {
-        expect(request.url.path, '/v1/omni_api/job_status/job/None');
+        expect(request.url.path, '/v1/credits/namespace/artcraft');
         expect(request.headers['authorization'], 'Bearer secret');
-        return http.Response('{"detail":"not found"}', 404);
+        return http.Response(
+          '{"success":true,"free_credits":5,"monthly_credits":20,'
+          '"banked_credits":100,"sum_total_credits":125}',
+          200,
+        );
       }),
     );
 
     final account = await api.verify('secret');
     expect(account.provider, 'artcraft');
-    expect(account.balance, isNull);
+    expect(account.balance, 125);
+    expect(account.currency, 'credits');
+    expect(account.balanceLabel, '125 credits available');
+  });
+
+  test('ArtCraft returns its exact resolution-aware cost quote', () async {
+    late Map<String, Object?> requestBody;
+    final api = ArtCraftApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/v1/omni_gen/cost/video');
+        expect(request.headers['authorization'], isNull);
+        requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        return http.Response(
+          '{"success":true,"cost_in_credits":466,'
+          '"cost_in_usd_cents":466}',
+          200,
+        );
+      }),
+    );
+
+    final estimate = await api.estimate('seedance_2p0', <String, Object?>{
+      'prompt': 'A precise quote',
+      'duration': 10,
+      'resolution': 'fhd',
+      'aspect_ratio': '16:9',
+      'generate_audio': true,
+    });
+
+    expect(requestBody['duration_seconds'], 10);
+    expect(requestBody['resolution'], 'ten_eighty_p');
+    expect(requestBody['aspect_ratio'], 'wide_sixteen_by_nine');
+    expect(estimate?.minimumUsd, 4.66);
+    expect(estimate?.providerUnitsMinimum, 466);
+    expect(estimate?.basis, 'artcraft-live-quote');
   });
 
   test('Atlas reads live video prices and marks supported models', () async {
@@ -671,6 +710,19 @@ void main() {
     );
 
     final ltx = estimateCost('ltx', 'ltx-2-3-fast', VideoMode.t2v, config);
+    final ltxHd = estimateCost(
+      'ltx',
+      'ltx-2-3-fast',
+      VideoMode.t2v,
+      const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 10,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+    );
     final atlas = estimateCost(
       'atlas',
       'bytedance/seedance-2.0-mini/text-to-video',
@@ -685,9 +737,14 @@ void main() {
     );
 
     expect(ltx.minimumUsd, .6);
+    expect(ltxHd.minimumUsd, .3);
     expect(artcraft.minimumUsd, 1.86);
+    expect(artcraft.providerUnitsMinimum, 186);
+    expect(artcraft.providerUnitLabel, 'credits');
     expect(atlas.minimumUsd, .39);
     final ltxRows = publishedProviderPrices('ltx');
+    expect(ltxRows.first.model, 'ltx-2-3-fast:720p');
+    expect(ltxRows.first.priceFor(10), .3);
     expect(ltxRows.first.supportsDuration(15), isFalse);
     expect(ltxRows.first.supportsDuration(20), isTrue);
   });
@@ -701,6 +758,7 @@ void main() {
     );
 
     expect(ltxFast.resolutions.map((item) => item.id), <String>[
+      'hd',
       'fhd',
       'qhd',
       '4k',

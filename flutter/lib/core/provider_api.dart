@@ -64,4 +64,13 @@ class ProviderApiRouter {
           publishedProviderPrices(provider),
         ),
       };
+
+  Future<CostEstimate?> quote(
+    String provider,
+    String model,
+    Map<String, Object?> input,
+  ) => switch (provider) {
+    'artcraft' => artcraft.estimate(model, input),
+    _ => Future<CostEstimate?>.value(),
+  };
 }

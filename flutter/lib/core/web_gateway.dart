@@ -160,6 +160,38 @@ class WebGateway
   }
 
   @override
+  Future<CostEstimate?> quoteProviderCost(
+    String provider,
+    String model,
+    Map<String, Object?> input,
+  ) async {
+    final payload = _map(
+      await _read(
+        await _client.post(
+          _url('/providers/quote'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{
+            'provider': provider,
+            'model': model,
+            'input': input,
+          }),
+        ),
+      ),
+    );
+    if (payload['available'] != true) return null;
+    return CostEstimate(
+      minimumUsd: (payload['minimumUsd'] as num).toDouble(),
+      maximumUsd: (payload['maximumUsd'] as num).toDouble(),
+      basis: payload['basis']?.toString() ?? 'provider-quote',
+      providerUnitsMinimum: (payload['providerUnitsMinimum'] as num?)
+          ?.toDouble(),
+      providerUnitsMaximum: (payload['providerUnitsMaximum'] as num?)
+          ?.toDouble(),
+      providerUnitLabel: payload['providerUnitLabel']?.toString(),
+    );
+  }
+
+  @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) =>
       _action('setPreferences', preferences.toJson());
 
