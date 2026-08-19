@@ -172,7 +172,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
+          cache: false
+          pub-cache: false
 
       - name: Build Windows x64 desktop app
         shell: bash

@@ -46,9 +46,10 @@ CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
   ./flutter/scripts/build_github_pages
 ```
 
-The output is `flutter/build/github-pages/app/`. The standalone-web workflow
-builds the same directory and uploads it as a test artifact; it does not deploy
-or replace the existing `docs/` splash page. Add a repository secret named
+The output is `flutter/build/github-pages/app/`. Flutter PR checks build the
+same directory and upload it as a test artifact, and the manual standalone-web
+workflow can produce the artifact on demand. Neither path deploys or replaces
+the existing `docs/` splash page. Add a repository secret named
 `GOOGLE_OAUTH_CLIENT_ID` to make Drive available in workflow-built artifacts.
 
 Direct provider calls depend on each provider allowing browser CORS for its API
