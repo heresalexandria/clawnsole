@@ -112,7 +112,9 @@ class AssetReference {
   final String? contentType;
   final int? bytes;
 
-  bool get isLocal => kind == 'local';
+  /// The asset is retained by the active Clawnsole data store rather than a
+  /// short-lived provider URL. Google Drive assets use the `drive` kind.
+  bool get isLocal => kind == 'local' || kind == 'drive';
 
   Map<String, Object?> toJson() => <String, Object?>{
     'kind': kind,

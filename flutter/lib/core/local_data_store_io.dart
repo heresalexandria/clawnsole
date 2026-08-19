@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'durable_data_store.dart';
 import 'models.dart';
 
 String retainedAssetExtension(String? contentType, String label) {
@@ -39,7 +40,7 @@ String retainedAssetExtension(String? contentType, String label) {
   };
 }
 
-class LocalDataStore {
+class LocalDataStore implements DurableDataStore {
   File? _cachedFile;
 
   Future<File> _file() async {
@@ -92,6 +93,7 @@ class LocalDataStore {
     return legacy.rename(preferred.path);
   }
 
+  @override
   Future<AssetReference> writeAsset(
     Uint8List bytes, {
     required String label,
@@ -111,6 +113,7 @@ class LocalDataStore {
     );
   }
 
+  @override
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
@@ -148,6 +151,7 @@ class LocalDataStore {
     return null;
   }
 
+  @override
   Future<Uint8List> readAsset(AssetReference reference) async {
     if (!reference.isLocal) {
       throw StateError('The asset is not stored locally.');
@@ -155,6 +159,7 @@ class LocalDataStore {
     return (await _resolveAssetFile(reference)).readAsBytes();
   }
 
+  @override
   Future<Uri> assetUri(AssetReference reference) async {
     if (!reference.isLocal) return Uri.parse(reference.value);
     return (await _resolveAssetFile(reference, migrateGenericName: true)).uri;
@@ -187,6 +192,7 @@ class LocalDataStore {
     return retained;
   }
 
+  @override
   Future<void> pruneAssets(
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
@@ -208,6 +214,7 @@ class LocalDataStore {
     if (await assets.exists()) await assets.delete(recursive: true);
   }
 
+  @override
   Future<StoredData> read() async {
     final file = await _file();
     if (!await file.exists()) return const StoredData();
@@ -220,6 +227,7 @@ class LocalDataStore {
     }
   }
 
+  @override
   Future<void> write(StoredData data) async {
     final file = await _file();
     await file.parent.create(recursive: true);
@@ -231,12 +239,14 @@ class LocalDataStore {
     await temporary.rename(file.path);
   }
 
+  @override
   Future<void> delete() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
     await clearAssets();
   }
 
+  @override
   Future<StorageStats> stats(int records) async {
     final file = await _file();
     final assets = await _assets();

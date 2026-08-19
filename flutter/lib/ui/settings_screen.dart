@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/app_links.dart';
+import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'claw_mark.dart';
@@ -50,6 +51,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final main = Column(
         children: <Widget>[
           _ProviderAccessCard(controller: widget.controller),
+          if (widget.controller.supportsGoogleDrive) ...<Widget>[
+            const SizedBox(height: 18),
+            _GoogleDriveSection(controller: widget.controller),
+          ],
           const SizedBox(height: 18),
           _StorageSection(controller: widget.controller),
         ],
@@ -73,8 +78,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: Theme.of(context).textTheme.displayLarge,
                 ),
                 const SizedBox(height: 10),
-                const Text(
-                  'Manage appearance, updates, and Clawnsole’s private local data.',
+                Text(
+                  widget.controller.supportsGoogleDrive
+                      ? 'Manage appearance, Drive sync, and this browser’s private keys.'
+                      : 'Manage appearance, updates, and Clawnsole’s private local data.',
                 ),
                 const SizedBox(height: 24),
                 if (split)
@@ -115,17 +122,19 @@ class _ProviderAccessCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
+                  const Text(
                     'Provider access moved to its own desk',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
+                    controller.supportsGoogleDrive
+                        ? 'Set an Atlas Cloud key for the verified backend-free Pages route.'
+                        : 'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
                   ),
                 ],
               ),
@@ -181,12 +190,16 @@ class _StorageSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'Local project data',
+                    controller.supportsGoogleDrive
+                        ? 'Portable project data'
+                        : 'Local project data',
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 3),
-                  const Text(
-                    'Compact JSON plus retained reference inputs and finished videos.',
+                  Text(
+                    controller.supportsGoogleDrive
+                        ? 'Drive metadata plus retained reference inputs and finished videos.'
+                        : 'Compact JSON plus retained reference inputs and finished videos.',
                   ),
                 ],
               ),
@@ -269,6 +282,152 @@ class _StorageSection extends StatelessWidget {
   );
 }
 
+class _GoogleDriveSection extends StatefulWidget {
+  const _GoogleDriveSection({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_GoogleDriveSection> createState() => _GoogleDriveSectionState();
+}
+
+class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
+  late final TextEditingController _folder = TextEditingController(
+    text: widget.controller.googleDriveConnection.folderName.isEmpty
+        ? 'Clawnsole'
+        : widget.controller.googleDriveConnection.folderName,
+  );
+
+  @override
+  void dispose() {
+    _folder.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connection = widget.controller.googleDriveConnection;
+    final connected = connection.isConnected;
+    final unavailable =
+        connection.state == GoogleDriveConnectionState.unavailable;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              CircleAvatar(
+                backgroundColor: context.colors.primaryContainer,
+                child: Icon(
+                  Icons.cloud_sync_rounded,
+                  color: context.colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Google Drive library',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      connected
+                          ? 'Synced with “${connection.folderName}”.'
+                          : 'Use one portable library across browser devices.',
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+                color: connected
+                    ? context.colors.primary
+                    : context.colors.onSurfaceVariant,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _folder,
+            enabled: !connected && !widget.controller.googleDriveBusy,
+            maxLength: 120,
+            decoration: const InputDecoration(
+              labelText: 'Drive folder name',
+              helperText:
+                  'Clawnsole creates or reopens an app-owned folder with this name.',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              if (!connected)
+                FilledButton.icon(
+                  onPressed: unavailable || widget.controller.googleDriveBusy
+                      ? null
+                      : () =>
+                            widget.controller.connectGoogleDrive(_folder.text),
+                  icon: widget.controller.googleDriveBusy
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_to_drive_rounded, size: 18),
+                  label: const Text('Connect Drive'),
+                )
+              else ...<Widget>[
+                FilledButton.tonalIcon(
+                  onPressed: widget.controller.googleDriveBusy
+                      ? null
+                      : widget.controller.refreshGoogleDrive,
+                  icon: const Icon(Icons.sync_rounded, size: 18),
+                  label: const Text('Refresh'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: widget.controller.googleDriveBusy
+                      ? null
+                      : widget.controller.disconnectGoogleDrive,
+                  icon: const Icon(Icons.link_off_rounded, size: 18),
+                  label: const Text('Disconnect this device'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              unavailable
+                  ? connection.message
+                  : 'Generated media, saved references, history, folders, and non-secret preferences go to Drive. Provider API keys never leave this browser.',
+              style: const TextStyle(fontSize: 11.5, height: 1.4),
+            ),
+          ),
+          if (connection.message.isNotEmpty && !unavailable) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              connection.message,
+              style: TextStyle(
+                fontSize: 11,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _Stat extends StatelessWidget {
   const _Stat({required this.value, required this.label});
 
@@ -323,7 +482,9 @@ class _SettingsSide extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
+              controller.supportsGoogleDrive
+                  ? 'History and saved references follow your Drive connection. Retained media is pruned only when nothing else uses it.'
+                  : 'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
               style: TextStyle(color: context.tokens.onPanelMuted),
             ),
             if (controller.gateway.usesCompanion) ...<Widget>[
@@ -355,12 +516,16 @@ class _SettingsSide extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
-              'Clear local data',
+              controller.supportsGoogleDrive
+                  ? 'Clear Clawnsole data'
+                  : 'Clear local data',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 5),
-            const Text(
-              'These actions update only Clawnsole data on this device.',
+            Text(
+              controller.supportsGoogleDrive
+                  ? 'History, preferences, and assets update in the connected Drive folder. API keys remain device-only.'
+                  : 'These actions update only Clawnsole data on this device.',
             ),
             const SizedBox(height: 12),
             _ClearButton(
@@ -384,14 +549,20 @@ class _SettingsSide extends StatelessWidget {
             ),
             _ClearButton(
               icon: Icons.warning_amber_rounded,
-              title: 'Delete all local data',
+              title: controller.supportsGoogleDrive
+                  ? 'Delete all Clawnsole data'
+                  : 'Delete all local data',
               subtitle:
-                  'History, saved references, assets, preferences, and API keys',
+                  'History, saved references, assets, preferences, and device API keys',
               danger: true,
               onTap: () async {
                 if (await confirm(
-                  'Delete all local data?',
-                  'This permanently removes the Flutter app’s local JSON file.',
+                  controller.supportsGoogleDrive
+                      ? 'Delete all Clawnsole data?'
+                      : 'Delete all local data?',
+                  controller.supportsGoogleDrive
+                      ? 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus API keys in this browser.'
+                      : 'This permanently removes the Flutter app’s local JSON file.',
                 )) {
                   await controller.clearAll();
                 }

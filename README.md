@@ -45,7 +45,11 @@ media each have independent local folder hierarchies and reusable tags.
 - One-tap folder and tag filters with a desktop folder rail and compact mobile picker
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
-- Local API-key setup with no database, `localStorage`, or IndexedDB history
+- Local API-key setup with no database, `localStorage`, or IndexedDB history in
+  the native and companion-backed targets
+- An isolated GitHub Pages-ready browser target with optional Google Drive
+  history/media sync and device-local API keys; Atlas Cloud is the initial
+  static-host provider because its API allows the Pages origin
 - A Providers desk for per-provider keys, console/docs links, live Atlas model
   discovery, canonical cross-provider model matching, observed quote variance,
   and route-aware 10/15/20/30-second USD comparisons
@@ -62,6 +66,10 @@ root Next.js implementation has been removed.
 ./flutter/scripts/start_ios
 ./flutter/scripts/start_android
 ./flutter/scripts/start_macos
+
+# isolated backend-free browser target
+CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
+  ./flutter/scripts/start_github_pages
 ```
 
 The matching deployable builds are:
@@ -71,16 +79,19 @@ The matching deployable builds are:
 ./flutter/scripts/build_ios
 ./flutter/scripts/build_android
 ./flutter/scripts/build_macos
+./flutter/scripts/build_github_pages
 ```
 
 See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/README.md).
 
 ## Persistence
 
-Clawnsole has no database and uses no browser storage for history. Native apps
-store `clawnsole.json` inside their application support sandbox. Companion-backed
-web and Electron store the same compact schema in a local file, with retained
-inputs and videos in an adjacent `assets/` directory.
+Clawnsole has no database. Native apps store `clawnsole.json` inside their
+application support sandbox. Companion-backed web and Electron store the same
+compact schema in a local file, with retained inputs and videos in an adjacent
+`assets/` directory. The separate standalone browser build stores portable
+metadata and media in a user-authorized Google Drive folder; only device API
+keys and a connection hint use localStorage.
 
 - History is not capped.
 - Folder names, tag labels, generation assignments, and saved-reference metadata
@@ -97,6 +108,11 @@ inputs and videos in an adjacent `assets/` directory.
   and are never returned to the web renderer. An optional temporary iOS App
   Review fallback is compiled only by the local iOS build script, never written
   to local JSON, and never displayed in the app.
+- Standalone-browser keys are never written to Drive. localStorage is not a
+  secret vault, so this mode should be used only on trusted devices and served
+  from the reviewed GitHub Pages origin.
+
+See [standalone web and Google Drive setup](docs/google-drive-web.md).
 
 ## Architecture
 
@@ -138,6 +154,7 @@ dart format --output=none --set-exit-if-changed lib tool test
 flutter analyze
 flutter test
 flutter build web
+./scripts/build_github_pages
 
 cd ../electron
 npm test
