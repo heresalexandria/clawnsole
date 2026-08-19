@@ -4,6 +4,7 @@ const path = require("node:path");
 const {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -19,6 +20,7 @@ const {
   isAllowedRendererPermission,
   waitForServer,
 } = require("./lib/runtime.cjs");
+const { installNativeTextContextMenu } = require("./lib/text-context-menu.cjs");
 const updater = require("./lib/updater.cjs");
 const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
@@ -283,6 +285,7 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
 }
 
 function installRendererBridge() {
+  installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain });
   ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
