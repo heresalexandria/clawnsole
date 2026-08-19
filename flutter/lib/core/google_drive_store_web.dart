@@ -113,7 +113,7 @@ class GoogleDriveStore implements DurableDataStore {
         _lastData = initial;
         return initial;
       }
-      return read();
+      return await read();
     } on Object catch (error) {
       _api = null;
       _connection = GoogleDriveConnection(
