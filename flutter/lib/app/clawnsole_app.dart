@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../core/app_version.dart';
@@ -32,7 +33,7 @@ class ClawnsoleApp extends StatefulWidget {
 
   final AppGateway? gateway;
 
-  /// Whether macOS, iOS, and Android check at launch and every 24 hours.
+  /// Whether supported platforms check at launch and every 24 hours.
   /// Widget tests turn this off so they never reach the network.
   final bool checkForUpdates;
 
@@ -50,10 +51,12 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   late final AppController controller;
   late final UpdateStatus _updateStatus;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
   StreamSubscription<ShellUpdateEvent>? _shellUpdates;
-  Timer? _startupUpdateCheck;
   Timer? _periodicUpdateCheck;
   bool _requiredUpdateDialogOpen = false;
+  String? _lastNotifiedUpdateVersion;
   String? _lastNotice;
   ThemeMode _themeMode = ThemeMode.system;
 
@@ -62,8 +65,8 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     super.initState();
     controller = AppController(gateway: widget.gateway);
     _updateStatus = widget.updateStatus ?? UpdateStatus.instance;
-    _updateStatus.addListener(_handleRequiredUpdate);
-    _handleRequiredUpdate();
+    _updateStatus.addListener(_handleUpdateStatus);
+    _handleUpdateStatus();
     unawaited(controller.initialize());
     // A shell-menu "Check for Updates…" downloads through the same pipe, so
     // surface its progress modal no matter where the update started.
@@ -73,25 +76,82 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
       if (navigator != null) unawaited(showUpdateProgressDialog(navigator));
     });
     if (widget.checkForUpdates && _updateStatus.supportsAutomaticChecks) {
-      _startupUpdateCheck = Timer(
-        const Duration(seconds: 4),
-        () => unawaited(_updateStatus.autoCheck()),
-      );
-      _periodicUpdateCheck = Timer.periodic(
-        const Duration(hours: 24),
-        (_) => unawaited(_updateStatus.backgroundCheck()),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_startAutomaticUpdateChecks());
+      });
     }
+  }
+
+  Future<void> _startAutomaticUpdateChecks() async {
+    await _updateStatus.autoCheck();
+    if (!mounted) return;
+    _periodicUpdateCheck = Timer.periodic(
+      const Duration(hours: 24),
+      (_) => unawaited(_updateStatus.backgroundCheck()),
+    );
   }
 
   @override
   void dispose() {
-    _startupUpdateCheck?.cancel();
     _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
-    _updateStatus.removeListener(_handleRequiredUpdate);
+    _updateStatus.removeListener(_handleUpdateStatus);
     controller.dispose();
     super.dispose();
+  }
+
+  void _handleUpdateStatus() {
+    _handleRequiredUpdate();
+    _handleAvailableUpdate();
+  }
+
+  void _handleAvailableUpdate() {
+    final result = _updateStatus.result;
+    final latest = result?.latest;
+    if (_updateStatus.checking ||
+        !_updateStatus.updateAvailable ||
+        _updateStatus.requiresMajorUpdate ||
+        latest == null ||
+        latest == _lastNotifiedUpdateVersion) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _updateStatus.checking ||
+          !_updateStatus.updateAvailable ||
+          _updateStatus.requiresMajorUpdate ||
+          latest == _lastNotifiedUpdateVersion) {
+        return;
+      }
+      final context = _navigatorKey.currentContext;
+      if (context == null) return;
+      final compact = MediaQuery.sizeOf(context).width < 900;
+      if (!compact && !_updateStatus.isStoreManaged) return;
+      _lastNotifiedUpdateVersion = latest;
+      _scaffoldMessengerKey.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Clawnsole $latest is available.'),
+            action: SnackBarAction(
+              label: _updateStatus.isStoreManaged ? 'Update' : 'View',
+              onPressed: _openAvailableUpdate,
+            ),
+          ),
+        );
+    });
+  }
+
+  void _openAvailableUpdate() {
+    if (_updateStatus.isStoreManaged) {
+      final opener = widget.storeUpdateOpener ?? openClawnsoleStore;
+      unawaited(opener(defaultTargetPlatform));
+      return;
+    }
+    final context = _navigatorKey.currentContext;
+    if (context != null) {
+      unawaited(showVersionDialog(context, status: _updateStatus));
+    }
   }
 
   void _handleRequiredUpdate() {
@@ -129,6 +189,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     title: 'Clawnsole',
     debugShowCheckedModeBanner: false,
     navigatorKey: _navigatorKey,
+    scaffoldMessengerKey: _scaffoldMessengerKey,
     theme: buildClawnsoleTheme(Brightness.light),
     darkTheme: buildClawnsoleTheme(Brightness.dark),
     themeMode: _themeMode,
@@ -538,25 +599,13 @@ class _VersionChip extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: status,
     builder: (context, _) {
-      final available = status.updateAvailable && status.canSelfUpdate;
+      final available = status.updateAvailable;
       final latest = status.result?.latest;
-      if (available) {
-        return UpdateAvailableChip(
-          compact: compact,
-          version: latest,
-          onPressed: () => unawaited(
-            startAvailableUpdate(
-              Navigator.of(context),
-              updater: status.desktopUpdater,
-            ),
-          ),
-        );
-      }
-      return Tooltip(
+      final versionChip = Tooltip(
         message: 'About this version and updates',
         child: InkWell(
           borderRadius: BorderRadius.circular(999),
-          onTap: () => unawaited(showVersionDialog(context)),
+          onTap: () => unawaited(showVersionDialog(context, status: status)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             child: Row(
@@ -575,6 +624,30 @@ class _VersionChip extends StatelessWidget {
             ),
           ),
         ),
+      );
+      if (!available || compact || status.isStoreManaged) return versionChip;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          versionChip,
+          const SizedBox(width: 4),
+          UpdateAvailableChip(
+            installable: status.canSelfUpdate,
+            version: latest,
+            onPressed: () {
+              if (status.canSelfUpdate) {
+                unawaited(
+                  startAvailableUpdate(
+                    Navigator.of(context),
+                    updater: status.desktopUpdater,
+                  ),
+                );
+              } else {
+                unawaited(showVersionDialog(context, status: status));
+              }
+            },
+          ),
+        ],
       );
     },
   );

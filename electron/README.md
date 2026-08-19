@@ -62,9 +62,10 @@ Set `CLAWNSOLE_NOTARY_KEYCHAIN_PROFILE` to select a different local profile.
 
 ## Self-update
 
-The app checks the latest release at most once every 24 hours and provides
-**Clawnsole → Check for Updates…** for an explicit check. It downloads the
-matching `Clawnsole-<version>-mac-<arch>.zip`, requires a matching digest in
+The app checks the latest release afresh on startup, then at most once every 24
+hours while it remains open, and provides **Clawnsole → Check for Updates…** for
+an explicit check. It downloads the matching
+`Clawnsole-<version>-mac-<arch>.zip`, requires a matching digest in
 `SHA256SUMS.txt`, unpacks with `ditto`, and performs a rollback-safe app swap
 after the running process exits. User data is outside the app bundle and is not
 touched.

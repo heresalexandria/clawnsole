@@ -197,6 +197,9 @@ Generate button. Layout order:
 - The top-bar **version chip** opens a dialog that reports the running
   version and checks the latest GitHub release (through the Electron shell
   bridge when present, otherwise the public releases API).
+- A newer release adds an **Update Available** chip beside the running version
+  on wide layouts. Compact layouts and native mobile apps use a flash
+  notification so the header remains responsive.
 - Where the shell can install in place (packaged macOS), the dialog offers
   **Download and install**; elsewhere it links the release page (or notes
   App Store delivery on mobile).

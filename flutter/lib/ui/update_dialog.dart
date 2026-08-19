@@ -50,20 +50,24 @@ Future<bool> startAvailableUpdate(
 
 /// Shows the running version, whether a newer release exists, and — where the
 /// shell can do it — installs that release in place.
-Future<void> showVersionDialog(BuildContext context) => showDialog<void>(
-  context: context,
-  builder: (context) => const _VersionDialog(),
-);
+Future<void> showVersionDialog(BuildContext context, {UpdateStatus? status}) =>
+    showDialog<void>(
+      context: context,
+      builder: (context) =>
+          _VersionDialog(status: status ?? UpdateStatus.instance),
+    );
 
 class _VersionDialog extends StatefulWidget {
-  const _VersionDialog();
+  const _VersionDialog({required this.status});
+
+  final UpdateStatus status;
 
   @override
   State<_VersionDialog> createState() => _VersionDialogState();
 }
 
 class _VersionDialogState extends State<_VersionDialog> {
-  final UpdateStatus _status = UpdateStatus.instance;
+  UpdateStatus get _status => widget.status;
 
   @override
   void initState() {

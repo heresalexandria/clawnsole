@@ -140,11 +140,12 @@ recoverable failure. iOS builds are intentionally local-only through
 `./flutter/scripts/build_ios`; GitHub never receives the iOS signing material or
 an IPA.
 
-Packaged Electron builds check GitHub at most once per day and expose
-**Clawnsole → Check for Updates…**. An accepted update downloads the architecture
-matched ZIP, verifies `SHA256SUMS.txt`, replaces the installed app with rollback,
-and reopens it. Windows update checks open the GitHub release for a manual ZIP
-download. iOS remains under normal App Store distribution semantics.
+Every surface checks GitHub for a newer stable release on startup and every 24
+hours while running. Packaged Electron builds also expose **Clawnsole → Check
+for Updates…**; an accepted update downloads the architecture-matched ZIP,
+verifies `SHA256SUMS.txt`, replaces the installed app with rollback, and reopens
+it. Windows and web updates open the GitHub release for a manual download, while
+iOS remains under normal App Store distribution semantics.
 
 See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 

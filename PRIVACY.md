@@ -79,13 +79,12 @@ key for the same provider takes precedence after it is saved.
 
 ## Update checks and external links
 
-The macOS app and companion-backed web build ask GitHub's public releases API
-whether a newer Clawnsole version exists once per app launch and when you open
-the version dialog or choose **Check for Updates…**. Native Windows makes the
-same request when you open its version dialog. That request carries no provider
-API key, prompt, media, or history. GitHub receives only an ordinary web request
-and its usual connection metadata. The iOS and Android apps do not make this
-request; their stores handle updates.
+The macOS, Windows, iOS, Android, and web builds ask GitHub's public releases
+API whether a newer Clawnsole version exists once per app launch, every 24 hours
+while running, and when you manually check where that action is available. That
+request carries no provider API key, prompt, media, or history. GitHub receives
+only an ordinary web request and its usual connection metadata. The iOS and
+Android stores still handle installation.
 
 Links that you choose to open, including provider consoles, documentation,
 pricing pages, and this policy, open in your browser and are governed by the

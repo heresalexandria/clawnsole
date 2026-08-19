@@ -29,9 +29,15 @@ class UpdateStatus extends ChangeNotifier {
   @visibleForTesting
   UpdateStatus.forMobileTesting(
     Future<UpdateCheckResult> Function() releaseChecker,
-  ) : _shellProvider = (() => null),
-      _storeManagedProvider = (() => true),
-      _releaseChecker = releaseChecker;
+  ) : this.forReleaseTesting(releaseChecker, storeManaged: true);
+
+  @visibleForTesting
+  UpdateStatus.forReleaseTesting(
+    Future<UpdateCheckResult> Function() releaseChecker, {
+    bool storeManaged = false,
+  }) : _shellProvider = (() => null),
+       _storeManagedProvider = (() => storeManaged),
+       _releaseChecker = releaseChecker;
 
   static final UpdateStatus instance = UpdateStatus._();
 
@@ -49,8 +55,8 @@ class UpdateStatus extends ChangeNotifier {
 
   bool get isStoreManaged => _storeManagedProvider();
 
-  /// Whether this surface can perform launch-time and 24-hour checks.
-  bool get supportsAutomaticChecks => hasDesktopUpdater || isStoreManaged;
+  /// Every supported surface can query the public stable-release endpoint.
+  bool get supportsAutomaticChecks => true;
 
   bool get updateAvailable => result?.available == true;
 
@@ -80,11 +86,16 @@ class UpdateStatus extends ChangeNotifier {
   bool get shellDeclinesInstall =>
       hasDesktopUpdater && result?.installable != true;
 
-  /// Checks once per app launch on macOS, iOS, and Android.
+  /// Checks once per app launch on every supported surface.
+  ///
+  /// A launch check is always fresh. The macOS shell keeps its own persisted
+  /// result for background throttling, but reusing that result here could hide
+  /// a release published since the previous launch until the version was
+  /// clicked manually.
   Future<void> autoCheck() async {
     if (_autoChecked || !supportsAutomaticChecks) return;
     _autoChecked = true;
-    await refresh(force: false);
+    await refresh(force: true);
   }
 
   /// Re-checks from the 24-hour timer without bypassing the macOS shell's
