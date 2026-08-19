@@ -222,7 +222,7 @@ class SurfaceCard extends StatelessWidget {
   );
 }
 
-/// A small on/off pill used for optional behaviors like auto duration.
+/// A small on/off pill used for optional behaviors like exact timing.
 class TogglePill extends StatelessWidget {
   const TogglePill({
     required this.label,

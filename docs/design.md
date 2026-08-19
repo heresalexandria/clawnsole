@@ -153,6 +153,9 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
   recessed pill well. The traveled side lights **hunter green** (the cost
   panel's `#2A4633`) when on; off is simply the empty well. No status lamps.
   The tile's whole row is tappable.
+- **`HardwareChoiceSwitch`** — a labeled two-position control whose selected
+  option rides on a brushed-metal carriage inside a recessed well. It is used
+  for mutually exclusive hardware choices such as Auto / Manual duration.
 - **`CounterReadout`** — a recessed counter window (Fraunces numerals) that
   states a control's current value: duration (`10 s` / `AUTO`), frame rate
   (`3 fps`), safety (`2 / 4`).
@@ -216,11 +219,13 @@ Generate button. Layout order:
 4. **Frame** — the ratio strip: one tile per aspect ratio with a *drawn
    glyph of the actual shape* (bounded 28×18) plus label; Auto uses the
    free-crop glyph. Selected tile fills plum.
-5. **Duration** — the knob slider is **always live**; dragging it
-   immediately sets a fixed duration (clearing Auto), and the Auto pill
-   re-enables provider choice. The counter readout beside the label states
-   the current value (`10 s`, or `AUTO`). Layouts that require fixed timing
-   disable Auto and say why.
+5. **Duration** — Manual is the default. Models that support provider-selected
+   duration show a brushed-metal Auto / Manual switch; models without that
+   capability show no Auto option. Manual shows the model- and
+   resolution-specific slider range. Auto replaces the slider with the same
+   possible-duration range in prose. The counter readout beside the label
+   states the current value (`10 s`, or `AUTO`). Layouts that require fixed
+   timing lock the switch to Manual and say why.
 6. **Finish** — HD / Full HD console keys, audio and fast-draft hardware
    switches (lit hunter green when on), safety-tolerance knob with an
    `n / 4` readout.

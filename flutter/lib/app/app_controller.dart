@@ -125,7 +125,7 @@ class ReferenceCandidate {
 class GenerationFormState {
   String prompt = '';
   String aspectRatio = '16:9';
-  bool autoDuration = true;
+  bool autoDuration = false;
   int durationSeconds = 8;
   int frameRate = 2;
   String resolution = 'hd';
@@ -1310,6 +1310,7 @@ class AppController extends ChangeNotifier {
     if (!ratios.contains(form.aspectRatio)) {
       form.aspectRatio = ratios.contains('16:9') ? '16:9' : ratios.first;
     }
+    if (!selectedModel.supportsAutoDuration) form.autoDuration = false;
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
     _invalidateProviderEstimate();
@@ -1334,12 +1335,7 @@ class AppController extends ChangeNotifier {
   );
 
   int _validDuration(int value) {
-    final model = selectedModel;
-    final maximum = model.maxDurationFor(form.resolution);
-    final clamped = value.clamp(model.minDuration, maximum);
-    final offset = clamped - model.minDuration;
-    return model.minDuration +
-        (offset ~/ model.durationStep) * model.durationStep;
+    return selectedModel.durationRangeFor(form.resolution).normalize(value);
   }
 
   List<VideoResolutionDefinition> get availableResolutions {
@@ -1681,6 +1677,19 @@ class AppController extends ChangeNotifier {
           ? frame.copyWith(seconds: form.durationSeconds.toDouble())
           : frame;
     }).toList();
+    _invalidateProviderEstimate();
+    notifyListeners();
+  }
+
+  void setAutoDuration(bool value) {
+    final model = selectedModel;
+    if (value && (!model.supportsAutoDuration || form.requiresFixedDuration)) {
+      return;
+    }
+    if (!value && form.referenceTask == MediaReferenceTask.edit) return;
+    if (form.autoDuration == value) return;
+    form.autoDuration = value;
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -2593,7 +2602,7 @@ class AppController extends ChangeNotifier {
               item.config.source?.kind == 'remote'
           ? item.config.source!.value
           : '';
-    if (form.requiresFixedDuration) form.autoDuration = false;
+    _normalizeFormForModel();
     formRevision += 1;
     notifyListeners();
   }
