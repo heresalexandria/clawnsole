@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 
@@ -28,7 +29,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
   final Set<String> _busyProviders = <String>{};
   final Map<String, String> _results = <String, String>{};
   final TextEditingController _search = TextEditingController();
-  String _pricingProvider = 'bfl';
+  String _pricingProvider = 'all';
   bool _createReadyOnly = false;
 
   @override
@@ -141,7 +142,9 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
               onProviderChanged: (value) => setState(() {
                 _pricingProvider = value;
                 _createReadyOnly = value == 'atlas';
-                unawaited(widget.controller.refreshProviderModels(value));
+                if (value != 'all') {
+                  unawaited(widget.controller.refreshProviderModels(value));
+                }
               }),
               onSearchChanged: (_) => setState(() {}),
               onCreateReadyChanged: (value) =>
@@ -399,17 +402,40 @@ class _PricingTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final provider = providerById(providerId);
     final query = searchController.text.trim().toLowerCase();
-    final models = (controller.providerPrices[providerId] ?? const [])
-        .where(
-          (model) =>
-              (!createReadyOnly || model.createReady) &&
-              (query.isEmpty ||
-                  model.label.toLowerCase().contains(query) ||
-                  model.model.toLowerCase().contains(query)),
-        )
-        .toList();
+    final models =
+        (providerId == 'all'
+                ? controller.providers.expand(
+                    (provider) =>
+                        controller.providerPrices[provider.id] ??
+                        const <ProviderModelPrice>[],
+                  )
+                : controller.providerPrices[providerId] ??
+                      const <ProviderModelPrice>[])
+            .where(
+              (model) =>
+                  (!createReadyOnly || model.createReady) &&
+                  (query.isEmpty ||
+                      model.label.toLowerCase().contains(query) ||
+                      model.model.toLowerCase().contains(query) ||
+                      model.canonicalId.toLowerCase().contains(query) ||
+                      providerById(
+                        model.provider,
+                      ).name.toLowerCase().contains(query)),
+            )
+            .toList()
+          ..sort((left, right) {
+            final canonical = left.canonicalId.compareTo(right.canonicalId);
+            if (canonical != 0) return canonical;
+            final provider = providerById(
+              left.provider,
+            ).name.compareTo(providerById(right.provider).name);
+            if (provider != 0) return provider;
+            return left.label.compareTo(right.label);
+          });
+    final pricingDescription = providerId == 'all'
+        ? 'Canonical model identities align equivalent routes across providers. Quotes remain route-specific; observed costs use saved generations.'
+        : '${providerById(providerId).pricingSource}. Estimates are USD and references use the provider’s reference rate when it differs.';
     return SurfaceCard(
       padding: EdgeInsets.zero,
       child: Column(
@@ -426,7 +452,7 @@ class _PricingTable extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${provider.pricingSource}. Estimates are USD and references use the provider’s reference rate when it differs.',
+                  pricingDescription,
                   style: TextStyle(
                     color: context.colors.onSurfaceVariant,
                     fontSize: 12,
@@ -438,19 +464,27 @@ class _PricingTable extends StatelessWidget {
                   runSpacing: 10,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: <Widget>[
-                    SegmentedButton<String>(
-                      segments: controller.providers
-                          .where((item) => item.requiresApiKey)
-                          .map(
-                            (item) => ButtonSegment<String>(
-                              value: item.id,
-                              label: Text(item.shortName),
-                            ),
-                          )
-                          .toList(),
-                      selected: <String>{providerId},
-                      onSelectionChanged: (value) =>
-                          onProviderChanged(value.single),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SegmentedButton<String>(
+                        segments: <ButtonSegment<String>>[
+                          const ButtonSegment<String>(
+                            value: 'all',
+                            label: Text('Compare'),
+                          ),
+                          ...controller.providers
+                              .where((item) => item.requiresApiKey)
+                              .map(
+                                (item) => ButtonSegment<String>(
+                                  value: item.id,
+                                  label: Text(item.shortName),
+                                ),
+                              ),
+                        ],
+                        selected: <String>{providerId},
+                        onSelectionChanged: (value) =>
+                            onProviderChanged(value.single),
+                      ),
                     ),
                     SizedBox(
                       width: 280,
@@ -489,17 +523,26 @@ class _PricingTable extends StatelessWidget {
                 dataRowMinHeight: 52,
                 dataRowMaxHeight: 64,
                 columns: const <DataColumn>[
+                  DataColumn(label: Text('Provider')),
                   DataColumn(label: Text('Model')),
+                  DataColumn(label: Text('Canonical model')),
                   DataColumn(label: Text('Modes')),
                   DataColumn(numeric: true, label: Text('10 sec')),
                   DataColumn(numeric: true, label: Text('15 sec')),
                   DataColumn(numeric: true, label: Text('20 sec')),
                   DataColumn(numeric: true, label: Text('30 sec')),
                   DataColumn(numeric: true, label: Text('10 sec + refs')),
+                  DataColumn(numeric: true, label: Text('Observed')),
+                  DataColumn(numeric: true, label: Text('vs quote')),
                 ],
                 rows: models.map((model) {
+                  final observation = routeCostObservation(
+                    model,
+                    controller.generations,
+                  );
                   return DataRow(
                     cells: <DataCell>[
+                      DataCell(Text(providerById(model.provider).shortName)),
                       DataCell(
                         SizedBox(
                           width: 285,
@@ -528,6 +571,7 @@ class _PricingTable extends StatelessWidget {
                           ),
                         ),
                       ),
+                      DataCell(Text(model.canonicalId)),
                       DataCell(
                         Text(
                           model.modes.isEmpty
@@ -551,6 +595,20 @@ class _PricingTable extends StatelessWidget {
                                   !model.hasPriceFor(10)
                               ? '—'
                               : _usd(model.priceFor(10, withReferences: true)),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          observation == null
+                              ? '—'
+                              : '${_usd(observation.realizedUsd)} · ${observation.sampleCount}×',
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          observation?.variancePercent == null
+                              ? '—'
+                              : '${observation!.variancePercent! >= 0 ? '+' : ''}${observation.variancePercent!.toStringAsFixed(1)}%',
                         ),
                       ),
                     ],

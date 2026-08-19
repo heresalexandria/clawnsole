@@ -77,6 +77,154 @@ CreditEstimate estimateCredits(
 
 double creditsToUsd(double credits) => credits * bflUsdPerCredit;
 
+double providerUnitsToUsd(String billingUnit, double value) =>
+    billingUnit == 'usd' ? value : creditsToUsd(value);
+
+double usdToProviderUnits(String billingUnit, double value) =>
+    billingUnit == 'usd' ? value : value / bflUsdPerCredit;
+
+double? providerCostFromPayload(Object? payload, [int depth = 0]) {
+  if (payload is! Map<Object?, Object?> || depth > 3) return null;
+  for (final key in const <String>[
+    'actual_cost',
+    'realized_cost',
+    'charged_amount',
+    'cost_in_credits',
+    'credits_used',
+    'cost',
+    'price',
+  ]) {
+    final raw = payload[key];
+    final value = raw is num ? raw.toDouble() : double.tryParse('$raw');
+    if (value != null && value.isFinite && value >= 0) return value;
+  }
+  for (final key in const <String>['billing', 'usage', 'data', 'state']) {
+    final nested = providerCostFromPayload(payload[key], depth + 1);
+    if (nested != null) return nested;
+  }
+  return null;
+}
+
+double? recordedRealizedCostUsd(Generation generation) {
+  final realized = generation.realizedCostUsd;
+  if (realized != null) return realized;
+  final legacy = generation.cost;
+  return legacy == null
+      ? null
+      : providerUnitsToUsd(generation.billingUnit, legacy);
+}
+
+class ResolvedProviderCost {
+  const ResolvedProviderCost({this.providerUnits, this.usd, this.source});
+
+  final double? providerUnits;
+  final double? usd;
+  final String? source;
+}
+
+ResolvedProviderCost resolveProviderCost(
+  Generation generation,
+  Object? payload, {
+  double? balanceAfter,
+  bool allowDeterministicQuote = false,
+}) {
+  final reported = providerCostFromPayload(payload);
+  final before = generation.creditsBefore;
+  final balanceDelta = before != null && balanceAfter != null
+      ? before - balanceAfter
+      : null;
+  final measured = balanceDelta != null && balanceDelta > .0000001
+      ? balanceDelta
+      : null;
+  final providerUnits = reported ?? measured ?? generation.cost;
+  final existingUsd = generation.realizedCostUsd;
+  if (providerUnits != null) {
+    return ResolvedProviderCost(
+      providerUnits: providerUnits,
+      usd:
+          existingUsd ??
+          providerUnitsToUsd(generation.billingUnit, providerUnits),
+      source:
+          generation.realizedCostSource ??
+          (reported != null
+              ? 'provider-reported'
+              : measured != null
+              ? 'balance-delta'
+              : 'legacy-provider-charge'),
+    );
+  }
+  final minimum = generation.quotedCostUsdMin;
+  final maximum = generation.quotedCostUsdMax;
+  if (allowDeterministicQuote &&
+      minimum != null &&
+      maximum != null &&
+      (minimum - maximum).abs() < .0000001) {
+    return ResolvedProviderCost(
+      providerUnits: usdToProviderUnits(generation.billingUnit, minimum),
+      usd: minimum,
+      source: 'deterministic-route-price',
+    );
+  }
+  return ResolvedProviderCost(
+    providerUnits: generation.cost,
+    usd: existingUsd,
+    source: generation.realizedCostSource,
+  );
+}
+
+class RouteCostObservation {
+  const RouteCostObservation({
+    required this.realizedUsd,
+    required this.sampleCount,
+    this.quotedUsd,
+  });
+
+  final double realizedUsd;
+  final double? quotedUsd;
+  final int sampleCount;
+
+  double? get variancePercent => quotedUsd == null || quotedUsd == 0
+      ? null
+      : (realizedUsd - quotedUsd!) / quotedUsd! * 100;
+}
+
+RouteCostObservation? routeCostObservation(
+  ProviderModelPrice route,
+  Iterable<Generation> history,
+) {
+  final matching = history.where((generation) {
+    if (generation.provider != route.provider) return false;
+    if (generation.model == route.model) return true;
+    if (!route.model.startsWith('${generation.model}:')) return false;
+    final routeTier = route.model.split(':').last.toLowerCase();
+    final generationTier = generation.config.draft
+        ? 'draft'
+        : switch (generation.config.resolution) {
+            'fhd' => route.provider == 'ltx' ? '1080p' : 'fhd',
+            'qhd' => '1440p',
+            '4k' => '4k',
+            _ => 'hd',
+          };
+    return routeTier == generationTier;
+  }).toList();
+  final realized = matching
+      .map(recordedRealizedCostUsd)
+      .whereType<double>()
+      .toList();
+  if (realized.isEmpty) return null;
+  final quotes = matching.expand((generation) {
+    final minimum = generation.quotedCostUsdMin;
+    final maximum = generation.quotedCostUsdMax;
+    if (minimum == null || maximum == null) return const <double>[];
+    return <double>[(minimum + maximum) / 2];
+  }).toList();
+  return RouteCostObservation(
+    realizedUsd: _median(realized),
+    quotedUsd: quotes.isEmpty ? null : _median(quotes),
+    sampleCount: realized.length,
+  );
+}
+
 ProviderModelPrice? _pricedModel(
   String modelId,
   GenerationConfig config,

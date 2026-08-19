@@ -112,6 +112,7 @@ class ArtCraftApi {
         ProviderModelPrice(
           provider: 'artcraft',
           model: id,
+          canonicalModelId: known?.canonicalId ?? id,
           label: item['full_name']?.toString() ?? known?.label ?? id,
           usdPerSecond: known?.usdPerSecond ?? 0,
           referenceUsdPerSecond: modes.contains(VideoMode.i2v)

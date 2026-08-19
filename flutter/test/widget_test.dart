@@ -381,7 +381,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 11);
+    expect(decoded.toJson()['schemaVersion'], 12);
   });
 
   test('persists folders and tags while removing a folder safely', () async {

@@ -376,6 +376,7 @@ class Generation {
     required this.updatedAt,
     this.provider = 'bfl',
     this.model = 'flux-3-video',
+    this.canonicalModelId,
     this.billingUnit = 'credits',
     this.outputKind = GenerationOutputKind.video,
     this.requestId,
@@ -392,6 +393,10 @@ class Generation {
     this.creditsBefore,
     this.creditsAfter,
     this.cost,
+    this.quotedCostUsdMin,
+    this.quotedCostUsdMax,
+    this.realizedCostUsd,
+    this.realizedCostSource,
     this.error,
     this.lastCheckedAt,
     this.statusCheckCount = 0,
@@ -407,6 +412,7 @@ class Generation {
   final String localId;
   final String provider;
   final String model;
+  final String? canonicalModelId;
   final String billingUnit;
   final GenerationOutputKind outputKind;
   final String? requestId;
@@ -429,6 +435,10 @@ class Generation {
   final double? creditsBefore;
   final double? creditsAfter;
   final double? cost;
+  final double? quotedCostUsdMin;
+  final double? quotedCostUsdMax;
+  final double? realizedCostUsd;
+  final String? realizedCostSource;
   final String? error;
   final DateTime? lastCheckedAt;
   final int statusCheckCount;
@@ -482,6 +492,7 @@ class Generation {
 
   Generation copyWith({
     GenerationConfig? config,
+    String? canonicalModelId,
     String? requestId,
     String? pollingUrl,
     String? status,
@@ -500,6 +511,10 @@ class Generation {
     double? creditsAfter,
     double? cost,
     bool clearCost = false,
+    double? quotedCostUsdMin,
+    double? quotedCostUsdMax,
+    double? realizedCostUsd,
+    String? realizedCostSource,
     String? error,
     bool clearError = false,
     DateTime? lastCheckedAt,
@@ -517,6 +532,7 @@ class Generation {
     localId: localId,
     provider: provider,
     model: model,
+    canonicalModelId: canonicalModelId ?? this.canonicalModelId,
     billingUnit: billingUnit,
     outputKind: outputKind,
     requestId: requestId ?? this.requestId,
@@ -539,6 +555,10 @@ class Generation {
     creditsBefore: creditsBefore ?? this.creditsBefore,
     creditsAfter: creditsAfter ?? this.creditsAfter,
     cost: clearCost ? null : cost ?? this.cost,
+    quotedCostUsdMin: quotedCostUsdMin ?? this.quotedCostUsdMin,
+    quotedCostUsdMax: quotedCostUsdMax ?? this.quotedCostUsdMax,
+    realizedCostUsd: realizedCostUsd ?? this.realizedCostUsd,
+    realizedCostSource: realizedCostSource ?? this.realizedCostSource,
     error: clearError ? null : error ?? this.error,
     lastCheckedAt: lastCheckedAt ?? this.lastCheckedAt,
     statusCheckCount: statusCheckCount ?? this.statusCheckCount,
@@ -560,6 +580,7 @@ class Generation {
     'localId': localId,
     'provider': provider,
     'model': model,
+    if (canonicalModelId != null) 'canonicalModelId': canonicalModelId,
     if (billingUnit != 'credits') 'billingUnit': billingUnit,
     if (outputKind != GenerationOutputKind.video) 'outputKind': outputKind.name,
     if (requestId != null) 'requestId': requestId,
@@ -583,6 +604,10 @@ class Generation {
     if (creditsBefore != null) 'creditsBefore': creditsBefore,
     if (creditsAfter != null) 'creditsAfter': creditsAfter,
     if (cost != null) 'cost': cost,
+    if (quotedCostUsdMin != null) 'quotedCostUsdMin': quotedCostUsdMin,
+    if (quotedCostUsdMax != null) 'quotedCostUsdMax': quotedCostUsdMax,
+    if (realizedCostUsd != null) 'realizedCostUsd': realizedCostUsd,
+    if (realizedCostSource != null) 'realizedCostSource': realizedCostSource,
     if (error != null) 'error': error,
     if (lastCheckedAt != null)
       'lastCheckedAt': lastCheckedAt!.toUtc().toIso8601String(),
@@ -606,6 +631,7 @@ class Generation {
     localId: json['localId'] as String? ?? '',
     provider: json['provider'] as String? ?? 'bfl',
     model: json['model'] as String? ?? 'flux-3-video',
+    canonicalModelId: json['canonicalModelId'] as String?,
     billingUnit: json['billingUnit'] as String? ?? 'credits',
     outputKind: json['outputKind'] == GenerationOutputKind.image.name
         ? GenerationOutputKind.image
@@ -646,6 +672,10 @@ class Generation {
     creditsBefore: (json['creditsBefore'] as num?)?.toDouble(),
     creditsAfter: (json['creditsAfter'] as num?)?.toDouble(),
     cost: (json['cost'] as num?)?.toDouble(),
+    quotedCostUsdMin: (json['quotedCostUsdMin'] as num?)?.toDouble(),
+    quotedCostUsdMax: (json['quotedCostUsdMax'] as num?)?.toDouble(),
+    realizedCostUsd: (json['realizedCostUsd'] as num?)?.toDouble(),
+    realizedCostSource: json['realizedCostSource'] as String?,
     error: json['error'] as String?,
     lastCheckedAt: DateTime.tryParse(json['lastCheckedAt'] as String? ?? ''),
     statusCheckCount: (json['statusCheckCount'] as num?)?.toInt() ?? 0,
@@ -774,7 +804,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 11,
+    'schemaVersion': 12,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
@@ -999,6 +1029,7 @@ class ProviderModelPrice {
     required this.label,
     required this.usdPerSecond,
     required this.modes,
+    this.canonicalModelId,
     this.referenceUsdPerSecond,
     this.source = 'published',
     this.createReady = true,
@@ -1013,6 +1044,7 @@ class ProviderModelPrice {
   final String provider;
   final String model;
   final String label;
+  final String? canonicalModelId;
   final double usdPerSecond;
   final double? referenceUsdPerSecond;
   final List<VideoMode> modes;
@@ -1024,6 +1056,8 @@ class ProviderModelPrice {
   final Map<int, double> durationPrices;
   final double? reference10SecondUsd;
   final String pricingUnit;
+
+  String get canonicalId => canonicalModelId ?? model;
 
   bool supportsDuration(int seconds) {
     if (minDuration == null || maxDuration == null) return true;
@@ -1052,6 +1086,7 @@ class ProviderModelPrice {
     'provider': provider,
     'model': model,
     'label': label,
+    if (canonicalModelId != null) 'canonicalModelId': canonicalModelId,
     'usdPerSecond': usdPerSecond,
     if (referenceUsdPerSecond != null)
       'referenceUsdPerSecond': referenceUsdPerSecond,
@@ -1076,6 +1111,7 @@ class ProviderModelPrice {
     provider: json['provider'] as String? ?? '',
     model: json['model'] as String? ?? '',
     label: json['label'] as String? ?? json['model'] as String? ?? '',
+    canonicalModelId: json['canonicalModelId'] as String?,
     usdPerSecond: (json['usdPerSecond'] as num?)?.toDouble() ?? 0,
     referenceUsdPerSecond: (json['referenceUsdPerSecond'] as num?)?.toDouble(),
     modes: (json['modes'] as List<Object?>? ?? const <Object?>[])

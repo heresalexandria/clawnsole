@@ -15,9 +15,11 @@ only desktop lifecycle, packaging, and self-update.
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
-- Live Atlas video catalog and no-charge request preflight, with published
-  provider pricing fallbacks
-- Provider-reported charges and before/after balances in generation history
+- Live Atlas video catalog and schema-aware routes for Seedance, Grok, Veo,
+  Wan, Kling, Vidu, PixVerse, Hailuo, and FLUX 3
+- Canonical model identities for cross-provider route and cost comparison
+- Exact Atlas route preflight where available, plus quoted-versus-realized
+  costs and before/after balances in generation history
 - Live polling, determinate/indeterminate progress, completed-video playback,
   draft enhancement, reuse, deletion, and device download
 - Uncapped compact history plus referenced local inputs/completed videos, storage
@@ -41,6 +43,8 @@ treating every image as a keyframe:
   extend tasks. Seedance 2.0 References variants expose 9 images, 3 videos, and
   3 audio clips (15 seconds total). Their Frames endpoints remain deliberately
   limited to first and optional last images.
+- Atlas routes outside Seedance map the shared form into each model family’s
+  published field names, resolution values, audio flags, and image inputs.
 
 Image, video, and audio references are ordered independently and retained as
 separate local assets. Provider upload adapters convert local media into the
@@ -196,5 +200,5 @@ flutter build web
 
 The implementation follows the official BFL, LTX, ArtCraft, and Atlas Cloud API,
 polling, model capability, and pricing documentation. Atlas models are read
-from its public catalog; 720p Create-ready costs use its calculate endpoint,
-with checked-in starting-rate fallbacks.
+from its public catalog; supported-duration Create-ready costs use exact route
+payloads with its calculate endpoint and checked-in starting-rate fallbacks.

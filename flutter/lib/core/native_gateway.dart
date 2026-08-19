@@ -519,6 +519,9 @@ class NativeGateway
       data.generations,
     );
     record = record.copyWith(
+      canonicalModelId:
+          record.canonicalModelId ??
+          canonicalModelIdFor(provider, record.model),
       estimatedCreditsMin:
           record.estimatedCreditsMin ??
           estimate.providerUnitsMinimum ??
@@ -528,6 +531,8 @@ class NativeGateway
           estimate.providerUnitsMaximum ??
           estimate.maximumUsd,
       estimateBasis: record.estimateBasis ?? estimate.basis,
+      quotedCostUsdMin: record.quotedCostUsdMin ?? estimate.minimumUsd,
+      quotedCostUsdMax: record.quotedCostUsdMax ?? estimate.maximumUsd,
       updatedAt: DateTime.now().toUtc(),
     );
     await _replaceGeneration(record);
@@ -552,8 +557,13 @@ class NativeGateway
           status: 502,
         );
       }
-      final cost = (response['cost'] as num?)?.toDouble();
       final liveAfter = await _balanceSafely(provider, key);
+      final realized = resolveProviderCost(
+        record,
+        response,
+        balanceAfter: liveAfter,
+      );
+      final cost = realized.providerUnits;
       final creditsAfter =
           liveAfter ??
           (creditsBefore != null && cost != null
@@ -566,6 +576,8 @@ class NativeGateway
         clearProgress: true,
         cost: cost,
         clearCost: cost == null,
+        realizedCostUsd: realized.usd,
+        realizedCostSource: realized.source,
         creditsBefore: creditsBefore,
         creditsAfter: creditsAfter,
         lastProviderStatusCode: 200,
@@ -656,6 +668,16 @@ class NativeGateway
         }
       }
       final failed = isGenerationFailureStatus(status);
+      final terminal = status == 'Ready' || failed;
+      final balanceAfter = terminal
+          ? await _balanceSafely(generation.provider, key)
+          : null;
+      final realized = resolveProviderCost(
+        generation,
+        payload,
+        balanceAfter: balanceAfter,
+        allowDeterministicQuote: status == 'Ready',
+      );
       next = generation.copyWith(
         status: status,
         progress: status == 'Ready'
@@ -670,6 +692,10 @@ class NativeGateway
             : null,
         error: failureMessage,
         clearError: !failed,
+        cost: realized.providerUnits,
+        realizedCostUsd: realized.usd,
+        realizedCostSource: realized.source,
+        creditsAfter: balanceAfter,
         lastCheckedAt: checkedAt,
         statusCheckCount: generation.statusCheckCount + 1,
         consecutiveCheckFailures: 0,

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import 'formatters.dart';
 import 'generation_video.dart';
@@ -1353,7 +1354,8 @@ class GenerationCost extends StatelessWidget {
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();
-    final exact = item.cost != null;
+    final realizedUsd = recordedRealizedCostUsd(item);
+    final exact = realizedUsd != null;
     final usesUsd = item.billingUnit == 'usd';
     final background = exact
         ? context.colors.primaryContainer
@@ -1380,7 +1382,7 @@ class GenerationCost extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  '${exact ? 'Provider charge' : 'Estimated'} · '
+                  '${exact ? 'Realized cost' : 'Estimated'} · '
                   '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
                   style: TextStyle(
                     fontSize: compact ? 11 : 12,
@@ -1409,6 +1411,21 @@ class GenerationCost extends StatelessWidget {
               usesUsd
                   ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
                   : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: foreground.withValues(alpha: .8),
+              ),
+            ),
+          ],
+          if (!compact &&
+              realizedUsd != null &&
+              item.quotedCostUsdMin != null &&
+              item.quotedCostUsdMax != null) ...<Widget>[
+            const SizedBox(height: 5),
+            Text(
+              'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
+              'realized ${formatUsdAmount(realizedUsd)}'
+              '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
               style: TextStyle(
                 fontSize: 10.5,
                 color: foreground.withValues(alpha: .8),
