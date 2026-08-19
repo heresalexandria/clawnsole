@@ -15,14 +15,17 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clawnsole-preview-dark.png">
-    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole Settings showing local data controls and the Made by Alexandria profile link">
+    <img src="docs/assets/clawnsole-preview.png" alt="Clawnsole Create screen with its machined duration knob, metal audio switch, console-key frame and finish tiles, and the hunter-green estimated-charge panel">
   </picture>
 </p>
 
 Clawnsole is a local-first Flutter video generation workspace with a premium,
-midcentury-inspired interface. Cloud video providers share one provider-neutral
-Create, Library, and References workflow. Generated work and saved reference
-media each have independent local folder hierarchies and reusable tags.
+midcentury-inspired interface — skeuomorphic console hardware included: a
+machined-steel duration knob, metal toggles that light hunter green, and
+recessed counter readouts, all drawn in code so every platform matches. Cloud
+video providers share one provider-neutral Create, Library, and References
+workflow. Generated work and saved reference media each have independent local
+folder hierarchies and reusable tags.
 
 ## iPhone
 

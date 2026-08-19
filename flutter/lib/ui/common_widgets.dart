@@ -549,6 +549,10 @@ class _ReferenceThumbState extends State<_ReferenceThumb> {
     final timing = frame.seconds == null
         ? ''
         : ' · at ${frame.seconds!.toStringAsFixed(frame.seconds! % 1 == 0 ? 0 : 1)} s';
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final ghostForeground = dark
+        ? ClawnsoleColors.creamMuted
+        : context.colors.onSurfaceVariant;
     return Tooltip(
       message: '${frame.role.label}$timing — tap to view',
       child: InkWell(
@@ -561,16 +565,14 @@ class _ReferenceThumbState extends State<_ReferenceThumb> {
           height: 44,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: ClawnsoleColors.plumInk,
+            color: dark
+                ? ClawnsoleColors.plumInk
+                : context.colors.surfaceContainer,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: context.colors.outlineVariant),
           ),
           child: _bytes == null
-              ? const Icon(
-                  Icons.image_outlined,
-                  size: 16,
-                  color: ClawnsoleColors.creamMuted,
-                )
+              ? Icon(Icons.image_outlined, size: 16, color: ghostForeground)
               : FutureBuilder<Uint8List>(
                   future: _bytes,
                   builder: (context, snapshot) => snapshot.hasData
@@ -584,7 +586,7 @@ class _ReferenceThumbState extends State<_ReferenceThumb> {
                               ? Icons.broken_image_outlined
                               : Icons.image_outlined,
                           size: 16,
-                          color: ClawnsoleColors.creamMuted,
+                          color: ghostForeground,
                         ),
                 ),
         ),
@@ -1322,25 +1324,25 @@ class _MediaPlaceholder extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => Container(
-    color: ClawnsoleColors.plumInk,
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, color: ClawnsoleColors.creamMuted, size: 28),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: ClawnsoleColors.creamMuted,
-              fontSize: 11.5,
-            ),
-          ),
-        ],
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final foreground = dark
+        ? ClawnsoleColors.creamMuted
+        : context.colors.onSurfaceVariant;
+    return Container(
+      color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, color: foreground, size: 28),
+            const SizedBox(height: 8),
+            Text(label, style: TextStyle(color: foreground, fontSize: 11.5)),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class GenerationCost extends StatelessWidget {

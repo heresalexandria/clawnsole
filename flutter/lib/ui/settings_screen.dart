@@ -464,130 +464,133 @@ class _SettingsSide extends StatelessWidget {
   final Future<bool> Function(String title, String detail) confirm;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      TexturePanel(
-        stitched: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            ClawMark(size: 30, color: context.tokens.panelBrass),
-            const SizedBox(height: 13),
-            Text(
-              'Room to stretch.',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                color: context.tokens.onPanel,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              controller.supportsGoogleDrive
-                  ? 'History and saved references follow your Drive connection. Retained media is pruned only when nothing else uses it.'
-                  : 'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
-              style: TextStyle(color: context.tokens.onPanelMuted),
-            ),
-            if (controller.gateway.usesCompanion) ...<Widget>[
+  Widget build(BuildContext context) {
+    final ink = PanelSurface.plumLeather.ink(context.tokens);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        TexturePanel(
+          stitched: true,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              ClawMark(size: 30, color: ink.accent),
               const SizedBox(height: 13),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .07),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  'WEB MODE · Local companion active. No localStorage or IndexedDB history is used.',
-                  style: TextStyle(
-                    color: context.tokens.panelBrass,
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: .4,
-                    height: 1.4,
+              Text(
+                'Room to stretch.',
+                style: Theme.of(
+                  context,
+                ).textTheme.headlineMedium?.copyWith(color: ink.on),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                controller.supportsGoogleDrive
+                    ? 'History and saved references follow your Drive connection. Retained media is pruned only when nothing else uses it.'
+                    : 'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
+                style: TextStyle(color: ink.onMuted),
+              ),
+              if (controller.gateway.usesCompanion) ...<Widget>[
+                const SizedBox(height: 13),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: ink.on.withValues(alpha: .07),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'WEB MODE · Local companion active. No localStorage or IndexedDB history is used.',
+                    style: TextStyle(
+                      color: ink.accent,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: .4,
+                      height: 1.4,
+                    ),
                   ),
                 ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 15),
+        SurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                controller.supportsGoogleDrive
+                    ? 'Clear Clawnsole data'
+                    : 'Clear local data',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                controller.supportsGoogleDrive
+                    ? 'History, preferences, and assets update in the connected Drive folder. API keys remain device-only.'
+                    : 'These actions update only Clawnsole data on this device.',
+              ),
+              const SizedBox(height: 12),
+              _ClearButton(
+                icon: Icons.delete_sweep_outlined,
+                title: 'Clear history',
+                subtitle: 'Generation records and unshared media',
+                onTap: () async {
+                  if (await confirm(
+                    'Clear generation history?',
+                    'This keeps saved references, their folders and tags, your API keys, and preferences.',
+                  )) {
+                    await controller.clearHistory();
+                  }
+                },
+              ),
+              _ClearButton(
+                icon: Icons.restart_alt_rounded,
+                title: 'Reset preferences',
+                subtitle: 'Navigation and filter state',
+                onTap: controller.clearPreferences,
+              ),
+              _ClearButton(
+                icon: Icons.warning_amber_rounded,
+                title: controller.supportsGoogleDrive
+                    ? 'Delete all Clawnsole data'
+                    : 'Delete all local data',
+                subtitle:
+                    'History, saved references, assets, preferences, and device API keys',
+                danger: true,
+                onTap: () async {
+                  if (await confirm(
+                    controller.supportsGoogleDrive
+                        ? 'Delete all Clawnsole data?'
+                        : 'Delete all local data?',
+                    controller.supportsGoogleDrive
+                        ? 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus API keys in this browser.'
+                        : 'This permanently removes the Flutter app’s local JSON file.',
+                  )) {
+                    await controller.clearAll();
+                  }
+                },
               ),
             ],
-          ],
+          ),
         ),
-      ),
-      const SizedBox(height: 15),
-      SurfaceCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text(
-              controller.supportsGoogleDrive
-                  ? 'Clear Clawnsole data'
-                  : 'Clear local data',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 5),
-            Text(
-              controller.supportsGoogleDrive
-                  ? 'History, preferences, and assets update in the connected Drive folder. API keys remain device-only.'
-                  : 'These actions update only Clawnsole data on this device.',
-            ),
-            const SizedBox(height: 12),
-            _ClearButton(
-              icon: Icons.delete_sweep_outlined,
-              title: 'Clear history',
-              subtitle: 'Generation records and unshared media',
-              onTap: () async {
-                if (await confirm(
-                  'Clear generation history?',
-                  'This keeps saved references, their folders and tags, your API keys, and preferences.',
-                )) {
-                  await controller.clearHistory();
-                }
-              },
-            ),
-            _ClearButton(
-              icon: Icons.restart_alt_rounded,
-              title: 'Reset preferences',
-              subtitle: 'Navigation and filter state',
-              onTap: controller.clearPreferences,
-            ),
-            _ClearButton(
-              icon: Icons.warning_amber_rounded,
-              title: controller.supportsGoogleDrive
-                  ? 'Delete all Clawnsole data'
-                  : 'Delete all local data',
-              subtitle:
-                  'History, saved references, assets, preferences, and device API keys',
-              danger: true,
-              onTap: () async {
-                if (await confirm(
-                  controller.supportsGoogleDrive
-                      ? 'Delete all Clawnsole data?'
-                      : 'Delete all local data?',
-                  controller.supportsGoogleDrive
-                      ? 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus API keys in this browser.'
-                      : 'This permanently removes the Flutter app’s local JSON file.',
-                )) {
-                  await controller.clearAll();
-                }
-              },
-            ),
-          ],
+        const SizedBox(height: 15),
+        OutlinedButton.icon(
+          onPressed: () => unawaited(launchUrl(Uri.parse(bflProvider.docsUrl))),
+          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+          label: const Text('FLUX 3 documentation'),
         ),
-      ),
-      const SizedBox(height: 15),
-      OutlinedButton.icon(
-        onPressed: () => unawaited(launchUrl(Uri.parse(bflProvider.docsUrl))),
-        icon: const Icon(Icons.open_in_new_rounded, size: 16),
-        label: const Text('FLUX 3 documentation'),
-      ),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-        onPressed: () =>
-            unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
-        icon: const Icon(Icons.privacy_tip_outlined, size: 16),
-        label: const Text('Privacy policy'),
-      ),
-      const SizedBox(height: 15),
-      const _CreatorCard(),
-    ],
-  );
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () =>
+              unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
+          icon: const Icon(Icons.privacy_tip_outlined, size: 16),
+          label: const Text('Privacy policy'),
+        ),
+        const SizedBox(height: 15),
+        const _CreatorCard(),
+      ],
+    );
+  }
 }
 
 class _CreatorCard extends StatelessWidget {
