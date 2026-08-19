@@ -4,7 +4,7 @@
 
 <h1 align="center">Clawnsole</h1>
 
-<p align="center"><em>Local BYO key studio for AI video generation</em></p>
+<p align="center"><em>One AI video studio, across providers and devices</em></p>
 
 <p align="center">
   <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"><strong>Download the latest macOS build (Apple silicon)</strong></a>
@@ -19,13 +19,13 @@
   </picture>
 </p>
 
-Clawnsole is a local-first Flutter video generation workspace with a premium,
-midcentury-inspired interface — skeuomorphic console hardware included: a
-machined-steel duration knob, metal toggles that light hunter green, and
-recessed counter readouts, all drawn in code so every platform matches. Cloud
-video providers share one provider-neutral Create, Library, and References
-workflow. Generated work and saved reference media each have independent local
-folder hierarchies and reusable tags.
+Clawnsole is a unified Flutter workspace for generating AI video across
+providers and devices. Its premium, midcentury-inspired interface includes
+skeuomorphic console hardware: a machined-steel duration knob, metal toggles
+that light hunter green, and recessed counter readouts, all drawn in code so
+every platform matches. Cloud video providers share one provider-neutral
+Create, Library, and References workflow, while project folders, reusable tags,
+and optional Google Drive sync keep work organized wherever you create.
 
 ## iPhone
 
@@ -60,8 +60,9 @@ folder hierarchies and reusable tags.
   discovery, canonical cross-provider model matching, observed quote variance,
   and route-aware 10/15/20/30-second USD comparisons
 
-## One product, five targets
+## One studio, every screen
 
+The same Clawnsole workflow runs on web, iOS, Android, macOS, and Windows.
 Flutter owns all product behavior, including the native Windows app. Electron
 is only the macOS lifecycle and self-update shell around Flutter's web build and
 local Dart companion. The old root Next.js implementation has been removed.
@@ -160,8 +161,8 @@ See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 ## Privacy and support
 
 Read the [privacy policy](PRIVACY.md), the [terms of use](TERMS.md), or their
-public web versions at [Privacy](https://heresalexandria.github.io/clawnsole/privacy/)
-and [Terms](https://heresalexandria.github.io/clawnsole/tos/). Use the
+public web versions at [Privacy](https://clawnsole.app/privacy/) and
+[Terms](https://clawnsole.app/tos/). Use the
 [issue tracker](https://github.com/heresalexandria/clawnsole/issues) for support.
 Do not post API keys, private prompts, or personal media in a public issue.
 

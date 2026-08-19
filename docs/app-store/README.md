@@ -11,7 +11,7 @@ history, prompt, or private media.
   - `03-library.png`: clean, device-local library
 - `ipad/`: 2048 x 2732 pixels (iPad 12.9-inch or 13-inch display, iPad Pro
   12.9-inch simulator)
-  - `01-create.png`: the full LTX creation console — knob slider, hardware
+  - `01-create.png`: the full LTX creation console with knob slider, hardware
     switch, console keys, and estimated-charge panel in one view
   - `02-providers-dark.png`: provider keys and cost desk in dark mode
   - `03-library-dark.png`: clean, device-local library in dark mode
