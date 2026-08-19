@@ -16,9 +16,6 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B5742D824825911D63BD5186 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1E141ACD20AC99140EE60F2 /* Pods_Runner.framework */; };
-		A11E00000000000000000001 /* AppleLocalGenerationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */; };
-		A11E00000000000000000003 /* ClawnsoleAppleLocal in Frameworks */ = {isa = PBXBuildFile; productRef = A11E00000000000000000004 /* ClawnsoleAppleLocal */; };
-		A11E00000000000000000006 /* ClawnsoleAppleLocal in Frameworks */ = {isa = PBXBuildFile; productRef = A11E00000000000000000004 /* ClawnsoleAppleLocal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,7 +65,6 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		BD58966DD69456D5134E6AC3 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		F1E141ACD20AC99140EE60F2 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
-		A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLocalGenerationPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,7 +72,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11E00000000000000000003 /* ClawnsoleAppleLocal in Frameworks */,
 				B5742D824825911D63BD5186 /* Pods_Runner.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -85,7 +80,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11E00000000000000000006 /* ClawnsoleAppleLocal in Frameworks */,
 				8593F7D4088A786F8A899914 /* Pods_RunnerTests.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -143,7 +137,6 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
-				A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -191,7 +184,6 @@
 			);
 			name = RunnerTests;
 			packageProductDependencies = (
-				A11E00000000000000000004 /* ClawnsoleAppleLocal */,
 			);
 			productName = RunnerTests;
 			productReference = 331C8081294A63A400263BE5 /* RunnerTests.xctest */;
@@ -216,7 +208,6 @@
 			);
 			name = Runner;
 			packageProductDependencies = (
-				A11E00000000000000000004 /* ClawnsoleAppleLocal */,
 			);
 			productName = Runner;
 			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
@@ -252,7 +243,6 @@
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
 			packageReferences = (
-				A11E00000000000000000005 /* XCLocalSwiftPackageReference "../../apple_local" */,
 			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
@@ -393,7 +383,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A11E00000000000000000001 /* AppleLocalGenerationPlugin.swift in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
@@ -427,21 +416,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		A11E00000000000000000005 /* XCLocalSwiftPackageReference "../../apple_local" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../apple_local;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A11E00000000000000000004 /* ClawnsoleAppleLocal */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A11E00000000000000000005 /* XCLocalSwiftPackageReference "../../apple_local" */;
-			productName = ClawnsoleAppleLocal;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		249021D3217E4FDB00AE95B9 /* Profile */ = {

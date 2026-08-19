@@ -43,12 +43,6 @@ fi
 cd "$REPOSITORY_ROOT"
 CLAWNSOLE_PROXY_URL= "$FLUTTER_DIRECTORY/scripts/build_web"
 ARCHITECTURE="${CLAWNSOLE_ELECTRON_ARCH:-$(uname -m)}"
-if [[ "$ARCHITECTURE" != "x64" && "$ARCHITECTURE" != "x86_64" ]]; then
-  "$REPOSITORY_ROOT/apple_local/scripts/build_macos"
-  export CLAWNSOLE_INCLUDE_APPLE_LOCAL=true
-else
-  export CLAWNSOLE_INCLUDE_APPLE_LOCAL=false
-fi
 node "$ELECTRON_DIRECTORY/scripts/prepare-renderer.mjs"
 "$ELECTRON_DIRECTORY/scripts/prepare_icon"
 

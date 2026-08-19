@@ -5,7 +5,6 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/bfl_api.dart';
-import 'package:clawnsole/core/apple_local_runtime.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/local_data_store.dart';
@@ -529,74 +528,122 @@ void main() {
     expect((await gateway.load()).hasApiKey, isFalse);
   });
 
+  test('does not advertise retired Apple Local generation on iOS', () async {
+    final store = _MemoryLocalDataStore();
+    final gateway = NativeGateway(store: store, isIos: true);
+
+    final snapshot = await gateway.load();
+
+    expect(snapshot.preferences.provider, 'bfl');
+    expect(snapshot.availableProviders, isNot(contains('apple-local')));
+    expect(snapshot.connectedProviders, isNot(contains('apple-local')));
+    expect(store.data.apiKey, isEmpty);
+  });
+
+  test('rejects legacy Apple Local submissions without a runtime', () async {
+    final gateway = NativeGateway(store: _MemoryLocalDataStore(), isIos: true);
+    final now = DateTime.utc(2026, 8, 19);
+    final image = Generation(
+      localId: 'retired-image',
+      provider: 'apple-local',
+      model: 'apple-local-image',
+      billingUnit: 'local',
+      outputKind: GenerationOutputKind.image,
+      status: 'submitting',
+      prompt: 'A painted lighthouse',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '1:1',
+        duration: 1,
+        resolution: 'hd',
+        generateAudio: false,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    await expectLater(
+      gateway.submit(
+        GenerationSubmission(record: image, input: const <String, Object?>{}),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('retired'),
+        ),
+      ),
+    );
+  });
+
   test(
-    'uses Apple Local as the keyless default on a fresh iOS device',
+    'retires active Apple Local jobs without deleting saved media',
     () async {
-      final store = _MemoryLocalDataStore();
-      final gateway = NativeGateway(
-        store: store,
-        appleLocalRuntime: _MemoryAppleLocalRuntime(),
-        isIos: true,
-      );
-
-      final snapshot = await gateway.load();
-
-      expect(snapshot.preferences.provider, 'apple-local');
-      expect(snapshot.preferences.model, 'apple-local-image');
-      expect(snapshot.hasApiKeyFor('apple-local'), isTrue);
-      expect(snapshot.availableProviders, contains('apple-local'));
-      expect(store.data.apiKey, isEmpty);
-    },
-  );
-
-  test(
-    'rejects retired Apple Local animation before calling the runtime',
-    () async {
-      final runtime = _MemoryAppleLocalRuntime();
-      final gateway = NativeGateway(
-        store: _MemoryLocalDataStore(),
-        appleLocalRuntime: runtime,
-        isIos: true,
-      );
       final now = DateTime.utc(2026, 8, 19);
-      final animation = Generation(
-        localId: 'retired-animation',
-        provider: 'apple-local',
-        model: 'apple-local-animation',
-        billingUnit: 'local',
-        outputKind: GenerationOutputKind.video,
-        status: 'submitting',
-        prompt: 'A fox waves',
-        mode: VideoMode.t2v,
-        config: const GenerationConfig(
-          aspectRatio: '16:9',
-          duration: 2,
-          resolution: 'hd',
-          generateAudio: false,
-          safetyTolerance: 2,
-          draft: false,
-          frameRate: 3,
+      const savedImage = AssetReference(
+        kind: 'local',
+        value: 'saved-apple-image',
+        label: 'saved.png',
+        contentType: 'image/png',
+      );
+      final store = _MemoryLocalDataStore(
+        StoredData(
+          generations: <Generation>[
+            Generation(
+              localId: 'pending-apple-image',
+              provider: 'apple-local',
+              model: 'apple-local-image',
+              billingUnit: 'local',
+              outputKind: GenerationOutputKind.image,
+              status: 'Pending',
+              prompt: 'A pending image',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: '1:1',
+                duration: 1,
+                resolution: 'hd',
+                generateAudio: false,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ),
+            Generation(
+              localId: 'saved-apple-image',
+              provider: 'apple-local',
+              model: 'apple-local-image',
+              billingUnit: 'local',
+              outputKind: GenerationOutputKind.image,
+              status: 'Ready',
+              prompt: 'A saved image',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: '1:1',
+                duration: 1,
+                resolution: 'hd',
+                generateAudio: false,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: now,
+              updatedAt: now,
+              resultAsset: savedImage,
+            ),
+          ],
         ),
-        createdAt: now,
-        updatedAt: now,
       );
 
-      await expectLater(
-        gateway.submit(
-          GenerationSubmission(
-            record: animation,
-            input: const <String, Object?>{},
-          ),
-        ),
-        throwsA(
-          isA<StateError>().having(
-            (error) => error.message,
-            'message',
-            contains('no longer available'),
-          ),
-        ),
-      );
-      expect(runtime.submitCount, 0);
+      final snapshot = await NativeGateway(store: store, isIos: true).load();
+
+      final pending = snapshot.generations.first;
+      expect(pending.status, 'Error');
+      expect(pending.error, contains('retired'));
+      final saved = snapshot.generations.last;
+      expect(saved.status, 'Ready');
+      expect(saved.resultAsset, savedImage);
     },
   );
 
@@ -1346,28 +1393,6 @@ class _MemoryLocalDataStore extends LocalDataStore {
     bytes: data.encode().length,
     records: records,
   );
-}
-
-class _MemoryAppleLocalRuntime implements AppleLocalRuntime {
-  int submitCount = 0;
-
-  @override
-  Future<bool> isAvailable() async => true;
-
-  @override
-  Future<Map<String, Object?>> poll(String jobId) async => <String, Object?>{
-    'status': 'Pending',
-    'progress': 10,
-  };
-
-  @override
-  Future<Map<String, Object?>> submit(Map<String, Object?> request) async {
-    submitCount += 1;
-    return <String, Object?>{
-      'jobId': request['requestId'],
-      'status': 'Pending',
-    };
-  }
 }
 
 class _RejectedCreditsApi extends BflApi {

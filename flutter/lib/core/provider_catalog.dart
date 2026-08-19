@@ -169,45 +169,6 @@ const _artCraftGrokRatios = <String>[
 const _artCraftKlingRatios = <String>['16:9', '1:1', '9:16'];
 const _artCraftVeoRatios = <String>['auto', '16:9', '9:16'];
 const _artCraftViduRatios = <String>['16:9', '9:16', '4:3', '3:4', '1:1'];
-const _localRatios = <String>['16:9', '4:3', '1:1', '3:4', '9:16'];
-const _local512 = VideoResolutionDefinition(
-  'hd',
-  'Standard',
-  '512 px long edge',
-);
-const _local768 = VideoResolutionDefinition('fhd', 'Large', '768 px long edge');
-
-const appleLocalProvider = VideoProviderDefinition(
-  id: 'apple-local',
-  name: 'Apple Local',
-  shortName: 'Local',
-  description:
-      'Keyless still-image creation through Apple Intelligence on this device.',
-  consoleUrl: '',
-  docsUrl: 'https://developer.apple.com/documentation/imageplayground',
-  pricingUrl: '',
-  pricingSource: 'Apple system service · no provider charge',
-  requiresApiKey: false,
-  isLocal: true,
-  models: <VideoModelDefinition>[
-    VideoModelDefinition(
-      id: 'apple-local-image',
-      label: 'Local Image',
-      description: 'One still image generated with Apple Image Playground.',
-      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
-      aspectRatios: _localRatios,
-      resolutions: <VideoResolutionDefinition>[_local512, _local768],
-      minDuration: 1,
-      maxDuration: 1,
-      durationStep: 1,
-      maxKeyframes: 1,
-      usdPerSecond: 0,
-      supportsAudio: false,
-      outputKind: GenerationOutputKind.image,
-    ),
-  ],
-);
-
 const bflProvider = VideoProviderDefinition(
   id: 'bfl',
   name: 'Black Forest Labs',
@@ -751,7 +712,6 @@ const atlasProvider = VideoProviderDefinition(
 );
 
 const videoProviders = <VideoProviderDefinition>[
-  appleLocalProvider,
   bflProvider,
   ltxProvider,
   artCraftProvider,
@@ -762,6 +722,9 @@ VideoProviderDefinition providerById(String id) => videoProviders.firstWhere(
   (provider) => provider.id == id,
   orElse: () => bflProvider,
 );
+
+String providerShortNameForHistory(String id) =>
+    id == 'apple-local' ? 'Apple Local · Retired' : providerById(id).shortName;
 
 VideoModelDefinition modelById(String providerId, String modelId) {
   final provider = providerById(providerId);
