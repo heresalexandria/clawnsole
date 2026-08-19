@@ -30,6 +30,13 @@ function isAllowedAppUrl(value, rendererOrigin) {
   return Boolean(candidate && origin && candidate.origin === origin.origin);
 }
 
+function isAllowedRendererPermission(permission, requestingUrl, rendererOrigin) {
+  return (
+    permission === "clipboard-sanitized-write"
+    && isAllowedAppUrl(requestingUrl, rendererOrigin)
+  );
+}
+
 function isAllowedExternalUrl(value) {
   const candidate = parseUrl(value);
   return Boolean(
@@ -84,5 +91,6 @@ module.exports = {
   findOpenPort,
   isAllowedAppUrl,
   isAllowedExternalUrl,
+  isAllowedRendererPermission,
   waitForServer,
 };

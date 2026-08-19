@@ -14,6 +14,7 @@ const {
   findOpenPort,
   isAllowedAppUrl,
   isAllowedExternalUrl,
+  isAllowedRendererPermission,
   waitForServer,
 } = require("./lib/runtime.cjs");
 const updater = require("./lib/updater.cjs");
@@ -332,10 +333,21 @@ async function startApplication() {
       defaultPath: item.getFilename(),
     });
   });
-  session.defaultSession.setPermissionCheckHandler(() => false);
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false);
-  });
+  session.defaultSession.setPermissionCheckHandler(
+    (_webContents, permission, requestingOrigin) =>
+      isAllowedRendererPermission(permission, requestingOrigin, rendererUrl),
+  );
+  session.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback, details) => {
+      callback(
+        isAllowedRendererPermission(
+          permission,
+          details.requestingUrl,
+          rendererUrl,
+        ),
+      );
+    },
+  );
 
   rendererUrl = app.isPackaged ? await startBundledRenderer() : DEVELOPMENT_URL;
   if (!app.isPackaged) await waitForServer(rendererUrl, { timeoutMs: 60_000 });

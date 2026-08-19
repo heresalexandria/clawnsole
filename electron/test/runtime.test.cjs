@@ -4,6 +4,7 @@ const {
   findOpenPort,
   isAllowedAppUrl,
   isAllowedExternalUrl,
+  isAllowedRendererPermission,
 } = require("../lib/runtime.cjs");
 
 test("app navigation stays on the active local renderer origin", () => {
@@ -12,6 +13,38 @@ test("app navigation stays on the active local renderer origin", () => {
   assert.equal(isAllowedAppUrl("http://127.0.0.1:43124", origin), false);
   assert.equal(isAllowedAppUrl("https://bfl.ai", origin), false);
   assert.equal(isAllowedAppUrl("not a URL", origin), false);
+});
+
+test("the local renderer may write text to the clipboard", () => {
+  const origin = "http://127.0.0.1:43123";
+  assert.equal(
+    isAllowedRendererPermission(
+      "clipboard-sanitized-write",
+      `${origin}/#/library`,
+      origin,
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedRendererPermission("clipboard-read", origin, origin),
+    false,
+  );
+  assert.equal(
+    isAllowedRendererPermission(
+      "clipboard-sanitized-write",
+      "http://127.0.0.1:43124",
+      origin,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedRendererPermission(
+      "clipboard-sanitized-write",
+      "https://example.com",
+      origin,
+    ),
+    false,
+  );
 });
 
 test("external navigation is HTTPS-only and explicitly allowlisted", () => {
