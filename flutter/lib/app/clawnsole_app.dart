@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_version.dart';
 import '../core/models.dart';
@@ -10,6 +11,7 @@ import '../core/store_update.dart';
 import '../core/update_status.dart';
 import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
+import '../ui/formatters.dart';
 import '../ui/library_screen.dart';
 import '../ui/panels.dart';
 import '../ui/providers_screen.dart';
@@ -516,7 +518,7 @@ class _TopBar extends StatelessWidget {
             ],
           ),
         ),
-        _CreditsPill(controller: controller),
+        _CreditsPill(controller: controller, compact: compact),
         const SizedBox(width: 8),
         if (!compact) ...<Widget>[
           _KeyPill(controller: controller),
@@ -581,54 +583,88 @@ class _VersionChip extends StatelessWidget {
 }
 
 class _CreditsPill extends StatelessWidget {
-  const _CreditsPill({required this.controller});
+  const _CreditsPill({required this.controller, required this.compact});
 
   final AppController controller;
+  final bool compact;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: controller.hasApiKey
-        ? () => unawaited(controller.refreshCredits())
-        : () => unawaited(controller.navigate(AppSection.providers)),
-    borderRadius: BorderRadius.circular(999),
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      decoration: BoxDecoration(
-        color: controller.creditError == null
-            ? context.colors.surfaceContainerLow
-            : context.colors.errorContainer,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: context.colors.outlineVariant),
-      ),
-      child: Row(
-        children: <Widget>[
-          if (controller.refreshingCredits)
-            const SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            Icon(Icons.toll_rounded, size: 15, color: context.tokens.brass),
-          const SizedBox(width: 7),
-          Text(
-            _balanceText(controller),
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  String _balanceText(AppController controller) {
-    if (!controller.hasApiKey) return 'Add key';
+  Widget build(BuildContext context) {
     final account = controller.providerAccounts[controller.selectedProviderId];
+    final externalBalance =
+        controller.hasApiKey &&
+        account?.balance == null &&
+        account?.balanceLabel != null &&
+        controller.selectedProvider.consoleUrl.isNotEmpty;
+    final tooltip = !controller.hasApiKey
+        ? 'Add a ${controller.selectedProvider.name} API key'
+        : externalBalance
+        ? 'Open ${controller.selectedProvider.name} to view the balance'
+        : 'Refresh the ${controller.selectedProvider.name} balance';
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: !controller.hasApiKey
+            ? () => unawaited(controller.navigate(AppSection.providers))
+            : externalBalance
+            ? () => unawaited(
+                launchUrl(Uri.parse(controller.selectedProvider.consoleUrl)),
+              )
+            : () => unawaited(controller.refreshCredits()),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          decoration: BoxDecoration(
+            color: controller.creditError == null
+                ? context.colors.surfaceContainerLow
+                : context.colors.errorContainer,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: context.colors.outlineVariant),
+          ),
+          child: Row(
+            children: <Widget>[
+              if (controller.refreshingCredits)
+                const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(Icons.toll_rounded, size: 15, color: context.tokens.brass),
+              const SizedBox(width: 7),
+              Text(
+                _balanceText(controller, account),
+                key: const ValueKey<String>('selected-provider-balance'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _balanceText(
+    AppController controller,
+    ProviderAccountStatus? account,
+  ) {
+    if (!controller.hasApiKey) return 'Add key';
     if (account?.balance == null) {
+      if (account?.balanceLabel != null &&
+          controller.selectedProvider.consoleUrl.isNotEmpty) {
+        final provider = compact
+            ? controller.selectedProvider.shortName
+            : controller.selectedProvider.name;
+        return '$provider balance ↗';
+      }
       return '${controller.selectedProvider.shortName} connected';
     }
     if (account!.currency == 'credits') {
-      return '${account.balance!.toStringAsFixed(account.balance! % 1 == 0 ? 0 : 1)} cr';
+      return '${formatCredits(account.balance!)} cr';
     }
-    return '\$${account.balance!.toStringAsFixed(2)}';
+    return formatUsdAmount(account.balance!);
   }
 }
 

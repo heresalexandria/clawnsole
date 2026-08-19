@@ -462,24 +462,45 @@ void main() {
     expect(models.last.createReady, isFalse);
   });
 
-  test('ArtCraft reads the authenticated credit balance', () async {
+  test(
+    'ArtCraft accepts authenticated not-found as an API key probe',
+    () async {
+      final api = ArtCraftApi(
+        client: MockClient((request) async {
+          expect(request.url.path, '/v1/omni_api/job_status/job/None');
+          expect(request.headers['authorization'], 'Bearer secret');
+          return http.Response('{"success":false}', 404);
+        }),
+      );
+
+      final account = await api.verify('secret');
+      expect(account.provider, 'artcraft');
+      expect(account.balance, isNull);
+      expect(account.currency, 'credits');
+      expect(account.balanceLabel, 'Open ArtCraft to view balance ↗');
+    },
+  );
+
+  test('ArtCraft rejects an unauthorized API key probe', () async {
     final api = ArtCraftApi(
       client: MockClient((request) async {
-        expect(request.url.path, '/v1/credits/namespace/artcraft');
-        expect(request.headers['authorization'], 'Bearer secret');
-        return http.Response(
-          '{"success":true,"free_credits":5,"monthly_credits":20,'
-          '"banked_credits":100,"sum_total_credits":125}',
-          200,
-        );
+        expect(request.url.path, '/v1/omni_api/job_status/job/None');
+        return http.Response('{"success":false}', 401);
       }),
     );
 
-    final account = await api.verify('secret');
-    expect(account.provider, 'artcraft');
-    expect(account.balance, 125);
-    expect(account.currency, 'credits');
-    expect(account.balanceLabel, '125 credits available');
+    await expectLater(
+      api.verify('invalid'),
+      throwsA(
+        isA<ProviderException>()
+            .having((error) => error.status, 'status', 401)
+            .having(
+              (error) => error.message,
+              'message',
+              'ArtCraft rejected this API key.',
+            ),
+      ),
+    );
   });
 
   test('ArtCraft returns its exact resolution-aware cost quote', () async {

@@ -2305,6 +2305,70 @@ void main() {
     expect(gateway.snapshot.preferences.activeSection, AppSection.providers);
   });
 
+  testWidgets('top bar always identifies the selected provider balance', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final artcraftGateway = _ProviderMemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(
+          provider: 'artcraft',
+          model: 'seedance_2p0',
+        ),
+        hasApiKey: false,
+        connectedProviders: <String>{'artcraft'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      const ProviderAccountStatus(
+        provider: 'artcraft',
+        currency: 'credits',
+        balanceLabel: 'Open ArtCraft to view balance ↗',
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: artcraftGateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    final artcraftBalance = find.byKey(
+      const ValueKey<String>('selected-provider-balance'),
+    );
+    expect(artcraftBalance, findsOneWidget);
+    expect(tester.widget<Text>(artcraftBalance).data, 'Art balance ↗');
+    expect(find.byTooltip('Open ArtCraft to view the balance'), findsOneWidget);
+
+    final bflGateway = _ProviderMemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: true,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      const ProviderAccountStatus(
+        provider: 'bfl',
+        balance: 125,
+        currency: 'credits',
+      ),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: bflGateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('125 cr'), findsOneWidget);
+    expect(
+      find.byTooltip('Refresh the Black Forest Labs balance'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
     await tester.pumpWidget(const ClawnsoleApp(checkForUpdates: false));
     expect(find.text('Clawnsole'), findsWidgets);
@@ -2610,9 +2674,10 @@ class _MemoryGateway implements AppGateway {
 }
 
 class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
-  _ProviderMemoryGateway(super.snapshot);
+  _ProviderMemoryGateway(super.snapshot, [this.account]);
 
   final List<String> quotedResolutions = <String>[];
+  final ProviderAccountStatus? account;
 
   @override
   Future<CostEstimate?> quoteProviderCost(
@@ -2643,11 +2708,11 @@ class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
   Future<ProviderAccountStatus> verifyProviderKey(
     String provider, [
     String? candidate,
-  ]) async => ProviderAccountStatus(provider: provider);
+  ]) async => account ?? ProviderAccountStatus(provider: provider);
 
   @override
   Future<ProviderAccountStatus> getProviderAccount(String provider) async =>
-      ProviderAccountStatus(provider: provider);
+      account ?? ProviderAccountStatus(provider: provider);
 
   @override
   Future<LocalSnapshot> clearProviderApiKey(String provider) async => snapshot;

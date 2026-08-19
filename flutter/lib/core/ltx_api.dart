@@ -40,7 +40,7 @@ class LtxApi {
     }
     return const ProviderAccountStatus(
       provider: 'ltx',
-      balanceLabel: 'Connected · balance available in LTX Console',
+      balanceLabel: 'Open LTX Console to view balance ↗',
     );
   }
 
