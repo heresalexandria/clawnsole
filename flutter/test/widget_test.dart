@@ -328,7 +328,7 @@ void main() {
   });
 
   testWidgets(
-    'shows a particle video placeholder at the generation aspect ratio',
+    'shows the cyclone video placeholder at the generation aspect ratio',
     (tester) async {
       final now = DateTime.utc(2026, 8, 19, 12);
       final item = Generation(
@@ -365,7 +365,7 @@ void main() {
 
       expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
       expect(find.text('Saved generation'), findsNothing);
-      expect(find.text('RENDERING  •  42%'), findsOneWidget);
+      expect(find.text('RENDERING — 42%'), findsOneWidget);
       final size = tester.getSize(find.byType(GenerationLoadingPlaceholder));
       expect(size.width / size.height, closeTo(9 / 16, .01));
 
