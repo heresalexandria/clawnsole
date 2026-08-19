@@ -2,20 +2,15 @@ const net = require("node:net");
 
 const EXTERNAL_HOSTS = new Set([
   "bfl.ai",
-  "www.bfl.ai",
   "docs.bfl.ai",
   "dashboard.bfl.ai",
-  "ltx.io",
-  "www.ltx.io",
   "docs.ltx.io",
   "console.ltx.io",
   "app.getartcraft.com",
   "storyteller-docs.netlify.app",
-  "atlascloud.ai",
   "www.atlascloud.ai",
-  "console.atlascloud.ai",
   "heresalexandria.com",
-  "www.heresalexandria.com",
+  "heresalexandria.github.io",
 ]);
 
 function parseUrl(value) {
@@ -45,6 +40,26 @@ function isAllowedExternalUrl(value) {
     candidate
       && candidate.protocol === "https:"
       && EXTERNAL_HOSTS.has(candidate.hostname),
+  );
+}
+
+function isAllowedExplicitExternalUrl(value, purpose) {
+  const candidate = parseUrl(value);
+  if (
+    !candidate
+    || candidate.protocol !== "https:"
+    || candidate.username
+    || candidate.password
+  ) {
+    return false;
+  }
+  if (purpose === "media") return true;
+  return (
+    purpose === "release"
+    && candidate.hostname === "github.com"
+    && candidate.pathname.startsWith(
+      "/heresalexandria/clawnsole/releases/",
+    )
   );
 }
 
@@ -92,6 +107,7 @@ async function waitForServer(url, options = {}) {
 module.exports = {
   findOpenPort,
   isAllowedAppUrl,
+  isAllowedExplicitExternalUrl,
   isAllowedExternalUrl,
   isAllowedRendererPermission,
   waitForServer,

@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
+import '../core/shell_bridge.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
@@ -880,8 +880,12 @@ Future<void> showReferenceFrameViewer(
                 children: <Widget>[
                   if (source != null && !source.isLocal)
                     OutlinedButton.icon(
-                      onPressed: () =>
-                          unawaited(launchUrl(Uri.parse(source.value))),
+                      onPressed: () => unawaited(
+                        openExternalUrl(
+                          Uri.parse(source.value),
+                          purpose: ExternalUrlPurpose.media,
+                        ),
+                      ),
                       icon: const Icon(Icons.open_in_new_rounded, size: 15),
                       label: const Text('Open link'),
                     ),
@@ -982,7 +986,12 @@ Future<void> showSourceReferenceSheet(
     actions: <Widget>[
       if (!source.isLocal)
         OutlinedButton.icon(
-          onPressed: () => unawaited(launchUrl(Uri.parse(source.value))),
+          onPressed: () => unawaited(
+            openExternalUrl(
+              Uri.parse(source.value),
+              purpose: ExternalUrlPurpose.media,
+            ),
+          ),
           icon: const Icon(Icons.open_in_new_rounded, size: 15),
           label: const Text('Open link'),
         ),

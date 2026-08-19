@@ -57,12 +57,14 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.onUpdateEvent, "function");
   assert.equal(typeof bridge.authorizeGoogleDrive, "function");
   assert.equal(typeof bridge.disconnectGoogleDrive, "function");
+  assert.equal(typeof bridge.openExternalUrl, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
   await bridge.startUpdate();
   await bridge.authorizeGoogleDrive();
   await bridge.disconnectGoogleDrive();
+  await bridge.openExternalUrl("https://cdn.example/video.mp4", "media");
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
@@ -71,10 +73,15 @@ test("the preload publishes the renderer update bridge", async () => {
       "clawnsole:update:start",
       "clawnsole:drive:authorize",
       "clawnsole:drive:disconnect",
+      "clawnsole:external:open",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);
   assert.deepEqual(invoked[1].args, [true]);
+  assert.deepEqual(invoked[5].args, [
+    "https://cdn.example/video.mp4",
+    "media",
+  ]);
 });
 
 test("update events reach the renderer and unsubscribe cleanly", () => {
