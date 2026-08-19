@@ -12,6 +12,8 @@ only desktop lifecycle, packaging, and self-update.
   video continuation and draft enhance
 - Model-aware multi-upload image, video, and audio references, kept distinct
   from first/last or explicitly timed keyframes
+- A searchable saved-reference library with independent nested folders, tags,
+  naming, sorting, and direct Saved/Generated selection from Create
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
@@ -45,6 +47,9 @@ treating every image as a keyframe:
 Image, video, and audio references are ordered independently and retained as
 separate local assets. Provider upload adapters convert local media into the
 token or hosted-asset form required by ArtCraft and Atlas before submission.
+The References tab stores reusable media alongside compact metadata. Its folder
+tree is independent from Generated history, while the Create picker can search
+either hierarchy without copying local assets unnecessarily.
 
 ## Install
 
@@ -179,11 +184,12 @@ broker is required if the credential must remain a true secret.
 - History is compact and uncapped.
 - Prompts, request IDs, polling URLs, status, settings, costs, and small asset
   references are retained in JSON; base64 payloads are never written there.
-- Uploaded references and generated videos are separate local files, enabling
-  preview, playback, and full-input reuse after restart.
+- Uploaded and saved references plus generated videos are separate local files,
+  enabling preview, playback, search, and full-input reuse after restart.
 - BFL delivery links are treated as ten-minute links and pruned after the result
   is copied locally.
-- Removing history prunes unreferenced assets. Saving exports a user-directed copy.
+- Removing history preserves the References library and prunes only assets no
+  longer used by a saved reference or another generation.
 
 ## Verification
 

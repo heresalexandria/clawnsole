@@ -17,6 +17,10 @@ String retainedAssetExtension(String? contentType, String label) {
     'image/jpeg' => '.jpg',
     'image/webp' => '.webp',
     'image/gif' => '.gif',
+    'audio/mpeg' => '.mp3',
+    'audio/mp4' => '.m4a',
+    'audio/wav' || 'audio/x-wav' => '.wav',
+    'audio/ogg' => '.ogg',
     _ => switch (label.toLowerCase()) {
       final value when value.endsWith('.mp4') => '.mp4',
       final value when value.endsWith('.mov') => '.mov',
@@ -26,6 +30,10 @@ String retainedAssetExtension(String? contentType, String label) {
         '.jpg',
       final value when value.endsWith('.webp') => '.webp',
       final value when value.endsWith('.gif') => '.gif',
+      final value when value.endsWith('.mp3') => '.mp3',
+      final value when value.endsWith('.m4a') => '.m4a',
+      final value when value.endsWith('.wav') => '.wav',
+      final value when value.endsWith('.ogg') => '.ogg',
       _ => '.asset',
     },
   };
@@ -152,7 +160,10 @@ class LocalDataStore {
     return (await _resolveAssetFile(reference, migrateGenericName: true)).uri;
   }
 
-  Set<String> _referencedAssets(List<Generation> generations) {
+  Set<String> _referencedAssets(
+    List<Generation> generations,
+    List<SavedReference> savedReferences,
+  ) {
     final retained = <String>{};
     void add(AssetReference? reference) {
       if (reference?.isLocal == true) retained.add(reference!.value);
@@ -170,13 +181,19 @@ class LocalDataStore {
         add(media.source);
       }
     }
+    for (final reference in savedReferences) {
+      add(reference.asset);
+    }
     return retained;
   }
 
-  Future<void> pruneAssets(List<Generation> generations) async {
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) async {
     final assets = await _assets();
     if (!await assets.exists()) return;
-    final retained = _referencedAssets(generations);
+    final retained = _referencedAssets(generations, savedReferences);
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
