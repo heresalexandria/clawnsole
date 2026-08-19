@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'bfl_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
+import 'reference_prompts.dart';
 
 class AtlasCloudApi {
   AtlasCloudApi({http.Client? client, Uri? baseUrl})
@@ -429,9 +430,27 @@ class AtlasCloudApi {
     final aspectRatio = input['aspect_ratio']?.toString() ?? '16:9';
     final resolution = input['resolution']?.toString() ?? 'hd';
     final images = frames.isEmpty ? referenceImages : frames;
+    final prompt = translateReferencePrompt(
+      input['prompt']?.toString() ?? '',
+      dialect: atlasReferencePromptDialect(model),
+      available: promptReferenceMentions(<MediaReferenceKind>[
+        ...List<MediaReferenceKind>.filled(
+          referenceImages.length,
+          MediaReferenceKind.image,
+        ),
+        ...List<MediaReferenceKind>.filled(
+          referenceVideos.length,
+          MediaReferenceKind.video,
+        ),
+        ...List<MediaReferenceKind>.filled(
+          referenceAudios.length,
+          MediaReferenceKind.audio,
+        ),
+      ]),
+    );
     final payload = <String, Object?>{
       'model': model,
-      'prompt': input['prompt']?.toString() ?? '',
+      'prompt': prompt,
       'duration': selectedDuration,
     };
 

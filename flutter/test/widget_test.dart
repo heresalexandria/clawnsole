@@ -1516,6 +1516,117 @@ void main() {
     },
   );
 
+  testWidgets('prompt reference tags autocomplete and highlight', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1400));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'atlas'
+      ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+    controller.form.references = const <MediaReferenceDraft>[
+      MediaReferenceDraft(
+        id: 'image-reference',
+        label: 'hero.png',
+        kind: MediaReferenceKind.image,
+        source: 'https://cdn.test/hero.png',
+      ),
+      MediaReferenceDraft(
+        id: 'video-reference',
+        label: 'camera-move.mp4',
+        kind: MediaReferenceKind.video,
+        source: 'https://cdn.test/camera-move.mp4',
+      ),
+    ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+
+    final prompt = find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    await tester.enterText(prompt, 'Follow @');
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('prompt-reference-suggestions')),
+      findsOneWidget,
+    );
+    expect(find.text('@Image 1'), findsOneWidget);
+    expect(find.text('@Video 1'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('prompt-reference-suggestions')),
+        matching: find.text('camera-move.mp4'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('prompt-reference-video1')));
+    await tester.pump();
+
+    final editable = tester.widget<EditableText>(
+      find.descendant(of: prompt, matching: find.byType(EditableText)),
+    );
+    expect(editable.controller.text, 'Follow @Video 1');
+    expect(controller.form.prompt, 'Follow @Video 1');
+    expect(
+      find.byKey(const ValueKey('prompt-reference-suggestions')),
+      findsNothing,
+    );
+
+    final span = editable.controller.buildTextSpan(
+      context: tester.element(
+        find.descendant(of: prompt, matching: find.byType(EditableText)),
+      ),
+      withComposing: false,
+    );
+    final highlighted = span.children!
+        .whereType<TextSpan>()
+        .where((child) => child.text == '@Video 1')
+        .single;
+    expect(highlighted.style?.backgroundColor, isNotNull);
+    expect(highlighted.style?.fontWeight, FontWeight.w700);
+
+    await tester.enterText(prompt, 'Use @image1 for the subject');
+    await tester.pump();
+    final typedSpan = editable.controller.buildTextSpan(
+      context: tester.element(
+        find.descendant(of: prompt, matching: find.byType(EditableText)),
+      ),
+      withComposing: false,
+    );
+    expect(
+      typedSpan.children!
+          .whereType<TextSpan>()
+          .singleWhere((child) => child.text == '@image1')
+          .style
+          ?.backgroundColor,
+      isNotNull,
+    );
+
+    controller.form.prompt = 'Use @Image 1, then @Image 2.';
+    controller.form.references = <MediaReferenceDraft>[
+      ...controller.form.references,
+      const MediaReferenceDraft(
+        id: 'second-image-reference',
+        label: 'location.png',
+        kind: MediaReferenceKind.image,
+        source: 'https://cdn.test/location.png',
+      ),
+    ];
+    controller.removeReference('image-reference');
+    expect(controller.form.prompt, 'Use hero.png, then @Image 1.');
+  });
+
   testWidgets('saved reference picker renders search and collection tabs', (
     tester,
   ) async {

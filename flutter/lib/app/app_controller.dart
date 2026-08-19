@@ -11,6 +11,7 @@ import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
+import '../core/reference_prompts.dart';
 
 class PickedAsset {
   const PickedAsset({
@@ -1443,6 +1444,22 @@ class AppController extends ChangeNotifier {
   }
 
   void removeReference(String id) {
+    final removed = form.references
+        .where((reference) => reference.id == id)
+        .firstOrNull;
+    if (removed == null) return;
+    final number =
+        form.references
+            .takeWhile((reference) => reference.id != id)
+            .where((reference) => reference.kind == removed.kind)
+            .length +
+        1;
+    form.prompt = detachReferenceFromPrompt(
+      form.prompt,
+      kind: removed.kind,
+      number: number,
+      label: removed.label,
+    );
     form.references = form.references.where((item) => item.id != id).toList();
     _selectCompatibleModel();
     _normalizeFormForModel();

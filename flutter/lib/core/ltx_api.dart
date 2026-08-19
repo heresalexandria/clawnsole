@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
 import 'models.dart';
+import 'reference_prompts.dart';
 
 class LtxApi {
   LtxApi({http.Client? client, Uri? baseUrl})
@@ -70,9 +71,23 @@ class LtxApi {
         ? 'image-to-video'
         : 'text-to-video';
     final duration = input['duration'];
+    final prompt = translateReferencePrompt(
+      input['prompt']?.toString() ?? '',
+      dialect: ReferencePromptDialect.plainOrdinal,
+      available: promptReferenceMentions(<MediaReferenceKind>[
+        ...List<MediaReferenceKind>.filled(
+          referenceImages.length,
+          MediaReferenceKind.image,
+        ),
+        ...List<MediaReferenceKind>.filled(
+          referenceAudios.length,
+          MediaReferenceKind.audio,
+        ),
+      ]),
+    );
     final payload = <String, Object?>{
       'model': model,
-      'prompt': input['prompt']?.toString() ?? '',
+      'prompt': prompt,
       'duration': duration == 'auto' ? null : duration,
       'resolution': _resolution(
         input['resolution']?.toString() ?? 'hd',

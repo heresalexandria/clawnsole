@@ -856,7 +856,7 @@ const atlasProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
       referencePromptHint:
-          'Name inputs with @Image1, @Video1, or @Audio1. Edit keeps duration on Auto; edit and extend preserve the source aspect ratio.',
+          'Edit keeps duration on Auto; edit and extend preserve the source aspect ratio.',
       referenceTasks: <MediaReferenceTask>[
         MediaReferenceTask.reference,
         MediaReferenceTask.edit,
@@ -923,8 +923,6 @@ const atlasProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
-      referencePromptHint:
-          'Name inputs as image 1, video 1, or audio 1 in the prompt.',
       supportsAutoDuration: true,
       aspectRatiosByResolution: <String, List<String>>{
         '4k': <String>['16:9'],
@@ -984,8 +982,6 @@ const atlasProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
-      referencePromptHint:
-          'Name inputs as image 1, video 1, or audio 1 in the prompt.',
       supportsAutoDuration: true,
     ),
     VideoModelDefinition(
@@ -1041,8 +1037,6 @@ const atlasProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
-      referencePromptHint:
-          'Name inputs as image 1, video 1, or audio 1 in the prompt.',
       supportsAutoDuration: true,
     ),
     _AtlasRouteModel(
