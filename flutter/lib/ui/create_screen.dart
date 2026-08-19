@@ -11,6 +11,7 @@ import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
 import 'panels.dart';
+import 'references_screen.dart';
 
 class CreateScreen extends StatelessWidget {
   const CreateScreen({required this.controller, super.key});
@@ -931,6 +932,35 @@ class _ReferenceTile extends StatelessWidget {
                 icon: const Icon(Icons.close_rounded, size: 14),
               ),
             ),
+            Positioned(
+              top: 3,
+              right: 32,
+              child: IconButton.filledTonal(
+                tooltip: reference.savedReferenceId == null
+                    ? 'Save to References'
+                    : 'Saved to References',
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                padding: EdgeInsets.zero,
+                onPressed: reference.savedReferenceId != null
+                    ? null
+                    : () => unawaited(
+                        showReferenceMetadataDialog(
+                          context,
+                          controller,
+                          draft: reference,
+                        ),
+                      ),
+                icon: Icon(
+                  reference.savedReferenceId == null
+                      ? Icons.bookmark_add_outlined
+                      : Icons.bookmark_added_rounded,
+                  size: 14,
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 6),
@@ -978,13 +1008,35 @@ class _AddReferenceButton extends StatelessWidget {
           ? 'Add reference ${kind.pluralLabel}'
           : '$maximum ${kind.pluralLabel} attached',
       onSelected: (choice) {
-        if (choice == 'upload') {
+        if (choice == 'saved') {
+          unawaited(() async {
+            final selected = await showReferencePicker(
+              context,
+              controller,
+              kind: kind,
+              maximum: maximum - count,
+            );
+            if (selected != null) {
+              await controller.addReferenceCandidates(kind, selected);
+            }
+          }());
+        } else if (choice == 'upload') {
           unawaited(controller.addMediaReferences(kind));
         } else {
           controller.addUrlReference(kind);
         }
       },
       itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem(
+          value: 'saved',
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.collections_bookmark_outlined, size: 17),
+              const SizedBox(width: 9),
+              Text('Choose saved ${kind.pluralLabel}'),
+            ],
+          ),
+        ),
         PopupMenuItem(
           value: 'upload',
           child: Row(

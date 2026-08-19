@@ -57,4 +57,12 @@ abstract interface class LibraryOrganizationGateway {
   });
 }
 
+abstract interface class ReferenceLibraryGateway {
+  Future<LocalSnapshot> saveReference(
+    SavedReference reference, {
+    String? source,
+  });
+  Future<LocalSnapshot> deleteReference(String referenceId);
+}
+
 AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();

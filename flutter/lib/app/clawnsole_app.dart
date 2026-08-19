@@ -12,6 +12,7 @@ import '../ui/claw_mark.dart';
 import '../ui/library_screen.dart';
 import '../ui/panels.dart';
 import '../ui/providers_screen.dart';
+import '../ui/references_screen.dart';
 import '../ui/settings_screen.dart';
 import '../ui/update_dialog.dart';
 import 'app_controller.dart';
@@ -130,6 +131,7 @@ class _AppShell extends StatelessWidget {
         : switch (controller.section) {
             AppSection.create => CreateScreen(controller: controller),
             AppSection.library => LibraryScreen(controller: controller),
+            AppSection.references => ReferencesScreen(controller: controller),
             AppSection.providers => ProvidersScreen(controller: controller),
             AppSection.settings => SettingsScreen(controller: controller),
           };
@@ -264,6 +266,12 @@ class _SideRail extends StatelessWidget {
             badge: controller.workingCount,
             selected: controller.section == AppSection.library,
             onTap: () => unawaited(controller.navigate(AppSection.library)),
+          ),
+          _RailButton(
+            icon: Icons.collections_bookmark_rounded,
+            label: 'References',
+            selected: controller.section == AppSection.references,
+            onTap: () => unawaited(controller.navigate(AppSection.references)),
           ),
           _RailButton(
             icon: Icons.hub_rounded,
@@ -683,6 +691,13 @@ class _BottomNav extends StatelessWidget {
               badge: controller.workingCount,
               selected: controller.section == AppSection.library,
               onTap: () => unawaited(controller.navigate(AppSection.library)),
+            ),
+            _BottomNavButton(
+              icon: Icons.collections_bookmark_rounded,
+              label: 'References',
+              selected: controller.section == AppSection.references,
+              onTap: () =>
+                  unawaited(controller.navigate(AppSection.references)),
             ),
             _BottomNavButton(
               icon: Icons.hub_rounded,
