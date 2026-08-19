@@ -1,26 +1,37 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_theme.dart';
+import '../core/store_update.dart';
 import '../core/update_status.dart';
 import 'claw_mark.dart';
 import 'update_dialog.dart';
 
-/// Blocks the packaged macOS app behind an installable breaking release.
+/// Blocks the app behind a breaking release with a supported update path.
 Future<void> showRequiredMajorUpdateDialog(
   NavigatorState navigator, {
   required UpdateStatus status,
+  StoreUpdateOpener? storeUpdateOpener,
 }) => showDialog<void>(
   context: navigator.context,
   barrierDismissible: false,
-  builder: (context) => RequiredMajorUpdateDialog(status: status),
+  builder: (context) => RequiredMajorUpdateDialog(
+    status: status,
+    storeUpdateOpener: storeUpdateOpener,
+  ),
 );
 
 class RequiredMajorUpdateDialog extends StatefulWidget {
-  const RequiredMajorUpdateDialog({required this.status, super.key});
+  const RequiredMajorUpdateDialog({
+    required this.status,
+    this.storeUpdateOpener,
+    super.key,
+  });
 
   final UpdateStatus status;
+  final StoreUpdateOpener? storeUpdateOpener;
 
   @override
   State<RequiredMajorUpdateDialog> createState() =>
@@ -29,10 +40,28 @@ class RequiredMajorUpdateDialog extends StatefulWidget {
 
 class _RequiredMajorUpdateDialogState extends State<RequiredMajorUpdateDialog> {
   bool _starting = false;
+  String? _storeError;
 
   Future<void> _update() async {
     if (_starting) return;
-    setState(() => _starting = true);
+    setState(() {
+      _starting = true;
+      _storeError = null;
+    });
+    if (widget.status.requiresStoreUpdate) {
+      final opener = widget.storeUpdateOpener ?? openClawnsoleStore;
+      final opened = await opener(defaultTargetPlatform);
+      if (!mounted) return;
+      setState(() {
+        _starting = false;
+        if (!opened) {
+          _storeError =
+              'Clawnsole could not open the store. Check your connection and '
+              'try again.';
+        }
+      });
+      return;
+    }
     final started = await startAvailableUpdate(
       Navigator.of(context),
       updater: widget.status.desktopUpdater,
@@ -43,6 +72,10 @@ class _RequiredMajorUpdateDialogState extends State<RequiredMajorUpdateDialog> {
   @override
   Widget build(BuildContext context) {
     final latest = widget.status.result?.latest ?? 'the latest version';
+    final storeDestination = widget.status.requiresStoreUpdate
+        ? clawnsoleStoreDestination(defaultTargetPlatform)
+        : null;
+    final storeName = storeDestination?.name ?? 'app store';
     return PopScope(
       canPop: false,
       child: AlertDialog(
@@ -96,14 +129,30 @@ class _RequiredMajorUpdateDialogState extends State<RequiredMajorUpdateDialog> {
               ),
               const SizedBox(height: 10),
               Text(
-                'The download is verified against the release checksums, '
-                'installed in place, and Clawnsole reopens automatically.',
+                storeDestination != null
+                    ? 'Install the update from $storeName, then reopen '
+                          'Clawnsole.'
+                    : 'The download is verified against the release '
+                          'checksums, installed in place, and Clawnsole '
+                          'reopens automatically.',
                 style: TextStyle(
                   fontSize: 12.5,
                   height: 1.45,
                   color: context.colors.onSurfaceVariant,
                 ),
               ),
+              if (_storeError != null) ...<Widget>[
+                const SizedBox(height: 10),
+                Text(
+                  _storeError!,
+                  key: const Key('required-major-update-store-error'),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.45,
+                    color: context.colors.error,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -116,8 +165,21 @@ class _RequiredMajorUpdateDialogState extends State<RequiredMajorUpdateDialog> {
                     dimension: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.download_rounded, size: 17),
-            label: Text(_starting ? 'Starting update…' : 'Update to $latest'),
+                : Icon(
+                    storeDestination != null
+                        ? Icons.open_in_new_rounded
+                        : Icons.download_rounded,
+                    size: 17,
+                  ),
+            label: Text(
+              _starting
+                  ? storeDestination != null
+                        ? 'Opening $storeName…'
+                        : 'Starting update…'
+                  : storeDestination != null
+                  ? 'Open $storeName'
+                  : 'Update to $latest',
+            ),
           ),
         ],
       ),

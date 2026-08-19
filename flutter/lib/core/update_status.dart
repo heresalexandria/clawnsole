@@ -4,8 +4,7 @@ import 'app_version.dart';
 import 'shell_bridge.dart';
 import 'update_check.dart';
 
-/// Whether the operating system's store owns updates for this build, which
-/// makes an in-app update check pointless.
+/// Whether the operating system's store owns installation for this build.
 bool get storeManagedPlatform =>
     !kIsWeb &&
     (defaultTargetPlatform == TargetPlatform.iOS ||
@@ -16,15 +15,29 @@ bool get storeManagedPlatform =>
 /// One instance backs both the version chip's badge and the version dialog so
 /// a launch-time check is reused instead of repeated per surface.
 class UpdateStatus extends ChangeNotifier {
-  UpdateStatus._() : _shellProvider = _defaultShellUpdater;
+  UpdateStatus._()
+    : _shellProvider = _defaultShellUpdater,
+      _storeManagedProvider = _defaultStoreManagedPlatform,
+      _releaseChecker = checkLatestRelease;
 
   @visibleForTesting
   UpdateStatus.forTesting(ShellUpdater updater)
-    : _shellProvider = (() => updater);
+    : _shellProvider = (() => updater),
+      _storeManagedProvider = (() => false),
+      _releaseChecker = checkLatestRelease;
+
+  @visibleForTesting
+  UpdateStatus.forMobileTesting(
+    Future<UpdateCheckResult> Function() releaseChecker,
+  ) : _shellProvider = (() => null),
+      _storeManagedProvider = (() => true),
+      _releaseChecker = releaseChecker;
 
   static final UpdateStatus instance = UpdateStatus._();
 
   final ShellUpdater? Function() _shellProvider;
+  final bool Function() _storeManagedProvider;
+  final Future<UpdateCheckResult> Function() _releaseChecker;
 
   UpdateCheckResult? result;
   bool checking = false;
@@ -34,20 +47,30 @@ class UpdateStatus extends ChangeNotifier {
 
   bool get hasDesktopUpdater => desktopUpdater != null;
 
+  bool get isStoreManaged => _storeManagedProvider();
+
+  /// Whether this surface can perform launch-time and 24-hour checks.
+  bool get supportsAutomaticChecks => hasDesktopUpdater || isStoreManaged;
+
   bool get updateAvailable => result?.available == true;
 
   /// True when this surface can download and install the update itself.
   bool get canSelfUpdate => hasDesktopUpdater && result?.installable == true;
 
-  /// True only after the packaged macOS shell successfully detects an
-  /// installable release across a major-version compatibility boundary.
-  bool get requiresMajorUpdate {
+  /// True when iOS or Android must hand the update off to its app store.
+  bool get requiresStoreUpdate => isStoreManaged && _isMajorUpdateDetected;
+
+  /// True only after a supported update path successfully detects a release
+  /// across a major-version compatibility boundary.
+  bool get requiresMajorUpdate =>
+      _isMajorUpdateDetected && (canSelfUpdate || isStoreManaged);
+
+  bool get _isMajorUpdateDetected {
     final value = result;
     final latest = value?.latest;
     return value != null &&
         value.error == null &&
         value.available &&
-        canSelfUpdate &&
         latest != null &&
         isMajorVersionUpgrade(latest, value.current);
   }
@@ -57,17 +80,17 @@ class UpdateStatus extends ChangeNotifier {
   bool get shellDeclinesInstall =>
       hasDesktopUpdater && result?.installable != true;
 
-  /// Checks once per app launch, and only inside the macOS desktop shell.
+  /// Checks once per app launch on macOS, iOS, and Android.
   Future<void> autoCheck() async {
-    if (_autoChecked || !hasDesktopUpdater) return;
+    if (_autoChecked || !supportsAutomaticChecks) return;
     _autoChecked = true;
     await refresh(force: false);
   }
 
-  /// Re-checks from the macOS shell's 24-hour timer without bypassing its
+  /// Re-checks from the 24-hour timer without bypassing the macOS shell's
   /// persisted throttle.
   Future<void> backgroundCheck() async {
-    if (!hasDesktopUpdater) return;
+    if (!supportsAutomaticChecks) return;
     await refresh(force: false);
   }
 
@@ -79,7 +102,7 @@ class UpdateStatus extends ChangeNotifier {
     final shell = desktopUpdater;
     try {
       value = shell == null
-          ? await checkLatestRelease()
+          ? await _releaseChecker()
           : UpdateCheckResult.fromShell(await shell.check(force: force));
     } on Object catch (error) {
       value = UpdateCheckResult(
@@ -94,3 +117,5 @@ class UpdateStatus extends ChangeNotifier {
 }
 
 ShellUpdater? _defaultShellUpdater() => shellUpdater;
+
+bool _defaultStoreManagedPlatform() => storeManagedPlatform;

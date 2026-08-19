@@ -6,6 +6,7 @@ import '../core/app_version.dart';
 import '../core/models.dart';
 import '../core/gateway.dart';
 import '../core/shell_bridge.dart';
+import '../core/store_update.dart';
 import '../core/update_status.dart';
 import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
@@ -26,16 +27,20 @@ class ClawnsoleApp extends StatefulWidget {
     this.gateway,
     this.checkForUpdates = true,
     this.updateStatus,
+    this.storeUpdateOpener,
   });
 
   final AppGateway? gateway;
 
-  /// Whether the macOS desktop shell checks at launch and every 24 hours.
+  /// Whether macOS, iOS, and Android check at launch and every 24 hours.
   /// Widget tests turn this off so they never reach the network.
   final bool checkForUpdates;
 
   /// An injectable update state used by focused widget tests.
   final UpdateStatus? updateStatus;
+
+  /// An injectable mobile store handoff used by focused widget tests.
+  final StoreUpdateOpener? storeUpdateOpener;
 
   @override
   State<ClawnsoleApp> createState() => _ClawnsoleAppState();
@@ -67,7 +72,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
       final navigator = _navigatorKey.currentState;
       if (navigator != null) unawaited(showUpdateProgressDialog(navigator));
     });
-    if (widget.checkForUpdates && _updateStatus.hasDesktopUpdater) {
+    if (widget.checkForUpdates && _updateStatus.supportsAutomaticChecks) {
       _startupUpdateCheck = Timer(
         const Duration(seconds: 4),
         () => unawaited(_updateStatus.autoCheck()),
@@ -108,7 +113,11 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
 
   Future<void> _showRequiredUpdate(NavigatorState navigator) async {
     try {
-      await showRequiredMajorUpdateDialog(navigator, status: _updateStatus);
+      await showRequiredMajorUpdateDialog(
+        navigator,
+        status: _updateStatus,
+        storeUpdateOpener: widget.storeUpdateOpener,
+      );
     } finally {
       _requiredUpdateDialogOpen = false;
       if (mounted) _handleRequiredUpdate();
