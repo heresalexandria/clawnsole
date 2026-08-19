@@ -871,7 +871,7 @@ class _ConnectionError extends StatelessWidget {
             Text(
               controller.gateway.usesCompanion
                   ? 'Start the local companion.'
-                  : 'Clawnsole could not open its local data.',
+                  : 'Clawnsole could not open its data store.',
               style: Theme.of(context).textTheme.headlineMedium,
               textAlign: TextAlign.center,
             ),

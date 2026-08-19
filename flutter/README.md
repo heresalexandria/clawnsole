@@ -140,6 +140,29 @@ The companion binds only to IPv4 loopback and accepts only localhost browser
 origins. The browser receives sanitized history and whether a key exists, never
 the saved key itself.
 
+### Standalone browser and GitHub Pages
+
+The isolated standalone target calls providers directly and uses an app-owned
+Google Drive folder instead of the companion:
+
+```bash
+CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
+  ./scripts/start_github_pages
+```
+
+Generated media, retained inputs, saved references, folders, history, and
+non-secret preferences sync through Drive. Provider keys remain in this
+browser's localStorage and must be entered separately on every device. They are
+never serialized into `clawnsole.json` or uploaded to Drive. Because localStorage
+is accessible to JavaScript on the same origin, run this target only on a
+trusted device and reviewed origin.
+
+This mode intentionally has no backend. Atlas Cloud is the only provider
+currently exposed because its API permits the hosted origin through browser
+CORS; the other configured provider APIs do not currently allow that origin. See
+[`docs/google-drive-web.md`](../docs/google-drive-web.md) for OAuth, origin, and
+GitHub Pages setup.
+
 ## Build targets
 
 ```bash
@@ -148,6 +171,7 @@ the saved key itself.
 ./scripts/build_android
 ./scripts/build_macos
 ./scripts/build_windows
+./scripts/build_github_pages
 ```
 
 - `build_web` creates `build/web` and compiles the companion into the standalone
@@ -175,6 +199,9 @@ the saved key itself.
 - `build_windows` creates the native x64 release directory under
   `build/windows/x64/runner/Release`. It rejects Dart defines and clears provider
   credential variables so API keys cannot be compiled into the executable.
+- `build_github_pages` creates the separate backend-free app under
+  `build/github-pages/app` with `/clawnsole/app/` as its default base path. It
+  does not replace or modify the existing `docs/` splash site.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.

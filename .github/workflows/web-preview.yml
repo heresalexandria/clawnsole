@@ -1,0 +1,37 @@
+name: Standalone web preview
+
+on:
+  pull_request:
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/web-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-web-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build GitHub Pages app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Build standalone app
+        env:
+          CLAWNSOLE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_WEB_BASE_HREF: /clawnsole/app/
+        run: ./flutter/scripts/build_github_pages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: clawnsole-github-pages-app
+          path: flutter/build/github-pages/app
+          if-no-files-found: error
+          retention-days: 14

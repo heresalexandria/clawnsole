@@ -7,6 +7,7 @@ import 'package:mime/mime.dart';
 
 import '../core/bfl_api.dart';
 import '../core/gateway.dart';
+import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
@@ -261,6 +262,14 @@ class AppController extends ChangeNotifier {
   bool get supportsPhotoLibrarySave => gateway.supportsPhotoLibrarySave;
   StorageStats get storage =>
       snapshot?.storage ?? const StorageStats(path: '', bytes: 0, records: 0);
+  bool get supportsGoogleDrive => gateway is GoogleDriveGateway;
+  GoogleDriveConnection get googleDriveConnection =>
+      gateway is GoogleDriveGateway
+      ? (gateway as GoogleDriveGateway).googleDriveConnection
+      : const GoogleDriveConnection(
+          state: GoogleDriveConnectionState.unavailable,
+        );
+  bool googleDriveBusy = false;
   int get workingCount => generations.where((item) => item.isWorking).length;
   int get readyCount => generations.where((item) => item.isReady).length;
   double get spentCredits => generations
@@ -2107,7 +2116,58 @@ class AppController extends ChangeNotifier {
   Future<void> clearAll() async {
     _apply(await gateway.clearAll());
     credits = null;
-    showNotice('Clawnsole’s local data was removed.');
+    showNotice(
+      supportsGoogleDrive
+          ? 'Clawnsole’s Drive data and browser-local keys were removed.'
+          : 'Clawnsole’s local data was removed.',
+    );
+  }
+
+  Future<void> connectGoogleDrive(String folderName) async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      _apply(
+        await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
+      );
+      showNotice('Google Drive connected and synced.');
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> disconnectGoogleDrive() async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      _apply(await (gateway as GoogleDriveGateway).disconnectGoogleDrive());
+      showNotice('Drive disconnected on this device. Cloud files were kept.');
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshGoogleDrive() async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      _apply(await (gateway as GoogleDriveGateway).refreshGoogleDrive());
+      showNotice('Google Drive data refreshed.');
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
   }
 
   Future<PickedAsset> _retainedAsset(AssetReference reference) async =>
@@ -2189,8 +2249,8 @@ class AppController extends ChangeNotifier {
         // Preserve the rest of the last-used settings when an asset is gone.
         showNotice(
           item.mode == VideoMode.v2v
-              ? 'The retained starting video is no longer on disk. Attach a video to continue one.'
-              : 'The retained draft cache is no longer on disk. Attach a draft to enhance it.',
+              ? 'The retained starting video is no longer available. Attach a video to continue one.'
+              : 'The retained draft cache is no longer available. Attach a draft to enhance it.',
         );
       }
     }

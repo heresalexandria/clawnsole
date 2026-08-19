@@ -1,6 +1,6 @@
 # Clawnsole privacy policy
 
-Effective: August 17, 2026
+Effective: August 19, 2026
 
 Clawnsole is a local-first video generation app and client for third-party
 generation services. The developer of Clawnsole does not operate an
@@ -24,6 +24,22 @@ references can be renamed, reorganized, or deleted from **References**.
 Generation history and app preferences can be cleared from **Settings**.
 Removing the app may also remove data held in its application sandbox, subject
 to the backup and device-management behavior of your operating system.
+
+## Optional Google Drive storage
+
+The standalone browser build can use a Google Drive folder that you authorize
+to make Clawnsole data available across browser devices. If enabled, Clawnsole
+stores prompts, generation records and settings, saved-reference metadata,
+retained input media, generated media, folders, tags, and non-secret app
+preferences in that folder. Google processes and retains those files under your
+Google account settings and the [Google Privacy Policy](https://policies.google.com/privacy).
+
+Clawnsole requests the limited `drive.file` permission and can access only the
+Drive files it creates or that you explicitly make available to the app. Drive
+access tokens are held in browser memory and are not sent to the developer.
+Provider API keys are excluded from Drive and remain in that browser's
+localStorage. localStorage is accessible to JavaScript on the same origin, so
+use the standalone build only on a trusted device and hosted origin.
 
 ## Data sent to a generation provider
 
@@ -77,8 +93,8 @@ destination site's policy.
 
 ## Data collected by the developer
 
-Clawnsole does not operate a sync service and does not send the developer your
-API keys, prompts, reference media, generated media, generation history,
+Clawnsole does not operate its own sync service and does not send the developer
+your API keys, prompts, reference media, generated media, generation history,
 contacts, precise location, advertising identifiers, or analytics events. The
 app does not use data for advertising or cross-app tracking.
 
@@ -91,9 +107,11 @@ information under their own policies and your settings with those services.
 
 Keep provider API keys private and revoke a key through the provider if you
 believe it has been exposed. Clawnsole keeps local data until you clear it,
-remove it through the app, or uninstall the app. Provider-side retention and
-deletion are controlled by the selected provider and, for an aggregated model,
-may also be controlled by the underlying model provider.
+remove it through the app, or uninstall the app. Optional Drive data remains in
+your Google account until you delete it through Clawnsole or Google Drive.
+Provider-side retention and deletion are controlled by the selected provider
+and, for an aggregated model, may also be controlled by the underlying model
+provider.
 
 ## Changes and contact
 

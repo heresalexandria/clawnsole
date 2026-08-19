@@ -49,14 +49,14 @@
           services. Its developer does not operate an account system, analytics
           service, advertising network, or cloud database for the app.
         </p>
-        <p class="policy-date">Effective August 17, 2026</p>
+        <p class="policy-date">Effective August 19, 2026</p>
       </header>
 
       <section class="policy-summary" aria-label="Privacy summary">
         <article>
           <span aria-hidden="true">01</span>
-          <h2>Stored locally</h2>
-          <p>Your key, settings, inputs, history, and retained videos live in Clawnsole’s local app storage.</p>
+          <h2>You choose storage</h2>
+          <p>Most targets store data locally. The standalone browser can use a Drive folder you authorize.</p>
         </article>
         <article>
           <span aria-hidden="true">02</span>
@@ -74,6 +74,7 @@
         <aside class="policy-nav" aria-label="Policy sections">
           <strong>On this page</strong>
           <a href="#local-data">Local data</a>
+          <a href="#drive-data">Optional Google Drive</a>
           <a href="#provider-data">Provider processing</a>
           <a href="#app-review">App Review access</a>
           <a href="#network">Other network requests</a>
@@ -99,10 +100,34 @@
               <li>appearance, retention, and other app preferences.</li>
             </ul>
             <p>
-              Clawnsole has no sync service. Local data is not uploaded to a
-              Clawnsole account or developer-operated cloud. Operating-system
+              Clawnsole has no developer-operated sync service. Local data is
+              not uploaded to a Clawnsole account or developer-operated cloud.
+              Operating-system
               backups or device-management tools may handle app data according
               to your device settings and their own policies.
+            </p>
+          </section>
+
+          <section id="drive-data">
+            <p class="eyebrow">Optional browser sync</p>
+            <h2>Data stored in Google Drive</h2>
+            <p>
+              The standalone browser build can use a Google Drive folder that
+              you authorize to make Clawnsole data available across browser
+              devices. If enabled, prompts, generation records and settings,
+              saved-reference metadata, retained inputs, generated media,
+              folders, tags, and non-secret preferences are stored there.
+              Google processes and retains those files under your Google
+              account settings and its
+              <a href="https://policies.google.com/privacy">privacy policy</a>.
+            </p>
+            <p>
+              Clawnsole requests the limited <code>drive.file</code> permission,
+              which covers files the app creates or that you explicitly make
+              available to it. Drive access tokens stay in browser memory and
+              are not sent to the developer. Provider API keys are never put in
+              Drive; they stay in that browser’s localStorage. Use this mode only
+              on a trusted device and hosted origin.
             </p>
           </section>
 
@@ -211,6 +236,7 @@
               <li>Choose which prompts and media to submit for each generation.</li>
               <li>Add, replace, or remove your provider keys from Providers at any time.</li>
               <li>Clear generation history, reset preferences, or delete all local Clawnsole data from Settings.</li>
+              <li>Connect or disconnect optional Google Drive storage, or delete its Clawnsole files from Settings or Drive.</li>
               <li>Revoke a provider key in the provider’s account dashboard to end its access.</li>
               <li>Contact the provider directly about data it retains on its systems.</li>
             </ul>
@@ -221,8 +247,10 @@
             <h2>Security and retention</h2>
             <p>
               User-supplied provider keys are stored in Clawnsole’s locally
-              protected JSON data, not sent to the developer, and never displayed
-              again after saving. App Review credentials, when present, are
+              protected JSON data or, in the standalone browser, localStorage.
+              They are not sent to the developer or written to Google Drive and
+              are never displayed again after saving. App Review credentials,
+              when present, are
               compiled into that iOS build and are not written to the local data
               file or shown in the interface. Keep provider keys private and
               revoke a key through the provider if you believe it has been exposed.
@@ -231,7 +259,9 @@
               Clawnsole keeps local data until you remove individual records,
               use a clear-data control, or uninstall the app. Removing the app
               may remove data in its sandbox, subject to operating-system backup
-              and device-management behavior. Provider-side retention and
+              and device-management behavior. Optional Drive data remains in
+              your Google account until you delete it through Clawnsole or
+              Google Drive. Provider-side retention and
               deletion are controlled by the selected provider and, for an
               aggregated model, may also be controlled by the underlying model
               provider.
