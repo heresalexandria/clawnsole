@@ -7,6 +7,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
+import 'generation_loading_placeholder.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatelessWidget {
@@ -691,6 +692,32 @@ class _GenerationCardState extends State<GenerationCard> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final folder = widget.controller.folderById(item.folderId);
+    final hasMedia = item.resultAsset != null || item.resultUrl != null;
+    final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;
+    final preview = Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        if (hasMedia)
+          GenerationMedia(controller: widget.controller, item: item)
+        else if (isGeneratingVideo)
+          GenerationLoadingPlaceholder(item: item)
+        else
+          GenerationInputPreview(controller: widget.controller, item: item),
+        Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
+        if (item.isWorking && !item.isStatusUnavailable)
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(
+              value: item.progress == null ? null : item.progress! / 100,
+              minHeight: 5,
+              backgroundColor: Colors.white24,
+              color: ClawnsoleColors.brassBright,
+            ),
+          ),
+      ],
+    );
     return SurfaceCard(
       padding: EdgeInsets.zero,
       child: Column(
@@ -698,36 +725,12 @@ class _GenerationCardState extends State<GenerationCard> {
         children: <Widget>[
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-            child: SizedBox(
-              height: 280,
-              child: Stack(
-                fit: StackFit.expand,
-                children: <Widget>[
-                  if (item.resultAsset != null || item.resultUrl != null)
-                    GenerationMedia(controller: widget.controller, item: item)
-                  else
-                    GenerationInputPreview(
-                      controller: widget.controller,
-                      item: item,
-                    ),
-                  Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
-                  if (item.isWorking && !item.isStatusUnavailable)
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: LinearProgressIndicator(
-                        value: item.progress == null
-                            ? null
-                            : item.progress! / 100,
-                        minHeight: 5,
-                        backgroundColor: Colors.white24,
-                        color: ClawnsoleColors.brassBright,
-                      ),
-                    ),
-                ],
-              ),
-            ),
+            child: isGeneratingVideo
+                ? AspectRatio(
+                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
+                    child: preview,
+                  )
+                : SizedBox(height: 280, child: preview),
           ),
           Padding(
             padding: const EdgeInsets.all(16),
