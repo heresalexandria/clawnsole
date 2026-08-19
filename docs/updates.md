@@ -31,7 +31,7 @@ shell's persisted 24-hour throttle, while other surfaces query on the shared
 24-hour in-process schedule.
 
 Where the shell can install in place, the dialog's primary action is
-**Download and install <version>** — the same verified pipeline as the system
+**Download and install <version>** uses the same verified pipeline as the system
 menu, not a link to GitHub. It falls back to a release link only when there is
 no self-updating shell, including native Windows and browser previews, and says
 so plainly when an unpackaged development build declines to replace itself.
@@ -41,8 +41,8 @@ so plainly when an unpackaged development build declines to replace itself.
 `electron/preload.cjs` exposes `window.clawnsole` to the Flutter renderer with
 `checkForUpdate()`, `startUpdate()`, and an `onUpdateEvent(callback)`
 subscription. The Flutter app (`lib/core/shell_bridge*.dart`) feature-detects
-this surface. Any in-flight download — including one begun from the system menu
-— streams `downloading / installing / error` events that open a blocking
+this surface. Any in-flight download, including one begun from the system menu,
+streams `downloading / installing / error` events that open a blocking
 progress modal in the UI, alongside the dock-icon progress bar. Failures the
 renderer detects itself are pushed onto the same stream, so the modal always
 resolves instead of hanging. Renderer-initiated installs skip the native

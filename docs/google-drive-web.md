@@ -26,8 +26,8 @@ when a Drive folder is shared, but each browser/device must enter its own keys.
 2. Enable the Google Drive API.
 3. Configure the OAuth consent screen.
 4. Create an OAuth 2.0 client with application type **Web application**.
-5. Add every development and hosted origin, for example
-   `http://localhost:7357` and `https://heresalexandria.github.io`.
+5. Add every development and hosted origin, including
+   `http://localhost:7357` and `https://clawnsole.app`.
 6. Export its public client ID before starting or building:
 
    ```bash
