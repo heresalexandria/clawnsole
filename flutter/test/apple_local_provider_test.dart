@@ -3,21 +3,21 @@ import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Apple Local is keyless and exposes still and animation modes', () {
+  test('Apple Local is keyless and exposes only still-image generation', () {
     expect(appleLocalProvider.requiresApiKey, isFalse);
     expect(appleLocalProvider.isLocal, isTrue);
-    expect(appleLocalProvider.models, hasLength(2));
+    expect(appleLocalProvider.models, hasLength(1));
     expect(
       modelById('apple-local', 'apple-local-image').outputKind,
       GenerationOutputKind.image,
     );
     expect(
-      modelById('apple-local', 'apple-local-animation').supportsFrameRate,
-      isTrue,
+      modelById('apple-local', 'apple-local-animation').id,
+      'apple-local-image',
     );
   });
 
-  test('local generation settings round-trip output kind and frame rate', () {
+  test('retired local animation history keeps its original media metadata', () {
     final now = DateTime.utc(2026, 8, 18);
     final original = Generation(
       localId: 'local-test',

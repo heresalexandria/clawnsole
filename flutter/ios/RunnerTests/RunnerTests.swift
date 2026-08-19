@@ -1,4 +1,3 @@
-import AVFoundation
 import ClawnsoleAppleLocal
 import Flutter
 import UIKit
@@ -34,7 +33,7 @@ class RunnerTests: XCTestCase {
     #endif
   }
 
-  func testAppleLocalAnimationOnPhysicalDevice() async throws {
+  func testAppleLocalImageOnPhysicalDevice() async throws {
     #if targetEnvironment(simulator)
       throw XCTSkip("Apple Image Playground is unavailable in the iOS simulator.")
     #else
@@ -44,20 +43,19 @@ class RunnerTests: XCTestCase {
       }
 
       let outputDirectory = FileManager.default.temporaryDirectory
-        .appendingPathComponent("clawnsole-physical-animation-test", isDirectory: true)
+        .appendingPathComponent("clawnsole-physical-image-test", isDirectory: true)
       if FileManager.default.fileExists(atPath: outputDirectory.path) {
         try FileManager.default.removeItem(at: outputDirectory)
       }
       defer { try? FileManager.default.removeItem(at: outputDirectory) }
       let request = LocalGenerationRequest(
-        requestId: "physical-animation-test",
-        mode: .animation,
-        prompt:
-          "A tiny orange fox in a blue scarf waves one paw, clean hand-drawn cartoon, static camera.",
+        requestId: "physical-image-test",
+        mode: .image,
+        prompt: "A tiny orange fox in a blue scarf, clean hand-drawn illustration.",
         aspectRatio: "9:16",
         resolution: "hd",
         durationSeconds: 1,
-        frameRate: 6,
+        frameRate: 1,
         outputDirectory: outputDirectory.path,
         modelsDirectory: outputDirectory.appendingPathComponent("models").path
       )
@@ -67,42 +65,24 @@ class RunnerTests: XCTestCase {
         recorder.append(update.message)
         print("Apple Local physical test: \(update.progress)% \(update.message)")
       }
-      XCTAssertEqual(result.pathExtension, "mp4")
+      XCTAssertEqual(result.pathExtension, "png")
       XCTAssertTrue(FileManager.default.fileExists(atPath: result.path))
       XCTAssertGreaterThan(
         try FileManager.default.attributesOfItem(atPath: result.path)[.size] as? Int ?? 0,
         0
       )
-      let asset = AVURLAsset(url: result)
-      let imageGenerator = AVAssetImageGenerator(asset: asset)
-      imageGenerator.appliesPreferredTrackTransform = true
-      let duration = CMTimeGetSeconds(asset.duration)
-      let sampleTimes = [0.0, duration * 0.5, max(0, duration - (1.0 / 6.0))]
-      for (index, seconds) in sampleTimes.enumerated() {
-        let frame = try imageGenerator.copyCGImage(
-          at: CMTime(seconds: seconds, preferredTimescale: 600),
-          actualTime: nil
-        )
-        let attachment = XCTAttachment(
-          image: UIImage(cgImage: frame),
-          quality: .original
-        )
-        attachment.name = "Apple Local animation sample \(index + 1)"
+      if let image = UIImage(contentsOfFile: result.path) {
+        let attachment = XCTAttachment(image: image, quality: .original)
+        attachment.name = "Apple Local image"
         attachment.lifetime = .keepAlways
         add(attachment)
+      } else {
+        XCTFail("Apple Local returned an unreadable PNG.")
       }
       let messages = recorder.snapshot()
       XCTAssertTrue(
-        messages.contains { $0.contains("Generating continuity anchor") },
-        "The physical test must generate individual full-size continuity anchors."
-      )
-      XCTAssertTrue(
-        messages.contains { $0.contains("Completing referenced frame") },
-        "The physical test must exercise the composite-reference frame path."
-      )
-      XCTAssertFalse(
-        messages.contains { $0.contains("failed continuity validation") },
-        "Every generated physical-device frame should pass continuity validation."
+        messages.contains { $0.contains("Generating local image") },
+        "The physical test must exercise still-image generation."
       )
     #endif
   }

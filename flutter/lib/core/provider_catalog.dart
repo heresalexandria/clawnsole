@@ -182,7 +182,7 @@ const appleLocalProvider = VideoProviderDefinition(
   name: 'Apple Local',
   shortName: 'Local',
   description:
-      'Keyless image creation through Apple Intelligence on this device. The experimental animation mode renders a sequence of generated frames.',
+      'Keyless still-image creation through Apple Intelligence on this device.',
   consoleUrl: '',
   docsUrl: 'https://developer.apple.com/documentation/imageplayground',
   pricingUrl: '',
@@ -204,22 +204,6 @@ const appleLocalProvider = VideoProviderDefinition(
       usdPerSecond: 0,
       supportsAudio: false,
       outputKind: GenerationOutputKind.image,
-    ),
-    VideoModelDefinition(
-      id: 'apple-local-animation',
-      label: 'Frame Animation · Experimental',
-      description:
-          'Builds a simple silent MP4 through one Apple-generated cartoon image per frame.',
-      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
-      aspectRatios: _localRatios,
-      resolutions: <VideoResolutionDefinition>[_local512, _local768],
-      minDuration: 1,
-      maxDuration: 8,
-      durationStep: 1,
-      maxKeyframes: 1,
-      usdPerSecond: 0,
-      supportsAudio: false,
-      supportsFrameRate: true,
     ),
   ],
 );

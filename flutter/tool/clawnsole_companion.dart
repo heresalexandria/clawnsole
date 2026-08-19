@@ -908,6 +908,11 @@ class CompanionApp {
     Generation generation,
     Map<String, Object?> input,
   ) async {
+    if (!generation.isImage || generation.model != 'apple-local-image') {
+      throw StateError(
+        'Apple Local animation is no longer available. Choose another video provider.',
+      );
+    }
     if (!_appleLocal.isAvailable) {
       throw StateError('Apple Local generation is unavailable on this Mac.');
     }
@@ -943,7 +948,7 @@ class CompanionApp {
           : 1;
       final receipt = await _appleLocal.submit(<String, Object?>{
         'requestId': generation.localId,
-        'mode': generation.isImage ? 'image' : 'animation',
+        'mode': 'image',
         'prompt': generation.prompt,
         'aspectRatio': generation.config.aspectRatio,
         'resolution': generation.config.resolution,

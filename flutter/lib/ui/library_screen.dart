@@ -848,11 +848,15 @@ class _GenerationCardState extends State<GenerationCard> {
                         icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
                         label: const Text('Enhance'),
                       ),
-                    OutlinedButton.icon(
-                      onPressed: () => unawaited(widget.controller.reuse(item)),
-                      icon: const Icon(Icons.replay_rounded, size: 16),
-                      label: Text(item.isFailed ? 'Retry generation' : 'Reuse'),
-                    ),
+                    if (widget.controller.canReuse(item))
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            unawaited(widget.controller.reuse(item)),
+                        icon: const Icon(Icons.replay_rounded, size: 16),
+                        label: Text(
+                          item.isFailed ? 'Retry generation' : 'Reuse',
+                        ),
+                      ),
                     GenerationStatusButton(
                       controller: widget.controller,
                       item: item,
