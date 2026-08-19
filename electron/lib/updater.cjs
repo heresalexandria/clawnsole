@@ -155,12 +155,41 @@ async function latestRelease() {
 
 let lastResult = null;
 
+function cachedResult(current, state, { isPackaged = app().isPackaged } = {}) {
+  if (state.lastError) {
+    return {
+      ok: false,
+      current,
+      available: false,
+      error: state.lastError,
+      htmlUrl: RELEASE_PAGE,
+      skipped: true,
+    };
+  }
+  const latest = typeof state.latestSeen === "string" ? state.latestSeen : null;
+  const available = latest ? isNewer(latest, current) : false;
+  return {
+    ok: true,
+    current,
+    latest,
+    available,
+    // Older updater state predates this field. A packaged macOS build may
+    // still advertise its cached release; starting the update re-checks and
+    // validates the architecture-specific asset before downloading anything.
+    installable: state.latestHasAsset == null
+      ? Boolean(available && isPackaged)
+      : Boolean(available && isPackaged && state.latestHasAsset === true),
+    htmlUrl: allowedUrl(state.latestUrl) ? state.latestUrl : RELEASE_PAGE,
+    skipped: true,
+  };
+}
+
 async function check({ force = false } = {}) {
   const current = app().getVersion();
   const state = readState();
   const stale = !state.lastCheckAt || Date.now() - state.lastCheckAt >= CHECK_INTERVAL_MS;
   if (!force && !stale) {
-    return lastResult || { ok: true, current, available: false, skipped: true };
+    return lastResult || cachedResult(current, state);
   }
 
   try {
@@ -181,6 +210,8 @@ async function check({ force = false } = {}) {
     writeState({
       lastCheckAt: result.checkedAt,
       latestSeen: latest,
+      latestHasAsset: Boolean(asset),
+      latestUrl: result.htmlUrl,
       lastError: null,
     });
     lastResult = result;
@@ -357,6 +388,7 @@ module.exports = {
   RELEASE_PAGE,
   allowedUrl,
   assetFor,
+  cachedResult,
   check,
   checksumFor,
   compareVersions,

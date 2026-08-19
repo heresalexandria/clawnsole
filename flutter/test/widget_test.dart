@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -15,11 +16,14 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/shell_bridge.dart';
 import 'package:clawnsole/core/update_check.dart';
+import 'package:clawnsole/core/update_status.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
+import 'package:clawnsole/ui/update_available_chip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -1274,6 +1278,128 @@ void main() {
     expect(development.releaseUrl, clawnsoleReleasePage);
   });
 
+  test('macOS update checks honor background and explicit modes', () async {
+    final updater = _MemoryShellUpdater(
+      result: const <String, Object?>{
+        'ok': true,
+        'current': '0.10.1',
+        'latest': '0.11.0',
+        'available': true,
+        'installable': true,
+      },
+    );
+    final status = UpdateStatus.forTesting(updater);
+
+    await status.autoCheck();
+    await status.autoCheck();
+    await status.backgroundCheck();
+    await status.refresh();
+
+    expect(updater.forcedChecks, <bool>[false, false, true]);
+    expect(status.updateAvailable, isTrue);
+    expect(status.canSelfUpdate, isTrue);
+  });
+
+  testWidgets('macOS checks on startup and every 24 hours', (tester) async {
+    final updater = _MemoryShellUpdater(
+      result: const <String, Object?>{
+        'ok': true,
+        'current': '0.10.1',
+        'latest': '0.10.1',
+        'available': false,
+        'installable': false,
+      },
+    );
+    final status = UpdateStatus.forTesting(updater);
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, updateStatus: status),
+    );
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump();
+    expect(updater.forcedChecks, <bool>[false]);
+
+    await tester.pump(const Duration(hours: 24));
+    await tester.pump();
+    expect(updater.forcedChecks, <bool>[false, false]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('update chip animates and starts the macOS installer', (
+    tester,
+  ) async {
+    final updater = _MemoryShellUpdater(
+      result: const <String, Object?>{
+        'ok': true,
+        'current': '0.10.1',
+        'latest': '0.11.0',
+        'available': true,
+        'installable': true,
+      },
+    );
+    final status = UpdateStatus.forTesting(updater);
+    await status.refresh(force: false);
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(
+        gateway: gateway,
+        checkForUpdates: false,
+        updateStatus: status,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(UpdateAvailableChip), findsOneWidget);
+    expect(find.text('Update Available'), findsOneWidget);
+    final label = tester.widget<Text>(find.text('Update Available'));
+    expect(label.style?.color, Colors.white);
+
+    final ink = tester.widget<Ink>(
+      find.ancestor(
+        of: find.byKey(const Key('update-available-chip')),
+        matching: find.byType(Ink),
+      ),
+    );
+    final before =
+        (ink.decoration! as BoxDecoration).gradient! as RadialGradient;
+    await tester.pump(const Duration(seconds: 1));
+    final animatedInk = tester.widget<Ink>(
+      find.ancestor(
+        of: find.byKey(const Key('update-available-chip')),
+        matching: find.byType(Ink),
+      ),
+    );
+    final after =
+        (animatedInk.decoration! as BoxDecoration).gradient! as RadialGradient;
+    expect(after.center, isNot(before.center));
+
+    await tester.tap(find.byKey(const Key('update-available-chip')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(updater.startCount, 1);
+    expect(find.text('Update failed'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('retained videos keep an AVPlayer-compatible extension', () {
     expect(retainedAssetExtension('video/mp4', 'result'), '.mp4');
     expect(retainedAssetExtension(null, 'clawnsole.mov'), '.mov');
@@ -1545,5 +1671,34 @@ class _RejectedCreditsApi extends BflApi {
   @override
   Future<double> getCredits(String apiKey) async {
     throw const ProviderException('BFL rejected this API key.', status: 401);
+  }
+}
+
+class _MemoryShellUpdater implements ShellUpdater {
+  _MemoryShellUpdater({required this.result});
+
+  final Map<String, Object?> result;
+  final List<bool> forcedChecks = <bool>[];
+  final StreamController<ShellUpdateEvent> _events =
+      StreamController<ShellUpdateEvent>.broadcast();
+  int startCount = 0;
+
+  @override
+  Future<Map<String, Object?>> check({bool force = false}) async {
+    forcedChecks.add(force);
+    return result;
+  }
+
+  @override
+  Stream<ShellUpdateEvent> get events => _events.stream;
+
+  @override
+  Future<Map<String, Object?>> start() async {
+    startCount += 1;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    return const <String, Object?>{
+      'started': false,
+      'error': 'Test update stopped before download.',
+    };
   }
 }

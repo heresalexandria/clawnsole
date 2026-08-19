@@ -26,6 +26,27 @@ Stream<ShellUpdateEvent> get updateEvents {
 void reportUpdateFailure(String message) =>
     _updateEvents.add(ShellUpdateEvent(phase: 'error', message: message));
 
+/// Starts a verified in-place macOS update and opens the shared progress UI.
+Future<void> startAvailableUpdate(
+  NavigatorState navigator, {
+  ShellUpdater? updater,
+}) async {
+  final active = updater ?? shellUpdater;
+  if (active == null) return;
+  unawaited(showUpdateProgressDialog(navigator));
+  try {
+    final outcome = await active.start();
+    if (outcome['started'] != true) {
+      reportUpdateFailure(
+        outcome['error']?.toString() ??
+            'Clawnsole could not start this update.',
+      );
+    }
+  } on Object catch (error) {
+    reportUpdateFailure(error.toString().replaceFirst('Exception: ', ''));
+  }
+}
+
 /// Shows the running version, whether a newer release exists, and — where the
 /// shell can do it — installs that release in place.
 Future<void> showVersionDialog(BuildContext context) => showDialog<void>(
@@ -53,22 +74,9 @@ class _VersionDialogState extends State<_VersionDialog> {
   }
 
   Future<void> _install() async {
-    final shell = shellUpdater;
-    if (shell == null) return;
     final navigator = Navigator.of(context);
     navigator.pop();
-    unawaited(showUpdateProgressDialog(navigator));
-    try {
-      final outcome = await shell.start();
-      if (outcome['started'] != true) {
-        reportUpdateFailure(
-          outcome['error']?.toString() ??
-              'Clawnsole could not start this update.',
-        );
-      }
-    } on Object catch (error) {
-      reportUpdateFailure(error.toString().replaceFirst('Exception: ', ''));
-    }
+    await startAvailableUpdate(navigator, updater: _status.desktopUpdater);
   }
 
   @override
