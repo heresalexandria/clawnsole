@@ -54,34 +54,25 @@ class ArtCraftApi {
       };
 
   Future<ProviderAccountStatus> verify(String key) async {
-    final body = await _read(
-      await _request(
-        _client.get(
-          _baseUrl.resolve('/v1/credits/namespace/artcraft'),
-          headers: _headers(key),
-        ),
-        'check your credit balance',
+    // ArtCraft API keys authenticate the Omni API, but the ArtCraft credit
+    // wallet endpoint requires a signed browser session instead. Probe a
+    // deliberately unknown job token: an authenticated key receives 404,
+    // while an invalid key is rejected before the lookup with 401 or 403.
+    final response = await _request(
+      _client.get(
+        _baseUrl.resolve('/v1/omni_api/job_status/job/None'),
+        headers: _headers(key),
       ),
+      'verify your API key',
     );
-    if (body is! Map<String, Object?>) {
-      throw const ProviderException(
-        'ArtCraft returned an invalid credit balance.',
-        status: 502,
-      );
+    if (response.statusCode != 404 &&
+        (response.statusCode < 200 || response.statusCode >= 300)) {
+      await _read(response);
     }
-    final raw = body['sum_total_credits'];
-    final balance = raw is num ? raw.toDouble() : double.tryParse('$raw');
-    if (balance == null || !balance.isFinite || balance < 0) {
-      throw const ProviderException(
-        'ArtCraft returned an invalid credit balance.',
-        status: 502,
-      );
-    }
-    return ProviderAccountStatus(
+    return const ProviderAccountStatus(
       provider: 'artcraft',
-      balance: balance,
       currency: 'credits',
-      balanceLabel: '${_formatCredits(balance)} credits available',
+      balanceLabel: 'Open ArtCraft to view balance ↗',
     );
   }
 
@@ -692,6 +683,3 @@ class _ArtCraftCostQuote {
   final double credits;
   final double usd;
 }
-
-String _formatCredits(double value) =>
-    value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
