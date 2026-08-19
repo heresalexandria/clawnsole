@@ -15,13 +15,15 @@ private local storage. Depending on how you use the app, this can include:
 - your selected provider and user-supplied provider API keys;
 - prompts, generation settings, provider job identifiers, status, errors, and
   estimated or provider-reported usage and cost;
-- reference images, source video, generated video, and local file references;
+- saved and in-progress reference images, video, and audio; generated media;
+  local file references; and reference names, folders, and tags;
 - appearance, retention, and other app preferences.
 
-Provider keys can be added, replaced, or removed from **Providers**. Generation
-history and app preferences can be cleared from **Settings**. Removing the app
-may also remove data held in its application sandbox, subject to the backup and
-device-management behavior of your operating system.
+Provider keys can be added, replaced, or removed from **Providers**. Saved
+references can be renamed, reorganized, or deleted from **References**.
+Generation history and app preferences can be cleared from **Settings**.
+Removing the app may also remove data held in its application sandbox, subject
+to the backup and device-management behavior of your operating system.
 
 ## Data sent to a generation provider
 
