@@ -28,6 +28,7 @@ Future<void> main(List<String> arguments) async {
     fallbackApiKeys: <String, String>{
       'bfl': Platform.environment['BFL_API_KEY']?.trim() ?? '',
       'ltx': Platform.environment['LTX_API_KEY']?.trim() ?? '',
+      'artcraft': Platform.environment['ARTCRAFT_KEY']?.trim() ?? '',
       'atlas': Platform.environment['ATLAS_CLOUD_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
@@ -691,6 +692,7 @@ class CompanionApp {
       availableProviders: <String>{
         'bfl',
         'ltx',
+        'artcraft',
         'atlas',
         if (_appleLocal.isAvailable) 'apple-local',
       },

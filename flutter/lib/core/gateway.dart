@@ -34,7 +34,8 @@ abstract interface class AppGateway {
 
 /// Provider-aware operations implemented by the production gateways. Keeping
 /// this separate preserves compatibility with lightweight BFL-only test and
-/// embedder gateways while the app can route LTX and Atlas Cloud explicitly.
+/// embedder gateways while the app can route LTX, ArtCraft, and Atlas Cloud
+/// explicitly.
 abstract interface class ProviderGateway {
   Future<LocalSnapshot> setProviderApiKey(String provider, String value);
   Future<ProviderAccountStatus> verifyProviderKey(

@@ -8,7 +8,8 @@ only desktop lifecycle, packaging, and self-update.
 
 - Apple Local still-image generation and experimental frame-by-frame cartoon
   animation on physical iOS devices and Apple-silicon Macs, without API keys
-- BFL FLUX 3, LTX 2.5/2.3, and selected Create-ready Atlas Cloud models
+- BFL FLUX 3, LTX 2.5/2.3, ArtCraft’s live video catalog, and selected
+  Create-ready Atlas Cloud models
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
   video continuation and draft enhance
 - Provider-aware uploaded or hosted references, with FLUX-specific even or
@@ -132,12 +133,14 @@ the saved key itself.
   `enterprise` when appropriate. Xcode signing must already be configured. iOS
   builds are deliberately local-only and are not run or published by GitHub
   Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
-  `CLAWNSOLE_IOS_REVIEW_LTX_API_KEY`, and/or
-  `CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY`. A local, Git-ignored
+  `CLAWNSOLE_IOS_REVIEW_LTX_API_KEY`,
+  `CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY`, and/or
+  `CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY`. A local, Git-ignored
   `flutter/.env.ios-review` or repository `.env` is loaded automatically; the
-  ordinary `BFL_API_KEY`, `LTX_API_KEY`, and `ATLAS_CLOUD_KEY` names act as
-  development/App Review fallbacks. The script passes credentials only to the iOS
-  compiler; web, Android, and macOS builds do not receive it.
+  ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
+  `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
+  passes credentials only to the iOS compiler; web, Android, and macOS builds
+  do not receive it.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
@@ -179,7 +182,7 @@ flutter test
 flutter build web
 ```
 
-The implementation follows the official BFL, LTX, and Atlas Cloud API,
+The implementation follows the official BFL, LTX, ArtCraft, and Atlas Cloud API,
 polling, model capability, and pricing documentation. Atlas models are read
 from its public catalog; 720p Create-ready costs use its calculate endpoint,
 with checked-in starting-rate fallbacks.

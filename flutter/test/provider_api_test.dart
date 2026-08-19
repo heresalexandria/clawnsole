@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/atlas_cloud_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/ltx_api.dart';
@@ -126,6 +127,12 @@ void main() {
         return http.Response('{}', 200);
       }),
     );
+    final artcraft = ArtCraftApi(
+      client: MockClient((_) async {
+        requests += 1;
+        return http.Response('{}', 200);
+      }),
+    );
 
     await expectLater(
       ltx.poll('secret', 'https://example.com/v2/text-to-video/job'),
@@ -135,7 +142,198 @@ void main() {
       atlas.poll('secret', 'https://example.com/api/v1/model/prediction/job'),
       throwsA(isA<ProviderException>()),
     );
+    await expectLater(
+      artcraft.poll(
+        'secret',
+        'https://example.com/v1/omni_api/job_status/job/job',
+      ),
+      throwsA(isA<ProviderException>()),
+    );
     expect(requests, 0);
+  });
+
+  test('ArtCraft exposes every enabled live video model', () {
+    expect(artCraftProvider.models.map((model) => model.id).toSet(), <String>{
+      'flux_3',
+      'flux_3_draft',
+      'grok_imagine_video',
+      'grok_imagine_video_1p5',
+      'happy_horse_1p0',
+      'kling_1p6_pro',
+      'kling_2p5_turbo_pro',
+      'kling_2p6_pro',
+      'minimax_h3',
+      'seedance_1p5_pro',
+      'seedance_2p0',
+      'seedance_2p0_fast',
+      'seedance_2p0_bp',
+      'seedance_2p0_bp_fast',
+      'seedance_2p0_bpu',
+      'seedance_2p0_bpu_fast',
+      'seedance_2p0_mini',
+      'seedance_2p0_bp_mini',
+      'seedance_2p0_bpu_mini',
+      'seedance_2p5',
+      'seedance_2p5_u',
+      'seedance_2p5_preview',
+      'veo_3_fast',
+      'veo_3p1',
+      'veo_3p1_fast',
+      'veo_3p1_lite',
+      'vidu_q3',
+      'vidu_q3_turbo',
+    });
+    expect(modelById('artcraft', 'seedance_2p5_preview').modes, <VideoMode>[
+      VideoMode.i2v,
+    ]);
+    expect(modelById('artcraft', 'seedance_2p0').maxKeyframes, 11);
+    expect(modelById('artcraft', 'kling_2p6_pro').supportsAudio, isTrue);
+  });
+
+  test('ArtCraft maps generation input and retains its quoted cost', () async {
+    final requestBodies = <String, Map<String, Object?>>{};
+    final api = ArtCraftApi(
+      client: MockClient((request) async {
+        final payload = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        requestBodies[request.url.path] = payload;
+        if (request.url.path == '/v1/omni_gen/cost/video') {
+          expect(request.headers['authorization'], isNull);
+          return http.Response(
+            jsonEncode(<String, Object?>{'cost_in_credits': 93}),
+            200,
+          );
+        }
+        expect(request.url.path, '/v1/omni_api/generate/video');
+        expect(request.headers['authorization'], 'Bearer secret');
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'success': true,
+            'inference_job_token': 'jinf_test',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final receipt = await api.submit(
+      'secret',
+      'seedance_2p0',
+      <String, Object?>{
+        'prompt': 'A continuous blue-hour tracking shot',
+        'duration': 5,
+        'resolution': 'fhd',
+        'aspect_ratio': '16:9',
+        'keyframes': <String>[
+          'https://cdn.test/first.png',
+          'https://cdn.test/reference.png',
+          'https://cdn.test/last.png',
+        ],
+      },
+    );
+
+    final quote = requestBodies['/v1/omni_gen/cost/video']!;
+    final generation = requestBodies['/v1/omni_api/generate/video']!;
+    expect(quote.containsKey('idempotency_token'), isFalse);
+    expect(generation['model'], 'seedance_2p0');
+    expect(generation['duration_seconds'], 5);
+    expect(generation['resolution'], 'ten_eighty_p');
+    expect(generation['aspect_ratio'], 'wide_sixteen_by_nine');
+    expect(generation['start_frame_image_url'], 'https://cdn.test/first.png');
+    expect(generation['end_frame_image_url'], 'https://cdn.test/last.png');
+    expect(generation['reference_image_urls'], <String>[
+      'https://cdn.test/reference.png',
+    ]);
+    expect(
+      generation['idempotency_token'],
+      matches(
+        RegExp(
+          r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+        ),
+      ),
+    );
+    expect(receipt['id'], 'jinf_test');
+    expect(
+      receipt['polling_url'],
+      'https://api.storyteller.ai/v1/omni_api/job_status/job/jinf_test',
+    );
+    expect(receipt['cost'], 93.0);
+  });
+
+  test('ArtCraft maps a completed Omni API status response', () async {
+    final api = ArtCraftApi(
+      client: MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer secret');
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'state': <String, Object?>{
+              'status': <String, Object?>{
+                'status': 'complete_success',
+                'progress_percentage': 100,
+              },
+              'maybe_result': <String, Object?>{
+                'media': <Object?>[
+                  <String, Object?>{'cdn_url': 'https://cdn.test/result.mp4'},
+                ],
+              },
+            },
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await api.poll(
+      'secret',
+      'https://api.storyteller.ai/v1/omni_api/job_status/job/jinf_test',
+    );
+
+    expect(result['status'], 'Ready');
+    expect(result['progress'], 100);
+    expect(result['result'], isA<Map<String, Object?>>());
+  });
+
+  test('ArtCraft live catalog filters disabled and unknown models', () async {
+    final api = ArtCraftApi(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode(<String, Object?>{
+            'models': <Object?>[
+              <String, Object?>{'model': 'flux_3', 'full_name': 'FLUX 3 Live'},
+              <String, Object?>{'model': 'seedance_2p0', 'is_disabled': true},
+              <String, Object?>{
+                'model': 'future_model',
+                'text_to_video_supported': true,
+              },
+            ],
+          }),
+          200,
+        ),
+      ),
+    );
+
+    final models = await api.listVideoModels();
+    expect(models.map((model) => model.model), <String>[
+      'flux_3',
+      'future_model',
+    ]);
+    expect(models.first.createReady, isTrue);
+    expect(models.last.createReady, isFalse);
+  });
+
+  test('ArtCraft accepts authenticated not-found as a key probe', () async {
+    final api = ArtCraftApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/v1/omni_api/job_status/job/None');
+        expect(request.headers['authorization'], 'Bearer secret');
+        return http.Response('{"detail":"not found"}', 404);
+      }),
+    );
+
+    final account = await api.verify('secret');
+    expect(account.provider, 'artcraft');
+    expect(account.balance, isNull);
   });
 
   test('Atlas reads live video prices and marks supported models', () async {
@@ -207,14 +405,25 @@ void main() {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
+        .withApiKey('artcraft', 'artcraft-secret')
         .withApiKey('atlas', 'atlas-secret')
         .encode();
     final decoded = StoredData.decode(encoded);
 
     expect(decoded.apiKeyFor('bfl'), 'bfl-secret');
     expect(decoded.apiKeyFor('ltx'), 'ltx-secret');
+    expect(decoded.apiKeyFor('artcraft'), 'artcraft-secret');
     expect(decoded.apiKeyFor('atlas'), 'atlas-secret');
     expect(decoded.toJson()['schemaVersion'], 9);
+  });
+
+  test('ArtCraft resolutions survive history serialization', () {
+    for (final resolution in <String>['sd', 'fhd', 'qhd', '4k']) {
+      final decoded = GenerationConfig.fromJson(<String, Object?>{
+        'resolution': resolution,
+      });
+      expect(decoded.resolution, resolution);
+    }
   });
 
   test('published provider pricing uses the selected tier', () {
@@ -234,8 +443,15 @@ void main() {
       VideoMode.t2v,
       config,
     );
+    final artcraft = estimateCost(
+      'artcraft',
+      'seedance_2p0',
+      VideoMode.t2v,
+      config,
+    );
 
     expect(ltx.minimumUsd, 1.3);
+    expect(artcraft.minimumUsd, 1.86);
     expect(atlas.minimumUsd, .39);
     final ltxRows = publishedProviderPrices('ltx');
     expect(ltxRows.first.supportsDuration(15), isFalse);

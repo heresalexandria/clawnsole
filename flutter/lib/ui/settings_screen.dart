@@ -123,7 +123,7 @@ class _ProviderAccessCard extends StatelessWidget {
               ),
               SizedBox(height: 4),
               Text(
-                'Set BFL, LTX, and Atlas Cloud keys and compare live model costs in Providers.',
+                'Set BFL, LTX, ArtCraft, and Atlas Cloud keys and compare live model costs in Providers.',
               ),
             ],
           ),

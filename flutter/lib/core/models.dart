@@ -170,7 +170,10 @@ class GenerationConfig {
           ? json['aspectRatio']! as String
           : '16:9',
       duration: rawDuration is num ? rawDuration.toInt() : 'auto',
-      resolution: json['resolution'] == 'fhd' ? 'fhd' : 'hd',
+      resolution: switch (json['resolution']) {
+        'sd' || 'fhd' || 'qhd' || '4k' => json['resolution']! as String,
+        _ => 'hd',
+      },
       generateAudio: json['generateAudio'] != false,
       safetyTolerance: (json['safetyTolerance'] as num?)?.toInt() ?? 2,
       draft: json['draft'] == true,
