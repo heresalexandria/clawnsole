@@ -22,6 +22,7 @@ double _roundUsd(double value) =>
     (value.clamp(0, double.infinity) * 10000).round() / 10000;
 
 bool _sameSignature(Generation item, VideoMode mode, GenerationConfig config) =>
+    item.provider == 'bfl' &&
     item.mode == mode &&
     item.config.resolution == config.resolution &&
     item.config.duration == config.duration &&
@@ -49,6 +50,7 @@ CreditEstimate estimateCredits(
   final observedRates = history.expand((item) {
     final duration = item.config.duration;
     if (item.cost == null ||
+        item.provider != 'bfl' ||
         duration is! num ||
         duration <= 0 ||
         item.mode != mode ||
@@ -203,7 +205,7 @@ RouteCostObservation? routeCostObservation(
             'fhd' => route.provider == 'ltx' ? '1080p' : 'fhd',
             'qhd' => '1440p',
             '4k' => '4k',
-            _ => 'hd',
+            _ => route.provider == 'ltx' ? '720p' : 'hd',
           };
     return routeTier == generationTier;
   }).toList();
@@ -274,8 +276,18 @@ ProviderModelPrice? _pricedModel(
   }
   if (providerId == 'ltx') {
     const rates = <String, Map<String, double>>{
-      'ltx-2-3-fast': <String, double>{'fhd': .06, 'qhd': .12, '4k': .24},
-      'ltx-2-3-pro': <String, double>{'fhd': .08, 'qhd': .16, '4k': .32},
+      'ltx-2-3-fast': <String, double>{
+        'hd': .03,
+        'fhd': .06,
+        'qhd': .12,
+        '4k': .24,
+      },
+      'ltx-2-3-pro': <String, double>{
+        'hd': .04,
+        'fhd': .08,
+        'qhd': .16,
+        '4k': .32,
+      },
     };
     return (
       usdPerSecond:
@@ -329,6 +341,18 @@ CostEstimate estimateCost(
       basis: credits.basis,
       providerUnitsMinimum: credits.minimum,
       providerUnitsMaximum: credits.maximum,
+      providerUnitLabel: 'credits',
+    );
+  }
+  if (providerId == 'artcraft') {
+    final minimumUsd = _roundUsd(quotedTotal(minimumSeconds));
+    final maximumUsd = _roundUsd(quotedTotal(maximumSeconds));
+    return CostEstimate(
+      minimumUsd: minimumUsd,
+      maximumUsd: maximumUsd,
+      basis: rate.source,
+      providerUnitsMinimum: _roundCredits(minimumUsd / bflUsdPerCredit),
+      providerUnitsMaximum: _roundCredits(maximumUsd / bflUsdPerCredit),
       providerUnitLabel: 'credits',
     );
   }

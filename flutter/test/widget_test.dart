@@ -16,6 +16,7 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/shell_bridge.dart';
 import 'package:clawnsole/core/store_update.dart';
 import 'package:clawnsole/core/update_check.dart';
@@ -98,6 +99,69 @@ void main() {
     expect(estimate.maximum, 130);
     expect(estimate.basis, 'provider-history');
   });
+
+  test('BFL estimates ignore matching history from other providers', () {
+    final now = DateTime.utc(2026, 8, 19);
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 10,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    );
+    final estimate = estimateCredits(VideoMode.t2v, config, <Generation>[
+      Generation(
+        localId: 'artcraft-quote',
+        provider: 'artcraft',
+        model: 'seedance_2p0',
+        status: 'Ready',
+        prompt: 'Another provider',
+        mode: VideoMode.t2v,
+        config: config,
+        createdAt: now,
+        updatedAt: now,
+        cost: 999,
+      ),
+    ]);
+
+    expect(estimate.minimum, 170);
+    expect(estimate.maximum, 170);
+    expect(estimate.basis, 'bfl-rate');
+  });
+
+  test(
+    'ArtCraft live quotes replace the published fallback estimate',
+    () async {
+      final gateway = _ProviderMemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'artcraft',
+            model: 'seedance_2p0',
+          ),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+
+      await controller.initialize();
+      await controller.refreshProviderEstimate();
+
+      expect(controller.currentEstimate.minimumUsd, 1.85);
+      expect(controller.currentEstimate.providerUnitsMinimum, 185);
+      expect(controller.currentEstimate.basis, 'artcraft-live-quote');
+
+      controller.updateForm((form) => form.resolution = 'fhd');
+      await controller.refreshProviderEstimate();
+
+      expect(controller.currentEstimate.minimumUsd, 4.66);
+      expect(controller.currentEstimate.providerUnitsMinimum, 466);
+      expect(gateway.quotedResolutions, containsAll(<String>['hd', 'fhd']));
+      controller.dispose();
+    },
+  );
 
   test('preserves terminal BFL statuses and extracts provider errors', () {
     expect(normalizeGenerationStatus('task not found'), 'Task not found');
@@ -2349,6 +2413,54 @@ class _MemoryGateway implements AppGateway {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
   }
+}
+
+class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
+  _ProviderMemoryGateway(super.snapshot);
+
+  final List<String> quotedResolutions = <String>[];
+
+  @override
+  Future<CostEstimate?> quoteProviderCost(
+    String provider,
+    String model,
+    Map<String, Object?> input,
+  ) async {
+    final resolution = input['resolution']?.toString() ?? '';
+    quotedResolutions.add(resolution);
+    final credits = resolution == 'fhd' ? 466.0 : 185.0;
+    return CostEstimate(
+      minimumUsd: credits / 100,
+      maximumUsd: credits / 100,
+      basis: 'artcraft-live-quote',
+      providerUnitsMinimum: credits,
+      providerUnitsMaximum: credits,
+      providerUnitLabel: 'credits',
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> setProviderApiKey(
+    String provider,
+    String value,
+  ) async => snapshot;
+
+  @override
+  Future<ProviderAccountStatus> verifyProviderKey(
+    String provider, [
+    String? candidate,
+  ]) async => ProviderAccountStatus(provider: provider);
+
+  @override
+  Future<ProviderAccountStatus> getProviderAccount(String provider) async =>
+      ProviderAccountStatus(provider: provider);
+
+  @override
+  Future<LocalSnapshot> clearProviderApiKey(String provider) async => snapshot;
+
+  @override
+  Future<List<ProviderModelPrice>> listProviderModels(String provider) async =>
+      publishedProviderPrices(provider);
 }
 
 class _MemoryLocalDataStore extends LocalDataStore {

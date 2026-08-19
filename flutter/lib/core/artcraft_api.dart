@@ -53,24 +53,50 @@ class ArtCraftApi {
       };
 
   Future<ProviderAccountStatus> verify(String key) async {
-    // ArtCraft does not expose an API-key wallet endpoint. "None" is a
-    // deliberately unknown job token: an authenticated key receives 404,
-    // while an invalid key is rejected before the lookup with 401.
-    final response = await _request(
-      _client.get(
-        _baseUrl.resolve('/v1/omni_api/job_status/job/None'),
-        headers: _headers(key),
+    final body = await _read(
+      await _request(
+        _client.get(
+          _baseUrl.resolve('/v1/credits/namespace/artcraft'),
+          headers: _headers(key),
+        ),
+        'check your credit balance',
       ),
-      'verify your API key',
     );
-    if (response.statusCode != 404 &&
-        (response.statusCode < 200 || response.statusCode >= 300)) {
-      await _read(response);
+    if (body is! Map<String, Object?>) {
+      throw const ProviderException(
+        'ArtCraft returned an invalid credit balance.',
+        status: 502,
+      );
     }
-    return const ProviderAccountStatus(
+    final raw = body['sum_total_credits'];
+    final balance = raw is num ? raw.toDouble() : double.tryParse('$raw');
+    if (balance == null || !balance.isFinite || balance < 0) {
+      throw const ProviderException(
+        'ArtCraft returned an invalid credit balance.',
+        status: 502,
+      );
+    }
+    return ProviderAccountStatus(
       provider: 'artcraft',
+      balance: balance,
       currency: 'credits',
-      balanceLabel: 'Connected · balance available in ArtCraft',
+      balanceLabel: '${_formatCredits(balance)} credits available',
+    );
+  }
+
+  Future<CostEstimate?> estimate(
+    String model,
+    Map<String, Object?> input,
+  ) async {
+    final quote = await _quote(_pricingPayload(model, input));
+    if (quote == null) return null;
+    return CostEstimate(
+      minimumUsd: quote.usd,
+      maximumUsd: quote.usd,
+      basis: 'artcraft-live-quote',
+      providerUnitsMinimum: quote.credits,
+      providerUnitsMaximum: quote.credits,
+      providerUnitLabel: 'credits',
     );
   }
 
@@ -139,7 +165,7 @@ class ArtCraftApi {
     Map<String, Object?> input,
   ) async {
     final payload = await _generationPayload(key, model, input);
-    final cost = await _quote(payload);
+    final quote = await _quote(payload);
     payload['idempotency_token'] = _uuid();
     final body = await _read(
       await _request(
@@ -166,7 +192,7 @@ class ArtCraftApi {
       'polling_url': _baseUrl
           .resolve('/v1/omni_api/job_status/job/$id')
           .toString(),
-      if (cost != null) 'cost': cost,
+      if (quote != null) 'cost': quote.credits,
     };
   }
 
@@ -328,7 +354,26 @@ class ArtCraftApi {
     return result;
   }
 
-  Future<double?> _quote(Map<String, Object?> payload) async {
+  Map<String, Object?> _pricingPayload(
+    String model,
+    Map<String, Object?> input,
+  ) {
+    final duration = input['duration'];
+    final definition = modelById('artcraft', model);
+    return <String, Object?>{
+      'model': model,
+      'prompt': input['prompt']?.toString() ?? 'Clawnsole pricing estimate',
+      if (duration is num) 'duration_seconds': duration.toInt(),
+      if (_aspectRatio(input['aspect_ratio']?.toString(), model) case final ar?)
+        'aspect_ratio': ar,
+      if (_resolution(input['resolution']?.toString()) case final resolution?)
+        'resolution': resolution,
+      if (definition.supportsAudio)
+        'generate_audio': input['generate_audio'] != false,
+    };
+  }
+
+  Future<_ArtCraftCostQuote?> _quote(Map<String, Object?> payload) async {
     final body = await _read(
       await _request(
         _client.post(
@@ -343,7 +388,24 @@ class ArtCraftApi {
       ),
     );
     if (body is! Map<String, Object?>) return null;
-    return (body['cost_in_credits'] as num?)?.toDouble();
+    final rawCredits = body['cost_in_credits'];
+    final rawUsdCents = body['cost_in_usd_cents'];
+    final credits = rawCredits is num
+        ? rawCredits.toDouble()
+        : double.tryParse('$rawCredits');
+    final usdCents = rawUsdCents is num
+        ? rawUsdCents.toDouble()
+        : double.tryParse('$rawUsdCents');
+    if (credits == null && usdCents == null) return null;
+    final normalizedCredits = credits ?? usdCents!;
+    final usd = (usdCents ?? normalizedCredits) / 100;
+    if (!normalizedCredits.isFinite ||
+        normalizedCredits < 0 ||
+        !usd.isFinite ||
+        usd < 0) {
+      return null;
+    }
+    return _ArtCraftCostQuote(credits: normalizedCredits, usd: usd);
   }
 
   Future<_ArtCraftMediaSource> _materialize(
@@ -601,3 +663,13 @@ class _ArtCraftMediaSource {
   final String? url;
   final String? token;
 }
+
+class _ArtCraftCostQuote {
+  const _ArtCraftCostQuote({required this.credits, required this.usd});
+
+  final double credits;
+  final double usd;
+}
+
+String _formatCredits(double value) =>
+    value.toStringAsFixed(value % 1 == 0 ? 0 : 1);

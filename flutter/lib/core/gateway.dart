@@ -45,6 +45,11 @@ abstract interface class ProviderGateway {
   Future<ProviderAccountStatus> getProviderAccount(String provider);
   Future<LocalSnapshot> clearProviderApiKey(String provider);
   Future<List<ProviderModelPrice>> listProviderModels(String provider);
+  Future<CostEstimate?> quoteProviderCost(
+    String provider,
+    String model,
+    Map<String, Object?> input,
+  );
 }
 
 abstract interface class LibraryOrganizationGateway {

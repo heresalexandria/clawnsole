@@ -393,6 +393,29 @@ class CompanionApp {
           models.map((model) => model.toJson()).toList(),
         );
       }
+      if (request.method == 'POST' && path == '/providers/quote') {
+        final body = await _bodyMap(request);
+        final provider = body['provider']?.toString() ?? '';
+        final model = body['model']?.toString() ?? '';
+        final input = (body['input'] as Map<Object?, Object?>? ?? const {}).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        final estimate = await _providers.quote(provider, model, input);
+        return await _json(request.response, 200, <String, Object?>{
+          'available': estimate != null,
+          if (estimate != null) ...<String, Object?>{
+            'minimumUsd': estimate.minimumUsd,
+            'maximumUsd': estimate.maximumUsd,
+            'basis': estimate.basis,
+            if (estimate.providerUnitsMinimum != null)
+              'providerUnitsMinimum': estimate.providerUnitsMinimum,
+            if (estimate.providerUnitsMaximum != null)
+              'providerUnitsMaximum': estimate.providerUnitsMaximum,
+            if (estimate.providerUnitLabel != null)
+              'providerUnitLabel': estimate.providerUnitLabel,
+          },
+        });
+      }
       if (request.method == 'POST' && path == '/generations') {
         final generation = await _submit(await _bodyMap(request));
         return await _json(request.response, 201, <String, Object?>{
