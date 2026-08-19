@@ -24,6 +24,10 @@ load_clawnsole_review_credentials() {
         -r "${CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_FILE:-}" ]]; then
     CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY="$(<"$CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_FILE")"
   fi
+  if [[ -z "${CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY:-}" &&
+        -r "${CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY_FILE:-}" ]]; then
+    CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY="$(<"$CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY_FILE")"
+  fi
 }
 
 prepare_clawnsole_review_defines() {
@@ -33,10 +37,12 @@ prepare_clawnsole_review_defines() {
   local bfl_key="${CLAWNSOLE_IOS_REVIEW_BFL_API_KEY:-${BFL_API_KEY:-}}"
   local ltx_key="${CLAWNSOLE_IOS_REVIEW_LTX_API_KEY:-${LTX_API_KEY:-}}"
   local atlas_key="${CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY:-${ATLAS_CLOUD_KEY:-}}"
+  local artcraft_key="${CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY:-${ARTCRAFT_KEY:-}}"
 
   _append_clawnsole_review_define "BFL" "$bfl_key"
   _append_clawnsole_review_define "LTX" "$ltx_key"
   _append_clawnsole_review_define "ATLAS" "$atlas_key"
+  _append_clawnsole_review_define "ARTCRAFT" "$artcraft_key"
 
   if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
     REVIEW_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
@@ -120,15 +121,35 @@ class _CreateHeading extends StatelessWidget {
   );
 }
 
-class _ProviderPlaque extends StatelessWidget {
+class _ProviderPlaque extends StatefulWidget {
   const _ProviderPlaque({required this.controller});
 
   final AppController controller;
+
+  @override
+  State<_ProviderPlaque> createState() => _ProviderPlaqueState();
+}
+
+class _ProviderPlaqueState extends State<_ProviderPlaque> {
+  final Set<String> _collapsedProviders = <String>{};
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _collapsedProviders.addAll(
+      controller.providers
+          .where((provider) => provider.id != controller.selectedProviderId)
+          .map((provider) => provider.id),
+    );
+  }
 
   Future<void> _select(String value) async {
     final divider = value.indexOf('|');
     final provider = value.substring(0, divider);
     final model = value.substring(divider + 1);
+    if (mounted) setState(() => _collapsedProviders.remove(provider));
     if (controller.selectedProviderId != provider) {
       await controller.selectProvider(provider);
     }
@@ -143,35 +164,29 @@ class _ProviderPlaque extends StatelessWidget {
     child: PopupMenuButton<String>(
       tooltip: 'Choose provider and model',
       onSelected: (value) => unawaited(_select(value)),
-      itemBuilder: (context) => controller.providers.expand((provider) {
-        return <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(
-            enabled: false,
-            height: 34,
-            child: Text(
-              provider.name.toUpperCase(),
-              style: const TextStyle(
-                fontSize: 10,
-                letterSpacing: 1.1,
-                fontWeight: FontWeight.w800,
+      constraints: const BoxConstraints(minWidth: 320, maxWidth: 380),
+      itemBuilder: (context) => controller.providers
+          .map<PopupMenuEntry<String>>(
+            (provider) => PopupMenuItem<String>(
+              enabled: false,
+              padding: EdgeInsets.zero,
+              child: _ProviderMenuSection(
+                key: ValueKey('provider-model-section-${provider.id}'),
+                provider: provider,
+                initiallyExpanded: !_collapsedProviders.contains(provider.id),
+                selectedProviderId: controller.selectedProviderId,
+                selectedModelId: controller.selectedModel.id,
+                onExpandedChanged: (expanded) {
+                  if (expanded) {
+                    _collapsedProviders.remove(provider.id);
+                  } else {
+                    _collapsedProviders.add(provider.id);
+                  }
+                },
               ),
             ),
-          ),
-          ...provider.models.map(
-            (model) => PopupMenuItem<String>(
-              value: '${provider.id}|${model.id}',
-              child: Row(
-                children: <Widget>[
-                  Expanded(child: Text(model.label)),
-                  if (provider.id == controller.selectedProviderId &&
-                      model.id == controller.selectedModel.id)
-                    const Icon(Icons.check_rounded, size: 17),
-                ],
-              ),
-            ),
-          ),
-        ];
-      }).toList(),
+          )
+          .toList(),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -234,6 +249,134 @@ class _ProviderPlaque extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _ProviderMenuSection extends StatefulWidget {
+  const _ProviderMenuSection({
+    required this.provider,
+    required this.initiallyExpanded,
+    required this.selectedProviderId,
+    required this.selectedModelId,
+    required this.onExpandedChanged,
+    super.key,
+  });
+
+  final VideoProviderDefinition provider;
+  final bool initiallyExpanded;
+  final String selectedProviderId;
+  final String selectedModelId;
+  final ValueChanged<bool> onExpandedChanged;
+
+  @override
+  State<_ProviderMenuSection> createState() => _ProviderMenuSectionState();
+}
+
+class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+    widget.onExpandedChanged(_expanded);
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      InkWell(
+        key: ValueKey('provider-model-heading-${widget.provider.id}'),
+        onTap: _toggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  widget.provider.name.toUpperCase(),
+                  style: TextStyle(
+                    color: context.colors.onSurface,
+                    fontSize: 10,
+                    letterSpacing: 1.1,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text(
+                '${widget.provider.models.length}',
+                style: TextStyle(
+                  color: context.colors.onSurfaceVariant,
+                  fontSize: 10,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                _expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        alignment: Alignment.topCenter,
+        child: _expanded
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: widget.provider.models.map((model) {
+                  final selected =
+                      widget.provider.id == widget.selectedProviderId &&
+                      model.id == widget.selectedModelId;
+                  return InkWell(
+                    key: ValueKey(
+                      'provider-model-option-${widget.provider.id}-${model.id}',
+                    ),
+                    onTap: () => Navigator.of(
+                      context,
+                    ).pop('${widget.provider.id}|${model.id}'),
+                    child: Container(
+                      color: selected
+                          ? context.colors.primaryContainer.withValues(
+                              alpha: .5,
+                            )
+                          : null,
+                      padding: const EdgeInsets.fromLTRB(24, 10, 14, 10),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              model.label,
+                              style: TextStyle(
+                                color: context.colors.onSurface,
+                                fontSize: 13,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (selected)
+                            Icon(
+                              Icons.check_rounded,
+                              size: 17,
+                              color: context.colors.primary,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              )
+            : const SizedBox.shrink(),
+      ),
+      Divider(height: 1, color: context.colors.outlineVariant),
+    ],
   );
 }
 

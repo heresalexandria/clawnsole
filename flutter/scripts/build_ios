@@ -13,6 +13,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "  CLAWNSOLE_IOS_REVIEW_BFL_API_KEY       App Review BFL key"
   echo "  CLAWNSOLE_IOS_REVIEW_LTX_API_KEY       App Review LTX key"
   echo "  CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY     App Review Atlas Cloud key"
+  echo "  CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY  App Review ArtCraft key"
   echo "  Append _FILE to any key variable to load it from a one-line file"
   echo "  CLAWNSOLE_IOS_REVIEW_ENV_FILE           Optional shell env file"
   echo "                                           (default: flutter/.env.ios-review)"

@@ -937,6 +937,68 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('provider picker collapses and expands provider models', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Choose provider and model'));
+    await tester.pumpAndSettle();
+
+    const bflOption = ValueKey('provider-model-option-bfl-flux-3-video');
+    const artcraftOption = ValueKey(
+      'provider-model-option-artcraft-seedance_2p0',
+    );
+    const artcraftHeading = ValueKey('provider-model-heading-artcraft');
+    expect(find.byKey(bflOption), findsOneWidget);
+    expect(find.byKey(artcraftOption), findsNothing);
+
+    await tester.ensureVisible(find.byKey(artcraftHeading));
+    await tester.tap(find.byKey(artcraftHeading));
+    await tester.pumpAndSettle();
+    expect(find.byKey(artcraftOption), findsOneWidget);
+
+    await tester.tap(find.byKey(artcraftHeading));
+    await tester.pumpAndSettle();
+    expect(find.byKey(artcraftOption), findsNothing);
+
+    await tester.tap(find.byKey(artcraftHeading));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(artcraftOption));
+    await tester.tap(find.byKey(artcraftOption));
+    await tester.pumpAndSettle();
+    expect(controller.selectedProviderId, 'artcraft');
+    expect(controller.selectedModelId, 'seedance_2p0');
+    controller.dispose();
+  });
+
   test('update checks compare releases and read the shell summary', () {
     expect(compareSemanticVersions('0.4.1', '0.4.0'), greaterThan(0));
     expect(compareSemanticVersions('v0.10.0', '0.9.0'), greaterThan(0));

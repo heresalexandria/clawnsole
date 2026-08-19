@@ -34,6 +34,12 @@ const _configuredIosReviewAtlasApiKey = String.fromEnvironment(
 const _configuredIosReviewAtlasApiKeyId = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY_ID',
 );
+const _configuredIosReviewArtCraftApiKey = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY',
+);
+const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
+  'CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY_ID',
+);
 
 List<String> _cleanLibraryTags(Iterable<String> input) {
   final tags = <String>[];
@@ -70,6 +76,8 @@ class NativeGateway
     String? iosReviewLtxApiKeyId,
     String? iosReviewAtlasApiKey,
     String? iosReviewAtlasApiKeyId,
+    String? iosReviewArtCraftApiKey,
+    String? iosReviewArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     AppleLocalRuntime? appleLocalRuntime,
     bool? isIos,
@@ -84,12 +92,18 @@ class NativeGateway
          'ltx': (iosReviewLtxApiKey ?? _configuredIosReviewLtxApiKey).trim(),
          'atlas': (iosReviewAtlasApiKey ?? _configuredIosReviewAtlasApiKey)
              .trim(),
+         'artcraft':
+             (iosReviewArtCraftApiKey ?? _configuredIosReviewArtCraftApiKey)
+                 .trim(),
        },
        _iosReviewKeyIds = <String, String>{
          'ltx': (iosReviewLtxApiKeyId ?? _configuredIosReviewLtxApiKeyId)
              .trim(),
          'atlas': (iosReviewAtlasApiKeyId ?? _configuredIosReviewAtlasApiKeyId)
              .trim(),
+         'artcraft':
+             (iosReviewArtCraftApiKeyId ?? _configuredIosReviewArtCraftApiKeyId)
+                 .trim(),
        },
        _appleLocal =
            appleLocalRuntime ?? const MethodChannelAppleLocalRuntime(),
@@ -194,6 +208,7 @@ class NativeGateway
       availableProviders: <String>{
         'bfl',
         'ltx',
+        'artcraft',
         'atlas',
         if (appleLocalAvailable) 'apple-local',
       },

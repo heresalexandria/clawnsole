@@ -879,7 +879,7 @@ class AppController extends ChangeNotifier {
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty) return 'Add at least one image frame.';
       if (form.keyframes.length > model.maxKeyframes) {
-        return '${model.label} accepts up to ${model.maxKeyframes} reference images.';
+        return '${model.label} accepts up to ${model.maxKeyframes} guide images.';
       }
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
@@ -985,7 +985,7 @@ class AppController extends ChangeNotifier {
       model: selectedModel.id,
       billingUnit: selectedProvider.isLocal
           ? 'local'
-          : selectedProviderId == 'bfl'
+          : selectedProviderId == 'bfl' || selectedProviderId == 'artcraft'
           ? 'credits'
           : 'usd',
       outputKind: selectedModel.outputKind,
