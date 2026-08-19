@@ -9,6 +9,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo
   echo "Environment:"
   echo "  CLAWNSOLE_IOS_SIMULATOR_ID  Simulator UDID override"
+  echo "  CLAWNSOLE_GOOGLE_IOS_CLIENT_ID  Google OAuth iOS client"
   exit 0
 fi
 
@@ -48,7 +49,17 @@ xcrun simctl bootstatus "$SIMULATOR_ID" -b
 
 load_clawnsole_review_credentials
 prepare_clawnsole_review_defines
-trap cleanup_clawnsole_review_defines EXIT
+prepare_google_ios_oauth
+trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
 
 echo "Launching Clawnsole on iOS simulator ${SIMULATOR_ID}…"
-flutter run -d "$SIMULATOR_ID" "${REVIEW_BUILD_ARGUMENTS[@]}" "$@"
+OAUTH_BUILD_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID=${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID}"
+  )
+fi
+flutter run -d "$SIMULATOR_ID" \
+  "${REVIEW_BUILD_ARGUMENTS[@]}" \
+  "${OAUTH_BUILD_ARGUMENTS[@]}" \
+  "$@"

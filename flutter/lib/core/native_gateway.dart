@@ -7,6 +7,9 @@ import 'package:path_provider/path_provider.dart';
 
 import 'bfl_api.dart';
 import 'direct_gateway.dart';
+import 'google_drive.dart';
+import 'google_drive_auth.dart';
+import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'models.dart';
 import 'provider_api.dart';
@@ -40,12 +43,14 @@ const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
 ///
 /// Provider and persistence behavior lives in [DirectGateway] so the
 /// standalone browser build can use the same contracts with Google Drive.
-class NativeGateway extends DirectGateway {
+class NativeGateway extends DirectGateway implements GoogleDriveGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
   // ignore: use_super_parameters
-  NativeGateway({
+  factory NativeGateway({
     LocalDataStore? store,
+    HybridDataStore? hybridStore,
+    GoogleDriveAuthorizer? driveAuthorizer,
     BflApi? api,
     http.Client? client,
     String? iosReviewApiKey,
@@ -58,7 +63,46 @@ class NativeGateway extends DirectGateway {
     String? iosReviewArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     bool? isIos,
-  }) : _iosReviewKeys = <String, String>{
+  }) {
+    final hybrid =
+        hybridStore ?? HybridDataStore(local: store ?? LocalDataStore());
+    return NativeGateway._(
+      hybrid: hybrid,
+      driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
+      api: api,
+      client: client,
+      iosReviewApiKey: iosReviewApiKey,
+      iosReviewApiKeyId: iosReviewApiKeyId,
+      iosReviewLtxApiKey: iosReviewLtxApiKey,
+      iosReviewLtxApiKeyId: iosReviewLtxApiKeyId,
+      iosReviewAtlasApiKey: iosReviewAtlasApiKey,
+      iosReviewAtlasApiKeyId: iosReviewAtlasApiKeyId,
+      iosReviewArtCraftApiKey: iosReviewArtCraftApiKey,
+      iosReviewArtCraftApiKeyId: iosReviewArtCraftApiKeyId,
+      providerRouter: providerRouter,
+      isIos: isIos,
+    );
+  }
+
+  // ignore: use_super_parameters
+  NativeGateway._({
+    required HybridDataStore hybrid,
+    required GoogleDriveAuthorizer driveAuthorizer,
+    BflApi? api,
+    http.Client? client,
+    String? iosReviewApiKey,
+    String? iosReviewApiKeyId,
+    String? iosReviewLtxApiKey,
+    String? iosReviewLtxApiKeyId,
+    String? iosReviewAtlasApiKey,
+    String? iosReviewAtlasApiKeyId,
+    String? iosReviewArtCraftApiKey,
+    String? iosReviewArtCraftApiKeyId,
+    ProviderApiRouter? providerRouter,
+    bool? isIos,
+  }) : _hybrid = hybrid,
+       _driveAuthorizer = driveAuthorizer,
+       _iosReviewKeys = <String, String>{
          'bfl': (iosReviewApiKey ?? _configuredIosReviewApiKey).trim(),
          'ltx': (iosReviewLtxApiKey ?? _configuredIosReviewLtxApiKey).trim(),
          'atlas': (iosReviewAtlasApiKey ?? _configuredIosReviewAtlasApiKey)
@@ -79,17 +123,71 @@ class NativeGateway extends DirectGateway {
        },
        _isIos = isIos ?? Platform.isIOS,
        super(
-         store: store ?? LocalDataStore(),
+         store: hybrid,
          api: api,
          client: client,
          providerRouter: providerRouter,
          persistenceDescription:
-             'Private JSON in this app’s documents directory',
+             'Combined local app documents and optional Google Drive library',
        );
 
+  final HybridDataStore _hybrid;
+  final GoogleDriveAuthorizer _driveAuthorizer;
   final Map<String, String> _iosReviewKeys;
   final Map<String, String> _iosReviewKeyIds;
   final bool _isIos;
+
+  @override
+  bool get supportsLocalLibrary => true;
+
+  @override
+  GoogleDriveConnection get googleDriveConnection {
+    final connection = _hybrid.connection;
+    if (_driveAuthorizer.isAvailable || connection.isConfigured) {
+      return connection;
+    }
+    return GoogleDriveConnection(
+      state: GoogleDriveConnectionState.unavailable,
+      message: _driveAuthorizer.unavailableMessage,
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> connectGoogleDrive(String folderName) async {
+    final token = await _driveAuthorizer.authorize();
+    await _hybrid.connect(token, folderName);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> disconnectGoogleDrive() async {
+    await _hybrid.disconnect();
+    await _driveAuthorizer.disconnect();
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> refreshGoogleDrive() async {
+    final token = await _driveAuthorizer.authorize();
+    await _hybrid.connect(token, googleDriveConnection.folderName);
+    return load();
+  }
+
+  @override
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async {
+    final copied = await _hybrid.copyLocalToDrive(
+      generationIds: generationIds,
+      referenceIds: referenceIds,
+    );
+    return GoogleDriveCopyResult(
+      snapshot: await load(),
+      generations: copied.generations,
+      references: copied.references,
+    );
+  }
 
   @override
   bool get supportsPhotoLibrarySave => Platform.isIOS || Platform.isAndroid;

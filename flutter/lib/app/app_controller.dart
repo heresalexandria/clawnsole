@@ -108,6 +108,7 @@ class ReferenceCandidate {
     this.folderId,
     this.tags = const <String>[],
     this.generated = false,
+    this.storage = LibraryStorage.local,
   });
 
   final String id;
@@ -118,6 +119,7 @@ class ReferenceCandidate {
   final String? folderId;
   final List<String> tags;
   final bool generated;
+  final LibraryStorage storage;
 }
 
 class GenerationFormState {
@@ -184,6 +186,9 @@ class AppController extends ChangeNotifier {
   LocalSnapshot? snapshot;
   AppSection section = AppSection.create;
   LibraryFilter libraryFilter = LibraryFilter.all;
+  LibraryStorageFilter libraryStorageFilter = LibraryStorageFilter.all;
+  LibraryStorageFilter referenceStorageFilter = LibraryStorageFilter.all;
+  LibraryStorage defaultStorage = LibraryStorage.local;
   String librarySearch = '';
   String libraryFolderView = libraryFolderAll;
   String? libraryTag;
@@ -240,10 +245,15 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
-  List<LibraryFolder> foldersFor(LibraryCollection collection) {
+  List<LibraryFolder> foldersFor(
+    LibraryCollection collection, {
+    LibraryStorage? storage,
+  }) {
     final values = List<LibraryFolder>.from(
       (snapshot?.folders ?? const <LibraryFolder>[]).where(
-        (folder) => folder.collection == collection,
+        (folder) =>
+            folder.collection == collection &&
+            (storage == null || folder.storage == storage),
       ),
     );
     values.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -269,6 +279,15 @@ class AppController extends ChangeNotifier {
   StorageStats get storage =>
       snapshot?.storage ?? const StorageStats(path: '', bytes: 0, records: 0);
   bool get supportsGoogleDrive => gateway is GoogleDriveGateway;
+  bool get supportsLocalLibrary =>
+      gateway is! GoogleDriveGateway ||
+      (gateway as GoogleDriveGateway).supportsLocalLibrary;
+  bool get googleDriveConnected =>
+      googleDriveConnection.state == GoogleDriveConnectionState.connected;
+  LibraryStorage get effectiveStorage =>
+      supportsLocalLibrary ? defaultStorage : LibraryStorage.drive;
+  bool get canUseDefaultStorage =>
+      effectiveStorage == LibraryStorage.local || googleDriveConnected;
   GoogleDriveConnection get googleDriveConnection =>
       gateway is GoogleDriveGateway
       ? (gateway as GoogleDriveGateway).googleDriveConnection
@@ -385,12 +404,25 @@ class AppController extends ChangeNotifier {
   };
 
   int folderCount(String folderView) => switch (folderView) {
-    libraryFolderAll => generations.length,
+    libraryFolderAll =>
+      generations
+          .where((item) => libraryStorageFilter.matches(item.storage))
+          .length,
     libraryFolderUnfiled =>
-      generations.where((item) => folderById(item.folderId) == null).length,
+      generations
+          .where(
+            (item) =>
+                libraryStorageFilter.matches(item.storage) &&
+                folderById(item.folderId) == null,
+          )
+          .length,
     _ =>
       generations
-          .where((item) => folderBranch(folderView).contains(item.folderId))
+          .where(
+            (item) =>
+                libraryStorageFilter.matches(item.storage) &&
+                folderBranch(folderView).contains(item.folderId),
+          )
           .length,
   };
 
@@ -421,6 +453,7 @@ class AppController extends ChangeNotifier {
         ? folderBranch(libraryFolderView)
         : const <String>{};
     return generations.where((item) {
+      if (!libraryStorageFilter.matches(item.storage)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(item.folderId!).toLowerCase();
@@ -471,25 +504,31 @@ class AppController extends ChangeNotifier {
   };
 
   int referenceFolderCount(String folderView) => switch (folderView) {
-    libraryFolderAll => savedReferences.length,
+    libraryFolderAll =>
+      savedReferences
+          .where((item) => referenceStorageFilter.matches(item.storage))
+          .length,
     libraryFolderUnfiled =>
       savedReferences
           .where(
             (item) =>
+                referenceStorageFilter.matches(item.storage) &&
                 folderById(
-                  item.folderId,
-                  collection: LibraryCollection.references,
-                ) ==
-                null,
+                      item.folderId,
+                      collection: LibraryCollection.references,
+                    ) ==
+                    null,
           )
           .length,
     _ =>
       savedReferences
           .where(
-            (item) => folderBranch(
-              folderView,
-              collection: LibraryCollection.references,
-            ).contains(item.folderId),
+            (item) =>
+                referenceStorageFilter.matches(item.storage) &&
+                folderBranch(
+                  folderView,
+                  collection: LibraryCollection.references,
+                ).contains(item.folderId),
           )
           .length,
   };
@@ -524,6 +563,7 @@ class AppController extends ChangeNotifier {
           )
         : const <String>{};
     final values = savedReferences.where((item) {
+      if (!referenceStorageFilter.matches(item.storage)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(
@@ -693,6 +733,11 @@ class AppController extends ChangeNotifier {
     snapshot = value;
     section = value.preferences.activeSection;
     libraryFilter = value.preferences.libraryFilter;
+    libraryStorageFilter = value.preferences.libraryStorageFilter;
+    referenceStorageFilter = value.preferences.referenceStorageFilter;
+    defaultStorage = supportsLocalLibrary
+        ? value.preferences.defaultStorage
+        : LibraryStorage.drive;
     final preferredProvider = providerById(value.preferences.provider);
     final available = providers;
     final previousModelId = selectedModelId;
@@ -759,12 +804,66 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> setLibraryStorageFilter(LibraryStorageFilter value) async {
+    libraryStorageFilter = value;
+    notifyListeners();
+    try {
+      _apply(
+        await gateway.setPreferences(_preferences(libraryStorageFilter: value)),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setReferenceStorageFilter(LibraryStorageFilter value) async {
+    referenceStorageFilter = value;
+    notifyListeners();
+    try {
+      _apply(
+        await gateway.setPreferences(
+          _preferences(referenceStorageFilter: value),
+        ),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setDefaultStorage(LibraryStorage value) async {
+    if (value == LibraryStorage.local && !supportsLocalLibrary) {
+      showNotice('This web build stores its library in Google Drive.');
+      return;
+    }
+    if (value == LibraryStorage.drive && !googleDriveConnected) {
+      showNotice('Connect Google Drive before choosing it for new items.');
+      return;
+    }
+    defaultStorage = value;
+    notifyListeners();
+    try {
+      _apply(await gateway.setPreferences(_preferences(defaultStorage: value)));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
   void setSearch(String value) {
     librarySearch = value;
     notifyListeners();
   }
 
   void setLibraryFolderView(String value) {
+    final folder = folderById(value);
+    if (folder != null && !libraryStorageFilter.matches(folder.storage)) {
+      unawaited(
+        setLibraryStorageFilter(
+          folder.storage == LibraryStorage.local
+              ? LibraryStorageFilter.local
+              : LibraryStorageFilter.drive,
+        ),
+      );
+    }
     libraryFolderView = value;
     notifyListeners();
   }
@@ -780,6 +879,16 @@ class AppController extends ChangeNotifier {
   }
 
   void setReferenceFolderView(String value) {
+    final folder = folderById(value, collection: LibraryCollection.references);
+    if (folder != null && !referenceStorageFilter.matches(folder.storage)) {
+      unawaited(
+        setReferenceStorageFilter(
+          folder.storage == LibraryStorage.local
+              ? LibraryStorageFilter.local
+              : LibraryStorageFilter.drive,
+        ),
+      );
+    }
     referenceFolderView = value;
     notifyListeners();
   }
@@ -818,6 +927,7 @@ class AppController extends ChangeNotifier {
     LibraryFolder? existing,
     String? parentId,
     LibraryCollection collection = LibraryCollection.generated,
+    LibraryStorage? storage,
   }) async {
     final clean = name.trim();
     if (clean.isEmpty || clean.length > 48) {
@@ -830,6 +940,15 @@ class AppController extends ChangeNotifier {
     }
     final organization = gateway as LibraryOrganizationGateway;
     final now = DateTime.now().toUtc();
+    final destination =
+        existing?.storage ??
+        folderById(parentId, collection: collection)?.storage ??
+        storage ??
+        effectiveStorage;
+    if (destination == LibraryStorage.drive && !googleDriveConnected) {
+      showNotice('Connect Google Drive before creating a Drive folder.');
+      return false;
+    }
     final folder = LibraryFolder(
       id:
           existing?.id ??
@@ -838,6 +957,7 @@ class AppController extends ChangeNotifier {
       createdAt: existing?.createdAt ?? now,
       parentId: parentId,
       collection: existing?.collection ?? collection,
+      storage: destination,
     );
     try {
       _apply(await organization.saveLibraryFolder(folder));
@@ -899,6 +1019,7 @@ class AppController extends ChangeNotifier {
     required String name,
     String? folderId,
     required Iterable<String> tags,
+    LibraryStorage? storage,
   }) async {
     if (gateway is! ReferenceLibraryGateway) {
       showNotice('Saved references are unavailable on this build.');
@@ -917,6 +1038,21 @@ class AppController extends ChangeNotifier {
         draft.asset?.retained ??
         draft.retained ??
         _reference(null, draft.source, draft.label);
+    final existing = savedReferences
+        .where((item) => item.id == draft.savedReferenceId)
+        .firstOrNull;
+    final destination =
+        existing?.storage ??
+        folderById(
+          folderId,
+          collection: LibraryCollection.references,
+        )?.storage ??
+        storage ??
+        effectiveStorage;
+    if (destination == LibraryStorage.drive && !googleDriveConnected) {
+      showNotice('Connect Google Drive before saving a Drive reference.');
+      return null;
+    }
     final reference = SavedReference(
       id: id,
       name: clean,
@@ -928,6 +1064,7 @@ class AppController extends ChangeNotifier {
       updatedAt: now,
       folderId: folderId,
       tags: cleanLibraryTags(tags),
+      storage: destination,
     );
     try {
       _apply(
@@ -1002,6 +1139,7 @@ class AppController extends ChangeNotifier {
   Future<void> importSavedReferences(
     MediaReferenceKind kind, {
     String? folderId,
+    LibraryStorage? storage,
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
     try {
@@ -1013,6 +1151,18 @@ class AppController extends ChangeNotifier {
       var saved = 0;
       for (final asset in picked) {
         final now = DateTime.now().toUtc();
+        final destination =
+            folderById(
+              folderId,
+              collection: LibraryCollection.references,
+            )?.storage ??
+            storage ??
+            effectiveStorage;
+        if (destination == LibraryStorage.drive && !googleDriveConnected) {
+          throw StateError(
+            'Connect Google Drive before importing Drive references.',
+          );
+        }
         final reference = SavedReference(
           id: 'reference-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
           name: asset.name,
@@ -1027,6 +1177,7 @@ class AppController extends ChangeNotifier {
           createdAt: now,
           updatedAt: now,
           folderId: folderId,
+          storage: destination,
         );
         _apply(
           await (gateway as ReferenceLibraryGateway).saveReference(
@@ -1091,6 +1242,7 @@ class AppController extends ChangeNotifier {
             folderId: item.folderId,
             tags: item.tags,
             generated: true,
+            storage: item.storage,
           );
         })
         .toList();
@@ -1167,11 +1319,18 @@ class AppController extends ChangeNotifier {
   AppPreferences _preferences({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
+    LibraryStorage? defaultStorage,
+    LibraryStorageFilter? libraryStorageFilter,
+    LibraryStorageFilter? referenceStorageFilter,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
     provider: selectedProviderId,
     model: selectedModelId,
+    defaultStorage: defaultStorage ?? this.defaultStorage,
+    libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
+    referenceStorageFilter:
+        referenceStorageFilter ?? this.referenceStorageFilter,
   );
 
   int _validDuration(int value) {
@@ -1778,6 +1937,13 @@ class AppController extends ChangeNotifier {
       }
       return;
     }
+    if (!canUseDefaultStorage) {
+      showNotice(
+        'Connect Google Drive before generating to your Drive library.',
+      );
+      unawaited(navigate(AppSection.settings));
+      return;
+    }
     if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
     await refreshProviderEstimate();
     final now = DateTime.now().toUtc();
@@ -1807,6 +1973,7 @@ class AppController extends ChangeNotifier {
       estimateBasis: estimate.basis,
       quotedCostUsdMin: estimate.minimumUsd,
       quotedCostUsdMax: estimate.maximumUsd,
+      storage: effectiveStorage,
     );
     final current = snapshot;
     if (current != null) {
@@ -2223,7 +2390,9 @@ class AppController extends ChangeNotifier {
     credits = null;
     showNotice(
       supportsGoogleDrive
-          ? 'Clawnsole’s Drive data and browser-local keys were removed.'
+          ? supportsLocalLibrary
+                ? 'Clawnsole’s Local and Drive data plus device keys were removed.'
+                : 'Clawnsole’s Drive data plus device keys were removed.'
           : 'Clawnsole’s local data was removed.',
     );
   }
@@ -2267,6 +2436,38 @@ class AppController extends ChangeNotifier {
     try {
       _apply(await (gateway as GoogleDriveGateway).refreshGoogleDrive());
       showNotice('Google Drive data refreshed.');
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    if (!googleDriveConnected) {
+      showNotice('Connect Google Drive before copying local items.');
+      return;
+    }
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      final copied = await (gateway as GoogleDriveGateway)
+          .copyLocalLibraryToGoogleDrive(
+            generationIds: generationIds,
+            referenceIds: referenceIds,
+          );
+      _apply(copied.snapshot);
+      final total = copied.generations + copied.references;
+      showNotice(
+        total == 0
+            ? 'Everything selected is already in Google Drive.'
+            : 'Copied ${copied.generations} generation${copied.generations == 1 ? '' : 's'} and ${copied.references} reference${copied.references == 1 ? '' : 's'} to Drive. Local originals were kept.',
+      );
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {

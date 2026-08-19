@@ -17,6 +17,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "  Append _FILE to any key variable to load it from a one-line file"
   echo "  CLAWNSOLE_IOS_REVIEW_ENV_FILE           Optional shell env file"
   echo "                                           (default: flutter/.env.ios-review)"
+  echo "  CLAWNSOLE_GOOGLE_IOS_CLIENT_ID           Google OAuth iOS client"
   exit 0
 fi
 
@@ -32,7 +33,15 @@ fi
 EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
 load_clawnsole_review_credentials
 prepare_clawnsole_review_defines
-trap cleanup_clawnsole_review_defines EXIT
+prepare_google_ios_oauth
+trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
+
+OAUTH_BUILD_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID=${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID}"
+  )
+fi
 
 "$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
 
@@ -40,6 +49,7 @@ flutter build ipa \
   --release \
   --export-method "$EXPORT_METHOD" \
   "${REVIEW_BUILD_ARGUMENTS[@]}" \
+  "${OAUTH_BUILD_ARGUMENTS[@]}" \
   "$@"
 
 echo

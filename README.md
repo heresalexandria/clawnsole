@@ -52,8 +52,9 @@ folder hierarchies and reusable tags.
 - Uncapped compact history with retained media files and granular clear controls
 - Local API-key setup with no database, `localStorage`, or IndexedDB history in
   the native and companion-backed targets
-- An isolated GitHub Pages-ready browser target with optional Google Drive
-  history/media sync and device-local API keys; Atlas Cloud is the initial
+- Optional Google Drive history/media sync across macOS, Windows, iOS,
+  Android, and the isolated GitHub Pages-ready browser target, with Local and
+  Drive items shown together and device-local API keys; Atlas Cloud is the initial
   static-host provider because its API allows the Pages origin
 - A Providers desk for per-provider keys, console/docs links, live Atlas model
   discovery, canonical cross-provider model matching, observed quote variance,
@@ -98,9 +99,12 @@ with C++ workload installed.
 Clawnsole has no database. Native apps store `clawnsole.json` inside their
 application support sandbox. Companion-backed web and Electron store the same
 compact schema in a local file, with retained inputs and videos in an adjacent
-`assets/` directory. The separate standalone browser build stores portable
-metadata and media in a user-authorized Google Drive folder; only device API
-keys and a connection hint use localStorage.
+`assets/` directory. All five targets can additionally connect to the same
+app-owned Google Drive folder. Local and Drive generations, references, and
+folders remain separate records with visible provenance; copying local work to
+Drive is non-destructive. The standalone browser requires Drive for library
+media and uses localStorage only for device settings, provider keys, and a
+connection hint.
 
 - History is not capped.
 - Folder names, tag labels, generation assignments, and saved-reference metadata
@@ -114,14 +118,15 @@ keys and a connection hint use localStorage.
   generation or a saved reference.
 - Provider delivery links may be temporary; completed videos are retained locally first.
 - User-supplied provider keys are plaintext inside the locally protected JSON file
-  and are never returned to the web renderer. An optional temporary iOS App
+  (or localStorage in the standalone browser), never uploaded to Drive, and
+  never returned to the companion-backed web renderer. An optional temporary iOS App
   Review fallback is compiled only by the local iOS build script, never written
   to local JSON, and never displayed in the app.
 - Standalone-browser keys are never written to Drive. localStorage is not a
   secret vault, so this mode should be used only on trusted devices and served
   from the reviewed GitHub Pages origin.
 
-See [standalone web and Google Drive setup](docs/google-drive-web.md).
+See [Google Drive and standalone web setup](docs/google-drive-web.md).
 
 ## Architecture
 

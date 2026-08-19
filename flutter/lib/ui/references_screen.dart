@@ -88,7 +88,9 @@ class _ReferencesHeading extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Keep reusable images, videos, and audio organized locally, then attach them from Create in a few clicks.',
+              controller.supportsLocalLibrary
+                  ? 'Keep reusable images, videos, and audio on this device or in Drive, then attach them from Create in a few clicks.'
+                  : 'Keep reusable images, videos, and audio in Drive, then attach them from Create in a few clicks.',
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
           ],
@@ -230,86 +232,104 @@ class _ReferenceToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final kindFilters = Wrap(
-          spacing: 5,
-          runSpacing: 5,
-          children: <Widget>[
-            _KindChip(
-              label: 'All',
-              icon: Icons.grid_view_rounded,
-              selected: controller.referenceKind == null,
-              onTap: () => controller.setReferenceKind(null),
-            ),
-            ...MediaReferenceKind.values.map(
-              (kind) => _KindChip(
-                label: kind.label,
-                icon: _kindIcon(kind),
-                selected: controller.referenceKind == kind,
-                onTap: () => controller.setReferenceKind(kind),
-              ),
-            ),
-          ],
-        );
-        final search = TextField(
-          key: const ValueKey('reference-library-search'),
-          onChanged: controller.setReferenceSearch,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search_rounded, size: 18),
-            hintText: 'Search names, tags, folders',
-            isDense: true,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (controller.supportsLocalLibrary) ...<Widget>[
+          StorageFilterChips(
+            value: controller.referenceStorageFilter,
+            showLocal: true,
+            onChanged: (value) =>
+                unawaited(controller.setReferenceStorageFilter(value)),
           ),
-        );
-        final sort = DropdownButtonHideUnderline(
-          child: DropdownButton<ReferenceSort>(
-            key: const ValueKey('reference-library-sort'),
-            value: controller.referenceSort,
-            borderRadius: BorderRadius.circular(12),
-            onChanged: (value) {
-              if (value != null) controller.setReferenceSort(value);
-            },
-            items: ReferenceSort.values
-                .map(
-                  (sort) => DropdownMenuItem(
-                    value: sort,
-                    child: Text(_sortLabel(sort)),
+          const SizedBox(height: 9),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final kindFilters = Wrap(
+              spacing: 5,
+              runSpacing: 5,
+              children: <Widget>[
+                _KindChip(
+                  label: 'All',
+                  icon: Icons.grid_view_rounded,
+                  selected: controller.referenceKind == null,
+                  onTap: () => controller.setReferenceKind(null),
+                ),
+                ...MediaReferenceKind.values.map(
+                  (kind) => _KindChip(
+                    label: kind.label,
+                    icon: _kindIcon(kind),
+                    selected: controller.referenceKind == kind,
+                    onTap: () => controller.setReferenceKind(kind),
                   ),
-                )
-                .toList(),
-          ),
-        );
-        final controls = constraints.maxWidth < 430
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                ),
+              ],
+            );
+            final search = TextField(
+              key: const ValueKey('reference-library-search'),
+              onChanged: controller.setReferenceSearch,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded, size: 18),
+                hintText: 'Search names, tags, folders',
+                isDense: true,
+              ),
+            );
+            final sort = DropdownButtonHideUnderline(
+              child: DropdownButton<ReferenceSort>(
+                key: const ValueKey('reference-library-sort'),
+                value: controller.referenceSort,
+                borderRadius: BorderRadius.circular(12),
+                onChanged: (value) {
+                  if (value != null) controller.setReferenceSort(value);
+                },
+                items: ReferenceSort.values
+                    .map(
+                      (sort) => DropdownMenuItem(
+                        value: sort,
+                        child: Text(_sortLabel(sort)),
+                      ),
+                    )
+                    .toList(),
+              ),
+            );
+            final controls = constraints.maxWidth < 430
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      search,
+                      const SizedBox(height: 8),
+                      Align(alignment: Alignment.centerLeft, child: sort),
+                    ],
+                  )
+                : Row(
+                    children: <Widget>[
+                      Expanded(child: search),
+                      const SizedBox(width: 10),
+                      sort,
+                    ],
+                  );
+
+            if (constraints.maxWidth >= 900) {
+              return Row(
                 children: <Widget>[
-                  search,
-                  const SizedBox(height: 8),
-                  Align(alignment: Alignment.centerLeft, child: sort),
-                ],
-              )
-            : Row(
-                children: <Widget>[
-                  Expanded(child: search),
-                  const SizedBox(width: 10),
-                  sort,
+                  Expanded(child: kindFilters),
+                  const SizedBox(width: 16),
+                  SizedBox(width: 500, child: controls),
                 ],
               );
-
-        if (constraints.maxWidth >= 900) {
-          return Row(
-            children: <Widget>[
-              Expanded(child: kindFilters),
-              const SizedBox(width: 16),
-              SizedBox(width: 500, child: controls),
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[kindFilters, const SizedBox(height: 10), controls],
-        );
-      },
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                kindFilters,
+                const SizedBox(height: 10),
+                controls,
+              ],
+            );
+          },
+        ),
+      ],
     ),
   );
 }
@@ -378,6 +398,8 @@ class _ReferenceCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    const SizedBox(height: 6),
+                    StorageBadge(storage: reference.storage, compact: true),
                     const SizedBox(height: 5),
                     Text(
                       '${reference.kind.label}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
@@ -414,15 +436,30 @@ class _ReferenceCard extends StatelessWidget {
                         reference: reference,
                       ),
                     );
+                  } else if (value == 'copy') {
+                    unawaited(
+                      controller.copyLocalLibraryToGoogleDrive(
+                        referenceIds: <String>{reference.id},
+                      ),
+                    );
                   } else {
                     unawaited(
                       _confirmReferenceDelete(context, controller, reference),
                     );
                   }
                 },
-                itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem(value: 'edit', child: Text('Rename and file')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                itemBuilder: (context) => <PopupMenuEntry<String>>[
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Text('Rename and file'),
+                  ),
+                  if (reference.storage == LibraryStorage.local &&
+                      controller.googleDriveConnected)
+                    const PopupMenuItem(
+                      value: 'copy',
+                      child: Text('Copy to Google Drive'),
+                    ),
+                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],
               ),
             ],
@@ -599,6 +636,19 @@ class _ReferenceFolderRow extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (folder != null) ...<Widget>[
+                  Tooltip(
+                    message: folder!.storage.label,
+                    child: Icon(
+                      folder!.storage == LibraryStorage.drive
+                          ? Icons.cloud_outlined
+                          : Icons.devices_outlined,
+                      size: 13,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                ],
                 Text(
                   '${controller.referenceFolderCount(id)}',
                   style: TextStyle(
@@ -716,6 +766,7 @@ Future<bool> showReferenceMetadataDialog(
   final name = TextEditingController(text: reference?.name ?? draft!.label);
   final tags = TextEditingController(text: reference?.tags.join(', ') ?? '');
   var folderId = reference?.folderId;
+  var destination = reference?.storage ?? controller.effectiveStorage;
   final saved = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -727,6 +778,36 @@ Future<bool> showReferenceMetadataDialog(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              if (reference == null &&
+                  controller.supportsLocalLibrary &&
+                  controller.supportsGoogleDrive) ...<Widget>[
+                DropdownButtonFormField<LibraryStorage>(
+                  initialValue: destination,
+                  decoration: const InputDecoration(
+                    labelText: 'Save in',
+                    prefixIcon: Icon(Icons.storage_outlined),
+                  ),
+                  items: LibraryStorage.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() {
+                    destination = value ?? destination;
+                    folderId = null;
+                  }),
+                ),
+                const SizedBox(height: 10),
+              ] else ...<Widget>[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: StorageBadge(storage: destination),
+                ),
+                const SizedBox(height: 10),
+              ],
               TextField(
                 controller: name,
                 autofocus: true,
@@ -739,17 +820,19 @@ Future<bool> showReferenceMetadataDialog(
                 decoration: const InputDecoration(labelText: 'Folder'),
                 items: <DropdownMenuItem<String?>>[
                   const DropdownMenuItem(value: null, child: Text('Unfiled')),
-                  ...controller.referenceFolderTree.map(
-                    (folder) => DropdownMenuItem(
-                      value: folder.id,
-                      child: Text(
-                        controller.folderPath(
-                          folder.id,
-                          collection: LibraryCollection.references,
+                  ...controller.referenceFolderTree
+                      .where((folder) => folder.storage == destination)
+                      .map(
+                        (folder) => DropdownMenuItem(
+                          value: folder.id,
+                          child: Text(
+                            controller.folderPath(
+                              folder.id,
+                              collection: LibraryCollection.references,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
                 ],
                 onChanged: (value) => setState(() => folderId = value),
               ),
@@ -779,6 +862,7 @@ Future<bool> showReferenceMetadataDialog(
                           name: name.text,
                           folderId: folderId,
                           tags: values,
+                          storage: destination,
                         ) !=
                         null
                   : await controller.updateSavedReference(
@@ -857,6 +941,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                   createdAt: item.createdAt,
                   folderId: item.folderId,
                   tags: item.tags,
+                  storage: item.storage,
                 ),
               )
               .toList();
@@ -957,12 +1042,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                         (folder) => DropdownMenuItem(
                           value: folder.id,
                           child: Text(
-                            widget.controller.folderPath(
-                              folder.id,
-                              collection: generated
-                                  ? LibraryCollection.generated
-                                  : LibraryCollection.references,
-                            ),
+                            '${widget.controller.folderPath(folder.id, collection: generated ? LibraryCollection.generated : LibraryCollection.references)} · ${folder.storage.shortLabel}',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -1005,10 +1085,21 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                                       : selected[item.id] = item;
                                 }),
                           secondary: Icon(_kindIcon(item.kind)),
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          title: Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              StorageBadge(
+                                storage: item.storage,
+                                compact: true,
+                              ),
+                            ],
                           ),
                           subtitle: Text(
                             <String>[
@@ -1059,6 +1150,12 @@ Future<void> _showReferenceFolderEditor(
 }) async {
   final name = TextEditingController(text: folder?.name ?? '');
   var selectedParent = folder?.parentId ?? parentId;
+  var destination =
+      folder?.storage ??
+      controller
+          .folderById(parentId, collection: LibraryCollection.references)
+          ?.storage ??
+      controller.effectiveStorage;
   final excluded = folder == null
       ? const <String>{}
       : controller.folderBranch(
@@ -1075,6 +1172,29 @@ Future<void> _showReferenceFolderEditor(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              if (controller.supportsLocalLibrary &&
+                  controller.supportsGoogleDrive &&
+                  folder == null) ...<Widget>[
+                DropdownButtonFormField<LibraryStorage>(
+                  initialValue: destination,
+                  decoration: const InputDecoration(
+                    labelText: 'Save folder in',
+                  ),
+                  items: LibraryStorage.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() {
+                    destination = value ?? destination;
+                    selectedParent = null;
+                  }),
+                ),
+                const SizedBox(height: 8),
+              ],
               TextField(
                 controller: name,
                 autofocus: true,
@@ -1088,7 +1208,11 @@ Future<void> _showReferenceFolderEditor(
                 items: <DropdownMenuItem<String?>>[
                   const DropdownMenuItem(value: null, child: Text('Top level')),
                   ...controller.referenceFolderTree
-                      .where((item) => !excluded.contains(item.id))
+                      .where(
+                        (item) =>
+                            item.storage == destination &&
+                            !excluded.contains(item.id),
+                      )
                       .map(
                         (item) => DropdownMenuItem(
                           value: item.id,
@@ -1118,6 +1242,7 @@ Future<void> _showReferenceFolderEditor(
                 existing: folder,
                 parentId: selectedParent,
                 collection: LibraryCollection.references,
+                storage: destination,
               );
               if (saved && context.mounted) Navigator.pop(context);
             },

@@ -681,6 +681,11 @@ class _ComposerState extends State<_Composer> {
           const SizedBox(height: 20),
           _CostPreview(controller: controller),
           const SizedBox(height: 18),
+          Align(
+            alignment: Alignment.centerRight,
+            child: StorageDestinationButton(controller: controller),
+          ),
+          const SizedBox(height: 12),
           _ComposerFooter(controller: controller),
         ],
       ),

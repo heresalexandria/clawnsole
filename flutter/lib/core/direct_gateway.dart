@@ -239,7 +239,10 @@ class DirectGateway
 
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
-    final next = (await _store.read()).copyWith(preferences: preferences);
+    final next = (await _store.read()).copyWith(
+      preferences: preferences,
+      preferencesUpdatedAt: DateTime.now().toUtc(),
+    );
     await _store.write(next);
     return _snapshot(next);
   }
@@ -256,7 +259,10 @@ class DirectGateway
         : folder.parentId;
     if (parentId != null &&
         !current.folders.any(
-          (item) => item.id == parentId && item.collection == folder.collection,
+          (item) =>
+              item.id == parentId &&
+              item.collection == folder.collection &&
+              item.storage == folder.storage,
         )) {
       throw StateError('The parent folder no longer exists.');
     }
@@ -274,6 +280,7 @@ class DirectGateway
       (item) =>
           item.id != folder.id &&
           item.collection == folder.collection &&
+          item.storage == folder.storage &&
           item.parentId == parentId &&
           item.name.toLowerCase() == name.toLowerCase(),
     )) {
@@ -287,6 +294,7 @@ class DirectGateway
       createdAt: folder.createdAt,
       parentId: parentId,
       collection: folder.collection,
+      storage: folder.storage,
     );
     if (index < 0) {
       folders.add(clean);
@@ -342,11 +350,16 @@ class DirectGateway
     required List<String> tags,
   }) async {
     final current = await _store.read();
+    final target = current.generations
+        .where((item) => item.localId == localId)
+        .firstOrNull;
+    if (target == null) throw StateError('That generation no longer exists.');
     if (folderId != null &&
         !current.folders.any(
           (folder) =>
               folder.id == folderId &&
-              folder.collection == LibraryCollection.generated,
+              folder.collection == LibraryCollection.generated &&
+              folder.storage == target.storage,
         )) {
       throw StateError('That folder no longer exists.');
     }
@@ -381,7 +394,8 @@ class DirectGateway
         !current.folders.any(
           (folder) =>
               folder.id == reference.folderId &&
-              folder.collection == LibraryCollection.references,
+              folder.collection == LibraryCollection.references &&
+              folder.storage == reference.storage,
         )) {
       throw StateError('That reference folder no longer exists.');
     }
@@ -395,6 +409,7 @@ class DirectGateway
             source,
             label: name,
             retained: reference.asset.value.isEmpty ? null : reference.asset,
+            storage: reference.storage,
           ) ??
           asset;
     }
@@ -410,6 +425,7 @@ class DirectGateway
       updatedAt: DateTime.now().toUtc(),
       folderId: reference.folderId,
       tags: _cleanLibraryTags(reference.tags),
+      storage: reference.storage,
     );
     final references = List<SavedReference>.from(current.savedReferences);
     final index = references.indexWhere((item) => item.id == clean.id);
@@ -455,6 +471,7 @@ class DirectGateway
   Future<GenerationConfig> _persistInputs(
     GenerationConfig config,
     Map<String, Object?> input,
+    LibraryStorage storage,
   ) async {
     final mode = input['mode'];
     if (mode == 'i2v') {
@@ -471,6 +488,7 @@ class DirectGateway
               index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
               label: frame.label,
               retained: frame.source,
+              storage: storage,
             ),
           ),
         );
@@ -499,6 +517,7 @@ class DirectGateway
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
               retained: media.source,
+              storage: storage,
             ),
           ),
         );
@@ -512,6 +531,7 @@ class DirectGateway
           source?.toString() ?? '',
           label: config.sourceLabel ?? 'Clawnsole source',
           retained: config.source,
+          storage: storage,
         ),
       );
     }
@@ -536,7 +556,11 @@ class DirectGateway
       );
     }
     record = record.copyWith(
-      config: await _persistInputs(record.config, submission.input),
+      config: await _persistInputs(
+        record.config,
+        submission.input,
+        record.storage,
+      ),
     );
     final estimate = estimateCost(
       provider,
@@ -688,6 +712,7 @@ class DirectGateway
               response.bodyBytes,
               label: 'clawnsole-${generation.localId}.mp4',
               contentType: response.headers['content-type'] ?? 'video/mp4',
+              storage: generation.storage,
             );
           }
         } on Object {
@@ -802,6 +827,7 @@ class DirectGateway
   Future<LocalSnapshot> clearPreferences() async {
     final next = (await _store.read()).copyWith(
       preferences: const AppPreferences(),
+      preferencesUpdatedAt: DateTime.now().toUtc(),
     );
     await _store.write(next);
     return _snapshot(next);

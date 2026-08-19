@@ -5,40 +5,9 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'asset_extensions.dart';
 import 'durable_data_store.dart';
 import 'models.dart';
-
-String retainedAssetExtension(String? contentType, String label) {
-  final normalized = contentType?.split(';').first.trim().toLowerCase();
-  return switch (normalized) {
-    'video/mp4' => '.mp4',
-    'video/quicktime' => '.mov',
-    'video/webm' => '.webm',
-    'image/png' => '.png',
-    'image/jpeg' => '.jpg',
-    'image/webp' => '.webp',
-    'image/gif' => '.gif',
-    'audio/mpeg' => '.mp3',
-    'audio/mp4' => '.m4a',
-    'audio/wav' || 'audio/x-wav' => '.wav',
-    'audio/ogg' => '.ogg',
-    _ => switch (label.toLowerCase()) {
-      final value when value.endsWith('.mp4') => '.mp4',
-      final value when value.endsWith('.mov') => '.mov',
-      final value when value.endsWith('.webm') => '.webm',
-      final value when value.endsWith('.png') => '.png',
-      final value when value.endsWith('.jpg') || value.endsWith('.jpeg') =>
-        '.jpg',
-      final value when value.endsWith('.webp') => '.webp',
-      final value when value.endsWith('.gif') => '.gif',
-      final value when value.endsWith('.mp3') => '.mp3',
-      final value when value.endsWith('.m4a') => '.m4a',
-      final value when value.endsWith('.wav') => '.wav',
-      final value when value.endsWith('.ogg') => '.ogg',
-      _ => '.asset',
-    },
-  };
-}
 
 class LocalDataStore implements DurableDataStore {
   File? _cachedFile;
@@ -98,6 +67,7 @@ class LocalDataStore implements DurableDataStore {
     Uint8List bytes, {
     required String label,
     required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
   }) async {
     final id = _assetId();
     final assets = await _assets();
@@ -118,8 +88,9 @@ class LocalDataStore implements DurableDataStore {
     String source, {
     required String label,
     AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
   }) async {
-    if (retained?.isLocal == true) {
+    if (retained?.kind == 'local') {
       final file = await _resolveAssetFile(retained!);
       if (await file.exists()) {
         return AssetReference(
@@ -153,7 +124,7 @@ class LocalDataStore implements DurableDataStore {
 
   @override
   Future<Uint8List> readAsset(AssetReference reference) async {
-    if (!reference.isLocal) {
+    if (reference.kind != 'local') {
       throw StateError('The asset is not stored locally.');
     }
     return (await _resolveAssetFile(reference)).readAsBytes();
@@ -161,7 +132,7 @@ class LocalDataStore implements DurableDataStore {
 
   @override
   Future<Uri> assetUri(AssetReference reference) async {
-    if (!reference.isLocal) return Uri.parse(reference.value);
+    if (reference.kind != 'local') return Uri.parse(reference.value);
     return (await _resolveAssetFile(reference, migrateGenericName: true)).uri;
   }
 
@@ -171,7 +142,7 @@ class LocalDataStore implements DurableDataStore {
   ) {
     final retained = <String>{};
     void add(AssetReference? reference) {
-      if (reference?.isLocal == true) retained.add(reference!.value);
+      if (reference?.kind == 'local') retained.add(reference!.value);
     }
 
     for (final generation in generations) {

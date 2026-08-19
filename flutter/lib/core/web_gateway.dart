@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
 import 'gateway.dart';
+import 'google_drive.dart';
+import 'google_drive_auth.dart';
 import 'models.dart';
 
 Uri _configuredBaseUrl(Uri? override) {
@@ -21,13 +23,22 @@ class WebGateway
         AppGateway,
         ProviderGateway,
         LibraryOrganizationGateway,
-        ReferenceLibraryGateway {
-  WebGateway({http.Client? client, Uri? baseUrl})
-    : _client = client ?? http.Client(),
-      _baseUrl = _configuredBaseUrl(baseUrl);
+        ReferenceLibraryGateway,
+        GoogleDriveGateway {
+  WebGateway({
+    http.Client? client,
+    Uri? baseUrl,
+    GoogleDriveAuthorizer? driveAuthorizer,
+  }) : _client = client ?? http.Client(),
+       _baseUrl = _configuredBaseUrl(baseUrl),
+       _driveAuthorizer = driveAuthorizer ?? createGoogleDriveAuthorizer();
 
   final http.Client _client;
   final Uri _baseUrl;
+  final GoogleDriveAuthorizer _driveAuthorizer;
+  GoogleDriveConnection _driveConnection = const GoogleDriveConnection(
+    state: GoogleDriveConnectionState.disconnected,
+  );
 
   Uri _url(String path, [Map<String, String>? query]) =>
       _baseUrl.resolve(path).replace(queryParameters: query);
@@ -40,7 +51,21 @@ class WebGateway
 
   @override
   String get persistenceDescription =>
-      'Local companion JSON file (browser storage is not used)';
+      'Combined local companion and optional Google Drive library';
+
+  @override
+  bool get supportsLocalLibrary => true;
+
+  @override
+  GoogleDriveConnection get googleDriveConnection {
+    if (_driveAuthorizer.isAvailable || _driveConnection.isConfigured) {
+      return _driveConnection;
+    }
+    return GoogleDriveConnection(
+      state: GoogleDriveConnectionState.unavailable,
+      message: _driveAuthorizer.unavailableMessage,
+    );
+  }
 
   Future<Object?> _read(http.Response response) async {
     Object? payload;
@@ -70,12 +95,87 @@ class WebGateway
     return value.map((key, child) => MapEntry(key.toString(), child));
   }
 
-  Future<LocalSnapshot> _snapshot(http.Response response) async =>
-      LocalSnapshot.fromJson(_map(await _read(response)));
+  Future<LocalSnapshot> _snapshot(http.Response response) async {
+    final payload = _map(await _read(response));
+    final rawDrive = payload['driveConnection'];
+    if (rawDrive is Map<Object?, Object?>) {
+      _driveConnection = GoogleDriveConnection.fromJson(
+        rawDrive.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return LocalSnapshot.fromJson(payload);
+  }
 
   @override
   Future<LocalSnapshot> load() async =>
       _snapshot(await _client.get(_url('/state')));
+
+  @override
+  Future<LocalSnapshot> connectGoogleDrive(String folderName) async {
+    final token = await _driveAuthorizer.authorize();
+    return _snapshot(
+      await _client.post(
+        _url('/drive/connect'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'accessToken': token,
+          'folderName': folderName,
+        }),
+      ),
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> disconnectGoogleDrive() async {
+    final snapshot = await _snapshot(
+      await _client.post(_url('/drive/disconnect')),
+    );
+    await _driveAuthorizer.disconnect();
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> refreshGoogleDrive() async {
+    final token = await _driveAuthorizer.authorize();
+    return _snapshot(
+      await _client.post(
+        _url('/drive/refresh'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'accessToken': token}),
+      ),
+    );
+  }
+
+  @override
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async {
+    final payload = _map(
+      await _read(
+        await _client.post(
+          _url('/drive/copy'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{
+            'generationIds': generationIds.toList(),
+            'referenceIds': referenceIds.toList(),
+          }),
+        ),
+      ),
+    );
+    final snapshotMap = _map(payload['snapshot']);
+    final rawDrive = snapshotMap['driveConnection'];
+    if (rawDrive is Map<Object?, Object?>) {
+      _driveConnection = GoogleDriveConnection.fromJson(
+        rawDrive.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return GoogleDriveCopyResult(
+      snapshot: LocalSnapshot.fromJson(snapshotMap),
+      generations: (payload['generations'] as num?)?.toInt() ?? 0,
+      references: (payload['references'] as num?)?.toInt() ?? 0,
+    );
+  }
 
   Future<LocalSnapshot> _action(String action, [Object? value]) async =>
       _snapshot(
@@ -299,7 +399,10 @@ class WebGateway
 
   @override
   Future<Uri> assetUri(AssetReference reference) async => reference.isLocal
-      ? _url('/assets', <String, String>{'id': reference.value})
+      ? _url('/assets', <String, String>{
+          'id': reference.value,
+          'kind': reference.kind,
+        })
       : Uri.parse(reference.value);
 
   @override

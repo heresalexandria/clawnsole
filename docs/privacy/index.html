@@ -109,11 +109,11 @@
           </section>
 
           <section id="drive-data">
-            <p class="eyebrow">Optional browser sync</p>
+            <p class="eyebrow">Optional cross-device sync</p>
             <h2>Data stored in Google Drive</h2>
             <p>
-              The standalone browser build can use a Google Drive folder that
-              you authorize to make Clawnsole data available across browser
+              Every Clawnsole surface can use a Google Drive folder that you
+              authorize to make selected Clawnsole data available across
               devices. If enabled, prompts, generation records and settings,
               saved-reference metadata, retained inputs, generated media,
               folders, tags, and non-secret preferences are stored there.
@@ -124,10 +124,12 @@
             <p>
               Clawnsole requests the limited <code>drive.file</code> permission,
               which covers files the app creates or that you explicitly make
-              available to it. Drive access tokens stay in browser memory and
-              are not sent to the developer. Provider API keys are never put in
-              Drive; they stay in that browser’s localStorage. Use this mode only
-              on a trusted device and hosted origin.
+              available to it. Drive access tokens and desktop refresh tokens
+              are not sent to the developer; desktop refresh tokens are stored
+              using operating-system-backed encryption. Provider API keys are
+              never put in Drive; they stay on each device (in localStorage for
+              standalone web). Use the web mode only on a trusted device and
+              hosted origin.
             </p>
           </section>
 
@@ -232,7 +234,7 @@
               <li>Do not add a provider key if you do not want Clawnsole to contact that provider.</li>
               <li>Choose which prompts and media to submit for each generation.</li>
               <li>Add, replace, or remove your provider keys from Providers at any time.</li>
-              <li>Clear generation history, reset preferences, or delete all local Clawnsole data from Settings.</li>
+              <li>Clear generation history, reset preferences, or delete Clawnsole data from Settings.</li>
               <li>Connect or disconnect optional Google Drive storage, or delete its Clawnsole files from Settings or Drive.</li>
               <li>Revoke a provider key in the provider’s account dashboard to end its access.</li>
               <li>Contact the provider directly about data it retains on its systems.</li>

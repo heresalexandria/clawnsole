@@ -18,6 +18,30 @@ enum MediaReferenceTask { reference, edit, extend }
 
 enum LibraryCollection { generated, references }
 
+enum LibraryStorage { local, drive }
+
+enum LibraryStorageFilter { all, local, drive }
+
+extension LibraryStorageValue on LibraryStorage {
+  String get label => switch (this) {
+    LibraryStorage.local => 'On this device',
+    LibraryStorage.drive => 'Google Drive',
+  };
+
+  String get shortLabel => switch (this) {
+    LibraryStorage.local => 'Local',
+    LibraryStorage.drive => 'Drive',
+  };
+}
+
+extension LibraryStorageFilterValue on LibraryStorageFilter {
+  bool matches(LibraryStorage storage) => switch (this) {
+    LibraryStorageFilter.all => true,
+    LibraryStorageFilter.local => storage == LibraryStorage.local,
+    LibraryStorageFilter.drive => storage == LibraryStorage.drive,
+  };
+}
+
 enum ReferenceSort { newest, oldest, name, kind }
 
 extension MediaReferenceTaskValue on MediaReferenceTask {
@@ -125,7 +149,11 @@ class AssetReference {
   };
 
   factory AssetReference.fromJson(Map<String, Object?> json) => AssetReference(
-    kind: json['kind'] == 'local' ? 'local' : 'remote',
+    kind: switch (json['kind']) {
+      'local' => 'local',
+      'drive' => 'drive',
+      _ => 'remote',
+    },
     value: json['value'] as String? ?? '',
     label: json['label'] as String? ?? 'Clawnsole asset',
     contentType: json['contentType'] as String?,
@@ -333,6 +361,7 @@ class LibraryFolder {
     required this.createdAt,
     this.parentId,
     this.collection = LibraryCollection.generated,
+    this.storage = LibraryStorage.local,
   });
 
   final String id;
@@ -340,18 +369,21 @@ class LibraryFolder {
   final DateTime createdAt;
   final String? parentId;
   final LibraryCollection collection;
+  final LibraryStorage storage;
 
   LibraryFolder copyWith({
     String? name,
     String? parentId,
     bool clearParent = false,
     LibraryCollection? collection,
+    LibraryStorage? storage,
   }) => LibraryFolder(
     id: id,
     name: name ?? this.name,
     createdAt: createdAt,
     parentId: clearParent ? null : parentId ?? this.parentId,
     collection: collection ?? this.collection,
+    storage: storage ?? this.storage,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -361,6 +393,7 @@ class LibraryFolder {
     if (parentId != null) 'parentId': parentId,
     if (collection != LibraryCollection.generated)
       'collection': collection.name,
+    if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
   factory LibraryFolder.fromJson(Map<String, Object?> json) => LibraryFolder(
@@ -378,6 +411,10 @@ class LibraryFolder {
       (value) => value.name == json['collection'],
       orElse: () => LibraryCollection.generated,
     ),
+    storage: LibraryStorage.values.firstWhere(
+      (value) => value.name == json['storage'],
+      orElse: () => LibraryStorage.local,
+    ),
   );
 }
 
@@ -391,6 +428,7 @@ class SavedReference {
     required this.updatedAt,
     this.folderId,
     this.tags = const <String>[],
+    this.storage = LibraryStorage.local,
   });
 
   final String id;
@@ -401,6 +439,7 @@ class SavedReference {
   final DateTime updatedAt;
   final String? folderId;
   final List<String> tags;
+  final LibraryStorage storage;
 
   SavedReference copyWith({
     String? name,
@@ -409,6 +448,7 @@ class SavedReference {
     String? folderId,
     bool clearFolder = false,
     List<String>? tags,
+    LibraryStorage? storage,
   }) => SavedReference(
     id: id,
     name: name ?? this.name,
@@ -418,6 +458,7 @@ class SavedReference {
     updatedAt: updatedAt ?? this.updatedAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
+    storage: storage ?? this.storage,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -429,6 +470,7 @@ class SavedReference {
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
+    if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
   factory SavedReference.fromJson(Map<String, Object?> json) {
@@ -453,6 +495,10 @@ class SavedReference {
           .whereType<String>()
           .where((tag) => tag.trim().isNotEmpty)
           .toList(),
+      storage: LibraryStorage.values.firstWhere(
+        (value) => value.name == json['storage'],
+        orElse: () => LibraryStorage.local,
+      ),
     );
   }
 }
@@ -499,6 +545,7 @@ class Generation {
     this.lastProviderResponseAt,
     this.folderId,
     this.tags = const <String>[],
+    this.storage = LibraryStorage.local,
   });
 
   final String localId;
@@ -541,6 +588,7 @@ class Generation {
   final DateTime? lastProviderResponseAt;
   final String? folderId;
   final List<String> tags;
+  final LibraryStorage storage;
 
   bool get canCheckStatus => pollingUrl?.trim().isNotEmpty == true;
   bool get isWorking =>
@@ -620,6 +668,7 @@ class Generation {
     String? folderId,
     bool clearFolder = false,
     List<String>? tags,
+    LibraryStorage? storage,
   }) => Generation(
     localId: localId,
     provider: provider,
@@ -666,6 +715,7 @@ class Generation {
         lastProviderResponseAt ?? this.lastProviderResponseAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
+    storage: storage ?? this.storage,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -717,6 +767,7 @@ class Generation {
           .toIso8601String(),
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
+    if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
   factory Generation.fromJson(Map<String, Object?> json) => Generation(
@@ -784,6 +835,10 @@ class Generation {
         .whereType<String>()
         .where((tag) => tag.trim().isNotEmpty)
         .toList(),
+    storage: LibraryStorage.values.firstWhere(
+      (value) => value.name == json['storage'],
+      orElse: () => LibraryStorage.local,
+    ),
   );
 }
 
@@ -793,18 +848,46 @@ class AppPreferences {
     this.libraryFilter = LibraryFilter.all,
     this.provider = 'bfl',
     this.model = 'flux-3-video',
+    this.defaultStorage = LibraryStorage.local,
+    this.libraryStorageFilter = LibraryStorageFilter.all,
+    this.referenceStorageFilter = LibraryStorageFilter.all,
   });
 
   final AppSection activeSection;
   final LibraryFilter libraryFilter;
   final String provider;
   final String model;
+  final LibraryStorage defaultStorage;
+  final LibraryStorageFilter libraryStorageFilter;
+  final LibraryStorageFilter referenceStorageFilter;
+
+  AppPreferences copyWith({
+    AppSection? activeSection,
+    LibraryFilter? libraryFilter,
+    String? provider,
+    String? model,
+    LibraryStorage? defaultStorage,
+    LibraryStorageFilter? libraryStorageFilter,
+    LibraryStorageFilter? referenceStorageFilter,
+  }) => AppPreferences(
+    activeSection: activeSection ?? this.activeSection,
+    libraryFilter: libraryFilter ?? this.libraryFilter,
+    provider: provider ?? this.provider,
+    model: model ?? this.model,
+    defaultStorage: defaultStorage ?? this.defaultStorage,
+    libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
+    referenceStorageFilter:
+        referenceStorageFilter ?? this.referenceStorageFilter,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'activeSection': activeSection.name,
     'libraryFilter': libraryFilter.name,
     'provider': provider,
     'model': model,
+    'defaultStorage': defaultStorage.name,
+    'libraryStorageFilter': libraryStorageFilter.name,
+    'referenceStorageFilter': referenceStorageFilter.name,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -818,6 +901,18 @@ class AppPreferences {
     ),
     provider: json['provider'] as String? ?? 'bfl',
     model: json['model'] as String? ?? 'flux-3-video',
+    defaultStorage: LibraryStorage.values.firstWhere(
+      (value) => value.name == json['defaultStorage'],
+      orElse: () => LibraryStorage.local,
+    ),
+    libraryStorageFilter: LibraryStorageFilter.values.firstWhere(
+      (value) => value.name == json['libraryStorageFilter'],
+      orElse: () => LibraryStorageFilter.all,
+    ),
+    referenceStorageFilter: LibraryStorageFilter.values.firstWhere(
+      (value) => value.name == json['referenceStorageFilter'],
+      orElse: () => LibraryStorageFilter.all,
+    ),
   );
 }
 
@@ -831,6 +926,9 @@ class StoredData {
     this.generations = const <Generation>[],
     this.folders = const <LibraryFolder>[],
     this.savedReferences = const <SavedReference>[],
+    this.preferencesUpdatedAt,
+    this.driveFolderName = '',
+    this.driveFolderId = '',
   });
 
   final String apiKey;
@@ -841,6 +939,9 @@ class StoredData {
   final List<Generation> generations;
   final List<LibraryFolder> folders;
   final List<SavedReference> savedReferences;
+  final DateTime? preferencesUpdatedAt;
+  final String driveFolderName;
+  final String driveFolderId;
 
   StoredData copyWith({
     String? apiKey,
@@ -851,6 +952,10 @@ class StoredData {
     List<Generation>? generations,
     List<LibraryFolder>? folders,
     List<SavedReference>? savedReferences,
+    DateTime? preferencesUpdatedAt,
+    bool clearPreferencesUpdatedAt = false,
+    String? driveFolderName,
+    String? driveFolderId,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -862,6 +967,11 @@ class StoredData {
     generations: generations ?? this.generations,
     folders: folders ?? this.folders,
     savedReferences: savedReferences ?? this.savedReferences,
+    preferencesUpdatedAt: clearPreferencesUpdatedAt
+        ? null
+        : preferencesUpdatedAt ?? this.preferencesUpdatedAt,
+    driveFolderName: driveFolderName ?? this.driveFolderName,
+    driveFolderId: driveFolderId ?? this.driveFolderId,
   );
 
   String apiKeyFor(String provider) =>
@@ -900,7 +1010,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 12,
+    'schemaVersion': 13,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,
@@ -910,6 +1020,10 @@ class StoredData {
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
       'rejectedIosReviewApiKeyIds': rejectedIosReviewApiKeyIds,
     'preferences': preferences.toJson(),
+    if (preferencesUpdatedAt != null)
+      'preferencesUpdatedAt': preferencesUpdatedAt!.toUtc().toIso8601String(),
+    if (driveFolderName.isNotEmpty) 'driveFolderName': driveFolderName,
+    if (driveFolderId.isNotEmpty) 'driveFolderId': driveFolderId,
     if (folders.isNotEmpty)
       'folders': folders.map((folder) => folder.toJson()).toList(),
     if (savedReferences.isNotEmpty)
@@ -941,6 +1055,11 @@ class StoredData {
           json['rejectedIosReviewApiKeyId'] as String? ?? '',
       rejectedIosReviewApiKeyIds: rejectedIds,
       preferences: AppPreferences.fromJson(preferences),
+      preferencesUpdatedAt: DateTime.tryParse(
+        json['preferencesUpdatedAt'] as String? ?? '',
+      ),
+      driveFolderName: json['driveFolderName'] as String? ?? '',
+      driveFolderId: json['driveFolderId'] as String? ?? '',
       folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
           .whereType<Map<Object?, Object?>>()
           .map(

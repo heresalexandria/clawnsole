@@ -8,6 +8,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo
   echo "Requires android/key.properties with storeFile, storePassword, keyAlias,"
   echo "and keyPassword. See android/key.properties.example."
+  echo "Set CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID to the registered web"
+  echo "OAuth client associated with the Android package and signing SHA."
   exit 0
 fi
 
@@ -20,7 +22,14 @@ if [[ ! -f android/key.properties ]]; then
   exit 1
 fi
 
-flutter build appbundle --release "$@"
+OAUTH_BUILD_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID=${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID}"
+  )
+fi
+
+flutter build appbundle --release "${OAUTH_BUILD_ARGUMENTS[@]}" "$@"
 
 echo
 echo "Android App Bundle: $FLUTTER_DIRECTORY/build/app/outputs/bundle/release/app-release.aab"

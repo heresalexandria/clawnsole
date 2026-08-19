@@ -7,11 +7,10 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/app_version.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/local_data_store.dart';
-import 'package:clawnsole/core/local_data_store_io.dart'
-    show retainedAssetExtension;
 import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
@@ -537,7 +536,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 12);
+    expect(decoded.toJson()['schemaVersion'], 13);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -671,7 +670,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 12);
+      expect(decoded.toJson()['schemaVersion'], 13);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',

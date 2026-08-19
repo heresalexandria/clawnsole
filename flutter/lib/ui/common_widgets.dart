@@ -13,6 +13,157 @@ import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'video_save_sheet.dart';
 
+class StorageBadge extends StatelessWidget {
+  const StorageBadge({required this.storage, super.key, this.compact = false});
+
+  final LibraryStorage storage;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: EdgeInsets.symmetric(
+      horizontal: compact ? 7 : 9,
+      vertical: compact ? 3 : 5,
+    ),
+    decoration: BoxDecoration(
+      color: storage == LibraryStorage.drive
+          ? context.colors.primaryContainer.withValues(alpha: .72)
+          : context.colors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: context.colors.outlineVariant),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(
+          storage == LibraryStorage.drive
+              ? Icons.cloud_outlined
+              : Icons.devices_outlined,
+          size: compact ? 12 : 14,
+        ),
+        const SizedBox(width: 5),
+        Text(
+          storage.shortLabel,
+          style: TextStyle(
+            fontSize: compact ? 9.5 : 10.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class StorageFilterChips extends StatelessWidget {
+  const StorageFilterChips({
+    required this.value,
+    required this.onChanged,
+    super.key,
+    this.showLocal = true,
+  });
+
+  final LibraryStorageFilter value;
+  final ValueChanged<LibraryStorageFilter> onChanged;
+  final bool showLocal;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: LibraryStorageFilter.values
+        .where((filter) => showLocal || filter != LibraryStorageFilter.local)
+        .map(
+          (filter) => FilterChip(
+            avatar: Icon(switch (filter) {
+              LibraryStorageFilter.all => Icons.layers_outlined,
+              LibraryStorageFilter.local => Icons.devices_outlined,
+              LibraryStorageFilter.drive => Icons.cloud_outlined,
+            }, size: 15),
+            label: Text(switch (filter) {
+              LibraryStorageFilter.all => 'All storage',
+              LibraryStorageFilter.local => 'Local',
+              LibraryStorageFilter.drive => 'Drive',
+            }),
+            selected: value == filter,
+            visualDensity: VisualDensity.compact,
+            onSelected: (_) => onChanged(filter),
+          ),
+        )
+        .toList(),
+  );
+}
+
+class StorageDestinationButton extends StatelessWidget {
+  const StorageDestinationButton({required this.controller, super.key});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final destination = controller.effectiveStorage;
+    return PopupMenuButton<LibraryStorage>(
+      tooltip: 'Choose where new items are saved',
+      onSelected: (value) => unawaited(controller.setDefaultStorage(value)),
+      itemBuilder: (context) => <PopupMenuEntry<LibraryStorage>>[
+        if (controller.supportsLocalLibrary)
+          const PopupMenuItem<LibraryStorage>(
+            value: LibraryStorage.local,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.devices_outlined),
+              title: Text('On this device'),
+              subtitle: Text('Private to this installation'),
+            ),
+          ),
+        if (controller.supportsGoogleDrive)
+          PopupMenuItem<LibraryStorage>(
+            value: LibraryStorage.drive,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.cloud_outlined),
+              title: const Text('Google Drive'),
+              subtitle: Text(
+                controller.googleDriveConnected
+                    ? 'Available across connected devices'
+                    : 'Connect Drive in Settings first',
+              ),
+            ),
+          ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+        decoration: BoxDecoration(
+          color: context.colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: context.colors.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              destination == LibraryStorage.drive
+                  ? Icons.cloud_outlined
+                  : Icons.devices_outlined,
+              size: 17,
+              color: context.colors.primary,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              'Save to ${destination.shortLabel}',
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more_rounded, size: 17),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class Eyebrow extends StatelessWidget {
   const Eyebrow(this.text, {super.key, this.icon});
 
@@ -1493,6 +1644,8 @@ class ActivityCard extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
+                    const SizedBox(width: 6),
+                    StorageBadge(storage: item.storage, compact: true),
                     const SizedBox(width: 6),
                     Padding(
                       padding: const EdgeInsets.only(top: 2),

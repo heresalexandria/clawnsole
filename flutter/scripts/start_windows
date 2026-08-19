@@ -7,6 +7,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/start_windows [additional flutter run arguments]"
   echo
   echo "Run this script from Windows or Git Bash with Visual Studio installed."
+  echo "Optional Drive OAuth uses CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID and"
+  echo "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET."
   exit 0
 fi
 
@@ -21,4 +23,16 @@ esac
 print_heading "Windows desktop"
 prepare_flutter
 
-flutter run -d windows "$@"
+OAUTH_RUN_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]]; then
+  OAUTH_RUN_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID=${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID}"
+  )
+fi
+if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]]; then
+  OAUTH_RUN_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET=${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET}"
+  )
+fi
+
+flutter run -d windows "${OAUTH_RUN_ARGUMENTS[@]}" "$@"

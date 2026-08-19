@@ -145,6 +145,8 @@ jobs:
         env:
           CLAWNSOLE_ELECTRON_ARCH: arm64
           CLAWNSOLE_ELECTRON_SIGN: 'false'
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET }}
         run: ./flutter/scripts/build_macos
       - name: Smoke test packaged desktop app
         run: electron/dist/release/mac-arm64/Clawnsole.app/Contents/MacOS/Clawnsole --smoke
@@ -163,6 +165,9 @@ jobs:
           pub-cache: false
       - name: Build Windows x64 desktop app
         shell: bash
+        env:
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET }}
         run: ./flutter/scripts/build_windows
       - name: Smoke test Windows desktop app
         shell: pwsh

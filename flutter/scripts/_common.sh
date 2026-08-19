@@ -26,3 +26,23 @@ print_heading() {
   echo "Working directory: $FLUTTER_DIRECTORY"
   echo
 }
+
+prepare_google_ios_oauth() {
+  local config="$FLUTTER_DIRECTORY/ios/Flutter/GoogleDriveOAuth.xcconfig"
+  rm -f "$config"
+  if [[ -z "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
+    return
+  fi
+  local suffix=".apps.googleusercontent.com"
+  local identifier="${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID%$suffix}"
+  if [[ "$identifier" == "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID}" ]]; then
+    echo "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID is not a Google OAuth client ID." >&2
+    exit 1
+  fi
+  printf 'GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.%s\n' \
+    "$identifier" >"$config"
+}
+
+cleanup_google_ios_oauth() {
+  rm -f "$FLUTTER_DIRECTORY/ios/Flutter/GoogleDriveOAuth.xcconfig"
+}

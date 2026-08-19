@@ -9,6 +9,7 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_ANDROID_DEVICE_ID  Running emulator device ID override"
   echo "  CLAWNSOLE_ANDROID_AVD_ID     AVD to launch when none is running"
+  echo "  CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID  Google OAuth web client"
   exit 0
 fi
 
@@ -54,4 +55,10 @@ if [[ -z "$ANDROID_DEVICE" ]]; then
 fi
 
 echo "Launching Clawnsole on Android emulator $ANDROID_DEVICE…"
-exec flutter run -d "$ANDROID_DEVICE" "$@"
+OAUTH_BUILD_ARGUMENTS=()
+if [[ -n "${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID:-}" ]]; then
+  OAUTH_BUILD_ARGUMENTS+=(
+    --dart-define "CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID=${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID}"
+  )
+fi
+exec flutter run -d "$ANDROID_DEVICE" "${OAUTH_BUILD_ARGUMENTS[@]}" "$@"

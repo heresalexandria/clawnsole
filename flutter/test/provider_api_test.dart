@@ -695,7 +695,7 @@ void main() {
     },
   );
 
-  test('provider keys round-trip independently through schema 12', () {
+  test('provider keys round-trip independently through schema 13', () {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
@@ -708,7 +708,7 @@ void main() {
     expect(decoded.apiKeyFor('ltx'), 'ltx-secret');
     expect(decoded.apiKeyFor('artcraft'), 'artcraft-secret');
     expect(decoded.apiKeyFor('atlas'), 'atlas-secret');
-    expect(decoded.toJson()['schemaVersion'], 12);
+    expect(decoded.toJson()['schemaVersion'], 13);
   });
 
   test('ArtCraft resolutions survive history serialization', () {

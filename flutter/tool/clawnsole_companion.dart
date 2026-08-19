@@ -5,7 +5,11 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
+import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/google_drive_store.dart';
+import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
@@ -13,8 +17,11 @@ import 'package:clawnsole/core/provider_catalog.dart';
 
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
-  final store = CompanionStore(File(config.dataFile));
-  final app = CompanionApp(
+  final localStore = CompanionStore(File(config.dataFile));
+  final store = CompanionHybridStore(
+    HybridDataStore(local: localStore, drive: GoogleDriveStore()),
+  );
+  final app = CompanionApp.hybrid(
     store: store,
     api: BflApi(),
     fallbackApiKeys: <String, String>{
@@ -82,7 +89,7 @@ class CompanionConfig {
   }
 }
 
-class CompanionStore {
+class CompanionStore implements DurableDataStore {
   CompanionStore(this.file);
 
   final File file;
@@ -110,10 +117,12 @@ class CompanionStore {
     return File('${assets.path}${Platform.pathSeparator}$id.asset');
   }
 
+  @override
   Future<AssetReference> writeAsset(
     Uint8List bytes, {
     required String label,
     required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
   }) async {
     final id = _assetId();
     await assets.create(recursive: true);
@@ -127,12 +136,14 @@ class CompanionStore {
     );
   }
 
+  @override
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
     AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
   }) async {
-    if (retained?.isLocal == true) {
+    if (retained?.kind == 'local') {
       final existing = assetFile(retained!.value);
       if (await existing.exists()) {
         return AssetReference(
@@ -170,7 +181,7 @@ class CompanionStore {
   ) {
     final retained = <String>{};
     void add(AssetReference? reference) {
-      if (reference?.isLocal == true) retained.add(reference!.value);
+      if (reference?.kind == 'local') retained.add(reference!.value);
     }
 
     for (final generation in generations) {
@@ -191,6 +202,7 @@ class CompanionStore {
     return retained;
   }
 
+  @override
   Future<void> pruneAssets(
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
@@ -232,6 +244,7 @@ class CompanionStore {
     await temporary.rename(file.path);
   }
 
+  @override
   Future<StoredData> read() async {
     await _queue;
     return _readRaw();
@@ -253,6 +266,10 @@ class CompanionStore {
   Future<void> replace(StoredData replacement) =>
       mutate<void>((_) => StoreChange<void>(replacement, null));
 
+  @override
+  Future<void> write(StoredData data) => replace(data);
+
+  @override
   Future<void> delete() {
     final operation = _queue.then((_) async {
       if (await file.exists()) await file.delete();
@@ -262,6 +279,7 @@ class CompanionStore {
     return operation;
   }
 
+  @override
   Future<StorageStats> stats(int records) async {
     await _queue;
     var assetBytes = 0;
@@ -292,6 +310,18 @@ class CompanionStore {
       lastUpdated: value.modified,
     );
   }
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    if (reference.kind != 'local') {
+      throw StateError('The asset is not stored by the local companion.');
+    }
+    return assetFile(reference.value).readAsBytes();
+  }
+
+  @override
+  Future<Uri> assetUri(AssetReference reference) async =>
+      assetFile(reference.value).uri;
 }
 
 class StoreChange<T> {
@@ -299,6 +329,87 @@ class StoreChange<T> {
 
   final StoredData data;
   final T result;
+}
+
+class CompanionHybridStore {
+  CompanionHybridStore(this.hybrid);
+
+  final HybridDataStore hybrid;
+  Future<void> _queue = Future<void>.value();
+
+  GoogleDriveConnection get connection => hybrid.connection;
+
+  Future<StoredData> read() async {
+    await _queue;
+    return hybrid.read();
+  }
+
+  Future<T> mutate<T>(
+    FutureOr<StoreChange<T>> Function(StoredData data) callback,
+  ) {
+    final operation = _queue.then((_) async {
+      final current = await hybrid.read();
+      final change = await callback(current);
+      await hybrid.write(change.data);
+      return change.result;
+    });
+    _queue = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
+  }
+
+  Future<void> replace(StoredData data) =>
+      mutate<void>((_) => StoreChange<void>(data, null));
+
+  Future<void> delete() => hybrid.delete();
+
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+  }) => hybrid.writeAsset(
+    bytes,
+    label: label,
+    contentType: contentType,
+    storage: storage,
+  );
+
+  Future<AssetReference?> persistSource(
+    String source, {
+    required String label,
+    AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
+  }) => hybrid.persistSource(
+    source,
+    label: label,
+    retained: retained,
+    storage: storage,
+  );
+
+  Future<Uint8List> readAsset(AssetReference reference) =>
+      hybrid.readAsset(reference);
+
+  Future<void> pruneAssets(
+    List<Generation> generations,
+    List<SavedReference> references,
+  ) => hybrid.pruneAssets(generations, references);
+
+  Future<StorageStats> stats(int records) => hybrid.stats(records);
+
+  Future<StoredData> connectDrive(String accessToken, String folderName) =>
+      hybrid.connect(accessToken, folderName);
+
+  Future<StoredData> disconnectDrive() => hybrid.disconnect();
+  Future<StoredData> refreshDrive(String accessToken) =>
+      hybrid.connect(accessToken, hybrid.connection.folderName);
+
+  Future<GoogleDriveCopyCounts> copyLocalToDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) => hybrid.copyLocalToDrive(
+    generationIds: generationIds,
+    referenceIds: referenceIds,
+  );
 }
 
 List<String> _cleanLibraryTags(Iterable<Object?> input) {
@@ -320,8 +431,22 @@ List<String> _cleanLibraryTags(Iterable<Object?> input) {
 }
 
 class CompanionApp {
-  CompanionApp({
+  factory CompanionApp({
     required CompanionStore store,
+    required BflApi api,
+    ProviderApiRouter? providerRouter,
+    Map<String, String> fallbackApiKeys = const <String, String>{},
+    Directory? webRoot,
+  }) => CompanionApp.hybrid(
+    store: CompanionHybridStore(HybridDataStore(local: store)),
+    api: api,
+    providerRouter: providerRouter,
+    fallbackApiKeys: fallbackApiKeys,
+    webRoot: webRoot,
+  );
+
+  CompanionApp.hybrid({
+    required CompanionHybridStore store,
     required BflApi api,
     ProviderApiRouter? providerRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
@@ -331,7 +456,7 @@ class CompanionApp {
        _fallbackApiKeys = fallbackApiKeys,
        _webRoot = webRoot;
 
-  final CompanionStore _store;
+  final CompanionHybridStore _store;
   final ProviderApiRouter _providers;
   final Map<String, String> _fallbackApiKeys;
   final Directory? _webRoot;
@@ -356,12 +481,46 @@ class CompanionApp {
         });
       }
       if (request.method == 'GET' && path == '/state') {
-        return await _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, await _snapshotPayload());
       }
       if (request.method == 'PATCH' && path == '/state') {
         final body = await _bodyMap(request);
         await _stateAction(body['action']?.toString() ?? '', body['value']);
-        return await _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, await _snapshotPayload());
+      }
+      if (request.method == 'POST' && path == '/drive/connect') {
+        final body = await _bodyMap(request);
+        final accessToken = body['accessToken']?.toString() ?? '';
+        final folderName = body['folderName']?.toString() ?? '';
+        await _store.connectDrive(accessToken, folderName);
+        return await _json(request.response, 200, await _snapshotPayload());
+      }
+      if (request.method == 'POST' && path == '/drive/disconnect') {
+        await _store.disconnectDrive();
+        return await _json(request.response, 200, await _snapshotPayload());
+      }
+      if (request.method == 'POST' && path == '/drive/refresh') {
+        final body = await _bodyMap(request);
+        await _store.refreshDrive(body['accessToken']?.toString() ?? '');
+        return await _json(request.response, 200, await _snapshotPayload());
+      }
+      if (request.method == 'POST' && path == '/drive/copy') {
+        final body = await _bodyMap(request);
+        final copied = await _store.copyLocalToDrive(
+          generationIds:
+              (body['generationIds'] as List<Object?>? ?? const <Object?>[])
+                  .whereType<String>()
+                  .toSet(),
+          referenceIds:
+              (body['referenceIds'] as List<Object?>? ?? const <Object?>[])
+                  .whereType<String>()
+                  .toSet(),
+        );
+        return await _json(request.response, 200, <String, Object?>{
+          'snapshot': await _snapshotPayload(),
+          'generations': copied.generations,
+          'references': copied.references,
+        });
       }
       if (request.method == 'POST' &&
           (path == '/account' || path == '/credits')) {
@@ -446,7 +605,7 @@ class CompanionApp {
         });
         final data = await _store.read();
         await _store.pruneAssets(data.generations, data.savedReferences);
-        return await _json(request.response, 200, (await _snapshot()).toJson());
+        return await _json(request.response, 200, await _snapshotPayload());
       }
       if (request.method == 'GET' && path == '/assets') {
         return await _asset(request);
@@ -533,7 +692,10 @@ class CompanionApp {
         final map = value is Map<Object?, Object?>
             ? value.map((key, child) => MapEntry(key.toString(), child))
             : <String, Object?>{};
-        next = current.copyWith(preferences: AppPreferences.fromJson(map));
+        next = current.copyWith(
+          preferences: AppPreferences.fromJson(map),
+          preferencesUpdatedAt: DateTime.now().toUtc(),
+        );
       } else if (action == 'saveLibraryFolder') {
         final map = value is Map<Object?, Object?>
             ? value.map((key, child) => MapEntry(key.toString(), child))
@@ -549,7 +711,9 @@ class CompanionApp {
         if (parentId != null &&
             !current.folders.any(
               (item) =>
-                  item.id == parentId && item.collection == folder.collection,
+                  item.id == parentId &&
+                  item.collection == folder.collection &&
+                  item.storage == folder.storage,
             )) {
           throw StateError('The parent folder no longer exists.');
         }
@@ -567,6 +731,7 @@ class CompanionApp {
           (item) =>
               item.id != folder.id &&
               item.collection == folder.collection &&
+              item.storage == folder.storage &&
               item.parentId == parentId &&
               item.name.toLowerCase() == name.toLowerCase(),
         )) {
@@ -580,6 +745,7 @@ class CompanionApp {
           createdAt: folder.createdAt,
           parentId: parentId,
           collection: folder.collection,
+          storage: folder.storage,
         );
         if (index < 0) {
           folders.add(clean);
@@ -624,11 +790,18 @@ class CompanionApp {
         final localId = map['localId']?.toString() ?? '';
         final rawFolderId = map['folderId']?.toString().trim() ?? '';
         final folderId = rawFolderId.isEmpty ? null : rawFolderId;
+        final target = current.generations
+            .where((item) => item.localId == localId)
+            .firstOrNull;
+        if (target == null) {
+          throw StateError('That generation no longer exists.');
+        }
         if (folderId != null &&
             !current.folders.any(
               (folder) =>
                   folder.id == folderId &&
-                  folder.collection == LibraryCollection.generated,
+                  folder.collection == LibraryCollection.generated &&
+                  folder.storage == target.storage,
             )) {
           throw StateError('That folder no longer exists.');
         }
@@ -669,7 +842,8 @@ class CompanionApp {
             !current.folders.any(
               (folder) =>
                   folder.id == reference.folderId &&
-                  folder.collection == LibraryCollection.references,
+                  folder.collection == LibraryCollection.references &&
+                  folder.storage == reference.storage,
             )) {
           throw StateError('That reference folder no longer exists.');
         }
@@ -686,6 +860,7 @@ class CompanionApp {
                 retained: reference.asset.value.isEmpty
                     ? null
                     : reference.asset,
+                storage: reference.storage,
               ) ??
               asset;
         }
@@ -701,6 +876,7 @@ class CompanionApp {
           updatedAt: DateTime.now().toUtc(),
           folderId: reference.folderId,
           tags: _cleanLibraryTags(reference.tags),
+          storage: reference.storage,
         );
         final references = List<SavedReference>.from(current.savedReferences);
         final index = references.indexWhere((item) => item.id == clean.id);
@@ -720,7 +896,10 @@ class CompanionApp {
       } else if (action == 'clearHistory') {
         next = current.copyWith(generations: <Generation>[]);
       } else if (action == 'clearPreferences') {
-        next = current.copyWith(preferences: const AppPreferences());
+        next = current.copyWith(
+          preferences: const AppPreferences(),
+          preferencesUpdatedAt: DateTime.now().toUtc(),
+        );
       } else if (action == 'clearApiKey') {
         next = current.withApiKey('bfl', '');
       } else if (action == 'clearProviderApiKey') {
@@ -789,6 +968,11 @@ class CompanionApp {
     );
   }
 
+  Future<Map<String, Object?>> _snapshotPayload() async => <String, Object?>{
+    ...(await _snapshot()).toJson(),
+    'driveConnection': _store.connection.toJson(),
+  };
+
   Future<void> _upsert(Generation generation) async {
     await _store.mutate<void>((current) {
       final generations = List<Generation>.from(current.generations);
@@ -831,6 +1015,7 @@ class CompanionApp {
   Future<GenerationConfig> _persistInputs(
     GenerationConfig config,
     Map<String, Object?> input,
+    LibraryStorage storage,
   ) async {
     final mode = input['mode'];
     if (mode == 'i2v') {
@@ -847,6 +1032,7 @@ class CompanionApp {
               index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
               label: frame.label,
               retained: frame.source,
+              storage: storage,
             ),
           ),
         );
@@ -875,6 +1061,7 @@ class CompanionApp {
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
               retained: media.source,
+              storage: storage,
             ),
           ),
         );
@@ -888,13 +1075,18 @@ class CompanionApp {
               '',
           label: config.sourceLabel ?? 'Clawnsole source',
           retained: config.source,
+          storage: storage,
         ),
       );
     }
     return config;
   }
 
-  Future<AssetReference?> _retainResult(String source, String label) async {
+  Future<AssetReference?> _retainResult(
+    String source,
+    String label,
+    LibraryStorage storage,
+  ) async {
     final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {
@@ -908,6 +1100,7 @@ class CompanionApp {
         builder.takeBytes(),
         label: label,
         contentType: upstream.headers.contentType?.mimeType ?? 'video/mp4',
+        storage: storage,
       );
     } finally {
       client.close(force: true);
@@ -944,7 +1137,11 @@ class CompanionApp {
       );
     }
     generation = generation.copyWith(
-      config: await _persistInputs(generation.config, cleanInput),
+      config: await _persistInputs(
+        generation.config,
+        cleanInput,
+        generation.storage,
+      ),
     );
     final estimate = estimateCost(
       provider,
@@ -1092,6 +1289,7 @@ class CompanionApp {
           resultAsset = await _retainResult(
             resultUrl,
             'clawnsole-${current.localId}.mp4',
+            current.storage,
           );
         } on Object {
           // The temporary BFL URL remains usable if local retention fails.
@@ -1221,14 +1419,8 @@ class CompanionApp {
         status: 404,
       );
     }
-    final file = _store.assetFile(id);
-    if (!await file.exists()) {
-      throw const ProviderException(
-        'The local asset file is missing.',
-        status: 404,
-      );
-    }
-    final size = await file.length();
+    final bytes = await _store.readAsset(reference);
+    final size = bytes.length;
     var start = 0;
     var end = size - 1;
     final range = request.headers.value(HttpHeaders.rangeHeader);
@@ -1265,7 +1457,8 @@ class CompanionApp {
       )
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
       ..contentLength = end - start + 1;
-    await file.openRead(start, end + 1).pipe(request.response);
+    request.response.add(bytes.sublist(start, end + 1));
+    await request.response.close();
   }
 
   Future<void> _media(HttpRequest request) async {

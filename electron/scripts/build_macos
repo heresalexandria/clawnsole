@@ -13,6 +13,10 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "  CLAWNSOLE_NOTARY_KEYCHAIN_PROFILE"
   echo "                            notarytool profile for local signed builds"
   echo "                            (default: clawnsole-notarization)"
+  echo "  CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID"
+  echo "                            optional Google Desktop OAuth client"
+  echo "  CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET"
+  echo "                            matching installed-app client value"
   exit 0
 fi
 
