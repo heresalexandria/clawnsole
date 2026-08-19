@@ -9,6 +9,8 @@ const EXTERNAL_HOSTS = new Set([
   "www.ltx.io",
   "docs.ltx.io",
   "console.ltx.io",
+  "app.getartcraft.com",
+  "storyteller-docs.netlify.app",
   "atlascloud.ai",
   "www.atlascloud.ai",
   "console.atlascloud.ai",
