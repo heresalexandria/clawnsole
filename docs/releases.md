@@ -2,11 +2,12 @@
 
 Clawnsole follows the same release shape as Aesthetician: a release decision is
 made on the PR, the shared app version is bumped once, and the tag is created
-only after the signed macOS artifacts exist.
+only after both desktop builds exist.
 
 ```text
 PR labelled minor -> merge -> bump Flutter and Electron together
-                              -> build macOS DMG + updater ZIP
+                              -> build macOS DMG + updater ZIP ─┐
+                              -> build Windows x64 ZIP ─────────┤
                               -> checksum -> publish GitHub release
 ```
 
@@ -55,14 +56,18 @@ verification before it uploads any desktop artifact.
 
 ## What is published
 
-GitHub releases contain only the notarized macOS application and its updater
-metadata. Release assets can include:
+GitHub releases contain the notarized macOS application, its updater metadata,
+and the unsigned native Windows x64 build. Release assets can include:
 
 - `Clawnsole-<version>-mac-arm64.dmg`
 - `Clawnsole-mac-arm64.dmg` (stable alias used by the README's latest-download link)
 - `Clawnsole-<version>-mac-arm64.zip`
+- `Clawnsole-<version>-windows-x64.zip`
+- `Clawnsole-windows-x64.zip` (stable alias used by latest-download links)
 - `SHA256SUMS.txt`
 
-The ZIP is the Electron updater asset. Artifact naming, architecture selection,
-and digest parsing are covered by Electron tests. iOS, Android, and hosted web
-distribution remain outside this workflow.
+The macOS ZIP is the Electron updater asset. Windows updates remain a manual ZIP
+download, and the unsigned executable may trigger a Microsoft Defender
+SmartScreen warning. Artifact naming, architecture selection, and digest parsing
+are covered by Electron tests. iOS, Android, and hosted web distribution remain
+outside this workflow.

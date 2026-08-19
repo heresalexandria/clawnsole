@@ -3,8 +3,10 @@
 Packaged macOS, iOS, and Android builds check GitHub Releases shortly after
 startup and every 24 hours while running. A manual macOS check is always
 available from **Clawnsole → Check for Updates…** or from the version chip
-beside the wordmark in the app's top bar. Development builds explain that they
-update through git instead of replacing themselves.
+beside the wordmark in the app's top bar. Native Windows checks when you open
+the version dialog and sends available updates to the GitHub release for a
+manual ZIP download. Development builds explain that they update through git
+instead of replacing themselves.
 
 When GitHub successfully reports a newer **major** version, Clawnsole blocks
 continued use until the update begins. macOS uses the verified in-place updater;
@@ -26,8 +28,8 @@ automatic compatibility check but leave installation to their stores.
 Where the shell can install in place, the dialog's primary action is
 **Download and install <version>** — the same verified pipeline as the system
 menu, not a link to GitHub. It falls back to a release link only when there is
-no self-updating shell (a browser preview), and says so plainly when an
-unpackaged development build declines to replace itself.
+no self-updating shell, including native Windows and browser previews, and says
+so plainly when an unpackaged development build declines to replace itself.
 
 ## Renderer bridge
 

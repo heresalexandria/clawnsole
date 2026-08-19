@@ -34,7 +34,7 @@ class ShellUpdateEvent {
 /// The desktop shell's self-update surface, reachable from the renderer.
 ///
 /// Present only when the Flutter web build runs inside the Electron shell;
-/// null on plain web, iOS, and Android.
+/// null on plain web, iOS, Android, and Windows.
 abstract class ShellUpdater {
   /// Asks the shell for the latest-release summary.
   ///

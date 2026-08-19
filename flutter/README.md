@@ -1,8 +1,8 @@
 # Clawnsole for Flutter
 
 This directory is the canonical Clawnsole implementation for web, iOS, Android,
-and the Electron macOS renderer. Product behavior belongs here; Electron owns
-only desktop lifecycle, packaging, and self-update.
+native Windows, and the Electron macOS renderer. Product behavior belongs here;
+Electron owns only macOS desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
@@ -74,6 +74,7 @@ and keep Flutter attached for hot reload:
 ./scripts/start_ios
 ./scripts/start_android
 ./scripts/start_macos
+./scripts/start_windows
 ```
 
 `start_web` starts the loopback companion, waits for its health check, opens
@@ -82,6 +83,8 @@ iPhone simulator or boots the newest available one. `start_android` reuses a
 running Android emulator or launches the first configured Android AVD.
 `start_macos` builds Flutter web, serves it through the Dart companion, and
 opens the thin Electron shell.
+`start_windows` runs the native Flutter desktop app and must be invoked on a
+Windows machine with Visual Studio's Desktop development with C++ workload.
 
 Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or
 `CLAWNSOLE_ANDROID_DEVICE_ID` to choose a specific emulator. Every script also
@@ -144,6 +147,7 @@ the saved key itself.
 ./scripts/build_ios
 ./scripts/build_android
 ./scripts/build_macos
+./scripts/build_windows
 ```
 
 - `build_web` creates `build/web` and compiles the companion into the standalone
@@ -161,13 +165,16 @@ the saved key itself.
   `flutter/.env.ios-review` or repository `.env` is loaded automatically; the
   ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
   `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
-  passes credentials only to the iOS compiler; web, Android, and macOS builds
-  do not receive it.
+  passes credentials only to the iOS compiler; web, Android, macOS, and Windows
+  builds do not receive it.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
 - `build_macos` packages the Flutter web output and companion in Electron,
   producing the standalone app, DMG, and updater ZIP.
+- `build_windows` creates the native x64 release directory under
+  `build/windows/x64/runner/Release`. It rejects Dart defines and clears provider
+  credential variables so API keys cannot be compiled into the executable.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.

@@ -173,7 +173,7 @@ class _VersionDialogState extends State<_VersionDialog> {
                             ? 'Updates for this app arrive through $storeName.'
                             : _status.shellDeclinesInstall
                             ? 'This development build updates from source with git rather than replacing itself.'
-                            : 'The macOS app installs updates in place. This browser preview can open the release instead.',
+                            : 'This build can open the GitHub release for a manual update.',
                         style: TextStyle(
                           fontSize: 12.5,
                           height: 1.45,

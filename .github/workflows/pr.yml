@@ -76,3 +76,27 @@ jobs:
         run: ./flutter/scripts/build_macos
       - name: Smoke test packaged desktop app
         run: electron/dist/release/mac-arm64/Clawnsole.app/Contents/MacOS/Clawnsole --smoke
+
+  windows-package:
+    name: Windows package check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Build Windows x64 desktop app
+        shell: bash
+        run: ./flutter/scripts/build_windows
+      - name: Smoke test Windows desktop app
+        shell: pwsh
+        run: |
+          $executable = "flutter/build/windows/x64/runner/Release/Clawnsole.exe"
+          if (-not (Test-Path $executable)) { throw "Windows executable was not built." }
+          $process = Start-Process -FilePath $executable -PassThru
+          Start-Sleep -Seconds 8
+          if ($process.HasExited) {
+            throw "Clawnsole exited during the Windows smoke test with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id
