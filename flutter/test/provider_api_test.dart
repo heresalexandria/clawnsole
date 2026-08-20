@@ -891,6 +891,29 @@ void main() {
       VideoMode.upscale,
       config.copyWith(upscaleCreativity: 1),
     );
+    const source = VideoSourceMetadata(
+      width: 1920,
+      height: 1080,
+      durationSeconds: 10,
+    );
+    final inputPrecise = estimateCost(
+      'bfl',
+      'flux-tools-video-upscale-v1',
+      VideoMode.upscale,
+      config,
+      const <Generation>[],
+      const <ProviderModelPrice>[],
+      source,
+    );
+    final inputCreative = estimateCost(
+      'bfl',
+      'flux-tools-video-upscale-v1',
+      VideoMode.upscale,
+      config.copyWith(upscaleCreativity: 1),
+      const <Generation>[],
+      const <ProviderModelPrice>[],
+      source,
+    );
 
     expect(decoded.resolution, 'source');
     expect(decoded.duration, 'source');
@@ -899,9 +922,70 @@ void main() {
     expect(precise.maximumUsd, 19.25);
     expect(precise.providerUnitsMaximum, 1925);
     expect(creative.maximumUsd, 27.5);
+    expect(inputPrecise.minimumUsd, closeTo(8.652, .000001));
+    expect(inputPrecise.maximumUsd, closeTo(8.652, .000001));
+    expect(inputPrecise.rateUsd, .07);
+    expect(inputPrecise.rateUnit, 'megapixel-second');
+    expect(inputPrecise.calculation, contains('1920×1080 × 2.5×'));
+    expect(inputCreative.minimumUsd, 12.36);
+    expect(inputCreative.maximumUsd, 12.36);
+    expect(inputCreative.rateUsd, .10);
     expect(modelById('bfl', 'flux-tools-video-upscale-v1').modes, <VideoMode>[
       VideoMode.upscale,
     ]);
+  });
+
+  test('every provider route exposes an input-derived estimate and rate', () {
+    for (final provider in videoProviders) {
+      for (final model in provider.models) {
+        for (final mode in model.modes) {
+          final upscale = mode == VideoMode.upscale;
+          final estimate = estimateCost(
+            provider.id,
+            model.id,
+            mode,
+            GenerationConfig(
+              aspectRatio: model.aspectRatios.first,
+              duration: upscale ? 'source' : model.minDuration,
+              resolution: model.resolutions.first.id,
+              generateAudio: model.supportsAudio,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            const <Generation>[],
+            publishedProviderPrices(provider.id),
+            upscale
+                ? const VideoSourceMetadata(
+                    width: 1280,
+                    height: 720,
+                    durationSeconds: 6,
+                  )
+                : null,
+          );
+
+          expect(
+            estimate.minimumUsd.isFinite && estimate.minimumUsd >= 0,
+            isTrue,
+            reason: '${provider.id}/${model.id}/${mode.name}',
+          );
+          expect(
+            estimate.maximumUsd >= estimate.minimumUsd,
+            isTrue,
+            reason: '${provider.id}/${model.id}/${mode.name}',
+          );
+          expect(
+            estimate.rateUsd,
+            isNotNull,
+            reason: '${provider.id}/${model.id}/${mode.name}',
+          );
+          expect(
+            estimate.calculation,
+            isNotEmpty,
+            reason: '${provider.id}/${model.id}/${mode.name}',
+          );
+        }
+      }
+    }
   });
 
   test('published provider pricing uses the selected tier', () {

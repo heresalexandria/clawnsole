@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'models.dart';
 import 'provider_catalog.dart';
 
@@ -5,7 +7,10 @@ const double bflUsdPerCredit = 0.01;
 
 const _textOrImageRates = <String, double>{'draft': 6, 'hd': 17, 'fhd': 29};
 
-const _videoRates = <String, double>{'draft': 12, 'hd': 41, 'fhd': 53};
+const _videoRates = <String, double>{'draft': 12, 'hd': 43, 'fhd': 54};
+
+const double bflUpscaleMaximumOutputMegapixels = 13.75;
+const double bflUpscaleMaximumDurationSeconds = 20;
 
 double _median(List<double> values) {
   final ordered = List<double>.from(values)..sort();
@@ -21,75 +26,80 @@ double _roundCredits(double value) =>
 double _roundUsd(double value) =>
     (value.clamp(0, double.infinity) * 10000).round() / 10000;
 
-bool _sameSignature(Generation item, VideoMode mode, GenerationConfig config) =>
-    item.provider == 'bfl' &&
-    item.mode == mode &&
-    item.config.resolution == config.resolution &&
-    item.config.duration == config.duration &&
-    item.config.generateAudio == config.generateAudio &&
-    item.config.draft == config.draft;
-
 CreditEstimate estimateCredits(
   VideoMode mode,
   GenerationConfig config, [
   List<Generation> history = const <Generation>[],
+  VideoSourceMetadata? sourceMetadata,
 ]) {
   if (mode == VideoMode.upscale) {
     final usdPerMegapixelSecond = config.upscaleCreativity == 0 ? .07 : .10;
-    const maximumOutputMegapixels = 13.75;
-    const maximumDurationSeconds = 20;
+    final outputMegapixels = sourceMetadata == null
+        ? bflUpscaleMaximumOutputMegapixels
+        : _upscaleOutputMegapixels(sourceMetadata, config.upscaleFactor);
+    final durationSeconds = sourceMetadata == null
+        ? bflUpscaleMaximumDurationSeconds
+        : sourceMetadata.durationSeconds;
     return CreditEstimate(
-      minimum: 0,
+      minimum: sourceMetadata == null
+          ? 0
+          : _roundCredits(
+              outputMegapixels *
+                  durationSeconds *
+                  usdPerMegapixelSecond /
+                  bflUsdPerCredit,
+            ),
       maximum: _roundCredits(
-        maximumOutputMegapixels *
-            maximumDurationSeconds *
+        outputMegapixels *
+            durationSeconds *
             usdPerMegapixelSecond /
             bflUsdPerCredit,
       ),
-      basis: 'published-output-megapixel-rate',
+      basis: sourceMetadata == null
+          ? 'published-input-limit-range'
+          : 'input-derived-published-rate',
     );
   }
-  final exact = history
-      .where((item) => item.cost != null && _sameSignature(item, mode, config))
-      .map((item) => item.cost!)
-      .toList();
-  if (exact.isNotEmpty) {
-    final quote = _roundCredits(_median(exact));
-    return CreditEstimate(
-      minimum: quote,
-      maximum: quote,
-      basis: 'provider-history',
-    );
-  }
-
-  final observedRates = history.expand((item) {
-    final duration = item.config.duration;
-    if (item.cost == null ||
-        item.provider != 'bfl' ||
-        duration is! num ||
-        duration <= 0 ||
-        item.mode != mode ||
-        item.config.resolution != config.resolution ||
-        item.config.generateAudio != config.generateAudio ||
-        item.config.draft != config.draft) {
-      return const <double>[];
-    }
-    return <double>[item.cost! / duration];
-  }).toList();
-
   final rates = mode == VideoMode.v2v ? _videoRates : _textOrImageRates;
   final published = config.draft && mode != VideoMode.draftEnhance
       ? rates['draft']!
       : rates[config.resolution]!;
-  final rate = observedRates.isEmpty ? published : _median(observedRates);
   final duration = config.duration;
   final minimumSeconds = duration is num ? duration.toDouble() : 5.0;
   final maximumSeconds = duration is num ? duration.toDouble() : 20.0;
   return CreditEstimate(
-    minimum: _roundCredits(rate * minimumSeconds),
-    maximum: _roundCredits(rate * maximumSeconds),
-    basis: observedRates.isEmpty ? 'bfl-rate' : 'provider-history',
+    minimum: _roundCredits(published * minimumSeconds),
+    maximum: _roundCredits(published * maximumSeconds),
+    basis: 'bfl-rate',
   );
+}
+
+double _upscaleOutputMegapixels(VideoSourceMetadata source, double factor) =>
+    (source.width * source.height * factor * factor / (1024 * 1024))
+        .clamp(0, bflUpscaleMaximumOutputMegapixels)
+        .toDouble();
+
+String _secondsLabel(double seconds) => seconds == seconds.roundToDouble()
+    ? seconds.toStringAsFixed(0)
+    : seconds.toStringAsFixed(1);
+
+String _upscaleCalculation(
+  VideoSourceMetadata source,
+  double factor,
+  double outputMegapixels,
+) {
+  final sourcePixels = source.width * source.height;
+  final cappedFactor = sourcePixels <= 0
+      ? factor
+      : math.sqrt(
+          bflUpscaleMaximumOutputMegapixels * 1024 * 1024 / sourcePixels,
+        );
+  final effectiveFactor = factor < cappedFactor ? factor : cappedFactor;
+  final outputWidth = (source.width * effectiveFactor).round();
+  final outputHeight = (source.height * effectiveFactor).round();
+  return '${source.width}×${source.height} × ${factor.toStringAsFixed(1)}× → '
+      '≈$outputWidth×$outputHeight · ${outputMegapixels.toStringAsFixed(2)} MP '
+      '· ${_secondsLabel(source.durationSeconds)} s';
 }
 
 double creditsToUsd(double credits) => credits * bflUsdPerCredit;
@@ -337,6 +347,7 @@ CostEstimate estimateCost(
   GenerationConfig config, [
   List<Generation> history = const <Generation>[],
   List<ProviderModelPrice> prices = const <ProviderModelPrice>[],
+  VideoSourceMetadata? sourceMetadata,
 ]) {
   final duration = config.duration;
   final model = modelById(providerId, modelId);
@@ -348,6 +359,27 @@ CostEstimate estimateCost(
       : model.maxDuration.toDouble();
   final rate = _providerRate(providerId, modelId, mode, config, prices);
   final pricedModel = _pricedModel(modelId, config, prices);
+  final durationLabel = minimumSeconds == maximumSeconds
+      ? '${_secondsLabel(minimumSeconds)} s'
+      : '${_secondsLabel(minimumSeconds)}–${_secondsLabel(maximumSeconds)} s Auto';
+  final resolutionLabel =
+      model.resolutions
+          .where((resolution) => resolution.id == config.resolution)
+          .firstOrNull
+          ?.label ??
+      config.resolution;
+  final calculation = <String>[
+    durationLabel,
+    resolutionLabel,
+    if (config.aspectRatio != 'auto') config.aspectRatio,
+    mode.shortLabel,
+    if (config.draft) 'draft',
+    if (config.keyframes?.isNotEmpty == true)
+      '${config.keyframes!.length} keyframe${config.keyframes!.length == 1 ? '' : 's'}',
+    if (config.references?.isNotEmpty == true)
+      '${config.references!.length} reference${config.references!.length == 1 ? '' : 's'}',
+    if (config.generateAudio) 'audio',
+  ].join(' · ');
 
   double quotedTotal(double seconds) {
     final wholeSeconds = seconds.round();
@@ -359,7 +391,11 @@ CostEstimate estimateCost(
   }
 
   if (providerId == 'bfl') {
-    final credits = estimateCredits(mode, config, history);
+    final credits = estimateCredits(mode, config, history, sourceMetadata);
+    final upscale = mode == VideoMode.upscale;
+    final outputMegapixels = sourceMetadata == null || !upscale
+        ? null
+        : _upscaleOutputMegapixels(sourceMetadata, config.upscaleFactor);
     return CostEstimate(
       minimumUsd: creditsToUsd(credits.minimum),
       maximumUsd: creditsToUsd(credits.maximum),
@@ -367,6 +403,17 @@ CostEstimate estimateCost(
       providerUnitsMinimum: credits.minimum,
       providerUnitsMaximum: credits.maximum,
       providerUnitLabel: 'credits',
+      rateUsd: rate.usdPerSecond,
+      rateUnit: upscale ? 'megapixel-second' : 'second',
+      calculation: upscale
+          ? sourceMetadata == null
+                ? 'Add a source video to calculate from its dimensions and duration.'
+                : _upscaleCalculation(
+                    sourceMetadata,
+                    config.upscaleFactor,
+                    outputMegapixels!,
+                  )
+          : calculation,
     );
   }
   if (providerId == 'artcraft') {
@@ -379,11 +426,17 @@ CostEstimate estimateCost(
       providerUnitsMinimum: _roundCredits(minimumUsd / bflUsdPerCredit),
       providerUnitsMaximum: _roundCredits(maximumUsd / bflUsdPerCredit),
       providerUnitLabel: 'credits',
+      rateUsd: rate.usdPerSecond,
+      rateUnit: 'second',
+      calculation: calculation,
     );
   }
   return CostEstimate(
     minimumUsd: _roundUsd(quotedTotal(minimumSeconds)),
     maximumUsd: _roundUsd(quotedTotal(maximumSeconds)),
     basis: rate.source,
+    rateUsd: rate.usdPerSecond,
+    rateUnit: 'second',
+    calculation: calculation,
   );
 }

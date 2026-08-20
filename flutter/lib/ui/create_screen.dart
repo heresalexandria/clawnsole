@@ -639,6 +639,7 @@ class _ComposerState extends State<_Composer> {
                   form.videoAsset = null;
                   form.videoUrl = '';
                   form.videoThumbnailBytes = null;
+                  form.videoMetadata = null;
                 });
               },
               formRevision: controller.formRevision,
@@ -1792,6 +1793,14 @@ class _AddFrameButton extends StatelessWidget {
   }
 }
 
+String _videoMetadataLabel(VideoSourceMetadata metadata) {
+  final seconds =
+      metadata.durationSeconds == metadata.durationSeconds.roundToDouble()
+      ? metadata.durationSeconds.toStringAsFixed(0)
+      : metadata.durationSeconds.toStringAsFixed(1);
+  return '${metadata.width}×${metadata.height} · $seconds s';
+}
+
 class _SourceEditor extends StatelessWidget {
   const _SourceEditor({
     required this.controller,
@@ -1891,6 +1900,9 @@ class _SourceEditor extends StatelessWidget {
                         onThumbnail: mediaKind == MediaReferenceKind.video
                             ? controller.rememberVideoSourceThumbnail
                             : null,
+                        onVideoMetadata: mediaKind == MediaReferenceKind.video
+                            ? controller.rememberVideoSourceMetadata
+                            : null,
                       ),
                     ),
                   ),
@@ -1899,7 +1911,14 @@ class _SourceEditor extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            subtitle: Text(formatBytes(asset!.bytes.length)),
+            subtitle: Text(
+              <String>[
+                formatBytes(asset!.bytes.length),
+                if (mediaKind == MediaReferenceKind.video &&
+                    controller.form.videoMetadata != null)
+                  _videoMetadataLabel(controller.form.videoMetadata!),
+              ].join(' · '),
+            ),
             trailing: IconButton(
               tooltip: 'Clear file',
               onPressed: onDismiss,
@@ -1925,6 +1944,9 @@ class _SourceEditor extends StatelessWidget {
                       semanticsLabel: '$title source thumbnail',
                       onThumbnail: mediaKind == MediaReferenceKind.video
                           ? controller.rememberVideoSourceThumbnail
+                          : null,
+                      onVideoMetadata: mediaKind == MediaReferenceKind.video
+                          ? controller.rememberVideoSourceMetadata
                           : null,
                     ),
                   ),
@@ -2621,85 +2643,23 @@ class _CostPreview extends StatelessWidget {
         ),
       );
     }
-    if (controller.form.mode == VideoMode.upscale) {
-      final tokens = context.tokens;
-      final creative = controller.form.upscaleCreativity == 1;
-      final rate = creative ? .10 : .07;
-      final maximum = 13.75 * 20 * rate;
-      final account =
-          controller.providerAccounts[controller.selectedProviderId];
-      return TexturePanel(
-        surface: PanelSurface.hunterFelt,
-        stitched: true,
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(Icons.toll_rounded, color: tokens.moneyAccent),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        '${creative ? 'CREATIVE' : 'PRECISE'} UPSCALE RATE',
-                        style: TextStyle(
-                          color: tokens.onMoneyMuted,
-                          fontSize: 9,
-                          letterSpacing: 1.5,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '\$${rate.toStringAsFixed(2)} / megapixel-second',
-                        style: TextStyle(
-                          fontFamily: 'Fraunces',
-                          color: tokens.onMoney,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'BFL bills the delivered output’s actual dimensions × duration. The 20-second, 13.75 MP ceiling would cost at most ${formatUsdAmount(maximum)} in this mode; rejected clips are not charged.',
-              style: TextStyle(color: tokens.onMoneyMuted, fontSize: 10.5),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              controller.credits == null
-                  ? (controller.hasApiKey
-                        ? account?.balanceLabel ?? 'BFL account connected'
-                        : 'Add a BFL API key to upscale')
-                  : '${formatCredits(controller.credits!)} credits available',
-              style: TextStyle(
-                color: tokens.moneyAccent,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
     final tokens = context.tokens;
     final estimate = controller.currentEstimate;
+    final hasUpscaleSource =
+        controller.form.videoAsset != null ||
+        controller.form.videoUrl.trim().isNotEmpty;
+    final calculation =
+        controller.form.mode == VideoMode.upscale &&
+            hasUpscaleSource &&
+            controller.form.videoMetadata == null
+        ? 'Reading source dimensions and duration…'
+        : estimate.calculation;
     final providerUnits = estimate.providerUnitsMinimum != null;
     final account = controller.providerAccounts[controller.selectedProviderId];
     final balanceUsesCredits = account?.currency == 'credits';
-    final chargeMinimum = providerUnits
-        ? estimate.providerUnitsMinimum!
-        : estimate.minimumUsd;
-    final chargeMaximum = providerUnits
-        ? estimate.providerUnitsMaximum!
-        : estimate.maximumUsd;
+    final rateLabel = estimate.rateUsd == null
+        ? null
+        : '${formatUsdAmount(estimate.rateUsd!)} / ${estimate.rateUnit ?? 'second'}';
     final afterMin = controller.credits == null
         ? null
         : (controller.credits! -
@@ -2764,12 +2724,10 @@ class _CostPreview extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          providerUnits
-                              ? '${formatCreditRange(chargeMinimum, chargeMaximum)} credits'
-                              : formatUsdAmountRange(
-                                  estimate.minimumUsd,
-                                  estimate.maximumUsd,
-                                ),
+                          formatUsdAmountRange(
+                            estimate.minimumUsd,
+                            estimate.maximumUsd,
+                          ),
                           style: TextStyle(
                             fontFamily: 'Fraunces',
                             color: tokens.onMoney,
@@ -2782,22 +2740,44 @@ class _CostPreview extends StatelessWidget {
                   ),
                 ],
               ),
-              Text(
-                providerUnits
-                    ? formatUsdAmountRange(
-                        estimate.minimumUsd,
-                        estimate.maximumUsd,
-                      )
-                    : controller.selectedModel.label,
-                style: TextStyle(
-                  fontFamily: 'Fraunces',
-                  color: tokens.moneyAccent,
-                  fontSize: 19,
-                  fontWeight: FontWeight.w600,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Text(
+                    rateLabel ?? controller.selectedModel.label,
+                    style: TextStyle(
+                      fontFamily: 'Fraunces',
+                      color: tokens.moneyAccent,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (providerUnits) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${formatCreditRange(estimate.providerUnitsMinimum!, estimate.providerUnitsMaximum!)} credits',
+                      style: TextStyle(
+                        color: tokens.onMoneyMuted,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
+          if (calculation != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(
+              calculation,
+              style: TextStyle(
+                color: tokens.onMoneyMuted,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           Divider(color: tokens.onMoney.withValues(alpha: .14)),
           const SizedBox(height: 11),
@@ -2833,7 +2813,11 @@ class _CostPreview extends StatelessWidget {
             children: <Widget>[
               Text(
                 '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
-                '${estimate.basis == 'provider-history' ? 'Calibrated from exact charges.' : 'Based on the provider’s current published or live rate.'}',
+                '${estimate.basis == 'artcraft-live-quote'
+                    ? 'Live quote calculated from the current prompt and settings.'
+                    : estimate.basis == 'input-derived-published-rate'
+                    ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
+                    : 'Calculated from the current pricing settings at the provider’s published or live rate.'}',
                 style: TextStyle(color: tokens.onMoneyMuted, fontSize: 10.5),
               ),
               TextButton(

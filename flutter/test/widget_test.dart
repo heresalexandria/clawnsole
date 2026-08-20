@@ -54,6 +54,7 @@ void main() {
     );
     Uri? requested;
     Uint8List? generated;
+    VideoSourceMetadata? metadata;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -73,7 +74,13 @@ void main() {
               requested = uri;
               return frame;
             },
+            metadataLoader: (_) async => const VideoSourceMetadata(
+              width: 1920,
+              height: 1080,
+              durationSeconds: 8,
+            ),
             onThumbnail: (bytes) => generated = bytes,
+            onVideoMetadata: (value) => metadata = value,
           ),
         ),
       ),
@@ -82,6 +89,7 @@ void main() {
 
     expect(requested, Uri.parse('https://cdn.test/reference.mp4'));
     expect(generated, frame);
+    expect(metadata?.signature, '1920×1080@8.000');
     expect(
       find.byKey(const ValueKey('media-thumbnail-video-frame')),
       findsOneWidget,
@@ -132,7 +140,7 @@ void main() {
     );
 
     expect(estimateCredits(VideoMode.t2v, hdEightSeconds).minimum, 136);
-    expect(estimateCredits(VideoMode.v2v, hdEightSeconds).minimum, 328);
+    expect(estimateCredits(VideoMode.v2v, hdEightSeconds).minimum, 344);
     expect(estimateCredits(VideoMode.t2v, draftTenSeconds).minimum, 60);
     expect(creditsToUsd(136), 1.36);
 
@@ -145,11 +153,11 @@ void main() {
       draft: false,
     );
     final autoEstimate = estimateCredits(VideoMode.v2v, fhdAuto);
-    expect(autoEstimate.minimum, 265);
-    expect(autoEstimate.maximum, 1060);
+    expect(autoEstimate.minimum, 270);
+    expect(autoEstimate.maximum, 1080);
   });
 
-  test('uses exact matching BFL history as the next estimate', () {
+  test('calculates BFL estimates from current inputs instead of history', () {
     final now = DateTime.utc(2026, 8, 15);
     const config = GenerationConfig(
       aspectRatio: '16:9',
@@ -173,9 +181,9 @@ void main() {
     ];
 
     final estimate = estimateCredits(VideoMode.t2v, config, history);
-    expect(estimate.minimum, 130);
-    expect(estimate.maximum, 130);
-    expect(estimate.basis, 'provider-history');
+    expect(estimate.minimum, 136);
+    expect(estimate.maximum, 136);
+    expect(estimate.basis, 'bfl-rate');
   });
 
   test('BFL estimates ignore matching history from other providers', () {
@@ -230,8 +238,20 @@ void main() {
       expect(controller.currentEstimate.minimumUsd, 1.85);
       expect(controller.currentEstimate.providerUnitsMinimum, 185);
       expect(controller.currentEstimate.basis, 'artcraft-live-quote');
+      expect(controller.currentEstimate.rateUsd, isPositive);
 
-      controller.updateForm((form) => form.resolution = 'fhd');
+      controller.updateForm((form) => form.prompt = 'Premium prompt');
+      expect(controller.currentEstimate.basis, isNot('artcraft-live-quote'));
+      await controller.refreshProviderEstimate();
+
+      expect(controller.currentEstimate.minimumUsd, 7);
+      expect(gateway.quotedInputs.last['prompt'], 'Premium prompt');
+
+      controller.updateForm((form) {
+        form
+          ..prompt = ''
+          ..resolution = 'fhd';
+      });
       await controller.refreshProviderEstimate();
 
       expect(controller.currentEstimate.minimumUsd, 4.66);
@@ -3375,6 +3395,9 @@ void main() {
     final controller = AppController(gateway: gateway);
     await controller.initialize();
     await controller.selectModel('flux-tools-video-upscale-v1');
+    controller.rememberVideoSourceMetadata(
+      const VideoSourceMetadata(width: 1920, height: 1080, durationSeconds: 10),
+    );
     expect(controller.form.mode, VideoMode.upscale);
     expect(controller.validate(), contains('video you want to upscale'));
 
@@ -3476,6 +3499,10 @@ void main() {
     );
     await controller.initialize();
     await controller.selectModel('flux-tools-video-upscale-v1');
+    controller.rememberVideoSourceMetadata(
+      const VideoSourceMetadata(width: 1920, height: 1080, durationSeconds: 10),
+    );
+    expect(controller.currentEstimate.minimumUsd, 7.91);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -3495,7 +3522,11 @@ void main() {
     expect(find.byKey(const ValueKey('upscale-factor-slider')), findsOneWidget);
     expect(find.text('PRECISE'), findsOneWidget);
     expect(find.text('CREATIVE'), findsOneWidget);
+    expect(find.text('ESTIMATED CHARGE'), findsOneWidget);
+    expect(find.textContaining(r'$7.91'), findsOneWidget);
     expect(find.textContaining(r'$0.10 / megapixel-second'), findsOneWidget);
+    expect(find.text('791 credits'), findsOneWidget);
+    expect(find.textContaining('1920×1080 × 2.0×'), findsOneWidget);
     expect(find.text('Upscale video'), findsOneWidget);
     controller.dispose();
   });
@@ -3728,6 +3759,7 @@ class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
   _ProviderMemoryGateway(super.snapshot, [this.account]);
 
   final List<String> quotedResolutions = <String>[];
+  final List<Map<String, Object?>> quotedInputs = <Map<String, Object?>>[];
   final ProviderAccountStatus? account;
 
   @override
@@ -3738,7 +3770,12 @@ class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
   ) async {
     final resolution = input['resolution']?.toString() ?? '';
     quotedResolutions.add(resolution);
-    final credits = resolution == 'fhd' ? 466.0 : 185.0;
+    quotedInputs.add(Map<String, Object?>.from(input));
+    final credits = input['prompt'] == 'Premium prompt'
+        ? 700.0
+        : resolution == 'fhd'
+        ? 466.0
+        : 185.0;
     return CostEstimate(
       minimumUsd: credits / 100,
       maximumUsd: credits / 100,
