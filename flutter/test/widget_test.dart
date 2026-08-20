@@ -2812,6 +2812,66 @@ void main() {
     expect(gateway.snapshot.preferences.activeSection, AppSection.references);
   });
 
+  test(
+    'keeps the latest tab selected while preference writes finish',
+    () async {
+      final gateway = _DelayedPreferencesGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      final libraryNavigation = controller.navigate(AppSection.library);
+      await Future<void>.delayed(Duration.zero);
+      final referencesNavigation = controller.navigate(AppSection.references);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.section, AppSection.references);
+      expect(gateway.pendingPreferences, <AppSection>[AppSection.library]);
+
+      await gateway.completeNextPreference();
+      await libraryNavigation;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.section, AppSection.references);
+      expect(gateway.pendingPreferences, <AppSection>[AppSection.references]);
+
+      await gateway.completeNextPreference();
+      await referencesNavigation;
+
+      expect(controller.section, AppSection.references);
+      expect(gateway.snapshot.preferences.activeSection, AppSection.references);
+    },
+  );
+
+  test('stale state responses do not restore an earlier tab', () async {
+    final gateway = _DelayedHistoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    final clearing = controller.clearHistory();
+    await controller.navigate(AppSection.library);
+    gateway.completeHistoryClear();
+    await clearing;
+
+    expect(controller.section, AppSection.library);
+    expect(controller.snapshot!.preferences.activeSection, AppSection.library);
+  });
+
   testWidgets('reference search and sort stack cleanly on mobile', (
     tester,
   ) async {
@@ -3070,6 +3130,52 @@ class _MemoryGateway implements AppGateway {
   ) async {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
+  }
+}
+
+class _PendingPreferenceWrite {
+  const _PendingPreferenceWrite(this.preferences, this.completer);
+
+  final AppPreferences preferences;
+  final Completer<LocalSnapshot> completer;
+}
+
+class _DelayedPreferencesGateway extends _MemoryGateway {
+  _DelayedPreferencesGateway(super.snapshot);
+
+  final List<_PendingPreferenceWrite> _pending = <_PendingPreferenceWrite>[];
+
+  List<AppSection> get pendingPreferences => _pending
+      .map((request) => request.preferences.activeSection)
+      .toList(growable: false);
+
+  @override
+  Future<LocalSnapshot> setPreferences(AppPreferences preferences) {
+    final completer = Completer<LocalSnapshot>();
+    _pending.add(_PendingPreferenceWrite(preferences, completer));
+    return completer.future;
+  }
+
+  Future<void> completeNextPreference() async {
+    final request = _pending.removeAt(0);
+    request.completer.complete(await super.setPreferences(request.preferences));
+  }
+}
+
+class _DelayedHistoryGateway extends _MemoryGateway {
+  _DelayedHistoryGateway(super.snapshot);
+
+  Completer<LocalSnapshot>? _historyClear;
+  LocalSnapshot? _historySnapshot;
+
+  @override
+  Future<LocalSnapshot> clearHistory() {
+    _historySnapshot = snapshot;
+    return (_historyClear = Completer<LocalSnapshot>()).future;
+  }
+
+  void completeHistoryClear() {
+    _historyClear!.complete(_historySnapshot!);
   }
 }
 

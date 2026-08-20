@@ -221,6 +221,7 @@ class AppController extends ChangeNotifier {
 
   Timer? _pollTimer;
   Timer? _creditTimer;
+  Future<void> _preferenceWrites = Future<void>.value();
   Future<bool>? _creditRefreshFuture;
   Timer? _estimateTimer;
   String? _estimateSignature;
@@ -713,7 +714,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
-      _apply(await gateway.load());
+      _apply(await gateway.load(), restorePreferences: true);
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
@@ -742,37 +743,55 @@ class AppController extends ChangeNotifier {
     });
   }
 
-  void _apply(LocalSnapshot value) {
-    snapshot = value;
-    section = value.preferences.activeSection;
-    libraryFilter = value.preferences.libraryFilter;
-    libraryStorageFilter = value.preferences.libraryStorageFilter;
-    referenceStorageFilter = value.preferences.referenceStorageFilter;
-    defaultStorage = supportsLocalLibrary
-        ? value.preferences.defaultStorage
-        : LibraryStorage.drive;
-    lastLocalGenerationFolderId = value.preferences.lastLocalGenerationFolderId;
-    lastDriveGenerationFolderId = value.preferences.lastDriveGenerationFolderId;
-    if (folderById(lastLocalGenerationFolderId)?.storage !=
-        LibraryStorage.local) {
-      lastLocalGenerationFolderId = null;
+  void _apply(LocalSnapshot value, {bool restorePreferences = false}) {
+    snapshot = restorePreferences
+        ? value
+        : LocalSnapshot(
+            generations: value.generations,
+            folders: value.folders,
+            savedReferences: value.savedReferences,
+            preferences: _preferences(),
+            hasApiKey: value.hasApiKey,
+            connectedProviders: value.connectedProviders,
+            availableProviders: value.availableProviders,
+            storage: value.storage,
+          );
+    if (restorePreferences) {
+      section = value.preferences.activeSection;
+      libraryFilter = value.preferences.libraryFilter;
+      libraryStorageFilter = value.preferences.libraryStorageFilter;
+      referenceStorageFilter = value.preferences.referenceStorageFilter;
+      defaultStorage = supportsLocalLibrary
+          ? value.preferences.defaultStorage
+          : LibraryStorage.drive;
+      lastLocalGenerationFolderId =
+          value.preferences.lastLocalGenerationFolderId;
+      lastDriveGenerationFolderId =
+          value.preferences.lastDriveGenerationFolderId;
+      if (folderById(lastLocalGenerationFolderId)?.storage !=
+          LibraryStorage.local) {
+        lastLocalGenerationFolderId = null;
+      }
+      if (folderById(lastDriveGenerationFolderId)?.storage !=
+          LibraryStorage.drive) {
+        lastDriveGenerationFolderId = null;
+      }
+      final preferredProvider = providerById(value.preferences.provider);
+      final available = providers;
+      final previousModelId = selectedModelId;
+      selectedProviderId =
+          available.any((provider) => provider.id == preferredProvider.id)
+          ? preferredProvider.id
+          : available.firstOrNull?.id ?? 'bfl';
+      selectedModelId = modelById(
+        selectedProviderId,
+        value.preferences.model,
+      ).id;
+      // A restored model must constrain the form exactly like a selected one,
+      // or a session can reopen with settings the model does not support
+      // (for example Auto duration on a fixed-duration model).
+      if (selectedModelId != previousModelId) _normalizeFormForModel();
     }
-    if (folderById(lastDriveGenerationFolderId)?.storage !=
-        LibraryStorage.drive) {
-      lastDriveGenerationFolderId = null;
-    }
-    final preferredProvider = providerById(value.preferences.provider);
-    final available = providers;
-    final previousModelId = selectedModelId;
-    selectedProviderId =
-        available.any((provider) => provider.id == preferredProvider.id)
-        ? preferredProvider.id
-        : available.firstOrNull?.id ?? 'bfl';
-    selectedModelId = modelById(selectedProviderId, value.preferences.model).id;
-    // A restored model must constrain the form exactly like a selected one,
-    // or a session can reopen with settings the model does not support
-    // (for example Auto duration on a fixed-duration model).
-    if (selectedModelId != previousModelId) _normalizeFormForModel();
     if (libraryFolderView != libraryFolderAll &&
         libraryFolderView != libraryFolderUnfiled &&
         !value.folders.any((folder) => folder.id == libraryFolderView)) {
@@ -807,11 +826,19 @@ class AppController extends ChangeNotifier {
       .replaceFirst('ProviderException: ', '')
       .replaceFirst('Exception: ', '');
 
+  Future<void> _savePreferences(AppPreferences preferences) {
+    final operation = _preferenceWrites.then((_) async {
+      _apply(await gateway.setPreferences(preferences));
+    });
+    _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
+  }
+
   Future<void> navigate(AppSection value) async {
     section = value;
     notifyListeners();
     try {
-      _apply(await gateway.setPreferences(_preferences(activeSection: value)));
+      await _savePreferences(_preferences(activeSection: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -821,7 +848,7 @@ class AppController extends ChangeNotifier {
     libraryFilter = value;
     notifyListeners();
     try {
-      _apply(await gateway.setPreferences(_preferences(libraryFilter: value)));
+      await _savePreferences(_preferences(libraryFilter: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -831,9 +858,7 @@ class AppController extends ChangeNotifier {
     libraryStorageFilter = value;
     notifyListeners();
     try {
-      _apply(
-        await gateway.setPreferences(_preferences(libraryStorageFilter: value)),
-      );
+      await _savePreferences(_preferences(libraryStorageFilter: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -843,11 +868,7 @@ class AppController extends ChangeNotifier {
     referenceStorageFilter = value;
     notifyListeners();
     try {
-      _apply(
-        await gateway.setPreferences(
-          _preferences(referenceStorageFilter: value),
-        ),
-      );
+      await _savePreferences(_preferences(referenceStorageFilter: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -865,7 +886,7 @@ class AppController extends ChangeNotifier {
     defaultStorage = value;
     notifyListeners();
     try {
-      _apply(await gateway.setPreferences(_preferences(defaultStorage: value)));
+      await _savePreferences(_preferences(defaultStorage: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -890,14 +911,12 @@ class AppController extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      _apply(
-        await gateway.setPreferences(
-          _preferences(
-            lastLocalGenerationFolderId: lastLocalGenerationFolderId,
-            clearLastLocalGenerationFolder: lastLocalGenerationFolderId == null,
-            lastDriveGenerationFolderId: lastDriveGenerationFolderId,
-            clearLastDriveGenerationFolder: lastDriveGenerationFolderId == null,
-          ),
+      await _savePreferences(
+        _preferences(
+          lastLocalGenerationFolderId: lastLocalGenerationFolderId,
+          clearLastLocalGenerationFolder: lastLocalGenerationFolderId == null,
+          lastDriveGenerationFolderId: lastDriveGenerationFolderId,
+          clearLastDriveGenerationFolder: lastDriveGenerationFolderId == null,
         ),
       );
     } on Object catch (error) {
@@ -1496,7 +1515,7 @@ class AppController extends ChangeNotifier {
     credits = providerAccounts[provider.id]?.balance;
     notifyListeners();
     try {
-      _apply(await gateway.setPreferences(_preferences()));
+      await _savePreferences(_preferences());
       if (provider.requiresApiKey && hasApiKey) unawaited(refreshCredits());
     } on Object catch (error) {
       showNotice(_message(error));
@@ -1509,7 +1528,7 @@ class AppController extends ChangeNotifier {
     _invalidateProviderEstimate();
     notifyListeners();
     try {
-      _apply(await gateway.setPreferences(_preferences()));
+      await _savePreferences(_preferences());
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -2496,12 +2515,12 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> clearPreferences() async {
-    _apply(await gateway.clearPreferences());
+    _apply(await gateway.clearPreferences(), restorePreferences: true);
     showNotice('Saved preferences reset.');
   }
 
   Future<void> clearAll() async {
-    _apply(await gateway.clearAll());
+    _apply(await gateway.clearAll(), restorePreferences: true);
     credits = null;
     showNotice(
       supportsGoogleDrive
@@ -2519,6 +2538,7 @@ class AppController extends ChangeNotifier {
     try {
       _apply(
         await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
+        restorePreferences: true,
       );
       showNotice('Google Drive connected and synced.');
     } on Object catch (error) {
@@ -2534,7 +2554,10 @@ class AppController extends ChangeNotifier {
     googleDriveBusy = true;
     notifyListeners();
     try {
-      _apply(await (gateway as GoogleDriveGateway).disconnectGoogleDrive());
+      _apply(
+        await (gateway as GoogleDriveGateway).disconnectGoogleDrive(),
+        restorePreferences: true,
+      );
       showNotice('Drive disconnected on this device. Cloud files were kept.');
     } on Object catch (error) {
       showNotice(_message(error));
@@ -2549,7 +2572,10 @@ class AppController extends ChangeNotifier {
     googleDriveBusy = true;
     notifyListeners();
     try {
-      _apply(await (gateway as GoogleDriveGateway).refreshGoogleDrive());
+      _apply(
+        await (gateway as GoogleDriveGateway).refreshGoogleDrive(),
+        restorePreferences: true,
+      );
       showNotice('Google Drive data refreshed.');
     } on Object catch (error) {
       showNotice(_message(error));
