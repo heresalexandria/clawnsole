@@ -150,6 +150,7 @@ class LocalDataStore implements DurableDataStore {
       add(generation.thumbnailAsset);
       add(generation.timelineThumbnailAsset);
       add(generation.config.source);
+      add(generation.config.sourceThumbnailAsset);
       for (final frame
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
         add(frame.source);
@@ -157,10 +158,12 @@ class LocalDataStore implements DurableDataStore {
       for (final media
           in generation.config.references ?? const <MediaReferenceLabel>[]) {
         add(media.source);
+        add(media.thumbnailAsset);
       }
     }
     for (final reference in savedReferences) {
       add(reference.asset);
+      add(reference.thumbnailAsset);
     }
     return retained;
   }

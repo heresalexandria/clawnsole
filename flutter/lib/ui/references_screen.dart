@@ -6,6 +6,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
+import 'media_thumbnail.dart';
 
 class ReferencesScreen extends StatelessWidget {
   const ReferencesScreen({required this.controller, super.key});
@@ -378,14 +379,18 @@ class _ReferenceCard extends StatelessWidget {
           aspectRatio: 16 / 9,
           child: ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            child: reference.kind == MediaReferenceKind.image
-                ? FutureBuilder(
-                    future: controller.gateway.readAsset(reference.asset),
-                    builder: (context, snapshot) => snapshot.hasData
-                        ? Image.memory(snapshot.data!, fit: BoxFit.cover)
-                        : _MediaPlaceholder(kind: reference.kind),
-                  )
-                : _MediaPlaceholder(kind: reference.kind),
+            child: MediaThumbnail(
+              gateway: controller.gateway,
+              kind: reference.kind,
+              reference: reference.asset,
+              thumbnailReference: reference.thumbnailAsset,
+              semanticsLabel: '${reference.name} thumbnail',
+              onThumbnail: reference.kind == MediaReferenceKind.video
+                  ? (bytes) => unawaited(
+                      controller.cacheReferencePreview(reference, bytes),
+                    )
+                  : null,
+            ),
           ),
         ),
         Padding(
@@ -491,29 +496,6 @@ class _ReferenceCard extends StatelessWidget {
       ],
     ),
   );
-}
-
-class _MediaPlaceholder extends StatelessWidget {
-  const _MediaPlaceholder({required this.kind});
-
-  final MediaReferenceKind kind;
-
-  @override
-  Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
-      child: Center(
-        child: Icon(
-          _kindIcon(kind),
-          size: 42,
-          color: dark
-              ? ClawnsoleColors.creamMuted
-              : context.colors.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
 }
 
 class _ReferenceEmpty extends StatelessWidget {
@@ -961,6 +943,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                   name: item.name,
                   kind: item.kind,
                   asset: item.asset,
+                  thumbnailAsset: item.thumbnailAsset,
                   createdAt: item.createdAt,
                   folderId: item.folderId,
                   tags: item.tags,
@@ -1107,7 +1090,19 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                                       ? selected.remove(item.id)
                                       : selected[item.id] = item;
                                 }),
-                          secondary: Icon(_kindIcon(item.kind)),
+                          secondary: ClipRRect(
+                            borderRadius: BorderRadius.circular(7),
+                            child: SizedBox.square(
+                              dimension: 44,
+                              child: MediaThumbnail(
+                                gateway: widget.controller.gateway,
+                                kind: item.kind,
+                                reference: item.asset,
+                                thumbnailReference: item.thumbnailAsset,
+                                semanticsLabel: '${item.name} thumbnail',
+                              ),
+                            ),
+                          ),
                           title: Row(
                             children: <Widget>[
                               Expanded(

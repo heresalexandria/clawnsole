@@ -192,6 +192,7 @@ class GenerationConfig {
     this.referenceTask = MediaReferenceTask.reference,
     this.sourceLabel,
     this.source,
+    this.sourceThumbnailAsset,
   });
 
   final String aspectRatio;
@@ -207,12 +208,14 @@ class GenerationConfig {
   final MediaReferenceTask referenceTask;
   final String? sourceLabel;
   final AssetReference? source;
+  final AssetReference? sourceThumbnailAsset;
 
   GenerationConfig copyWith({
     List<KeyframeLabel>? keyframes,
     List<MediaReferenceLabel>? references,
     MediaReferenceTask? referenceTask,
     AssetReference? source,
+    AssetReference? sourceThumbnailAsset,
     int? frameRate,
   }) => GenerationConfig(
     aspectRatio: aspectRatio,
@@ -228,6 +231,7 @@ class GenerationConfig {
     referenceTask: referenceTask ?? this.referenceTask,
     sourceLabel: sourceLabel,
     source: source ?? this.source,
+    sourceThumbnailAsset: sourceThumbnailAsset ?? this.sourceThumbnailAsset,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -247,6 +251,8 @@ class GenerationConfig {
       'referenceTask': referenceTask.name,
     if (sourceLabel != null) 'sourceLabel': sourceLabel,
     if (source != null) 'source': source!.toJson(),
+    if (sourceThumbnailAsset != null)
+      'sourceThumbnailAsset': sourceThumbnailAsset!.toJson(),
   };
 
   factory GenerationConfig.fromJson(Map<String, Object?> json) {
@@ -298,6 +304,14 @@ class GenerationConfig {
               ),
             )
           : null,
+      sourceThumbnailAsset:
+          json['sourceThumbnailAsset'] is Map<Object?, Object?>
+          ? AssetReference.fromJson(
+              (json['sourceThumbnailAsset']! as Map<Object?, Object?>).map(
+                (key, value) => MapEntry(key.toString(), value),
+              ),
+            )
+          : null,
     );
   }
 }
@@ -307,16 +321,29 @@ class MediaReferenceLabel {
     required this.label,
     required this.kind,
     this.source,
+    this.thumbnailAsset,
   });
 
   final String label;
   final MediaReferenceKind kind;
   final AssetReference? source;
+  final AssetReference? thumbnailAsset;
+
+  MediaReferenceLabel copyWith({
+    AssetReference? source,
+    AssetReference? thumbnailAsset,
+  }) => MediaReferenceLabel(
+    label: label,
+    kind: kind,
+    source: source ?? this.source,
+    thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
     'kind': kind.name,
     if (source != null) 'source': source!.toJson(),
+    if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
   };
 
   factory MediaReferenceLabel.fromJson(Map<String, Object?> json) =>
@@ -326,6 +353,13 @@ class MediaReferenceLabel {
         source: json['source'] is Map<Object?, Object?>
             ? AssetReference.fromJson(
                 (json['source']! as Map<Object?, Object?>).map(
+                  (key, value) => MapEntry(key.toString(), value),
+                ),
+              )
+            : null,
+        thumbnailAsset: json['thumbnailAsset'] is Map<Object?, Object?>
+            ? AssetReference.fromJson(
+                (json['thumbnailAsset']! as Map<Object?, Object?>).map(
                   (key, value) => MapEntry(key.toString(), value),
                 ),
               )
@@ -440,6 +474,7 @@ class SavedReference {
     required this.name,
     required this.kind,
     required this.asset,
+    this.thumbnailAsset,
     required this.createdAt,
     required this.updatedAt,
     this.folderId,
@@ -452,6 +487,7 @@ class SavedReference {
   final String name;
   final MediaReferenceKind kind;
   final AssetReference asset;
+  final AssetReference? thumbnailAsset;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? folderId;
@@ -462,6 +498,7 @@ class SavedReference {
   SavedReference copyWith({
     String? name,
     AssetReference? asset,
+    AssetReference? thumbnailAsset,
     DateTime? updatedAt,
     String? folderId,
     bool clearFolder = false,
@@ -473,6 +510,7 @@ class SavedReference {
     name: name ?? this.name,
     kind: kind,
     asset: asset ?? this.asset,
+    thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
@@ -486,6 +524,7 @@ class SavedReference {
     'name': name,
     'kind': kind.name,
     'asset': asset.toJson(),
+    if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (folderId != null) 'folderId': folderId,
@@ -505,6 +544,13 @@ class SavedReference {
             ? rawAsset.map((key, value) => MapEntry(key.toString(), value))
             : const <String, Object?>{},
       ),
+      thumbnailAsset: json['thumbnailAsset'] is Map<Object?, Object?>
+          ? AssetReference.fromJson(
+              (json['thumbnailAsset']! as Map<Object?, Object?>).map(
+                (key, value) => MapEntry(key.toString(), value),
+              ),
+            )
+          : null,
       createdAt:
           DateTime.tryParse(json['createdAt'] as String? ?? '') ??
           DateTime.now().toUtc(),
@@ -1085,7 +1131,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 14,
+    'schemaVersion': 15,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,

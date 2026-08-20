@@ -185,7 +185,7 @@ void main() {
   });
 
   test(
-    'schema 14 preserves Drive provenance and migrates old items locally',
+    'schema 15 preserves Drive provenance and migrates old items locally',
     () {
       final driveAsset = AssetReference.fromJson(<String, Object?>{
         'kind': 'drive',
@@ -211,11 +211,11 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 14);
+      expect(migrated.toJson()['schemaVersion'], 15);
     },
   );
 
-  test('schema 14 round-trips favorites, preview caches, and last folders', () {
+  test('schema 15 round-trips favorites, preview caches, and last folders', () {
     final now = DateTime.utc(2026, 8, 19, 12);
     const thumbnail = AssetReference(
       kind: 'drive',
@@ -241,7 +241,7 @@ void main() {
             localId: 'favorite-film',
             status: 'Ready',
             prompt: 'Favorite film',
-            mode: VideoMode.t2v,
+            mode: VideoMode.v2v,
             config: const GenerationConfig(
               aspectRatio: '16:9',
               duration: 8,
@@ -249,6 +249,20 @@ void main() {
               generateAudio: true,
               safetyTolerance: 2,
               draft: false,
+              source: AssetReference(
+                kind: 'drive',
+                value: 'source-video',
+                label: 'source.mp4',
+                contentType: 'video/mp4',
+              ),
+              sourceThumbnailAsset: thumbnail,
+              references: <MediaReferenceLabel>[
+                MediaReferenceLabel(
+                  label: 'motion.mp4',
+                  kind: MediaReferenceKind.video,
+                  thumbnailAsset: thumbnail,
+                ),
+              ],
             ),
             createdAt: now,
             updatedAt: now,
@@ -264,6 +278,7 @@ void main() {
             name: 'Favorite reference',
             kind: MediaReferenceKind.image,
             asset: thumbnail,
+            thumbnailAsset: timeline,
             createdAt: now,
             updatedAt: now,
             favorite: true,
@@ -281,7 +296,26 @@ void main() {
       decoded.generations.single.timelineThumbnailAsset?.value,
       'timeline-file',
     );
+    expect(
+      decoded.generations.single.config.sourceThumbnailAsset?.value,
+      'thumbnail-file',
+    );
+    expect(
+      decoded
+          .generations
+          .single
+          .config
+          .references
+          ?.single
+          .thumbnailAsset
+          ?.value,
+      'thumbnail-file',
+    );
     expect(decoded.savedReferences.single.favorite, isTrue);
+    expect(
+      decoded.savedReferences.single.thumbnailAsset?.value,
+      'timeline-file',
+    );
   });
 
   test(
@@ -323,6 +357,77 @@ void main() {
       expect(film.favorite, isTrue);
       expect(film.thumbnailAsset?.contentType, 'image/jpeg');
       expect(film.timelineThumbnailAsset?.contentType, 'image/png');
+      expect(store.assets, hasLength(2));
+    },
+  );
+
+  test(
+    'video reference and generation-input previews persist by owner',
+    () async {
+      final now = DateTime.utc(2026, 8, 19, 12);
+      const video = AssetReference(
+        kind: 'local',
+        value: 'retained-video',
+        label: 'motion.mp4',
+        contentType: 'video/mp4',
+      );
+      final store = _MemoryStore(
+        StoredData(
+          generations: <Generation>[
+            Generation(
+              localId: 'film',
+              status: 'Ready',
+              prompt: 'Film',
+              mode: VideoMode.i2v,
+              config: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 8,
+                resolution: 'hd',
+                generateAudio: true,
+                safetyTolerance: 2,
+                draft: false,
+                references: <MediaReferenceLabel>[
+                  MediaReferenceLabel(
+                    label: 'motion.mp4',
+                    kind: MediaReferenceKind.video,
+                    source: video,
+                  ),
+                ],
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ],
+          savedReferences: <SavedReference>[
+            SavedReference(
+              id: 'motion-reference',
+              name: 'Motion',
+              kind: MediaReferenceKind.video,
+              asset: video,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ],
+        ),
+      );
+      final gateway = DirectGateway(store: store);
+
+      await gateway.saveReferencePreview(
+        'motion-reference',
+        Uint8List.fromList(<int>[1, 2, 3]),
+      );
+      await gateway.saveGenerationInputPreview(
+        'film',
+        video.value,
+        Uint8List.fromList(<int>[4, 5, 6]),
+      );
+
+      final decoded = StoredData.decode(store.data.encode());
+      expect(decoded.savedReferences.single.thumbnailAsset, isNotNull);
+      expect(
+        decoded.generations.single.config.references!.single.thumbnailAsset,
+        isNotNull,
+      );
       expect(store.assets, hasLength(2));
     },
   );

@@ -18,15 +18,34 @@ class PickedAsset {
     required this.name,
     required this.bytes,
     required this.mimeType,
+    this.path,
     this.retained,
+    this.thumbnailAsset,
+    this.thumbnailBytes,
   });
 
   final String name;
   final Uint8List bytes;
   final String mimeType;
+  final String? path;
   final AssetReference? retained;
+  final AssetReference? thumbnailAsset;
+  final Uint8List? thumbnailBytes;
 
   String get dataUrl => 'data:$mimeType;base64,${base64Encode(bytes)}';
+
+  PickedAsset copyWithThumbnail({
+    AssetReference? thumbnailAsset,
+    Uint8List? thumbnailBytes,
+  }) => PickedAsset(
+    name: name,
+    bytes: bytes,
+    mimeType: mimeType,
+    path: path,
+    retained: retained,
+    thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
+    thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
+  );
 }
 
 class KeyframeDraft {
@@ -70,6 +89,8 @@ class MediaReferenceDraft {
     required this.source,
     this.asset,
     this.retained,
+    this.thumbnailAsset,
+    this.thumbnailBytes,
     this.savedReferenceId,
   });
 
@@ -79,6 +100,8 @@ class MediaReferenceDraft {
   final String source;
   final PickedAsset? asset;
   final AssetReference? retained;
+  final AssetReference? thumbnailAsset;
+  final Uint8List? thumbnailBytes;
   final String? savedReferenceId;
 
   String get requestSource => asset?.dataUrl ?? source.trim();
@@ -86,6 +109,10 @@ class MediaReferenceDraft {
   MediaReferenceDraft copyWith({
     String? label,
     String? source,
+    AssetReference? thumbnailAsset,
+    bool clearThumbnailAsset = false,
+    Uint8List? thumbnailBytes,
+    bool clearThumbnailBytes = false,
     String? savedReferenceId,
   }) => MediaReferenceDraft(
     id: id,
@@ -94,6 +121,12 @@ class MediaReferenceDraft {
     source: source ?? this.source,
     asset: asset,
     retained: source == null ? retained : null,
+    thumbnailAsset: clearThumbnailAsset
+        ? null
+        : thumbnailAsset ?? this.thumbnailAsset,
+    thumbnailBytes: clearThumbnailBytes
+        ? null
+        : thumbnailBytes ?? this.thumbnailBytes,
     savedReferenceId: savedReferenceId ?? this.savedReferenceId,
   );
 }
@@ -105,6 +138,7 @@ class ReferenceCandidate {
     required this.kind,
     required this.asset,
     required this.createdAt,
+    this.thumbnailAsset,
     this.folderId,
     this.tags = const <String>[],
     this.generated = false,
@@ -115,6 +149,7 @@ class ReferenceCandidate {
   final String name;
   final MediaReferenceKind kind;
   final AssetReference asset;
+  final AssetReference? thumbnailAsset;
   final DateTime createdAt;
   final String? folderId;
   final List<String> tags;
@@ -138,6 +173,7 @@ class GenerationFormState {
   MediaReferenceTask referenceTask = MediaReferenceTask.reference;
   PickedAsset? videoAsset;
   String videoUrl = '';
+  Uint8List? videoThumbnailBytes;
   PickedAsset? draftAsset;
   String draftUrl = '';
 
@@ -232,6 +268,8 @@ class AppController extends ChangeNotifier {
   bool _polling = false;
   final Set<String> _retentionAttempts = <String>{};
   final Set<String> _statusChecks = <String>{};
+  final Set<String> _referencePreviewWrites = <String>{};
+  final Set<String> _generationInputPreviewWrites = <String>{};
   int _idCounter = 0;
 
   static const String libraryFolderAll = 'all';
@@ -632,6 +670,18 @@ class AppController extends ChangeNotifier {
         : null;
   }
 
+  AssetReference? _previewForStorage(
+    AssetReference? preview,
+    LibraryStorage storage,
+  ) {
+    if (preview == null) return null;
+    return switch (storage) {
+      LibraryStorage.local when preview.kind == 'local' => preview,
+      LibraryStorage.drive when preview.kind == 'drive' => preview,
+      _ => null,
+    };
+  }
+
   GenerationConfig get currentConfig {
     final orderedFrames = _orderedFrames();
     return GenerationConfig(
@@ -668,6 +718,10 @@ class AppController extends ChangeNotifier {
                         item.asset?.retained ??
                         item.retained ??
                         _reference(null, item.source, item.label),
+                    thumbnailAsset: _previewForStorage(
+                      item.thumbnailAsset ?? item.asset?.thumbnailAsset,
+                      effectiveStorage,
+                    ),
                   ),
                 )
                 .toList()
@@ -695,6 +749,12 @@ class AppController extends ChangeNotifier {
         ),
         _ => null,
       },
+      sourceThumbnailAsset: form.mode == VideoMode.v2v
+          ? _previewForStorage(
+              form.videoAsset?.thumbnailAsset,
+              effectiveStorage,
+            )
+          : null,
     );
   }
 
@@ -1174,6 +1234,10 @@ class AppController extends ChangeNotifier {
       asset:
           retained ??
           AssetReference(kind: 'remote', value: '', label: draft.label),
+      thumbnailAsset: _previewForStorage(
+        draft.thumbnailAsset ?? draft.asset?.thumbnailAsset,
+        destination,
+      ),
       createdAt: now,
       updatedAt: now,
       folderId: folderId,
@@ -1187,8 +1251,18 @@ class AppController extends ChangeNotifier {
           source: draft.requestSource.isEmpty ? null : draft.requestSource,
         ),
       );
-      final saved = savedReferences.where((item) => item.id == id).firstOrNull;
+      var saved = savedReferences.where((item) => item.id == id).firstOrNull;
       if (saved == null) throw StateError('The saved reference was not found.');
+      final thumbnailBytes =
+          draft.thumbnailBytes ?? draft.asset?.thumbnailBytes;
+      if (saved.thumbnailAsset == null && thumbnailBytes != null) {
+        await cacheReferencePreview(saved, thumbnailBytes);
+        saved = savedReferences.where((item) => item.id == id).firstOrNull;
+        if (saved == null) {
+          throw StateError('The saved reference was not found.');
+        }
+      }
+      final savedReference = saved;
       form.references = form.references.map((item) {
         if (item.id != draft.id) return item;
         final asset = item.asset;
@@ -1196,22 +1270,28 @@ class AppController extends ChangeNotifier {
           id: item.id,
           label: item.label,
           kind: item.kind,
-          source: saved.asset.isLocal ? '' : saved.asset.value,
+          source: savedReference.asset.isLocal
+              ? ''
+              : savedReference.asset.value,
           asset: asset == null
               ? null
               : PickedAsset(
                   name: asset.name,
                   bytes: asset.bytes,
                   mimeType: asset.mimeType,
-                  retained: saved.asset,
+                  retained: savedReference.asset,
+                  thumbnailAsset: savedReference.thumbnailAsset,
+                  thumbnailBytes: asset.thumbnailBytes,
                 ),
-          retained: saved.asset,
-          savedReferenceId: saved.id,
+          retained: savedReference.asset,
+          thumbnailAsset: savedReference.thumbnailAsset,
+          thumbnailBytes: item.thumbnailBytes,
+          savedReferenceId: savedReference.id,
         );
       }).toList();
       notifyListeners();
-      showNotice('“${saved.name}” saved to References.');
-      return saved;
+      showNotice('“${savedReference.name}” saved to References.');
+      return savedReference;
     } on Object catch (error) {
       showNotice(_message(error));
       return null;
@@ -1288,6 +1368,7 @@ class AppController extends ChangeNotifier {
             contentType: asset.mimeType,
             bytes: asset.bytes.length,
           ),
+          thumbnailAsset: asset.thumbnailAsset,
           createdAt: now,
           updatedAt: now,
           folderId: folderId,
@@ -1352,6 +1433,7 @@ class AppController extends ChangeNotifier {
                 : item.prompt.trim(),
             kind: kind,
             asset: asset,
+            thumbnailAsset: item.isImage ? null : item.thumbnailAsset,
             createdAt: item.createdAt,
             folderId: item.folderId,
             tags: item.tags,
@@ -1373,7 +1455,15 @@ class AppController extends ChangeNotifier {
     try {
       for (final candidate in selected) {
         PickedAsset? picked;
+        Uint8List? thumbnailBytes;
         var source = candidate.asset.isLocal ? '' : candidate.asset.value;
+        if (candidate.thumbnailAsset != null) {
+          try {
+            thumbnailBytes = await gateway.readAsset(candidate.thumbnailAsset!);
+          } on Object {
+            // The original media can still be selected and make a new frame.
+          }
+        }
         if (candidate.asset.isLocal) {
           final bytes = await gateway.readAsset(candidate.asset);
           picked = PickedAsset(
@@ -1383,6 +1473,8 @@ class AppController extends ChangeNotifier {
                 candidate.asset.contentType ??
                 _fallbackMimeType(candidate.kind),
             retained: candidate.asset,
+            thumbnailAsset: candidate.thumbnailAsset,
+            thumbnailBytes: thumbnailBytes,
           );
         }
         form.references = <MediaReferenceDraft>[
@@ -1394,6 +1486,11 @@ class AppController extends ChangeNotifier {
             source: source,
             asset: picked,
             retained: candidate.asset,
+            thumbnailAsset: _previewForStorage(
+              candidate.thumbnailAsset,
+              effectiveStorage,
+            ),
+            thumbnailBytes: thumbnailBytes,
             savedReferenceId: candidate.generated ? null : candidate.id,
           ),
         ];
@@ -1574,6 +1671,7 @@ class AppController extends ChangeNotifier {
       mimeType:
           lookupMimeType(file.name, headerBytes: bytes) ??
           'application/octet-stream',
+      path: file.path,
     );
   }
 
@@ -1596,6 +1694,7 @@ class AppController extends ChangeNotifier {
           mimeType:
               lookupMimeType(file.name, headerBytes: bytes) ??
               'application/octet-stream',
+          path: file.path,
         ),
       );
     }
@@ -1749,9 +1848,35 @@ class AppController extends ChangeNotifier {
       return item.copyWith(
         source: source,
         label: source.trim().isNotEmpty ? source : null,
+        clearThumbnailAsset: true,
+        clearThumbnailBytes: true,
       );
     }).toList();
     notifyListeners();
+  }
+
+  void rememberReferenceThumbnail(String id, Uint8List bytes) {
+    form.references = form.references.map((item) {
+      if (item.id != id || item.thumbnailBytes != null) return item;
+      return item.copyWith(thumbnailBytes: bytes);
+    }).toList();
+  }
+
+  void rememberVideoSourceThumbnail(Uint8List bytes) {
+    final asset = form.videoAsset;
+    if (asset != null) {
+      if (asset.thumbnailBytes != null) return;
+      form.videoAsset = asset.copyWithThumbnail(thumbnailBytes: bytes);
+      return;
+    }
+    form.videoThumbnailBytes ??= bytes;
+  }
+
+  void updateVideoSourceUrl(String source) {
+    updateForm((value) {
+      if (value.videoUrl != source) value.videoThumbnailBytes = null;
+      value.videoUrl = source;
+    });
   }
 
   void removeReference(String id) {
@@ -1863,7 +1988,12 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo() async {
     try {
       final asset = await _pick(type: FileType.video);
-      if (asset != null) updateForm((value) => value.videoAsset = asset);
+      if (asset != null) {
+        updateForm((value) {
+          value.videoAsset = asset;
+          value.videoThumbnailBytes = null;
+        });
+      }
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -2081,6 +2211,11 @@ class AppController extends ChangeNotifier {
     await refreshProviderEstimate();
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;
+    final referenceThumbnailBytes = form.references
+        .map((item) => item.thumbnailBytes ?? item.asset?.thumbnailBytes)
+        .toList(growable: false);
+    final sourceThumbnailBytes =
+        form.videoAsset?.thumbnailBytes ?? form.videoThumbnailBytes;
     var pending = Generation(
       localId: _uid(),
       provider: selectedProviderId,
@@ -2130,6 +2265,27 @@ class AppController extends ChangeNotifier {
         GenerationSubmission(record: pending, input: _buildInput()),
       );
       _replaceInMemory(pending);
+      final retainedReferences =
+          pending.config.references ?? const <MediaReferenceLabel>[];
+      for (
+        var index = 0;
+        index < retainedReferences.length &&
+            index < referenceThumbnailBytes.length;
+        index += 1
+      ) {
+        final source = retainedReferences[index].source;
+        final thumbnail = referenceThumbnailBytes[index];
+        if (source != null && thumbnail != null) {
+          await cacheGenerationInputPreview(pending, source, thumbnail);
+        }
+      }
+      if (pending.config.source != null && sourceThumbnailBytes != null) {
+        await cacheGenerationInputPreview(
+          pending,
+          pending.config.source!,
+          sourceThumbnailBytes,
+        );
+      }
       if (pending.creditsAfter != null) credits = pending.creditsAfter;
     } on Object catch (error) {
       await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
@@ -2654,13 +2810,77 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<PickedAsset> _retainedAsset(AssetReference reference) async =>
-      PickedAsset(
-        name: reference.label,
-        bytes: await gateway.readAsset(reference),
-        mimeType: reference.contentType ?? 'application/octet-stream',
-        retained: reference,
+  Future<void> cacheReferencePreview(
+    SavedReference reference,
+    Uint8List thumbnailBytes,
+  ) async {
+    if (gateway is! MediaPreviewGateway ||
+        thumbnailBytes.isEmpty ||
+        !_referencePreviewWrites.add(reference.id)) {
+      return;
+    }
+    try {
+      _apply(
+        await (gateway as MediaPreviewGateway).saveReferencePreview(
+          reference.id,
+          thumbnailBytes,
+        ),
       );
+    } on Object {
+      // The original reference remains usable if a thumbnail write fails.
+    } finally {
+      _referencePreviewWrites.remove(reference.id);
+    }
+  }
+
+  Future<void> cacheGenerationInputPreview(
+    Generation item,
+    AssetReference source,
+    Uint8List thumbnailBytes,
+  ) async {
+    final key = '${item.localId}:${source.value}';
+    if (gateway is! MediaPreviewGateway ||
+        source.value.isEmpty ||
+        thumbnailBytes.isEmpty ||
+        !_generationInputPreviewWrites.add(key)) {
+      return;
+    }
+    try {
+      _apply(
+        await (gateway as MediaPreviewGateway).saveGenerationInputPreview(
+          item.localId,
+          source.value,
+          thumbnailBytes,
+        ),
+      );
+    } on Object {
+      // The retained input remains usable if preview backfill fails.
+    } finally {
+      _generationInputPreviewWrites.remove(key);
+    }
+  }
+
+  Future<PickedAsset> _retainedAsset(
+    AssetReference reference, {
+    AssetReference? thumbnailAsset,
+  }) async {
+    Uint8List? thumbnailBytes;
+    if (thumbnailAsset != null) {
+      try {
+        thumbnailBytes = await gateway.readAsset(thumbnailAsset);
+      } on Object {
+        // The original media remains reusable without its cached preview.
+      }
+    }
+    return PickedAsset(
+      name: reference.label,
+      bytes: await gateway.readAsset(reference),
+      mimeType: reference.contentType ?? 'application/octet-stream',
+      retained: reference,
+      thumbnailAsset: thumbnailAsset,
+      thumbnailBytes: thumbnailBytes,
+    );
+  }
 
   Future<void> _restoreGenerationSettings(
     Generation item, {
@@ -2706,9 +2926,20 @@ class AppController extends ChangeNotifier {
         in item.config.references ?? const <MediaReferenceLabel>[]) {
       final reference = media.source;
       PickedAsset? asset;
+      Uint8List? thumbnailBytes;
+      if (media.thumbnailAsset != null) {
+        try {
+          thumbnailBytes = await gateway.readAsset(media.thumbnailAsset!);
+        } on Object {
+          // The original reference can regenerate its preview.
+        }
+      }
       if (reference?.isLocal == true) {
         try {
-          asset = await _retainedAsset(reference!);
+          asset = await _retainedAsset(
+            reference!,
+            thumbnailAsset: media.thumbnailAsset,
+          );
         } on Object {
           // Keep the saved reference label if its retained file moved.
         }
@@ -2721,6 +2952,8 @@ class AppController extends ChangeNotifier {
           source: reference?.kind == 'remote' ? reference!.value : '',
           asset: asset,
           retained: reference,
+          thumbnailAsset: media.thumbnailAsset,
+          thumbnailBytes: asset?.thumbnailBytes ?? thumbnailBytes,
         ),
       );
     }
@@ -2728,7 +2961,10 @@ class AppController extends ChangeNotifier {
     if ((item.mode == VideoMode.v2v || item.mode == VideoMode.draftEnhance) &&
         item.config.source?.isLocal == true) {
       try {
-        retainedSource = await _retainedAsset(item.config.source!);
+        retainedSource = await _retainedAsset(
+          item.config.source!,
+          thumbnailAsset: item.config.sourceThumbnailAsset,
+        );
       } on Object {
         // Preserve the rest of the last-used settings when an asset is gone.
         showNotice(
@@ -2736,6 +2972,17 @@ class AppController extends ChangeNotifier {
               ? 'The retained starting video is no longer available. Attach a video to continue one.'
               : 'The retained draft cache is no longer available. Attach a draft to enhance it.',
         );
+      }
+    }
+    Uint8List? sourceThumbnailBytes = retainedSource?.thumbnailBytes;
+    if (sourceThumbnailBytes == null &&
+        item.config.sourceThumbnailAsset != null) {
+      try {
+        sourceThumbnailBytes = await gateway.readAsset(
+          item.config.sourceThumbnailAsset!,
+        );
+      } on Object {
+        // Reused source media can regenerate its preview in the Create panel.
       }
     }
     final restoredTask =
@@ -2765,6 +3012,7 @@ class AppController extends ChangeNotifier {
           item.mode == VideoMode.v2v && item.config.source?.kind == 'remote'
           ? item.config.source!.value
           : ''
+      ..videoThumbnailBytes = sourceThumbnailBytes
       ..draftAsset = item.mode == VideoMode.draftEnhance ? retainedSource : null
       ..draftUrl =
           item.mode == VideoMode.draftEnhance &&

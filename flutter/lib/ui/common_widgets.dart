@@ -12,6 +12,7 @@ import '../core/shell_bridge.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
+import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
@@ -641,12 +642,20 @@ class ReferenceInputsStrip extends StatelessWidget {
         ...frames.map(
           (frame) => _ReferenceThumb(controller: controller, frame: frame),
         ),
-        ...references.map((media) => _MediaReferenceChip(media: media)),
+        ...references.map(
+          (media) => _MediaReferenceChip(
+            controller: controller,
+            item: item,
+            media: media,
+          ),
+        ),
         if (source != null)
           _SourceReferenceChip(
             controller: controller,
+            item: item,
             source: source,
             mode: item.mode,
+            thumbnailAsset: item.config.sourceThumbnailAsset,
           ),
       ],
     );
@@ -654,8 +663,14 @@ class ReferenceInputsStrip extends StatelessWidget {
 }
 
 class _MediaReferenceChip extends StatelessWidget {
-  const _MediaReferenceChip({required this.media});
+  const _MediaReferenceChip({
+    required this.controller,
+    required this.item,
+    required this.media,
+  });
 
+  final AppController controller;
+  final Generation item;
   final MediaReferenceLabel media;
 
   @override
@@ -663,7 +678,7 @@ class _MediaReferenceChip extends StatelessWidget {
     message: '${media.kind.label} reference · ${media.label}',
     child: Container(
       height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: context.colors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(8),
@@ -672,16 +687,27 @@ class _MediaReferenceChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(
-            switch (media.kind) {
-              MediaReferenceKind.image => Icons.image_rounded,
-              MediaReferenceKind.video => Icons.video_library_rounded,
-              MediaReferenceKind.audio => Icons.graphic_eq_rounded,
-            },
-            size: 15,
-            color: context.colors.onSurfaceVariant,
+          SizedBox.square(
+            dimension: 42,
+            child: MediaThumbnail(
+              gateway: controller.gateway,
+              kind: media.kind,
+              reference: media.source,
+              thumbnailReference: media.thumbnailAsset,
+              semanticsLabel: '${media.label} reference thumbnail',
+              onThumbnail:
+                  media.kind == MediaReferenceKind.video && media.source != null
+                  ? (bytes) => unawaited(
+                      controller.cacheGenerationInputPreview(
+                        item,
+                        media.source!,
+                        bytes,
+                      ),
+                    )
+                  : null,
+            ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 110),
             child: Text(
@@ -694,6 +720,7 @@ class _MediaReferenceChip extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(width: 10),
         ],
       ),
     ),
@@ -787,13 +814,17 @@ class _ReferenceThumbState extends State<_ReferenceThumb> {
 class _SourceReferenceChip extends StatelessWidget {
   const _SourceReferenceChip({
     required this.controller,
+    required this.item,
     required this.source,
     required this.mode,
+    required this.thumbnailAsset,
   });
 
   final AppController controller;
+  final Generation item;
   final AssetReference source;
   final VideoMode mode;
+  final AssetReference? thumbnailAsset;
 
   @override
   Widget build(BuildContext context) => Tooltip(
@@ -805,7 +836,7 @@ class _SourceReferenceChip extends StatelessWidget {
       ),
       child: Container(
         height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: context.colors.surfaceContainerLow,
           borderRadius: BorderRadius.circular(8),
@@ -814,14 +845,30 @@ class _SourceReferenceChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              mode == VideoMode.draftEnhance
-                  ? Icons.auto_fix_high_rounded
-                  : Icons.movie_filter_rounded,
-              size: 15,
-              color: context.colors.onSurfaceVariant,
+            SizedBox.square(
+              dimension: 42,
+              child: mode == VideoMode.v2v
+                  ? MediaThumbnail(
+                      gateway: controller.gateway,
+                      kind: MediaReferenceKind.video,
+                      reference: source,
+                      thumbnailReference: thumbnailAsset,
+                      semanticsLabel: 'Starting video thumbnail',
+                      onThumbnail: (bytes) => unawaited(
+                        controller.cacheGenerationInputPreview(
+                          item,
+                          source,
+                          bytes,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      Icons.auto_fix_high_rounded,
+                      size: 17,
+                      color: context.colors.onSurfaceVariant,
+                    ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 8),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 110),
               child: Text(
@@ -834,6 +881,7 @@ class _SourceReferenceChip extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 10),
           ],
         ),
       ),
@@ -1438,26 +1486,63 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   String get _jobKey =>
       '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
 
-  Future<Uint8List> _read(AssetReference reference) =>
-      _previewAssetBytes.putIfAbsent(
-        '${reference.kind}:${reference.value}',
-        () => widget.controller.gateway.readAsset(reference),
-      );
+  Future<Uint8List> _read(AssetReference reference) {
+    final key = '${reference.kind}:${reference.value}';
+    final existing = _previewAssetBytes[key];
+    if (existing != null) return existing;
+    late final Future<Uint8List> job;
+    job = widget.controller.gateway.readAsset(reference).catchError((
+      Object error,
+    ) {
+      if (identical(_previewAssetBytes[key], job)) {
+        _previewAssetBytes.remove(key);
+      }
+      throw error;
+    });
+    _previewAssetBytes[key] = job;
+    return job;
+  }
+
+  Future<_GeneratedVideoPreview?> _previewJob(String key) {
+    final existing = _previewJobs[key];
+    if (existing != null) return existing;
+    late final Future<_GeneratedVideoPreview?> job;
+    job = _generateAndCache().then((preview) {
+      if (preview == null && identical(_previewJobs[key], job)) {
+        _previewJobs.remove(key);
+      }
+      return preview;
+    });
+    _previewJobs[key] = job;
+    return job;
+  }
 
   void _load() {
     final thumbnail = widget.item.thumbnailAsset;
     if (thumbnail != null) {
-      _preview = Future<_GeneratedVideoPreview>(() async {
-        return _GeneratedVideoPreview(
-          thumbnail: await _read(thumbnail),
-          timeline: widget.item.timelineThumbnailAsset == null
-              ? null
-              : await _read(widget.item.timelineThumbnailAsset!),
-        );
+      _preview = Future<_GeneratedVideoPreview?>(() async {
+        try {
+          final thumbnailBytes = await _read(thumbnail);
+          Uint8List? timelineBytes;
+          final timeline = widget.item.timelineThumbnailAsset;
+          if (timeline != null) {
+            try {
+              timelineBytes = await _read(timeline);
+            } on Object {
+              // A missing timeline strip must not hide the main thumbnail.
+            }
+          }
+          return _GeneratedVideoPreview(
+            thumbnail: thumbnailBytes,
+            timeline: timelineBytes,
+          );
+        } on Object {
+          return await _previewJob('$_jobKey:regenerate');
+        }
       });
       return;
     }
-    _preview = _previewJobs.putIfAbsent(_jobKey, _generateAndCache);
+    _preview = _previewJob(_jobKey);
   }
 
   Future<_GeneratedVideoPreview?> _generateAndCache() async {
@@ -1685,30 +1770,34 @@ class GenerationInputPreview extends StatefulWidget {
 }
 
 class _GenerationInputPreviewState extends State<GenerationInputPreview> {
-  late AssetReference? _reference;
-  Future<Uint8List>? _bytes;
+  late (MediaReferenceKind, AssetReference, AssetReference?)? _media;
 
-  AssetReference? _findReference() {
+  (MediaReferenceKind, AssetReference, AssetReference?)? _findMedia() {
     for (final media
         in widget.item.config.references ?? const <MediaReferenceLabel>[]) {
-      if (media.kind == MediaReferenceKind.image && media.source != null) {
-        return media.source;
+      if (media.kind != MediaReferenceKind.audio && media.source != null) {
+        return (media.kind, media.source!, media.thumbnailAsset);
       }
     }
     for (final frame
         in widget.item.config.keyframes ?? const <KeyframeLabel>[]) {
-      if (frame.source != null) return frame.source;
+      if (frame.source != null) {
+        return (MediaReferenceKind.image, frame.source!, null);
+      }
     }
-    return widget.item.config.source?.contentType?.startsWith('image/') == true
-        ? widget.item.config.source
-        : null;
+    final source = widget.item.config.source;
+    if (source == null) return null;
+    return (
+      source.contentType?.startsWith('image/') == true
+          ? MediaReferenceKind.image
+          : MediaReferenceKind.video,
+      source,
+      widget.item.config.sourceThumbnailAsset,
+    );
   }
 
   void _load() {
-    _reference = _findReference();
-    _bytes = _reference == null
-        ? null
-        : widget.controller.gateway.readAsset(_reference!);
+    _media = _findMedia();
   }
 
   @override
@@ -1720,34 +1809,37 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
   @override
   void didUpdateWidget(covariant GenerationInputPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_findReference()?.value != _reference?.value) _load();
+    final next = _findMedia();
+    if (next?.$2.value != _media?.$2.value ||
+        next?.$3?.value != _media?.$3?.value) {
+      _load();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_reference == null || _bytes == null) {
+    final media = _media;
+    if (media == null) {
       return const _MediaPlaceholder(
         icon: Icons.movie_creation_outlined,
         label: 'Saved generation',
       );
     }
-    return FutureBuilder<Uint8List>(
-      future: _bytes,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const _MediaPlaceholder(
-            icon: Icons.broken_image_outlined,
-            label: 'Reference unavailable',
-          );
-        }
-        if (!snapshot.hasData) {
-          return const _MediaPlaceholder(
-            icon: Icons.image_outlined,
-            label: 'Loading reference',
-          );
-        }
-        return Image.memory(snapshot.data!, fit: BoxFit.cover);
-      },
+    return MediaThumbnail(
+      gateway: widget.controller.gateway,
+      kind: media.$1,
+      reference: media.$2,
+      thumbnailReference: media.$3,
+      semanticsLabel: 'Generation input thumbnail',
+      onThumbnail: media.$1 == MediaReferenceKind.video
+          ? (bytes) => unawaited(
+              widget.controller.cacheGenerationInputPreview(
+                widget.item,
+                media.$2,
+                bytes,
+              ),
+            )
+          : null,
     );
   }
 }

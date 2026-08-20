@@ -323,6 +323,7 @@ class HybridDataStore implements DurableDataStore {
           name: reference.name,
           kind: reference.kind,
           asset: (await _copyAsset(reference.asset))!,
+          thumbnailAsset: await _copyAsset(reference.thumbnailAsset),
           createdAt: reference.createdAt,
           updatedAt: DateTime.now().toUtc(),
           folderId: reference.folderId == null
@@ -379,6 +380,7 @@ class HybridDataStore implements DurableDataStore {
           label: item.label,
           kind: item.kind,
           source: await _copyAsset(item.source),
+          thumbnailAsset: await _copyAsset(item.thumbnailAsset),
         ),
       );
     }
@@ -386,6 +388,9 @@ class HybridDataStore implements DurableDataStore {
       keyframes: keyframes,
       references: references,
       source: await _copyAsset(source.config.source),
+      sourceThumbnailAsset: await _copyAsset(
+        source.config.sourceThumbnailAsset,
+      ),
     );
     return Generation.fromJson(<String, Object?>{
       ...source.toJson(),

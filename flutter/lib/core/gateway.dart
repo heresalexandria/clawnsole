@@ -85,6 +85,23 @@ abstract interface class GenerationPreviewGateway {
   });
 }
 
+/// Durable thumbnails for source videos and creative video references.
+///
+/// These previews are separate assets so compact history never embeds media
+/// bytes and every surface can reuse the same image after an app restart.
+abstract interface class MediaPreviewGateway {
+  Future<LocalSnapshot> saveReferencePreview(
+    String referenceId,
+    Uint8List thumbnailBytes,
+  );
+
+  Future<LocalSnapshot> saveGenerationInputPreview(
+    String localId,
+    String sourceAssetValue,
+    Uint8List thumbnailBytes,
+  );
+}
+
 const _standaloneWeb = bool.fromEnvironment('CLAWNSOLE_STANDALONE_WEB');
 
 AppGateway createGateway() {
