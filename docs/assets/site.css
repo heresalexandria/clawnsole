@@ -256,16 +256,16 @@ nav a:focus-visible,
 }
 
 .button-light {
-  border-color: var(--paper);
-  color: var(--plum-dark);
-  background: var(--paper);
+  border-color: #f8f3e8;
+  color: #2b1a29;
+  background: #f8f3e8;
   box-shadow: none;
 }
 
 .button-light:hover,
 .button-light:focus-visible {
-  color: var(--plum-dark);
-  background: white;
+  color: #2b1a29;
+  background: #ffffff;
 }
 
 .eyebrow {
