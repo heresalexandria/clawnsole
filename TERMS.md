@@ -6,10 +6,10 @@ These terms govern your use of the official Clawnsole website, applications,
 and release builds (collectively, "Clawnsole"). By using Clawnsole, you agree to
 these terms. If you do not agree, do not use Clawnsole.
 
-Clawnsole is an open-source, local-first client that lets you connect your own
-accounts and API keys to third-party AI generation services. The developer does
-not sell generation services, operate a Clawnsole account service, or receive
-the fees charged by providers.
+Clawnsole is an open-source client that lets you connect your own accounts and
+API keys to third-party AI generation services across web, mobile, and desktop.
+The developer does not sell generation services, operate a Clawnsole account
+service, or receive the fees charged by providers.
 
 ## Open-source license
 
@@ -22,8 +22,8 @@ licensed software, the MIT License controls.
 
 Third-party libraries, services, model names, trademarks, and other materials
 may be subject to their own licenses and terms. Clawnsole is independent and is
-not affiliated with or endorsed by Black Forest Labs, Lightricks/LTX, Atlas
-Cloud, Google, GitHub, Apple, or Microsoft.
+not affiliated with or endorsed by Black Forest Labs, Lightricks/LTX, ArtCraft,
+Atlas Cloud, Google, GitHub, Apple, or Microsoft.
 
 ## Your provider accounts and charges
 
@@ -75,6 +75,11 @@ not controlled by the Clawnsole developer and may change, suspend access,
 reject content, retain data, experience outages, or discontinue an API without
 notice.
 
+The public website also uses Google Analytics for audience and product
+measurement. The [privacy policy](PRIVACY.md) explains the website data handled
+by Google and how this differs from the native apps, which contain no analytics
+SDK.
+
 Your use of a third-party service is a relationship between you and that
 service. Its terms and privacy policy apply. Atlas Cloud may send request data
 to an underlying model provider, whose terms and policies may also apply.
@@ -83,12 +88,11 @@ availability, billing, or data handling.
 
 ## Storage, privacy, and security
 
-Clawnsole is local-first. Depending on the platform and features you choose,
-project data and credentials may be kept in an application sandbox, a local
-companion data store, browser localStorage, or a Google Drive folder you
-authorize. You are responsible for securing your devices, browser profile,
-backups, provider accounts, and Drive account, and for keeping copies of work
-you cannot afford to lose.
+Depending on the platform and features you choose, project data and credentials
+may be kept in an application sandbox, a local companion data store, browser
+localStorage, or a Google Drive folder you authorize. You are responsible for
+securing your devices, browser profile, backups, provider accounts, and Drive
+account, and for keeping copies of work you cannot afford to lose.
 
 Do not put API keys, private prompts, personal media, or other secrets in a
 public GitHub issue. The [privacy policy](PRIVACY.md) explains what Clawnsole
@@ -166,4 +170,4 @@ For questions, open an issue at
 <https://github.com/heresalexandria/clawnsole/issues>.
 
 The public version of these terms is available at
-<https://heresalexandria.github.io/clawnsole/tos/>.
+<https://clawnsole.app/tos/>.
