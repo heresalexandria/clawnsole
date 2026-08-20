@@ -2077,33 +2077,59 @@ void main() {
     expect(controller.form.prompt, 'Use hero.png, then @Image 1.');
   });
 
-  testWidgets('saved reference picker renders search and collection tabs', (
+  testWidgets('saved video picker renders selectable thumbnail cards', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final now = DateTime.utc(2026, 8, 19);
-    final controller = AppController();
-    controller.snapshot = LocalSnapshot(
+    final thumbnail = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    SavedReference reference(String id, String name) => SavedReference(
+      id: id,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: AssetReference(
+        kind: 'remote',
+        value: 'https://cdn.test/$id.mp4',
+        label: '$id.mp4',
+        contentType: 'video/mp4',
+      ),
+      thumbnailAsset: AssetReference(
+        kind: 'local',
+        value: '$id-thumbnail',
+        label: '$id-thumbnail.jpg',
+        contentType: 'image/jpeg',
+      ),
+      createdAt: now,
+      updatedAt: now,
+      tags: const <String>['skate'],
+    );
+    final snapshot = LocalSnapshot(
       generations: const <Generation>[],
       savedReferences: <SavedReference>[
-        SavedReference(
-          id: 'saved-image',
-          name: 'Hero turnaround',
-          kind: MediaReferenceKind.image,
-          asset: const AssetReference(
-            kind: 'remote',
-            value: 'https://cdn.test/hero.png',
-            label: 'hero.png',
-            contentType: 'image/png',
-          ),
-          createdAt: now,
-          updatedAt: now,
-          tags: const <String>['hero'],
-        ),
+        reference('saved-video-1', 'Revised skatepark prompt'),
+        reference('saved-video-2', 'Sloth trip storyboard'),
+        reference('saved-video-3', 'LES half-pipe study'),
       ],
       preferences: const AppPreferences(),
       hasApiKey: false,
-      storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 3),
     );
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        snapshot,
+        assets: <String, Uint8List>{
+          'saved-video-1-thumbnail': thumbnail,
+          'saved-video-2-thumbnail': thumbnail,
+          'saved-video-3-thumbnail': thumbnail,
+        },
+      ),
+    );
+    controller.snapshot = snapshot;
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       MaterialApp(
@@ -2114,8 +2140,8 @@ void main() {
               showReferencePicker(
                 context,
                 controller,
-                kind: MediaReferenceKind.image,
-                maximum: 3,
+                kind: MediaReferenceKind.video,
+                maximum: 2,
               ),
             ),
             child: const Text('Open picker'),
@@ -2128,11 +2154,46 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Add saved images'), findsOneWidget);
+    expect(find.text('Add saved videos'), findsOneWidget);
     expect(find.text('References'), findsOneWidget);
     expect(find.text('Generated'), findsOneWidget);
-    expect(find.text('Hero turnaround'), findsOneWidget);
-    expect(find.text('0/3 selected'), findsOneWidget);
+    expect(find.byKey(const ValueKey('reference-picker-card-grid')), findsOne);
+    expect(find.byType(CheckboxListTile), findsNothing);
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsNWidgets(3),
+    );
+    expect(find.text('0/2 selected'), findsOneWidget);
+
+    final first = find.byKey(
+      const ValueKey('reference-picker-card-saved-video-1'),
+    );
+    final second = find.byKey(
+      const ValueKey('reference-picker-card-saved-video-2'),
+    );
+    final third = find.byKey(
+      const ValueKey('reference-picker-card-saved-video-3'),
+    );
+    expect(tester.getTopLeft(first).dy, tester.getTopLeft(second).dy);
+    expect(tester.getTopLeft(second).dy, tester.getTopLeft(third).dy);
+    expect(tester.getTopLeft(first).dx, lessThan(tester.getTopLeft(second).dx));
+    expect(tester.getTopLeft(second).dx, lessThan(tester.getTopLeft(third).dx));
+
+    await tester.tap(first);
+    await tester.pumpAndSettle();
+    expect(find.text('1/2 selected'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+
+    await tester.tap(second);
+    await tester.pumpAndSettle();
+    expect(find.text('2/2 selected'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsNWidgets(2));
+    expect(tester.widget<InkWell>(third).onTap, isNull);
+
+    await tester.tap(first);
+    await tester.pumpAndSettle();
+    expect(find.text('1/2 selected'), findsOneWidget);
+    expect(tester.widget<InkWell>(third).onTap, isNotNull);
   });
 
   test('an empty reference endpoint stays selected while writing a prompt', () {
@@ -3078,12 +3139,14 @@ class _MemoryGateway implements AppGateway {
     this.snapshot, {
     this.supportsPhotoLibrarySave = false,
     this.creditError,
+    this.assets = const <String, Uint8List>{},
   });
 
   LocalSnapshot snapshot;
   @override
   final bool supportsPhotoLibrarySave;
   final Object? creditError;
+  final Map<String, Uint8List> assets;
   int invalidationCount = 0;
   Uint8List? photoLibraryBytes;
   String? photoLibraryFileName;
@@ -3164,7 +3227,8 @@ class _MemoryGateway implements AppGateway {
       Uri.parse(reference.value);
 
   @override
-  Future<Uint8List> readAsset(AssetReference reference) async => Uint8List(0);
+  Future<Uint8List> readAsset(AssetReference reference) async =>
+      assets[reference.value] ?? Uint8List(0);
 
   @override
   Uri mediaUri(String source) => Uri.parse(source);
