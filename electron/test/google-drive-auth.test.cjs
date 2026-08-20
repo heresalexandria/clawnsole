@@ -11,6 +11,28 @@ const {
   configuredOAuth,
   DRIVE_SCOPE,
 } = require("../lib/google-drive-auth.cjs");
+const {
+  oauthResultPage,
+} = require("../lib/google-drive-auth-page.cjs");
+
+test("OAuth result pages carry the Clawnsole site identity", () => {
+  const success = oauthResultPage(true);
+  const failure = oauthResultPage(false);
+
+  assert.match(success, /<title>Clawnsole connected<\/title>/);
+  assert.match(success, /You’re connected\./);
+  assert.match(success, /Authorization complete/);
+  assert.match(success, /data:image\/png;base64,/);
+  assert.match(success, /color-scheme: light dark/);
+  assert.match(success, /--paper: light-dark\(#f8f3e8, #171116\)/);
+  assert.match(success, /--plum: light-dark\(#5a2856, #d2a0ca\)/);
+  assert.match(success, /font-family: Georgia/);
+
+  assert.match(failure, /<title>Clawnsole connection not completed<\/title>/);
+  assert.match(failure, /Connection not completed\./);
+  assert.match(failure, /No Drive files were changed\./);
+  assert.doesNotMatch(failure, /Authorization complete/);
+});
 
 test("OAuth configuration prefers process values and exposes only drive.file", () => {
   const previous = process.env.CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID;

@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
+const { oauthResultPage } = require("./google-drive-auth-page.cjs");
 
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -98,12 +99,21 @@ class GoogleDriveAuth {
           const valid = !error && code && returnedState === state;
           const address = server.address();
           const redirectUri = `http://127.0.0.1:${address.port}/oauth/google/callback`;
-          response.writeHead(valid ? 200 : 400, { "content-type": "text/html; charset=utf-8" });
-          response.end(
-            valid
-              ? "<!doctype html><title>Clawnsole connected</title><p>Google Drive is connected. You can close this tab and return to Clawnsole.</p>"
-              : "<!doctype html><title>Clawnsole connection failed</title><p>Google Drive authorization was not completed. Return to Clawnsole and try again.</p>",
-          );
+          response.writeHead(valid ? 200 : 400, {
+            "cache-control": "no-store",
+            "content-security-policy": [
+              "default-src 'none'",
+              "img-src data:",
+              "style-src 'unsafe-inline'",
+              "base-uri 'none'",
+              "form-action 'none'",
+              "frame-ancestors 'none'",
+            ].join("; "),
+            "content-type": "text/html; charset=utf-8",
+            "referrer-policy": "no-referrer",
+            "x-content-type-options": "nosniff",
+          });
+          response.end(oauthResultPage(valid));
           server.close();
           if (error) return reject(new Error("Google authorization was declined."));
           if (returnedState !== state) {
