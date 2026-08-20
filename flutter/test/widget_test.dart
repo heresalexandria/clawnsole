@@ -677,7 +677,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 15);
+    expect(decoded.toJson()['schemaVersion'], 16);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -811,7 +811,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 15);
+      expect(decoded.toJson()['schemaVersion'], 16);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -3146,6 +3146,124 @@ void main() {
     }
   });
 
+  testWidgets('library view toggle switches and saves mini and compact views', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: List<Generation>.generate(4, _viewModeGeneration),
+        preferences: const AppPreferences(activeSection: AppSection.library),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 4),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Compact'), findsOneWidget);
+    expect(find.byTooltip('Mini'), findsOneWidget);
+    expect(find.byTooltip('Full'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Mini'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('generation-mini-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-mini-view-generation-1')),
+      findsOneWidget,
+    );
+    final firstMini = tester.getTopLeft(
+      find.byKey(const ValueKey('generation-mini-view-generation-0')),
+    );
+    final secondMini = tester.getTopLeft(
+      find.byKey(const ValueKey('generation-mini-view-generation-1')),
+    );
+    expect((firstMini.dy - secondMini.dy).abs(), lessThan(1));
+    expect(secondMini.dx, greaterThan(firstMini.dx));
+    expect(
+      gateway.snapshot.preferences.libraryViewMode,
+      GenerationViewMode.mini,
+    );
+
+    await tester.tap(find.byTooltip('Compact'));
+    await tester.pumpAndSettle();
+
+    final firstCompact = find.byKey(
+      const ValueKey('generation-compact-view-generation-0'),
+    );
+    final secondCompact = find.byKey(
+      const ValueKey('generation-compact-view-generation-1'),
+    );
+    expect(firstCompact, findsOneWidget);
+    expect(secondCompact, findsOneWidget);
+    expect(
+      tester.getTopLeft(secondCompact).dy,
+      greaterThan(tester.getTopLeft(firstCompact).dy),
+    );
+    expect(
+      tester.getSize(
+        find.byKey(
+          const ValueKey('generation-compact-thumbnail-view-generation-0'),
+        ),
+      ),
+      const Size(92, 68),
+    );
+    expect(
+      gateway.snapshot.preferences.libraryViewMode,
+      GenerationViewMode.compact,
+    );
+  });
+
+  testWidgets('recent work view toggle renders a two-column mini grid', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: List<Generation>.generate(4, _viewModeGeneration),
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 4),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Mini'));
+    await tester.pumpAndSettle();
+
+    final first = find.byKey(
+      const ValueKey('generation-mini-view-generation-0'),
+    );
+    final second = find.byKey(
+      const ValueKey('generation-mini-view-generation-1'),
+    );
+    expect(first, findsOneWidget);
+    expect(second, findsOneWidget);
+    expect(
+      (tester.getTopLeft(first).dy - tester.getTopLeft(second).dy).abs(),
+      lessThan(1),
+    );
+    expect(
+      tester.getTopLeft(second).dx,
+      greaterThan(tester.getTopLeft(first).dx),
+    );
+    expect(
+      gateway.snapshot.preferences.recentWorkViewMode,
+      GenerationViewMode.mini,
+    );
+  });
+
   testWidgets('settings credits Alexandria with a linked portrait', (
     tester,
   ) async {
@@ -3275,6 +3393,31 @@ void main() {
     expect(controller.notice, 'Video saved to Photos.');
     controller.dispose();
   });
+}
+
+Generation _viewModeGeneration(int index) {
+  final createdAt = DateTime.utc(
+    2026,
+    8,
+    20,
+    12,
+  ).subtract(Duration(minutes: index));
+  return Generation(
+    localId: 'view-generation-$index',
+    status: 'Ready',
+    prompt: 'A compact generation preview number $index.',
+    mode: VideoMode.t2v,
+    config: const GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 8,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    ),
+    createdAt: createdAt,
+    updatedAt: createdAt,
+  );
 }
 
 class _MemoryGateway implements AppGateway {

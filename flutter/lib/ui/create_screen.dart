@@ -11,6 +11,7 @@ import '../core/reference_prompts.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
+import 'generation_view_widgets.dart';
 import 'hardware.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
@@ -2832,6 +2833,16 @@ class _RecentWork extends StatelessWidget {
           ),
         ],
       ),
+      const SizedBox(height: 8),
+      Align(
+        alignment: Alignment.centerRight,
+        child: GenerationViewToggle(
+          keyPrefix: 'recent-work-view',
+          value: controller.recentWorkViewMode,
+          onChanged: (value) =>
+              unawaited(controller.setRecentWorkViewMode(value)),
+        ),
+      ),
       const SizedBox(height: 12),
       if (controller.generations.isEmpty)
         SurfaceCard(
@@ -2854,15 +2865,60 @@ class _RecentWork extends StatelessWidget {
             ],
           ),
         )
+      else if (controller.recentWorkViewMode == GenerationViewMode.mini)
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const gap = 10.0;
+            final columns = constraints.maxWidth >= 320 ? 2 : 1;
+            final width =
+                (constraints.maxWidth - gap * (columns - 1)) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: controller.generations
+                  .take(5)
+                  .map(
+                    (item) => SizedBox(
+                      width: width,
+                      child: MiniGenerationCard(
+                        controller: controller,
+                        item: item,
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
+        )
+      else if (controller.recentWorkViewMode == GenerationViewMode.compact)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: controller.generations
+              .take(5)
+              .map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: CompactGenerationRow(
+                    controller: controller,
+                    item: item,
+                  ),
+                ),
+              )
+              .toList(),
+        )
       else
-        ...controller.generations
-            .take(5)
-            .map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: ActivityCard(controller: controller, item: item),
-              ),
-            ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: controller.generations
+              .take(5)
+              .map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: ActivityCard(controller: controller, item: item),
+                ),
+              )
+              .toList(),
+        ),
       const SizedBox(height: 2),
       SurfaceCard(
         color: context.colors.surfaceContainer,
