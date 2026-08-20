@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -983,13 +984,42 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
     return filtered;
   }
 
+  void _toggle(ReferenceCandidate item) {
+    final active = selected.containsKey(item.id);
+    if (!active && selected.length >= widget.maximum) return;
+    setState(() {
+      active ? selected.remove(item.id) : selected[item.id] = item;
+    });
+  }
+
+  void _cacheThumbnail(ReferenceCandidate item, Uint8List bytes) {
+    if (item.generated) {
+      for (final generation in widget.controller.generations) {
+        if (generation.localId != item.id) continue;
+        unawaited(
+          widget.controller.cacheGenerationPreviews(
+            generation,
+            thumbnailBytes: bytes,
+          ),
+        );
+        return;
+      }
+      return;
+    }
+    for (final reference in widget.controller.savedReferences) {
+      if (reference.id != item.id) continue;
+      unawaited(widget.controller.cacheReferencePreview(reference, bytes));
+      return;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final values = candidates;
     return AlertDialog(
       title: Text('Add saved ${widget.kind.pluralLabel}'),
       content: SizedBox(
-        width: 660,
+        width: 820,
         height: 520,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1074,65 +1104,42 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                         ),
                       ),
                     )
-                  : ListView.separated(
-                      itemCount: values.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = values[index];
-                        final active = selected.containsKey(item.id);
-                        final full = selected.length >= widget.maximum;
-                        return CheckboxListTile(
-                          value: active,
-                          onChanged: !active && full
-                              ? null
-                              : (_) => setState(() {
-                                  active
-                                      ? selected.remove(item.id)
-                                      : selected[item.id] = item;
-                                }),
-                          secondary: ClipRRect(
-                            borderRadius: BorderRadius.circular(7),
-                            child: SizedBox.square(
-                              dimension: 44,
-                              child: MediaThumbnail(
-                                gateway: widget.controller.gateway,
-                                kind: item.kind,
-                                reference: item.asset,
-                                thumbnailReference: item.thumbnailAsset,
-                                semanticsLabel: '${item.name} thumbnail',
+                  : LayoutBuilder(
+                      builder: (context, grid) {
+                        final columns = grid.maxWidth >= 640
+                            ? 3
+                            : grid.maxWidth >= 420
+                            ? 2
+                            : 1;
+                        const gap = 12.0;
+                        final cardWidth =
+                            (grid.maxWidth - gap * (columns - 1)) / columns;
+                        return GridView.builder(
+                          key: const ValueKey('reference-picker-card-grid'),
+                          itemCount: values.length,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: gap,
+                                mainAxisSpacing: gap,
+                                mainAxisExtent: cardWidth * 9 / 16 + 86,
                               ),
-                            ),
-                          ),
-                          title: Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  item.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              StorageBadge(
-                                storage: item.storage,
-                                compact: true,
-                              ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            <String>[
-                              if (item.folderId != null)
-                                widget.controller.folderPath(
-                                  item.folderId!,
-                                  collection: generated
-                                      ? LibraryCollection.generated
-                                      : LibraryCollection.references,
-                                ),
-                              ...item.tags.map((tag) => '#$tag'),
-                            ].join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          itemBuilder: (context, index) {
+                            final item = values[index];
+                            final active = selected.containsKey(item.id);
+                            final enabled =
+                                active || selected.length < widget.maximum;
+                            return _ReferenceCandidateCard(
+                              controller: widget.controller,
+                              item: item,
+                              active: active,
+                              enabled: enabled,
+                              onTap: () => _toggle(item),
+                              onThumbnail: item.kind == MediaReferenceKind.video
+                                  ? (bytes) => _cacheThumbnail(item, bytes)
+                                  : null,
+                            );
+                          },
                         );
                       },
                     ),
@@ -1156,6 +1163,165 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
           child: Text('Add ${selected.length}'),
         ),
       ],
+    );
+  }
+}
+
+class _ReferenceCandidateCard extends StatelessWidget {
+  const _ReferenceCandidateCard({
+    required this.controller,
+    required this.item,
+    required this.active,
+    required this.enabled,
+    required this.onTap,
+    this.onThumbnail,
+  });
+
+  final AppController controller;
+  final ReferenceCandidate item;
+  final bool active;
+  final bool enabled;
+  final VoidCallback onTap;
+  final ValueChanged<Uint8List>? onThumbnail;
+
+  String get details {
+    final collection = item.generated
+        ? LibraryCollection.generated
+        : LibraryCollection.references;
+    final values = <String>[
+      if (item.folderId != null)
+        controller.folderPath(item.folderId!, collection: collection),
+      ...item.tags.map((tag) => '#$tag'),
+    ];
+    return values.isEmpty
+        ? '${item.generated ? 'Generated' : 'Saved'} ${item.kind.label.toLowerCase()}'
+        : values.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colors;
+    final outline = active
+        ? scheme.primary
+        : scheme.outlineVariant.withValues(alpha: .7);
+    return Semantics(
+      button: true,
+      selected: active,
+      enabled: enabled,
+      label: '${active ? 'Deselect' : 'Select'} ${item.name}',
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 160),
+        opacity: enabled ? 1 : .48,
+        child: Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          color: active
+              ? scheme.secondaryContainer.withValues(alpha: .42)
+              : scheme.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+            side: BorderSide(color: outline, width: active ? 2 : 1),
+          ),
+          child: InkWell(
+            key: ValueKey('reference-picker-card-${item.id}'),
+            onTap: enabled ? onTap : null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      MediaThumbnail(
+                        gateway: controller.gateway,
+                        kind: item.kind,
+                        reference: item.asset,
+                        thumbnailReference: item.thumbnailAsset,
+                        semanticsLabel: '${item.name} thumbnail',
+                        onThumbnail: onThumbnail,
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: AnimatedContainer(
+                          key: ValueKey(
+                            'reference-picker-selection-${item.id}',
+                          ),
+                          duration: const Duration(milliseconds: 160),
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: active
+                                ? scheme.primary
+                                : scheme.surface.withValues(alpha: .9),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: active
+                                  ? scheme.primary
+                                  : scheme.outline.withValues(alpha: .8),
+                            ),
+                            boxShadow: const <BoxShadow>[
+                              BoxShadow(
+                                color: Color(0x42000000),
+                                blurRadius: 5,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            active ? Icons.check_rounded : Icons.add_rounded,
+                            size: 19,
+                            color: active ? scheme.onPrimary : scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
+                        child: StorageBadge(
+                          storage: item.storage,
+                          compact: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(11, 9, 11, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          item.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            height: 1.18,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: scheme.onSurfaceVariant,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
