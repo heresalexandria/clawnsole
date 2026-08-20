@@ -25,6 +25,7 @@ import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
+import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -36,6 +37,31 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('duration defaults to manual and model capabilities gate Auto', () {
+    final controller = AppController();
+
+    expect(controller.form.autoDuration, isFalse);
+    controller.setAutoDuration(true);
+    expect(controller.form.autoDuration, isTrue);
+
+    controller.setAutoDuration(false);
+    controller
+      ..selectedProviderId = 'ltx'
+      ..selectedModelId = 'ltx-2-3-fast';
+    controller.setAutoDuration(true);
+    expect(controller.form.autoDuration, isFalse);
+
+    final fullHd = controller.selectedModel.durationRangeFor('fhd');
+    final quadHd = controller.selectedModel.durationRangeFor('qhd');
+    expect(
+      (fullHd.minimumSeconds, fullHd.maximumSeconds, fullHd.stepSeconds),
+      (6, 20, 2),
+    );
+    expect((quadHd.minimumSeconds, quadHd.maximumSeconds), (6, 10));
+    expect(quadHd.normalize(19), 10);
+    controller.dispose();
+  });
+
   test('uses BFL published FLUX 3 video rates', () {
     const hdEightSeconds = GenerationConfig(
       aspectRatio: '16:9',
@@ -1192,13 +1218,35 @@ void main() {
   );
 
   test('restoring a model constrains the form like selecting it', () async {
+    final now = DateTime.utc(2026, 8, 19);
     final gateway = _MemoryGateway(
-      const LocalSnapshot(
-        generations: <Generation>[],
+      LocalSnapshot(
+        generations: <Generation>[
+          Generation(
+            localId: 'legacy-auto',
+            status: 'Ready',
+            prompt: 'A legacy setting that the selected model cannot use.',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 'auto',
+              resolution: 'qhd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+              exactTiming: true,
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
         // LTX 2.3 Fast supports neither Auto duration nor timed keyframes.
-        preferences: AppPreferences(provider: 'ltx', model: 'ltx-2-3-fast'),
+        preferences: const AppPreferences(
+          provider: 'ltx',
+          model: 'ltx-2-3-fast',
+        ),
         hasApiKey: false,
-        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
       ),
     );
     final controller = AppController(gateway: gateway);
@@ -1206,6 +1254,7 @@ void main() {
     expect(controller.selectedModelId, 'ltx-2-3-fast');
     expect(controller.form.autoDuration, isFalse);
     expect(controller.form.exactTiming, isFalse);
+    expect(controller.form.durationSeconds, 8);
     controller.dispose();
   });
 
@@ -1488,6 +1537,64 @@ void main() {
     expect(controller.form.resolution, 'fhd');
     expect(controller.form.generateAudio, isFalse);
     expect(controller.form.safetyTolerance, 1);
+    controller.dispose();
+  });
+
+  testWidgets('duration control follows model Auto support and range', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.form.autoDuration, isFalse);
+    expect(find.byKey(const ValueKey('duration-mode-switch')), findsOneWidget);
+    expect(find.byKey(const ValueKey('duration-slider')), findsOneWidget);
+    expect(find.byKey(const ValueKey('auto-duration-range')), findsNothing);
+
+    final auto = find.byKey(const ValueKey('duration-mode-auto'));
+    await tester.ensureVisible(auto);
+    await tester.tap(auto);
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isTrue);
+    expect(find.byKey(const ValueKey('duration-slider')), findsNothing);
+    expect(find.byKey(const ValueKey('auto-duration-range')), findsOneWidget);
+    expect(find.textContaining('5–20 seconds'), findsOneWidget);
+
+    await controller.selectProvider('ltx');
+    controller.updateForm((form) => form.resolution = 'qhd');
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isFalse);
+    expect(find.byKey(const ValueKey('duration-mode-switch')), findsNothing);
+    final slider = tester.widget<HardwareSlider>(
+      find.byKey(const ValueKey('duration-slider')),
+    );
+    expect((slider.min, slider.max, slider.divisions), (6, 10, 2));
     controller.dispose();
   });
 

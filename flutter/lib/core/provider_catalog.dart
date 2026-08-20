@@ -8,6 +8,29 @@ class VideoResolutionDefinition {
   final String detail;
 }
 
+class VideoDurationRange {
+  const VideoDurationRange({
+    required this.minimumSeconds,
+    required this.maximumSeconds,
+    required this.stepSeconds,
+  }) : assert(minimumSeconds > 0),
+       assert(maximumSeconds >= minimumSeconds),
+       assert(stepSeconds > 0),
+       assert((maximumSeconds - minimumSeconds) % stepSeconds == 0);
+
+  final int minimumSeconds;
+  final int maximumSeconds;
+  final int stepSeconds;
+
+  int get divisions => (maximumSeconds - minimumSeconds) ~/ stepSeconds;
+
+  int normalize(int value) {
+    final clamped = value.clamp(minimumSeconds, maximumSeconds);
+    final offset = clamped - minimumSeconds;
+    return minimumSeconds + (offset ~/ stepSeconds) * stepSeconds;
+  }
+}
+
 class VideoModelDefinition {
   const VideoModelDefinition({
     required this.id,
@@ -101,6 +124,12 @@ class VideoModelDefinition {
 
   int maxDurationFor(String resolution) =>
       maxDurationByResolution[resolution] ?? maxDuration;
+
+  VideoDurationRange durationRangeFor(String resolution) => VideoDurationRange(
+    minimumSeconds: minDuration,
+    maximumSeconds: maxDurationFor(resolution),
+    stepSeconds: durationStep,
+  );
 
   List<String> aspectRatiosFor(String resolution) =>
       aspectRatiosByResolution[resolution] ?? aspectRatios;

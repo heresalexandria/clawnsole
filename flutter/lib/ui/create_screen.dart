@@ -1898,76 +1898,101 @@ class _DurationControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final form = controller.form;
     final model = controller.selectedModel;
-    final maximumDuration = model.maxDurationFor(form.resolution);
+    final range = model.durationRangeFor(form.resolution);
+    final autoLocked =
+        form.requiresFixedDuration ||
+        form.referenceTask == MediaReferenceTask.edit;
+    final rangeText = range.minimumSeconds == range.maximumSeconds
+        ? '${range.minimumSeconds} seconds'
+        : '${range.minimumSeconds}–${range.maximumSeconds} seconds';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         FieldLabel(
           'Duration',
           icon: Icons.timelapse_rounded,
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              CounterReadout(
-                form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
-                unit: form.autoDuration ? null : 's',
-              ),
-              const SizedBox(width: 8),
-              TogglePill(
-                label: 'Auto',
-                selected: form.autoDuration,
-                onChanged:
-                    form.requiresFixedDuration ||
-                        !model.supportsAutoDuration ||
-                        form.referenceTask == MediaReferenceTask.edit
-                    ? null
-                    : (value) => controller.updateForm(
-                        (form) => form.autoDuration = value,
-                      ),
-              ),
-            ],
+          trailing: CounterReadout(
+            form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
+            unit: form.autoDuration ? null : 's',
           ),
         ),
-        HardwareSlider(
-          min: model.minDuration.toDouble(),
-          max: maximumDuration.toDouble(),
-          divisions:
-              (maximumDuration - model.minDuration) ~/ model.durationStep,
-          label: '${form.durationSeconds} s',
-          value: form.durationSeconds.toDouble(),
-          onChanged: (value) => controller.setDurationSeconds(value.round()),
-        ),
-        Row(
-          children: <Widget>[
-            Text(
-              '${model.minDuration} s',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: context.colors.onSurfaceVariant,
+        if (model.supportsAutoDuration)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: HardwareChoiceSwitch(
+                key: const ValueKey('duration-mode-switch'),
+                firstKey: const ValueKey('duration-mode-auto'),
+                secondKey: const ValueKey('duration-mode-manual'),
+                firstLabel: 'AUTO',
+                secondLabel: 'MANUAL',
+                firstSelected: form.autoDuration,
+                onChanged: autoLocked ? null : controller.setAutoDuration,
               ),
             ),
-            Expanded(
-              child: Text(
-                form.autoDuration ? 'Auto — the provider chooses' : '',
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+          ),
+        if (form.autoDuration)
+          Container(
+            key: const ValueKey('auto-duration-range'),
+            margin: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: context.colors.outlineVariant),
+            ),
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 17,
+                  color: context.tokens.brass,
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    '${model.label} can choose $rangeText at the current resolution.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else ...<Widget>[
+          HardwareSlider(
+            key: const ValueKey('duration-slider'),
+            min: range.minimumSeconds.toDouble(),
+            max: range.maximumSeconds.toDouble(),
+            divisions: range.divisions,
+            label: '${form.durationSeconds} s',
+            value: form.durationSeconds.toDouble(),
+            onChanged: (value) => controller.setDurationSeconds(value.round()),
+          ),
+          Row(
+            children: <Widget>[
+              Text(
+                '${range.minimumSeconds} s',
                 style: TextStyle(
                   fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
                   color: context.colors.onSurfaceVariant,
                 ),
               ),
-            ),
-            Text(
-              '$maximumDuration s',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: context.colors.onSurfaceVariant,
+              const Spacer(),
+              Text(
+                '${range.maximumSeconds} s',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: context.colors.onSurfaceVariant,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
         if (form.requiresFixedDuration)
           Padding(
             padding: const EdgeInsets.only(top: 4),
