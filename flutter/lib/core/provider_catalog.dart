@@ -51,12 +51,17 @@ class VideoModelDefinition {
     this.maxImageReferences = 0,
     this.maxVideoReferences = 0,
     this.maxAudioReferences = 0,
+    this.maxTotalReferences,
     this.framesExclusiveWithReferences = false,
     this.maxReferenceVideoSeconds,
     this.maxReferenceAudioSeconds,
+    this.maxReferenceVideoSecondsByResolution = const <String, int>{},
+    this.maxReferenceAudioSecondsByResolution = const <String, int>{},
     this.requiresVisualReferenceForAudio = false,
+    this.maxDurationWithImageGuidance,
     this.maxDurationByResolution = const <String, int>{},
     this.aspectRatiosByResolution = const <String, List<String>>{},
+    this.aspectRatiosWithFrames,
     this.resolutionsByReferenceKind =
         const <MediaReferenceKind, List<String>>{},
     this.referencePromptHint,
@@ -89,16 +94,21 @@ class VideoModelDefinition {
   final int maxImageReferences;
   final int maxVideoReferences;
   final int maxAudioReferences;
+  final int? maxTotalReferences;
 
-  /// The provider accepts pinned keyframes or media references in one
-  /// request, never both (Seedance routes behind ArtCraft's Omni API).
+  /// The provider exposes pinned-keyframe and creative-reference modes as
+  /// separate request shapes, so a generation cannot combine both.
   final bool framesExclusiveWithReferences;
 
   final int? maxReferenceVideoSeconds;
   final int? maxReferenceAudioSeconds;
+  final Map<String, int> maxReferenceVideoSecondsByResolution;
+  final Map<String, int> maxReferenceAudioSecondsByResolution;
   final bool requiresVisualReferenceForAudio;
+  final int? maxDurationWithImageGuidance;
   final Map<String, int> maxDurationByResolution;
   final Map<String, List<String>> aspectRatiosByResolution;
+  final List<String>? aspectRatiosWithFrames;
   final Map<MediaReferenceKind, List<String>> resolutionsByReferenceKind;
   final String? referencePromptHint;
   final List<MediaReferenceTask> referenceTasks;
@@ -122,17 +132,44 @@ class VideoModelDefinition {
       maxVideoReferences > 0 ||
       maxAudioReferences > 0;
 
-  int maxDurationFor(String resolution) =>
-      maxDurationByResolution[resolution] ?? maxDuration;
+  int maxDurationFor(String resolution, {bool withImageGuidance = false}) {
+    final resolutionMaximum =
+        maxDurationByResolution[resolution] ?? maxDuration;
+    final guidanceMaximum = withImageGuidance
+        ? maxDurationWithImageGuidance
+        : null;
+    return guidanceMaximum == null || resolutionMaximum < guidanceMaximum
+        ? resolutionMaximum
+        : guidanceMaximum;
+  }
 
-  VideoDurationRange durationRangeFor(String resolution) => VideoDurationRange(
+  VideoDurationRange durationRangeFor(
+    String resolution, {
+    bool withImageGuidance = false,
+  }) => VideoDurationRange(
     minimumSeconds: minDuration,
-    maximumSeconds: maxDurationFor(resolution),
+    maximumSeconds: maxDurationFor(
+      resolution,
+      withImageGuidance: withImageGuidance,
+    ),
     stepSeconds: durationStep,
   );
 
-  List<String> aspectRatiosFor(String resolution) =>
-      aspectRatiosByResolution[resolution] ?? aspectRatios;
+  int? maxReferenceSeconds(MediaReferenceKind kind, String resolution) =>
+      switch (kind) {
+        MediaReferenceKind.image => null,
+        MediaReferenceKind.video =>
+          maxReferenceVideoSecondsByResolution[resolution] ??
+              maxReferenceVideoSeconds,
+        MediaReferenceKind.audio =>
+          maxReferenceAudioSecondsByResolution[resolution] ??
+              maxReferenceAudioSeconds,
+      };
+
+  List<String> aspectRatiosFor(String resolution, {bool withFrames = false}) =>
+      withFrames && aspectRatiosWithFrames != null
+      ? aspectRatiosWithFrames!
+      : aspectRatiosByResolution[resolution] ?? aspectRatios;
 
   bool supportsResolutionForReferences(
     String resolution,
@@ -214,10 +251,13 @@ class _ArtCraftModel extends VideoModelDefinition {
     super.maxImageReferences,
     super.maxVideoReferences,
     super.maxAudioReferences,
+    super.maxTotalReferences,
     super.framesExclusiveWithReferences,
     super.maxReferenceVideoSeconds,
     super.maxReferenceAudioSeconds,
     super.requiresVisualReferenceForAudio,
+    super.maxDurationWithImageGuidance,
+    super.aspectRatiosWithFrames,
     super.durationStep = 1,
     bool supportsText = true,
     super.supportsAudio = false,
@@ -354,9 +394,7 @@ const ltxProvider = VideoProviderDefinition(
       supportsEndFrame: true,
       maxAudioReferences: 1,
       maxReferenceAudioSeconds: 20,
-      resolutionsByReferenceKind: <MediaReferenceKind, List<String>>{
-        MediaReferenceKind.audio: <String>['fhd'],
-      },
+      maxReferenceAudioSecondsByResolution: <String, int>{'qhd': 10, '4k': 10},
     ),
   ],
 );
@@ -554,6 +592,7 @@ const artCraftProvider = VideoProviderDefinition(
       framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
+      aspectRatiosWithFrames: <String>['auto'],
       usdPerSecond: .268,
     ),
     _ArtCraftModel(
@@ -571,6 +610,7 @@ const artCraftProvider = VideoProviderDefinition(
       framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
+      aspectRatiosWithFrames: <String>['auto'],
       usdPerSecond: .316,
     ),
     _ArtCraftModel(
@@ -643,6 +683,8 @@ const artCraftProvider = VideoProviderDefinition(
       maxKeyframes: 1,
       supportsEndFrame: false,
       maxImageReferences: 7,
+      framesExclusiveWithReferences: true,
+      maxDurationWithImageGuidance: 10,
       usdPerSecond: .09125,
     ),
     _ArtCraftModel(
@@ -656,6 +698,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxDuration: 15,
       maxKeyframes: 1,
       supportsEndFrame: false,
+      maxDurationWithImageGuidance: 10,
       usdPerSecond: .1475,
       supportsText: false,
     ),
@@ -721,6 +764,8 @@ const artCraftProvider = VideoProviderDefinition(
       maxImageReferences: 9,
       maxVideoReferences: 3,
       maxAudioReferences: 3,
+      maxTotalReferences: 12,
+      framesExclusiveWithReferences: true,
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
@@ -751,6 +796,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxKeyframes: 2,
       maxImageReferences: 3,
       maxVideoReferences: 1,
+      framesExclusiveWithReferences: true,
       usdPerSecond: .48,
       supportsAudio: true,
     ),
@@ -766,6 +812,7 @@ const artCraftProvider = VideoProviderDefinition(
       maxKeyframes: 2,
       maxImageReferences: 3,
       maxVideoReferences: 1,
+      framesExclusiveWithReferences: true,
       usdPerSecond: .165,
       supportsAudio: true,
     ),
@@ -871,7 +918,7 @@ const atlasProvider = VideoProviderDefinition(
       label: 'Seedance 2.5 · Frames',
       description: 'First/last-frame guided Seedance generation.',
       modes: <VideoMode>[VideoMode.i2v],
-      aspectRatios: _wideRatios,
+      aspectRatios: <String>['auto'],
       resolutions: <VideoResolutionDefinition>[_hd, _sd, _fhd],
       minDuration: 4,
       maxDuration: 30,

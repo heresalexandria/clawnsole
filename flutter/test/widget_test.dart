@@ -1433,6 +1433,31 @@ void main() {
     controller.dispose();
   });
 
+  test('provider guidance caps normalize totals and duration', () {
+    final h3 = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'minimax_h3';
+    for (var index = 0; index < 9; index += 1) {
+      h3.addUrlReference(MediaReferenceKind.image);
+    }
+    for (var index = 0; index < 3; index += 1) {
+      h3.addUrlReference(MediaReferenceKind.video);
+    }
+    expect(h3.form.references, hasLength(12));
+    expect(h3.canAddReference(MediaReferenceKind.audio), isFalse);
+    expect(h3.canAddFrame(KeyframeRole.start), isFalse);
+    h3.dispose();
+
+    final grok = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'grok_imagine_video';
+    grok.form.durationSeconds = 15;
+    grok.addUrlReference(MediaReferenceKind.image);
+    expect(grok.selectedDurationRange.maximumSeconds, 10);
+    expect(grok.form.durationSeconds, 10);
+    grok.dispose();
+  });
+
   test('reuse recreates the exact stored request for every mode', () async {
     final gateway = _MemoryGateway(
       const LocalSnapshot(
@@ -1936,10 +1961,17 @@ void main() {
       ),
     );
 
-    // Empty form: both sections are offered, each noting the either-or rule.
+    // Empty form: both sections are offered with one compact either-or note.
     await pump();
-    expect(find.textContaining('sets creative references aside'), findsOne);
-    expect(find.textContaining('sets pinned frames aside'), findsOne);
+    expect(find.textContaining('2 frames max · first + last'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'use first/last frames or creative references, not both',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Guide identity'), findsNothing);
+    expect(find.textContaining('Type @'), findsNothing);
     expect(find.text('First frame'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
 
@@ -1948,7 +1980,9 @@ void main() {
     await pump();
     await tester.pump();
     expect(
-      find.textContaining('Remove the frames to guide with references'),
+      find.textContaining(
+        'Frames attached — remove them to add creative references',
+      ),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('add-image-reference')), findsNothing);
@@ -1959,7 +1993,7 @@ void main() {
     await pump();
     await tester.pump();
     expect(
-      find.textContaining('Remove the references below to pin frames'),
+      find.textContaining('References attached — remove them to add frames'),
       findsOneWidget,
     );
     expect(find.text('First frame'), findsNothing);
@@ -1977,7 +2011,12 @@ void main() {
     ];
     await pump();
     await tester.pump();
-    expect(find.textContaining('not both — remove one side'), findsNWidgets(2));
+    expect(
+      find.textContaining(
+        'cannot combine first/last frames or creative references',
+      ),
+      findsOneWidget,
+    );
     controller.dispose();
   });
 

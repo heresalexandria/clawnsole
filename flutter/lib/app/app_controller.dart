@@ -1572,8 +1572,15 @@ class AppController extends ChangeNotifier {
   );
 
   int _validDuration(int value) {
-    return selectedModel.durationRangeFor(form.resolution).normalize(value);
+    return selectedDurationRange.normalize(value);
   }
+
+  bool get hasImageGuidance =>
+      form.keyframes.isNotEmpty ||
+      form.referenceCount(MediaReferenceKind.image) > 0;
+
+  VideoDurationRange get selectedDurationRange => selectedModel
+      .durationRangeFor(form.resolution, withImageGuidance: hasImageGuidance);
 
   List<VideoResolutionDefinition> get availableResolutions {
     final referenceKinds = MediaReferenceKind.values.where(
@@ -1593,7 +1600,10 @@ class AppController extends ChangeNotifier {
       form.referenceTask != MediaReferenceTask.reference &&
           selectedModel.referenceTasks.length > 1
       ? const <String>['auto']
-      : selectedModel.aspectRatiosFor(form.resolution);
+      : selectedModel.aspectRatiosFor(
+          form.resolution,
+          withFrames: form.keyframes.isNotEmpty,
+        );
 
   void _selectCompatibleModel() {
     bool accepts(VideoModelDefinition model) {
@@ -1741,7 +1751,9 @@ class AppController extends ChangeNotifier {
 
   bool canAddReference(MediaReferenceKind kind) =>
       !referencesBlockedByFrames &&
-      form.referenceCount(kind) < referenceLimit(kind);
+      form.referenceCount(kind) < referenceLimit(kind) &&
+      (selectedModel.maxTotalReferences == null ||
+          form.references.length < selectedModel.maxTotalReferences!);
 
   int referenceLimit(MediaReferenceKind kind) =>
       kind == MediaReferenceKind.video &&
@@ -1841,13 +1853,20 @@ class AppController extends ChangeNotifier {
         MediaReferenceKind.audio => FileType.audio,
       });
       final available = referenceLimit(kind) - form.referenceCount(kind);
-      for (final asset in picked.take(available)) {
+      final totalAvailable = selectedModel.maxTotalReferences == null
+          ? available
+          : selectedModel.maxTotalReferences! - form.references.length;
+      final accepted = available < totalAvailable ? available : totalAvailable;
+      for (final asset in picked.take(accepted)) {
         _appendReference(kind, label: asset.name, asset: asset);
       }
-      if (picked.length > available) {
+      if (picked.length > accepted) {
+        final totalLimit = selectedModel.maxTotalReferences;
         showNotice(
-          '${selectedModel.label} accepts up to '
-          '${referenceLimit(kind)} ${kind.pluralLabel}.',
+          totalLimit != null && totalAvailable <= available
+              ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
+              : '${selectedModel.label} accepts up to '
+                    '${referenceLimit(kind)} ${kind.pluralLabel}.',
         );
       }
     } on Object catch (error) {
@@ -2082,6 +2101,10 @@ class AppController extends ChangeNotifier {
               : '${model.label} accepts up to $maximum ${kind.pluralLabel}.';
         }
       }
+      final totalLimit = model.maxTotalReferences;
+      if (totalLimit != null && form.references.length > totalLimit) {
+        return '${model.label} accepts up to $totalLimit creative references total.';
+      }
       if (form.references.any((item) => item.requestSource.isEmpty)) {
         return 'Every reference needs an upload or HTTPS URL.';
       }
@@ -2114,7 +2137,10 @@ class AppController extends ChangeNotifier {
         return 'Choose a fixed duration for this keyframe layout.';
       }
       if (form.usesTimedKeyframes) {
-        final maximumDuration = model.maxDurationFor(form.resolution);
+        final maximumDuration = model.maxDurationFor(
+          form.resolution,
+          withImageGuidance: hasImageGuidance,
+        );
         final seconds = form.keyframes.map((frame) => frame.seconds).toList();
         if (seconds.any((value) => value < 0 || value > maximumDuration)) {
           return 'Keyframe timing must stay between 0 and $maximumDuration seconds.';

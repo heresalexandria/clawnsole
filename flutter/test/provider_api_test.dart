@@ -105,12 +105,18 @@ void main() {
         'duration': 8,
         'resolution': 'fhd',
         'aspect_ratio': '16:9',
-        'keyframes': <String>['https://cdn.test/opening.png'],
+        'keyframes': <String>[
+          'https://cdn.test/opening.png',
+          'https://cdn.test/closing.png',
+        ],
         'reference_audios': <String>['data:audio/mpeg;base64,audio'],
       });
 
       expect(requestBody['audio_uri'], 'data:audio/mpeg;base64,audio');
       expect(requestBody['image_uri'], 'https://cdn.test/opening.png');
+      expect(requestBody['last_frame_uri'], 'https://cdn.test/closing.png');
+      expect(requestBody.containsKey('duration'), isFalse);
+      expect(requestBody.containsKey('generate_audio'), isFalse);
       expect(requestBody['prompt'], 'Cut the scene to audio 1');
     },
   );
@@ -225,6 +231,114 @@ void main() {
     expect(seedance.maxVideoReferences, 3);
     expect(seedance.maxAudioReferences, 3);
     expect(modelById('artcraft', 'kling_2p6_pro').supportsAudio, isTrue);
+  });
+
+  test('every create-ready model keeps its audited guidance constraints', () {
+    String constraint(VideoModelDefinition model) => <Object?>[
+      model.maxKeyframes,
+      model.maxImageReferences,
+      model.maxVideoReferences,
+      model.maxAudioReferences,
+      model.maxTotalReferences ?? '-',
+      model.framesExclusiveWithReferences ? 'exclusive' : 'mix',
+      model.requiresVisualReferenceForAudio ? 'visual' : 'audio-ok',
+    ].join('/');
+
+    const expectedArtCraft = <String, String>{
+      'flux_3': '2/0/0/0/-/mix/audio-ok',
+      'flux_3_draft': '2/0/0/0/-/mix/audio-ok',
+      'grok_imagine_video': '1/7/0/0/-/exclusive/audio-ok',
+      'grok_imagine_video_1p5': '1/0/0/0/-/mix/audio-ok',
+      'happy_horse_1p0': '1/0/0/0/-/mix/audio-ok',
+      'kling_1p6_pro': '2/4/0/0/-/mix/audio-ok',
+      'kling_2p5_turbo_pro': '2/0/0/0/-/mix/audio-ok',
+      'kling_2p6_pro': '2/0/0/0/-/mix/audio-ok',
+      'minimax_h3': '2/9/3/3/12/exclusive/visual',
+      'seedance_1p5_pro': '2/0/0/0/-/mix/audio-ok',
+      'seedance_2p0': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_fast': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bp': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bp_fast': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bpu': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bpu_fast': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_mini': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bp_mini': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p0_bpu_mini': '2/9/3/3/-/exclusive/visual',
+      'seedance_2p5': '2/30/10/10/-/exclusive/audio-ok',
+      'seedance_2p5_u': '2/30/10/10/-/exclusive/audio-ok',
+      'seedance_2p5_preview': '0/30/10/10/-/mix/audio-ok',
+      'veo_3_fast': '1/0/0/0/-/mix/audio-ok',
+      'veo_3p1': '2/3/1/0/-/exclusive/audio-ok',
+      'veo_3p1_fast': '2/3/1/0/-/exclusive/audio-ok',
+      'veo_3p1_lite': '2/0/0/0/-/mix/audio-ok',
+      'vidu_q3': '2/4/0/0/-/mix/audio-ok',
+      'vidu_q3_turbo': '2/0/0/0/-/mix/audio-ok',
+    };
+    expect(<String, String>{
+      for (final model in artCraftProvider.models) model.id: constraint(model),
+    }, expectedArtCraft);
+
+    const expectedAtlas = <String, String>{
+      'bytedance/seedance-2.5/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.5/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.5/reference-to-video': '0/30/10/10/-/mix/audio-ok',
+      'bytedance/seedance-2.0/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0/reference-to-video': '0/9/3/3/-/mix/visual',
+      'bytedance/seedance-2.0-fast/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0-fast/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0-fast/reference-to-video': '0/9/3/3/-/mix/visual',
+      'bytedance/seedance-2.0-mini/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0-mini/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'bytedance/seedance-2.0-mini/reference-to-video': '0/9/3/3/-/mix/visual',
+      'xai/grok-imagine-video-v1.5/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'xai/grok-imagine-video-v1.5/image-to-video': '1/0/0/0/-/mix/audio-ok',
+      'google/veo3.1-fast/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'google/veo3.1-fast/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-2.7/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-2.7/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'kwaivgi/kling-v3.0-pro/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'kwaivgi/kling-v3.0-pro/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'vidu/q3-turbo/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'vidu/q3-turbo/image-to-video': '1/0/0/0/-/mix/audio-ok',
+      'pixverse/v6/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'pixverse/v6/image-to-video': '1/0/0/0/-/mix/audio-ok',
+      'minimax/hailuo-2.3/t2v-standard': '0/0/0/0/-/mix/audio-ok',
+      'minimax/hailuo-2.3/i2v-standard': '1/0/0/0/-/mix/audio-ok',
+      'black-forest-labs/flux-3/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'black-forest-labs/flux-3/image-to-video': '1/0/0/0/-/mix/audio-ok',
+    };
+    expect(<String, String>{
+      for (final model in atlasProvider.models) model.id: constraint(model),
+    }, expectedAtlas);
+
+    expect(constraint(bflProvider.defaultModel), '10/0/0/0/-/mix/audio-ok');
+    expect(
+      <String, String>{
+        for (final model in ltxProvider.models) model.id: constraint(model),
+      },
+      <String, String>{
+        'ltx-2-3-fast': '2/0/0/0/-/mix/audio-ok',
+        'ltx-2-3-pro': '2/0/0/1/-/mix/audio-ok',
+      },
+    );
+
+    final grok = modelById('artcraft', 'grok_imagine_video');
+    expect(
+      grok.durationRangeFor('hd', withImageGuidance: true).maximumSeconds,
+      10,
+    );
+    expect(
+      modelById(
+        'artcraft',
+        'seedance_2p5',
+      ).aspectRatiosFor('hd', withFrames: true),
+      <String>['auto'],
+    );
+    expect(
+      modelById('atlas', 'bytedance/seedance-2.5/image-to-video').aspectRatios,
+      <String>['auto'],
+    );
   });
 
   test('ArtCraft maps generation input and retains its quoted cost', () async {
@@ -797,8 +911,10 @@ void main() {
       ltxPro.supportsResolutionForReferences('4k', <MediaReferenceKind>[
         MediaReferenceKind.audio,
       ]),
-      isFalse,
+      isTrue,
     );
+    expect(ltxPro.maxReferenceSeconds(MediaReferenceKind.audio, 'fhd'), 20);
+    expect(ltxPro.maxReferenceSeconds(MediaReferenceKind.audio, '4k'), 10);
   });
 
   test('LTX audio-to-video uses the dedicated published rate', () {

@@ -88,18 +88,18 @@ class LtxApi {
     final payload = <String, Object?>{
       'model': model,
       'prompt': prompt,
-      'duration': duration == 'auto' ? null : duration,
+      if (!audioDriven) 'duration': duration == 'auto' ? null : duration,
       'resolution': _resolution(
         input['resolution']?.toString() ?? 'hd',
         input['aspect_ratio']?.toString() ?? '16:9',
       ),
       'fps': 24,
-      'generate_audio': input['generate_audio'] != false,
+      if (!audioDriven) 'generate_audio': input['generate_audio'] != false,
       if (audioDriven) 'audio_uri': referenceAudios.first,
       if (endpoint != 'text-to-video' &&
           (frames.isNotEmpty || referenceImages.isNotEmpty))
         'image_uri': frames.isNotEmpty ? frames.first : referenceImages.first,
-      if (endpoint == 'image-to-video' && frames.length > 1)
+      if (endpoint != 'text-to-video' && frames.length > 1)
         'last_frame_uri': frames.last,
     };
     final body = await _read(
