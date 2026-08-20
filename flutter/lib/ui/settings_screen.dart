@@ -50,6 +50,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final split = constraints.maxWidth >= 1050;
       final main = Column(
         children: <Widget>[
+          _GenerationAppearanceCard(controller: widget.controller),
+          const SizedBox(height: 18),
           _ProviderAccessCard(controller: widget.controller),
           if (widget.controller.supportsGoogleDrive) ...<Widget>[
             const SizedBox(height: 18),
@@ -100,6 +102,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     },
+  );
+}
+
+class _GenerationAppearanceCard extends StatelessWidget {
+  const _GenerationAppearanceCard({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        CircleAvatar(
+          backgroundColor: context.colors.primaryContainer,
+          child: Icon(
+            Icons.live_tv_rounded,
+            color: context.colors.onPrimaryContainer,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Generation appearance',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose what plays in the preview while a video is rendering.',
+                style: TextStyle(color: context.colors.onSurfaceVariant),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<GenerationPlaceholderStyle>(
+                key: const ValueKey('generation-placeholder-style'),
+                initialValue: controller.generationPlaceholderStyle,
+                decoration: const InputDecoration(
+                  labelText: 'Generation Placeholder',
+                  helperText:
+                      'Static recreates analog broadcast snow; Cyclone keeps the luminous ribbon field.',
+                ),
+                items: GenerationPlaceholderStyle.values
+                    .map(
+                      (style) => DropdownMenuItem<GenerationPlaceholderStyle>(
+                        value: style,
+                        child: Text(style.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (style) {
+                  if (style != null) {
+                    unawaited(controller.setGenerationPlaceholderStyle(style));
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
   );
 }
 

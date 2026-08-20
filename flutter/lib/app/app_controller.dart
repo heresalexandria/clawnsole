@@ -227,6 +227,8 @@ class AppController extends ChangeNotifier {
   FavoriteFilter libraryFavoriteFilter = FavoriteFilter.all;
   FavoriteFilter referenceFavoriteFilter = FavoriteFilter.all;
   LibraryStorage defaultStorage = LibraryStorage.local;
+  GenerationPlaceholderStyle generationPlaceholderStyle =
+      GenerationPlaceholderStyle.broadcastStatic;
   String? lastLocalGenerationFolderId;
   String? lastDriveGenerationFolderId;
   String librarySearch = '';
@@ -821,6 +823,7 @@ class AppController extends ChangeNotifier {
       libraryFilter = value.preferences.libraryFilter;
       libraryStorageFilter = value.preferences.libraryStorageFilter;
       referenceStorageFilter = value.preferences.referenceStorageFilter;
+      generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
           : LibraryStorage.drive;
@@ -947,6 +950,18 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences(defaultStorage: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setGenerationPlaceholderStyle(
+    GenerationPlaceholderStyle value,
+  ) async {
+    generationPlaceholderStyle = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences());
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -1547,6 +1562,7 @@ class AppController extends ChangeNotifier {
     libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
     referenceStorageFilter:
         referenceStorageFilter ?? this.referenceStorageFilter,
+    generationPlaceholderStyle: generationPlaceholderStyle,
     lastLocalGenerationFolderId: clearLastLocalGenerationFolder
         ? null
         : lastLocalGenerationFolderId ?? this.lastLocalGenerationFolderId,
