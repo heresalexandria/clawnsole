@@ -24,10 +24,17 @@ when a Drive folder is shared, but each browser/device must enter its own keys.
 
 1. Create or select a Google Cloud project.
 2. Enable the Google Drive API.
-3. Configure the OAuth consent screen.
+3. Configure the OAuth consent screen with these exact public identity values:
+   - App name: `Clawnsole`
+   - App homepage: `https://clawnsole.app/`
+   - Privacy policy: `https://clawnsole.app/privacy/`
+   - Terms of service: `https://clawnsole.app/tos/`
+   - Authorized domain: `clawnsole.app`
+   - App logo: the current Clawnsole icon in
+     `docs/assets/clawnsole-app-icon.png`
 4. Create an OAuth 2.0 client with application type **Web application**.
-5. Add every development and hosted origin, for example
-   `http://localhost:7357` and `https://heresalexandria.github.io`.
+5. Add every development and hosted origin, including
+   `http://localhost:7357` and `https://clawnsole.app`.
 6. Export its public client ID before starting or building:
 
    ```bash
@@ -40,6 +47,12 @@ and manage files that Clawnsole created, not the rest of the user's Drive. A
 folder is reopened by its user-selected name and the Clawnsole app marker, so
 the same Google account can connect to it from another browser. After Clawnsole
 creates the folder, it can be moved anywhere in Drive without breaking sync.
+
+The public homepage describes this Drive use before sign-in and links directly
+to the same privacy-policy URL listed above. When preparing an OAuth verification
+submission, confirm that Google Cloud shows the exact app name `Clawnsole` and
+the exact HTTPS URLs above. Do not submit the legacy GitHub Pages hostname or a
+URL that redirects to the custom domain.
 
 Provider API keys and iOS App Review credentials are never serialized into the
 portable file. They stay on each device. Storing paid API keys in Drive is

@@ -72,6 +72,19 @@ abstract interface class ReferenceLibraryGateway {
   Future<LocalSnapshot> deleteReference(String referenceId);
 }
 
+abstract interface class FavoriteGateway {
+  Future<LocalSnapshot> setGenerationFavorite(String localId, bool favorite);
+  Future<LocalSnapshot> setReferenceFavorite(String referenceId, bool favorite);
+}
+
+abstract interface class GenerationPreviewGateway {
+  Future<LocalSnapshot> saveGenerationPreviews(
+    String localId, {
+    Uint8List? thumbnailBytes,
+    Uint8List? timelineBytes,
+  });
+}
+
 const _standaloneWeb = bool.fromEnvironment('CLAWNSOLE_STANDALONE_WEB');
 
 AppGateway createGateway() {

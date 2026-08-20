@@ -3,14 +3,23 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#211720">
+    <meta id="theme-color" name="theme-color" content="#f8f3e8">
     <meta
       name="description"
-      content="Clawnsole privacy policy: local project storage, direct provider connections, and no developer-operated cloud database."
+      content="Clawnsole privacy policy for app data, Google Drive, generation providers, and Google Analytics on the public website."
     >
-    <title>Privacy policy — Clawnsole</title>
+    <title>Privacy policy | Clawnsole</title>
     <link rel="icon" href="../assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="../assets/site.css?v=6ff92239">
+    <link rel="stylesheet" href="../assets/site.css?v=unified-studio-theme">
+    <script>
+      try {
+        const theme = localStorage.getItem('clawnsole-site-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {}
+    </script>
+    <script src="../assets/theme.js" defer></script>
   </head>
   <body class="privacy-page">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -32,6 +41,22 @@
         <a href="../tos/">Terms</a>
       </nav>
       <div class="header-actions">
+        <details class="theme-picker" data-theme-picker>
+          <summary data-theme-trigger aria-label="Theme: system" title="Theme: system">
+            <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.5"></circle>
+              <path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56M17.51 17.51l1.56 1.56M2 12h2.2M19.8 12H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56"></path>
+            </svg>
+            <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.4 15.1A8.4 8.4 0 0 1 8.9 3.6 8.6 8.6 0 1 0 20.4 15.1Z"></path>
+            </svg>
+          </summary>
+          <div class="theme-menu" role="group" aria-label="Theme">
+            <button type="button" data-theme-value="system">System</button>
+            <button type="button" data-theme-value="light">Light</button>
+            <button type="button" data-theme-value="dark">Dark</button>
+          </div>
+        </details>
         <a
           class="button button-small"
           href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
@@ -46,9 +71,11 @@
         <p class="eyebrow">Clawnsole privacy policy</p>
         <h1>Privacy without a hidden backend.</h1>
         <p class="policy-intro">
-          Clawnsole is a local-first client for third-party video generation
-          services. Its developer does not operate an account system, analytics
-          service, advertising network, or cloud database for the app.
+          Clawnsole is a unified client for third-party video generation
+          services across web, mobile, and desktop. The native desktop and
+          mobile apps contain no analytics or advertising SDKs. The public
+          website uses Google Analytics as described below. The developer does
+          not operate an account system or cloud database for project data.
         </p>
         <p class="policy-date">Effective August 19, 2026</p>
       </header>
@@ -78,6 +105,7 @@
           <a href="#drive-data">Optional Google Drive</a>
           <a href="#provider-data">Provider processing</a>
           <a href="#app-review">App Review access</a>
+          <a href="#site-analytics">Website analytics</a>
           <a href="#network">Other network requests</a>
           <a href="#developer-data">Developer collection</a>
           <a href="#choices">Your choices</a>
@@ -161,17 +189,18 @@
                 <a href="https://bfl.ai/legal/privacy-policy">Black Forest Labs privacy policy <span aria-hidden="true">↗</span></a>
                 <a href="https://bfl.ai/legal/usage-policy">Black Forest Labs usage policy <span aria-hidden="true">↗</span></a>
                 <a href="https://static.lightricks.com/legal/Privacy%20Policy%20-%20LTX%20Platform.pdf">LTX Platform privacy policy <span aria-hidden="true">↗</span></a>
+                <a href="https://app.getartcraft.com/">ArtCraft service <span aria-hidden="true">↗</span></a>
                 <a href="https://www.atlascloud.ai/privacy">Atlas Cloud privacy policy <span aria-hidden="true">↗</span></a>
               </p>
             </div>
             <p>
               Clawnsole currently supports Black Forest Labs (BFL / FLUX 3),
-              LTX, which is operated by Lightricks, and Atlas Cloud. Atlas Cloud
-              is an API aggregation platform and may forward prompts and
-              generation inputs to the underlying model provider selected for
-              the request; that provider’s data-handling and retention policies
-              also apply. Clawnsole is not affiliated with or endorsed by any
-              of these providers.
+              LTX, which is operated by Lightricks, ArtCraft, and Atlas Cloud.
+              Atlas Cloud is an API aggregation platform and may forward prompts
+              and generation inputs to the underlying model provider selected
+              for the request; that provider’s data-handling and retention
+              policies also apply. Clawnsole is not affiliated with or endorsed
+              by any of these providers.
             </p>
           </section>
 
@@ -190,6 +219,39 @@
               processed by the selected provider as described above. A
               user-supplied key for the same provider takes precedence after it
               is saved.
+            </p>
+          </section>
+
+          <section id="site-analytics">
+            <p class="eyebrow">Public website measurement</p>
+            <h2>Google Analytics on clawnsole.app</h2>
+            <p>
+              The public Clawnsole website uses Google Analytics to understand
+              visits and interactions, evaluate site performance, and decide
+              what to improve. If the hosted web app is made available on
+              clawnsole.app, the same site analytics may measure visits and
+              interactions with that web experience. The native macOS, Windows,
+              iOS, and Android apps do not use Google Analytics or send
+              analytics events.
+            </p>
+            <p>
+              Google Analytics may process page URLs, referral information,
+              interactions, session statistics, approximate location, browser
+              and device information, IP addresses for processing and coarse
+              location, and identifiers stored in first-party cookies. Google
+              processes this information under its
+              <a href="https://policies.google.com/technologies/partner-sites">explanation for sites that use Google services</a>
+              and its <a href="https://policies.google.com/privacy">privacy policy</a>.
+            </p>
+            <p>
+              Clawnsole does not intentionally send provider API keys, prompts,
+              reference media, generated media, Google Drive contents, or
+              project history to Google Analytics. Analytics data is used for
+              audience and product measurement, not advertising or cross-app
+              tracking. Google Analytics retention is controlled through the
+              Analytics property settings. You can limit Analytics through your
+              browser's cookie controls or Google's
+              <a href="https://tools.google.com/dlpage/gaoptout">Analytics opt-out browser add-on</a>.
             </p>
           </section>
 
@@ -214,10 +276,13 @@
             <p class="eyebrow">What we receive</p>
             <h2>Data collected by the developer</h2>
             <p>
-              Clawnsole does not send its developer your API key, prompts,
-              reference media, generated media, project history, contacts,
-              precise location, advertising identifiers, or analytics events.
-              The app does not use data for advertising or cross-app tracking.
+              The native Clawnsole apps do not send the developer your API key,
+              prompts, reference media, generated media, project history,
+              contacts, precise location, advertising identifiers, or analytics
+              events. The developer can access aggregate and event-level website
+              usage reports collected through Google Analytics, as described
+              above. Clawnsole does not use data for advertising or cross-app
+              tracking.
             </p>
             <p>
               Apple, Google, GitHub, the selected generation provider, any

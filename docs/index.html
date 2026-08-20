@@ -3,49 +3,78 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#211720">
+    <meta id="theme-color" name="theme-color" content="#f8f3e8">
+    <meta name="application-name" content="Clawnsole">
     <meta
       name="description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Clawnsole is an AI video generation studio for creating, comparing, monitoring, and organizing video across providers. Optional Google Drive access keeps your project library available across devices."
     >
-    <link rel="canonical" href="https://heresalexandria.github.io/clawnsole/">
+    <link rel="canonical" href="https://clawnsole.app/">
     <meta property="og:site_name" content="Clawnsole">
     <meta property="og:locale" content="en_US">
-    <meta property="og:title" content="Clawnsole — Local-first AI video studio">
+    <meta property="og:title" content="Clawnsole | AI video generation studio">
     <meta
       property="og:description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Create, compare, monitor, and organize AI video across providers. Optionally connect Google Drive to keep your Clawnsole project library available across devices."
     >
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://heresalexandria.github.io/clawnsole/">
+    <meta property="og:url" content="https://clawnsole.app/">
     <meta
       property="og:image"
-      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+      content="https://clawnsole.app/assets/clawnsole-og.jpg"
     >
     <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta
       property="og:image:alt"
-      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
+      content="Clawnsole shown as one unified AI video studio across desktop, tablet, and phone."
     >
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Clawnsole — Local-first AI video studio">
+    <meta name="twitter:title" content="Clawnsole | AI video generation studio">
     <meta
       name="twitter:description"
-      content="Clawnsole is a local-first AI video studio for macOS, Windows, iOS, Android, and web. Bring your own key for FLUX 3, LTX, and Seedance models."
+      content="Create, compare, monitor, and organize AI video across providers. Optionally connect Google Drive to keep your Clawnsole project library available across devices."
     >
     <meta
       name="twitter:image"
-      content="https://heresalexandria.github.io/clawnsole/assets/clawnsole-og.jpg"
+      content="https://clawnsole.app/assets/clawnsole-og.jpg"
     >
     <meta
       name="twitter:image:alt"
-      content="Clawnsole’s GitHub Pages landing page with the app’s Create workspace for LTX video generation."
+      content="Clawnsole shown as one unified AI video studio across desktop, tablet, and phone."
     >
-    <title>Clawnsole — Local-first AI video studio</title>
+    <title>Clawnsole | AI video generation studio</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="assets/site.css?v=windows-desktop">
+    <link rel="stylesheet" href="assets/site.css?v=unified-studio-theme">
+    <script>
+      try {
+        const theme = localStorage.getItem('clawnsole-site-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {}
+    </script>
+    <script src="assets/theme.js" defer></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Clawnsole",
+        "url": "https://clawnsole.app/",
+        "image": "https://clawnsole.app/assets/clawnsole-app-icon.png",
+        "sameAs": "https://github.com/heresalexandria/clawnsole",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "macOS, Windows",
+        "description": "Clawnsole is an AI video generation studio for creating, comparing, monitoring, and organizing video across providers. Optional Google Drive access keeps a user's Clawnsole project library available across devices.",
+        "featureList": [
+          "Text-to-video and image-to-video generation across multiple providers",
+          "Model and estimated-cost comparison",
+          "Generation monitoring and project organization",
+          "Optional Google Drive project-library sync across devices"
+        ]
+      }
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -62,11 +91,28 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="#features">Features</a>
+        <a href="#google-drive">Drive access</a>
         <a href="#screenshots">Screenshots</a>
         <a href="privacy/">Privacy</a>
         <a href="tos/">Terms</a>
       </nav>
       <div class="header-actions">
+        <details class="theme-picker" data-theme-picker>
+          <summary data-theme-trigger aria-label="Theme: system" title="Theme: system">
+            <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.5"></circle>
+              <path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56M17.51 17.51l1.56 1.56M2 12h2.2M19.8 12H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56"></path>
+            </svg>
+            <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.4 15.1A8.4 8.4 0 0 1 8.9 3.6 8.6 8.6 0 1 0 20.4 15.1Z"></path>
+            </svg>
+          </summary>
+          <div class="theme-menu" role="group" aria-label="Theme">
+            <button type="button" data-theme-value="system">System</button>
+            <button type="button" data-theme-value="light">Light</button>
+            <button type="button" data-theme-value="dark">Dark</button>
+          </div>
+        </details>
         <a
           class="button button-small button-secondary"
           href="https://github.com/heresalexandria/clawnsole"
@@ -85,16 +131,18 @@
     <main id="main">
       <section class="hero section-shell" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Local-first video studio</p>
-          <h1 id="hero-title">Make it <em>move.</em></h1>
+          <h1 id="hero-title">Clawnsole</h1>
           <p class="hero-lede">
-            Direct one continuous moment, pin the important frames, and let
-            Clawnsole mind the render. Your key, projects, and finished films
-            stay under your control.
+            Clawnsole is an AI video generation studio. Create video from text,
+            images, or existing clips; compare provider models and estimated
+            costs; monitor renders; and organize completed work on desktop.
           </p>
           <p class="provider-support">
-            Currently supported: your Black Forest Labs key for FLUX 3, LTX
-            key for LTX models, or Atlas Cloud key for Seedance models.
+            Use your own provider keys in one consistent workspace. Connect
+            Black Forest Labs, LTX, ArtCraft, or Atlas Cloud to choose from
+            FLUX 3, LTX, Seedance, and other supported video models. Authorize
+            your Google account to save videos and references to Google Drive
+            and keep them available across devices.
           </p>
           <div class="hero-actions">
             <div class="hero-download-actions">
@@ -102,13 +150,13 @@
                 class="button"
                 href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
               >
-                Download latest for macOS
+                Download for macOS
               </a>
               <a
                 class="button button-secondary"
                 href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-windows-x64.zip"
               >
-                Download latest for Windows
+                Download for Windows
               </a>
               <a
                 class="button button-secondary"
@@ -141,6 +189,62 @@
         </div>
       </section>
 
+      <section class="drive-section section-shell" id="google-drive" aria-labelledby="drive-title">
+        <div class="drive-heading">
+          <div>
+            <p class="eyebrow">Optional Google Drive connection</p>
+            <h2 id="drive-title">Why Clawnsole asks for Google Drive access</h2>
+          </div>
+          <p>
+            Clawnsole uses Google Drive only when you choose to connect it. The
+            connection gives you user-controlled project storage and lets the
+            same Clawnsole library remain available across your devices.
+          </p>
+        </div>
+
+        <div class="drive-grid">
+          <article>
+            <span class="feature-number">01</span>
+            <h3>What Drive enables</h3>
+            <p>
+              Clawnsole creates an app-owned Drive folder so you can reopen
+              generations, references, folders, and tags on another device and
+              continue the same project workflow.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">02</span>
+            <h3>What Clawnsole stores</h3>
+            <p>
+              The folder can contain prompts, generation settings and history,
+              saved-reference metadata, retained inputs, generated media,
+              project folders, tags, and non-secret preferences.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">03</span>
+            <h3>What access is limited to</h3>
+            <p>
+              Clawnsole requests the narrow <code>drive.file</code> permission.
+              It can access files it creates or files you explicitly make
+              available to it, not the rest of your Google Drive.
+            </p>
+          </article>
+        </div>
+
+        <div class="drive-disclosure">
+          <p>
+            <strong>Your provider API keys and Google OAuth tokens are never
+            stored in Drive.</strong> Drive content is sent to a generation
+            provider only when you deliberately select that content as an input.
+            You can disconnect Drive or delete Clawnsole's Drive data at any time.
+          </p>
+          <a class="button button-secondary" href="privacy/#drive-data">
+            Read how Clawnsole uses Drive data
+          </a>
+        </div>
+      </section>
+
       <section class="feature-section section-shell" id="features" aria-labelledby="features-title">
         <div class="section-heading">
           <div>
@@ -148,8 +252,9 @@
             <h2 id="features-title">The controls that matter. Nothing between you and the shot.</h2>
           </div>
           <p>
-            Move between Black Forest Labs, LTX, and Atlas Cloud without moving
-            your project. Each model exposes only the controls it supports.
+            Move between Black Forest Labs, LTX, ArtCraft, and Atlas Cloud
+            without moving your project. Each model exposes only the controls
+            it supports.
           </p>
         </div>
 
@@ -174,16 +279,16 @@
             <span class="feature-number">03</span>
             <h3>Know the cost before the cut</h3>
             <p>
-              Compare 10, 15, 20, and 30-second USD costs—including reference
-              rates—and see a request estimate before rendering.
+              Compare 10, 15, 20, and 30-second USD costs, including reference
+              rates, and see a request estimate before rendering.
             </p>
           </article>
           <article class="feature-card">
             <span class="feature-number">04</span>
-            <h3>Keep a local film library</h3>
+            <h3>Keep every project together</h3>
             <p>
-              Inputs, settings, job state, and completed videos remain together
-              on your device until you remove them.
+              Organize inputs, settings, job state, and completed videos in one
+              library, with optional Google Drive sync across devices.
             </p>
           </article>
         </div>
@@ -192,18 +297,20 @@
       <section class="privacy-band" aria-labelledby="privacy-title">
         <div class="section-shell privacy-band-inner">
           <div class="privacy-seal" aria-hidden="true">
-            <span>LOCAL</span>
+            <span>YOUR</span>
             <strong>BYO</strong>
             <span>KEY</span>
           </div>
           <div>
-            <p class="eyebrow">No Clawnsole cloud</p>
-            <h2 id="privacy-title">Your studio is not our data source.</h2>
+            <p class="eyebrow">Your keys, your choice</p>
+            <h2 id="privacy-title">Connect directly. Stay in control.</h2>
           </div>
           <p>
-            Clawnsole has no developer-operated account, analytics service, ad
-            network, or cloud database. It sends a generation only to the
-            provider you connect and stores your project history locally.
+            Clawnsole does not require a developer-operated account or cloud
+            database. Native builds contain no analytics or ads. The public
+            website uses Google Analytics for traffic and usage measurement, as
+            explained in the privacy policy. Your provider keys, prompts, media,
+            and project history are not sent to Google Analytics.
           </p>
           <a class="button button-light" href="privacy/">How privacy works</a>
         </div>
@@ -212,12 +319,13 @@
       <section class="screens-section section-shell" id="screenshots" aria-labelledby="screenshots-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">The studio, pocket-sized</p>
+          <p class="eyebrow">The studio, everywhere</p>
             <h2 id="screenshots-title">The same workflow on every screen.</h2>
           </div>
           <p>
-            Flutter carries the complete Clawnsole experience across iPhone,
-            iPad, Android, web, macOS, and the Windows desktop app.
+            The responsive Flutter interface keeps the complete Clawnsole
+            workflow consistent from compact screens to wide desktop
+            workspaces.
           </p>
         </div>
 
@@ -226,7 +334,7 @@
             <div class="phone-frame">
               <img
                 src="app-store/iphone/01-create.png"
-                alt="Clawnsole Create screen on iPhone"
+                alt="Clawnsole Create screen in a compact phone layout"
                 width="1284"
                 height="2778"
                 loading="lazy"
@@ -238,7 +346,7 @@
             <div class="phone-frame phone-frame-raised">
               <img
                 src="app-store/iphone/02-providers.png"
-                alt="Clawnsole provider and model cost controls on iPhone"
+                alt="Clawnsole provider and model cost controls in a compact phone layout"
                 width="1284"
                 height="2778"
                 loading="lazy"
@@ -250,7 +358,7 @@
             <div class="phone-frame">
               <img
                 src="app-store/iphone/03-library.png"
-                alt="Clawnsole local film library on iPhone"
+                alt="Clawnsole local film library in a compact phone layout"
                 width="1284"
                 height="2778"
                 loading="lazy"
@@ -272,13 +380,13 @@
               class="button"
               href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
             >
-              Download latest for macOS
+              Download for macOS
             </a>
             <a
               class="button button-secondary"
               href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-windows-x64.zip"
             >
-              Download latest for Windows
+              Download for Windows
             </a>
           </div>
           <p>macOS requires Apple silicon. Windows requires x64 and is currently unsigned. Provider usage is billed by the service you connect.</p>
@@ -287,7 +395,7 @@
     </main>
 
     <footer class="site-footer section-shell">
-      <span>Clawnsole is independent and is not affiliated with Black Forest Labs, Lightricks/LTX, or Atlas Cloud.</span>
+      <span>Clawnsole is independent and is not affiliated with Black Forest Labs, Lightricks/LTX, ArtCraft, or Atlas Cloud.</span>
       <div>
         <a href="privacy/">Privacy</a>
         <a href="tos/">Terms</a>

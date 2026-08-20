@@ -3,15 +3,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#211720">
+    <meta id="theme-color" name="theme-color" content="#f8f3e8">
     <meta
       name="description"
-      content="Clawnsole terms of use for the open-source, local-first client and its connections to third-party AI generation services."
+      content="Clawnsole terms of use for its unified AI video generation studio and connections to third-party generation services."
     >
-    <link rel="canonical" href="https://heresalexandria.github.io/clawnsole/tos/">
-    <title>Terms of use — Clawnsole</title>
+    <link rel="canonical" href="https://clawnsole.app/tos/">
+    <title>Terms of use | Clawnsole</title>
     <link rel="icon" href="../assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="../assets/site.css?v=terms-20260819">
+    <link rel="stylesheet" href="../assets/site.css?v=unified-studio-theme">
+    <script>
+      try {
+        const theme = localStorage.getItem('clawnsole-site-theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch (_) {}
+    </script>
+    <script src="../assets/theme.js" defer></script>
   </head>
   <body class="privacy-page">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -33,6 +42,22 @@
         <a href="./" aria-current="page">Terms</a>
       </nav>
       <div class="header-actions">
+        <details class="theme-picker" data-theme-picker>
+          <summary data-theme-trigger aria-label="Theme: system" title="Theme: system">
+            <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.5"></circle>
+              <path d="M12 2v2.2M12 19.8V22M4.93 4.93l1.56 1.56M17.51 17.51l1.56 1.56M2 12h2.2M19.8 12H22M4.93 19.07l1.56-1.56M17.51 6.49l1.56-1.56"></path>
+            </svg>
+            <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.4 15.1A8.4 8.4 0 0 1 8.9 3.6 8.6 8.6 0 1 0 20.4 15.1Z"></path>
+            </svg>
+          </summary>
+          <div class="theme-menu" role="group" aria-label="Theme">
+            <button type="button" data-theme-value="system">System</button>
+            <button type="button" data-theme-value="light">Light</button>
+            <button type="button" data-theme-value="dark">Dark</button>
+          </div>
+        </details>
         <a
           class="button button-small"
           href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"
@@ -47,9 +72,10 @@
         <p class="eyebrow">Clawnsole terms of use</p>
         <h1>Bring your key. Know the terms.</h1>
         <p class="policy-intro">
-          Clawnsole is an open-source, local-first client for third-party AI
-          generation services. These terms explain the responsibilities that
-          come with using the official site, apps, and release builds.
+          Clawnsole is an open-source client for third-party AI generation
+          services across web, mobile, and desktop. These terms explain the
+          responsibilities that come with using the official site, apps, and
+          release builds.
         </p>
         <p class="policy-date">Effective August 19, 2026</p>
       </header>
@@ -123,8 +149,8 @@
               Third-party libraries, services, model names, trademarks, and
               other materials may have their own licenses and terms. Clawnsole
               is independent and is not affiliated with or endorsed by Black
-              Forest Labs, Lightricks/LTX, Atlas Cloud, Google, GitHub, Apple,
-              or Microsoft.
+              Forest Labs, Lightricks/LTX, ArtCraft, Atlas Cloud, Google,
+              GitHub, Apple, or Microsoft.
             </p>
           </section>
 
@@ -191,9 +217,11 @@
               Clawnsole communicates with providers and optional services only
               when needed for features you choose, such as generation, status
               and balance checks, Google Drive storage, update checks,
-              downloads, or external links. Those services are not controlled
-              by the Clawnsole developer and may change, suspend access, reject
-              content, retain data, experience outages, or discontinue an API.
+              downloads, or external links. The public website also uses Google
+              Analytics for audience and product measurement. Those services
+              are not controlled by the Clawnsole developer and may change,
+              suspend access, reject content, retain data, experience outages,
+              or discontinue an API.
             </p>
             <p>
               Your use of a third-party service is a relationship between you
@@ -201,7 +229,8 @@
               may send request data to an underlying model provider, whose
               terms and policies may also apply. Clawnsole is not responsible
               for third-party services, content, security, availability,
-              billing, or data handling.
+              billing, or data handling. The Clawnsole privacy policy explains
+              the website analytics data handled by Google.
             </p>
           </section>
 

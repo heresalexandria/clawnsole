@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -11,6 +12,8 @@ import '../core/shell_bridge.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
+import 'video_frame_loader.dart';
+import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
 
 class StorageBadge extends StatelessWidget {
@@ -164,6 +167,41 @@ class StorageDestinationButton extends StatelessWidget {
   }
 }
 
+class FavoriteFilterChips extends StatelessWidget {
+  const FavoriteFilterChips({
+    required this.value,
+    required this.onChanged,
+    super.key,
+  });
+
+  final FavoriteFilter value;
+  final ValueChanged<FavoriteFilter> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: 6,
+    runSpacing: 6,
+    children: FavoriteFilter.values
+        .map(
+          (filter) => FilterChip(
+            avatar: Icon(
+              filter == FavoriteFilter.starred
+                  ? Icons.star_rounded
+                  : filter == FavoriteFilter.unstarred
+                  ? Icons.star_border_rounded
+                  : Icons.select_all_rounded,
+              size: 15,
+            ),
+            label: Text(filter.label),
+            selected: value == filter,
+            visualDensity: VisualDensity.compact,
+            onSelected: (_) => onChanged(filter),
+          ),
+        )
+        .toList(),
+  );
+}
+
 class Eyebrow extends StatelessWidget {
   const Eyebrow(this.text, {super.key, this.icon});
 
@@ -222,7 +260,7 @@ class SurfaceCard extends StatelessWidget {
   );
 }
 
-/// A small on/off pill used for optional behaviors like auto duration.
+/// A small on/off pill used for optional behaviors like exact timing.
 class TogglePill extends StatelessWidget {
   const TogglePill({
     required this.label,
@@ -1359,39 +1397,276 @@ class _GenerationMediaState extends State<GenerationMedia> {
         },
       );
     }
-    return FutureBuilder<Uri?>(
-      future: _uri,
-      builder: (context, snapshot) {
-        if (snapshot.hasError ||
-            (snapshot.connectionState == ConnectionState.done &&
-                snapshot.data == null)) {
-          return const _MediaPlaceholder(
-            icon: Icons.link_off_rounded,
-            label: 'Video unavailable',
-          );
-        }
-        if (!snapshot.hasData) {
-          return const _MediaPlaceholder(
-            icon: Icons.hourglass_bottom_rounded,
-            label: 'Loading film',
-          );
-        }
-        return GenerationVideo(
-          uri: snapshot.data!,
-          supportsPhotos: widget.controller.supportsPhotoLibrarySave,
-          onDownload: (destination) async {
-            try {
-              await widget.controller.saveMedia(
-                widget.item,
-                destination: destination,
-              );
-            } on Object catch (error) {
-              widget.controller.showNotice(error.toString());
-            }
-          },
-        );
-      },
+    return _CachedVideoPreview(
+      controller: widget.controller,
+      item: widget.item,
+      uri: _uri,
     );
+  }
+}
+
+final Map<String, Future<Uint8List>> _previewAssetBytes =
+    <String, Future<Uint8List>>{};
+final Map<String, Future<_GeneratedVideoPreview?>> _previewJobs =
+    <String, Future<_GeneratedVideoPreview?>>{};
+
+class _GeneratedVideoPreview {
+  const _GeneratedVideoPreview({required this.thumbnail, this.timeline});
+
+  final Uint8List thumbnail;
+  final Uint8List? timeline;
+}
+
+class _CachedVideoPreview extends StatefulWidget {
+  const _CachedVideoPreview({
+    required this.controller,
+    required this.item,
+    required this.uri,
+  });
+
+  final AppController controller;
+  final Generation item;
+  final Future<Uri?> uri;
+
+  @override
+  State<_CachedVideoPreview> createState() => _CachedVideoPreviewState();
+}
+
+class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
+  Future<_GeneratedVideoPreview?>? _preview;
+
+  String get _jobKey =>
+      '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
+
+  Future<Uint8List> _read(AssetReference reference) =>
+      _previewAssetBytes.putIfAbsent(
+        '${reference.kind}:${reference.value}',
+        () => widget.controller.gateway.readAsset(reference),
+      );
+
+  void _load() {
+    final thumbnail = widget.item.thumbnailAsset;
+    if (thumbnail != null) {
+      _preview = Future<_GeneratedVideoPreview>(() async {
+        return _GeneratedVideoPreview(
+          thumbnail: await _read(thumbnail),
+          timeline: widget.item.timelineThumbnailAsset == null
+              ? null
+              : await _read(widget.item.timelineThumbnailAsset!),
+        );
+      });
+      return;
+    }
+    _preview = _previewJobs.putIfAbsent(_jobKey, _generateAndCache);
+  }
+
+  Future<_GeneratedVideoPreview?> _generateAndCache() async {
+    try {
+      final uri = await widget.uri;
+      if (uri == null) return null;
+      final configured = widget.item.config.duration;
+      final seconds = configured is num ? configured.toDouble() : 8.0;
+      final duration = Duration(
+        milliseconds: (seconds.clamp(1, 120) * 1000).round(),
+      );
+      final positions = videoTimelinePositions(duration, 6);
+      final frames = <Uint8List>[];
+      for (final position in positions) {
+        final frame = await loadVideoFrame(uri, position);
+        if (frame != null) frames.add(frame);
+      }
+      if (frames.isEmpty) return null;
+      final timeline = frames.length > 1
+          ? await _composeTimelineStrip(frames)
+          : null;
+      final preview = _GeneratedVideoPreview(
+        thumbnail: frames.first,
+        timeline: timeline,
+      );
+      await widget.controller.cacheGenerationPreviews(
+        widget.item,
+        thumbnailBytes: preview.thumbnail,
+        timelineBytes: preview.timeline,
+      );
+      return preview;
+    } on Object {
+      return null;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CachedVideoPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.thumbnailAsset?.value !=
+            widget.item.thumbnailAsset?.value ||
+        oldWidget.item.timelineThumbnailAsset?.value !=
+            widget.item.timelineThumbnailAsset?.value ||
+        oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value ||
+        oldWidget.item.resultUrl != widget.item.resultUrl) {
+      _load();
+    }
+  }
+
+  Future<void> _open() async {
+    final uri = await widget.uri;
+    if (!mounted || uri == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog.fullscreen(
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Generation playback'),
+            leading: IconButton(
+              tooltip: 'Close',
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ),
+          body: GenerationVideo(
+            uri: uri,
+            supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+            onDownload: (destination) async {
+              try {
+                await widget.controller.saveMedia(
+                  widget.item,
+                  destination: destination,
+                );
+              } on Object catch (error) {
+                widget.controller.showNotice(error.toString());
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<_GeneratedVideoPreview?>(
+    future: _preview,
+    builder: (context, snapshot) {
+      final preview = snapshot.data;
+      if (preview == null) {
+        return InkWell(
+          onTap: () => unawaited(_open()),
+          child: _MediaPlaceholder(
+            icon: snapshot.connectionState == ConnectionState.done
+                ? Icons.movie_outlined
+                : Icons.hourglass_bottom_rounded,
+            label: snapshot.connectionState == ConnectionState.done
+                ? 'Tap to play video'
+                : 'Caching preview',
+          ),
+        );
+      }
+      return Semantics(
+        button: true,
+        label: 'Play generated video',
+        child: InkWell(
+          onTap: () => unawaited(_open()),
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              Image.memory(
+                preview.thumbnail,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              ),
+              if (preview.timeline != null)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 48,
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      border: Border(top: BorderSide(color: Colors.white30)),
+                    ),
+                    child: Image.memory(
+                      preview.timeline!,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+                ),
+              Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: .62),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Future<Uint8List?> _composeTimelineStrip(List<Uint8List> frames) async {
+  if (frames.isEmpty) return null;
+  final images = <ui.Image>[];
+  try {
+    for (final bytes in frames) {
+      final codec = await ui.instantiateImageCodec(bytes);
+      images.add((await codec.getNextFrame()).image);
+      codec.dispose();
+    }
+    const cellWidth = 160.0;
+    const height = 90.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    for (var index = 0; index < images.length; index += 1) {
+      final image = images[index];
+      final sourceAspect = image.width / image.height;
+      final targetAspect = cellWidth / height;
+      final source = sourceAspect > targetAspect
+          ? ui.Rect.fromLTWH(
+              (image.width - image.height * targetAspect) / 2,
+              0,
+              image.height * targetAspect,
+              image.height.toDouble(),
+            )
+          : ui.Rect.fromLTWH(
+              0,
+              (image.height - image.width / targetAspect) / 2,
+              image.width.toDouble(),
+              image.width / targetAspect,
+            );
+      canvas.drawImageRect(
+        image,
+        source,
+        ui.Rect.fromLTWH(index * cellWidth, 0, cellWidth, height),
+        ui.Paint(),
+      );
+    }
+    final strip = await recorder.endRecording().toImage(
+      (cellWidth * images.length).round(),
+      height.round(),
+    );
+    final data = await strip.toByteData(format: ui.ImageByteFormat.png);
+    strip.dispose();
+    return data?.buffer.asUint8List();
+  } finally {
+    for (final image in images) {
+      image.dispose();
+    }
   }
 }
 

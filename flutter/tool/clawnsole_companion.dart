@@ -186,6 +186,8 @@ class CompanionStore implements DurableDataStore {
 
     for (final generation in generations) {
       add(generation.resultAsset);
+      add(generation.thumbnailAsset);
+      add(generation.timelineThumbnailAsset);
       add(generation.config.source);
       for (final frame
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
@@ -822,6 +824,80 @@ class CompanionApp {
         }).toList();
         if (!found) throw StateError('That generation no longer exists.');
         next = current.copyWith(generations: generations);
+      } else if (action == 'setGenerationFavorite') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final localId = map['localId']?.toString() ?? '';
+        if (!current.generations.any((item) => item.localId == localId)) {
+          throw StateError('That generation no longer exists.');
+        }
+        next = current.copyWith(
+          generations: current.generations
+              .map(
+                (item) => item.localId == localId
+                    ? item.copyWith(favorite: map['favorite'] == true)
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'setReferenceFavorite') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final referenceId = map['referenceId']?.toString() ?? '';
+        if (!current.savedReferences.any((item) => item.id == referenceId)) {
+          throw StateError('That reference no longer exists.');
+        }
+        next = current.copyWith(
+          savedReferences: current.savedReferences
+              .map(
+                (item) => item.id == referenceId
+                    ? item.copyWith(
+                        favorite: map['favorite'] == true,
+                        updatedAt: DateTime.now().toUtc(),
+                      )
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'saveGenerationPreviews') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final localId = map['localId']?.toString() ?? '';
+        final target = current.generations
+            .where((item) => item.localId == localId)
+            .firstOrNull;
+        if (target == null) {
+          throw StateError('That generation no longer exists.');
+        }
+        final thumbnailSource = map['thumbnail']?.toString();
+        final timelineSource = map['timeline']?.toString();
+        final thumbnail =
+            thumbnailSource == null || target.thumbnailAsset != null
+            ? target.thumbnailAsset
+            : await _store.writeAsset(
+                base64Decode(thumbnailSource),
+                label: 'clawnsole-$localId-thumbnail.jpg',
+                contentType: 'image/jpeg',
+                storage: target.storage,
+              );
+        final timeline =
+            timelineSource == null || target.timelineThumbnailAsset != null
+            ? target.timelineThumbnailAsset
+            : await _store.writeAsset(
+                base64Decode(timelineSource),
+                label: 'clawnsole-$localId-timeline.png',
+                contentType: 'image/png',
+                storage: target.storage,
+              );
+        next = current.copyWith(
+          generations: current.generations
+              .map(
+                (item) => item.localId == localId
+                    ? item.copyWith(
+                        thumbnailAsset: thumbnail,
+                        timelineThumbnailAsset: timeline,
+                      )
+                    : item,
+              )
+              .toList(),
+        );
       } else if (action == 'saveReference') {
         final map = value is Map<Object?, Object?> ? value : const {};
         final rawReference = map['reference'];
@@ -876,6 +952,7 @@ class CompanionApp {
           updatedAt: DateTime.now().toUtc(),
           folderId: reference.folderId,
           tags: _cleanLibraryTags(reference.tags),
+          favorite: reference.favorite,
           storage: reference.storage,
         );
         final references = List<SavedReference>.from(current.savedReferences);

@@ -39,7 +39,9 @@ class DirectGateway
         AppGateway,
         ProviderGateway,
         LibraryOrganizationGateway,
-        ReferenceLibraryGateway {
+        ReferenceLibraryGateway,
+        FavoriteGateway,
+        GenerationPreviewGateway {
   DirectGateway({
     required DurableDataStore store,
     BflApi? api,
@@ -425,6 +427,7 @@ class DirectGateway
       updatedAt: DateTime.now().toUtc(),
       folderId: reference.folderId,
       tags: _cleanLibraryTags(reference.tags),
+      favorite: reference.favorite,
       storage: reference.storage,
     );
     final references = List<SavedReference>.from(current.savedReferences);
@@ -449,6 +452,108 @@ class DirectGateway
     );
     await _store.write(next);
     await _store.pruneAssets(next.generations, next.savedReferences);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> setGenerationFavorite(
+    String localId,
+    bool favorite,
+  ) async {
+    final current = await _store.read();
+    if (!current.generations.any((item) => item.localId == localId)) {
+      throw StateError('That generation no longer exists.');
+    }
+    final next = current.copyWith(
+      generations: current.generations
+          .map(
+            (item) => item.localId == localId
+                ? item.copyWith(favorite: favorite)
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> setReferenceFavorite(
+    String referenceId,
+    bool favorite,
+  ) async {
+    final current = await _store.read();
+    if (!current.savedReferences.any((item) => item.id == referenceId)) {
+      throw StateError('That reference no longer exists.');
+    }
+    final next = current.copyWith(
+      savedReferences: current.savedReferences
+          .map(
+            (item) => item.id == referenceId
+                ? item.copyWith(
+                    favorite: favorite,
+                    updatedAt: DateTime.now().toUtc(),
+                  )
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> saveGenerationPreviews(
+    String localId, {
+    Uint8List? thumbnailBytes,
+    Uint8List? timelineBytes,
+  }) async {
+    if (thumbnailBytes == null && timelineBytes == null) return _snapshot();
+    final current = await _store.read();
+    final target = current.generations
+        .where((item) => item.localId == localId)
+        .firstOrNull;
+    if (target == null) throw StateError('That generation no longer exists.');
+    final thumbnail = thumbnailBytes == null || target.thumbnailAsset != null
+        ? target.thumbnailAsset
+        : await _store.writeAsset(
+            thumbnailBytes,
+            label: 'clawnsole-$localId-thumbnail.jpg',
+            contentType: 'image/jpeg',
+            storage: target.storage,
+          );
+    final timeline =
+        timelineBytes == null || target.timelineThumbnailAsset != null
+        ? target.timelineThumbnailAsset
+        : await _store.writeAsset(
+            timelineBytes,
+            label: 'clawnsole-$localId-timeline.png',
+            contentType: 'image/png',
+            storage: target.storage,
+          );
+    // Asset creation can involve a Drive round trip. Re-read before attaching
+    // the references so a star/folder edit made while images upload survives.
+    final latest = await _store.read();
+    final latestTarget = latest.generations
+        .where((item) => item.localId == localId)
+        .firstOrNull;
+    if (latestTarget == null) {
+      throw StateError('That generation no longer exists.');
+    }
+    final next = latest.copyWith(
+      generations: latest.generations
+          .map(
+            (item) => item.localId == localId
+                ? item.copyWith(
+                    thumbnailAsset: item.thumbnailAsset ?? thumbnail,
+                    timelineThumbnailAsset:
+                        item.timelineThumbnailAsset ?? timeline,
+                  )
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
     return _snapshot(next);
   }
 

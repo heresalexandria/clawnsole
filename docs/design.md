@@ -2,7 +2,7 @@
 
 Clawnsole is a midcentury studio console: walnut burl casework, stitched
 leather panels, brass hardware, parchment paper, and a patient sloth's claw
-for a maker's mark. Every screen should feel like furniture — warm, solid,
+for a maker's mark. Every screen should feel like furniture: warm, solid,
 unhurried, and built from a small number of honest materials.
 
 This guide is the contract for all surfaces (web, iOS, Android, macOS).
@@ -13,20 +13,20 @@ than inventing new colors or sizes.
 ## 1. Principles
 
 - **Furniture, not chrome.** Structure comes from material panels (wood,
-  leather, felt) and hairline outlines on warm paper — not from floating
+  leather, felt) and hairline outlines on warm paper, not from floating
   shadows and gray boxes.
 - **Brass is jewelry.** The brass/gold tones mark small, precious things:
   the claw, eyebrows, stitching, icons, counts. Never large fills.
-- **Plum acts, navy informs, green is money — and "on."** Primary actions and
+- **Plum acts, navy informs, green is money and "on."** Primary actions and
   selected states are plum. Informational chips and in-progress states lean
   navy. Green belongs to the estimated-charge panel and to the lit side of
   hardware switches; nothing else uses it. Green is the one family that
   **changes value between modes**: pale baize with hunter ink on paper, deep
   hunter felt with cream at night. It is never a large dark block in light
   mode.
-- **Hardware is honest.** Values are set with real-feeling hardware — a
+- **Hardware is honest.** Values are set with real-feeling hardware: a
   machined knob in a recessed groove, metal toggles, counter-window
-  readouts — echoing the app icon. No status lamps or ornament beyond the
+  readouts that echo the app icon. No status lamps or ornament beyond the
   control itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles.
@@ -41,16 +41,16 @@ through `TexturePanel` (`flutter/lib/ui/panels.dart`).
 
 | Material | Asset | Used for |
 | --- | --- | --- |
-| Walnut burl | `wood_burl.jpg` | Side rail, mobile bottom nav — casework, dark in both modes |
+| Walnut burl | `wood_burl.jpg` | Side rail and mobile bottom nav; casework, dark in both modes |
 | Plum leather | `leather_plum.jpg` | Settings feature panel (dark mode), dark canvas grain |
 | Navy leather | `leather_navy.jpg` | Provider plaque (dark mode) |
-| Baize / hunter felt (solid) | — | Estimated-charge panel; follows the mode |
+| Baize / hunter felt (solid) | None | Estimated-charge panel; follows the mode |
 | Cream linen | `linen_cream.jpg` | Light-mode canvas, and the tooth on pale content panels |
 
 Rules:
 
 - **In light mode the only dark backgrounds are buttons and the rail / tab
-  bar.** Nothing else — no card, panel, well, or readout — is a dark block on
+  bar.** Nothing else (no card, panel, well, or readout) is a dark block on
   paper. `PanelSurface.isCasework` draws the line: the walnut burl is the
   cabinet the app is built into and stays dark in both modes; every other
   panel is *content* and follows the mode. A test walks all four surfaces and
@@ -106,7 +106,7 @@ use `tertiary` heather because mid-plum fills lack contrast as text.
 
 Contrast floor: body and label text ≥ 4.5:1 against its background;
 decorative micro-caps ≥ 3:1 at 700 weight. Every selected control states
-both its fill and its `on` color explicitly — never rely on defaults.
+both its fill and its `on` color explicitly; never rely on defaults.
 
 ## 4. Typography
 
@@ -127,8 +127,8 @@ tight leading, slight negative tracking); titles 16.5/14.5/13 at 700; body
 - **Field labels** are 11 px, 700, +1.3 tracking, uppercase, near-ink, with
   a 16 px brass icon.
 - Micro-type floor is **10 px**; the old 8–9 px annotations are banned.
-- Weights stop at 700 — the w800/w900 "shouting" weights are not used.
-- The version chip next to the wordmark is DM Sans **400** — the one
+- Weights stop at 700; the w800/w900 "shouting" weights are not used.
+- The version chip next to the wordmark is DM Sans **400**, the one
   deliberately light element in the top bar.
 
 ## 5. Shape, depth, spacing
@@ -145,24 +145,27 @@ tight leading, slight negative tracking); titles 16.5/14.5/13 at 700; body
 The value-setting controls are skeuomorphic console hardware, drawn in code
 (no bitmaps) so they render identically on every platform and in both modes:
 
-- **`HardwareSlider`** — a machined brushed-steel knob (knurled rim, sweep-
+- **`HardwareSlider`**: a machined brushed-steel knob (knurled rim, sweep-
   gradient face, lit plum indicator line) traveling a recessed groove. The
   traveled side fills lit plum with a soft glow; divisions show as small
   in-groove tick dots. Replaces every Material slider.
-- **`HardwareSwitch` / `HardwareSwitchTile`** — a metal handle sliding in a
+- **`HardwareSwitch` / `HardwareSwitchTile`**: a metal handle sliding in a
   recessed pill well. The traveled side lights **hunter green** (the cost
   panel's `#2A4633`) when on; off is simply the empty well. No status lamps.
   The tile's whole row is tappable.
-- **`CounterReadout`** — a recessed counter window (Fraunces numerals) that
+- **`HardwareChoiceSwitch`**: a labeled two-position control whose selected
+  option rides on a brushed-metal carriage inside a recessed well. It is used
+  for mutually exclusive hardware choices such as Auto / Manual duration.
+- **`CounterReadout`**: a recessed counter window (Fraunces numerals) that
   states a control's current value: duration (`10 s` / `AUTO`), frame rate
   (`3 fps`), safety (`2 / 4`).
-- **`consoleKeyDecoration`** — selection tiles (ratio strip, resolution pair,
+- **`consoleKeyDecoration`**: selection tiles (ratio strip, resolution pair,
   library filters) read as console keys: a faint raised gradient when idle,
   a lit plum gradient with a soft glow when selected.
 
 The grooves, wells, and readout windows are recessed into the surface they
-sit on — shadowed warm cream with ink numerals in light mode, warm
-near-black with cream numerals in dark mode — so light mode stays paper and
+sit on: shadowed warm cream with ink numerals in light mode, warm
+near-black with cream numerals in dark mode, so light mode stays paper and
 cream rather than sprouting reverse-type islands. The same rule covers media
 ghosts (empty frame, reference, and library placeholders): they follow the
 mode instead of always sitting on plum ink. Only the machined metal, the
@@ -172,12 +175,12 @@ in light mode.
 ## 6. Shell anatomy
 
 - **Top bar (64 px):** brass claw + "Clawnsole" (Fraunces 21/19) as the
-  home affordance, then the version chip (`v0.4.0`, light weight — opens
+  home affordance, then the version chip (`v0.4.0`, light weight; opens
   the update dialog), then credits pill, API-key pill (wide only), and the
   appearance menu (System default / Light / Dark).
 - **Side rail (≥ 900 px, 92 px wide):** walnut burl. App icon with a brass
   keyline on top; Create and Library; Settings alone at the bottom. The
-  decorative claw that used to float above Settings is gone — the claw now
+  decorative claw that used to float above Settings is gone; the claw now
   lives in the wordmark and as accents.
 - **Bottom nav (< 900 px):** the same burl, three labeled buttons with a
   cream-on-wood selected pill and brass count badge for working renders.
@@ -198,8 +201,8 @@ reads what you attach; `GenerationFormState.mode` is derived:
 The current inference is always visible as a quiet chip beside the
 Generate button. Layout order:
 
-1. **Direction** — the prompt field (4–10 lines).
-2. **Reference frames · optional** — thumbnail tiles (role tag, remove,
+1. **Direction**: the prompt field (4–10 lines).
+2. **Reference frames · optional**: thumbnail tiles (role tag, remove,
    URL/timing fields when relevant), three add buttons (First / Middle /
    Last, each offering *Upload an image* or *Paste an image URL*), and the
    Custom-timing pill. Provider rules are stated in one sentence under the
@@ -208,32 +211,34 @@ Generate button. Layout order:
    family) say so up front; attaching one side quietly sets the other aside
    with an explanation, and a conflicted form (via reuse or a model switch)
    warns in madder and cannot submit.
-3. **"Or start from…"** — two quiet text buttons disclose the
+3. **"Or start from…"**: two quiet text buttons disclose the
    video-continuation and draft-enhance panels. An attached source
    collapses the irrelevant sections and explains what is set aside;
    removing it restores them. Draft enhance hides prompt/frames entirely
    (the original generation owns them) and shows only Finish + Safety.
-4. **Frame** — the ratio strip: one tile per aspect ratio with a *drawn
+4. **Frame**: the ratio strip, one tile per aspect ratio with a *drawn
    glyph of the actual shape* (bounded 28×18) plus label; Auto uses the
    free-crop glyph. Selected tile fills plum.
-5. **Duration** — the knob slider is **always live**; dragging it
-   immediately sets a fixed duration (clearing Auto), and the Auto pill
-   re-enables provider choice. The counter readout beside the label states
-   the current value (`10 s`, or `AUTO`). Layouts that require fixed timing
-   disable Auto and say why.
-6. **Finish** — HD / Full HD console keys, audio and fast-draft hardware
+5. **Duration**: Manual is the default. Models that support provider-selected
+   duration show a brushed-metal Auto / Manual switch; models without that
+   capability show no Auto option. Manual shows the model- and
+   resolution-specific slider range. Auto replaces the slider with the same
+   possible-duration range in prose. The counter readout beside the label
+   states the current value (`10 s`, or `AUTO`). Layouts that require fixed
+   timing lock the switch to Manual and say why.
+6. **Finish**: HD / Full HD console keys, audio and fast-draft hardware
    switches (lit hunter green when on), safety-tolerance knob with an
    `n / 4` readout.
-7. **Estimated charge** — the stitched hunter-green panel: brass coin,
+7. **Estimated charge**: the stitched hunter-green panel with brass coin,
    credits range in Fraunces, USD in brass, balance before/after, basis
    note, rate-card link.
-8. Footer — claw + readiness line, mode chip, plum **Generate video**.
+8. Footer: claw + readiness line, mode chip, plum **Generate video**.
 
 ## 8. Library & recent work
 
 - Filter is a **segmented control** with icon + label + count per state
   (All / In progress / Ready / Needs attention). Selected = plum fill with
-  cream icon and text — both modes were verified against the old
+  cream icon and text; both modes were verified against the old
   unreadable-active-tab bug.
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
@@ -260,8 +265,8 @@ Generate button. Layout order:
 - Where the shell can install in place (packaged macOS), the dialog offers
   **Download and install**; elsewhere it links the release page (or notes
   App Store delivery on mobile).
-- Any in-place update — from this dialog **or** the macOS *Check for
-  Updates…* menu — surfaces a blocking **progress modal** with the
+- Any in-place update, from this dialog **or** the macOS *Check for
+  Updates…* menu, surfaces a blocking **progress modal** with the
   download byte count and bar, then a verifying/installing state before
   the app reopens itself. The shell streams `downloading / installing /
   error` events over `window.clawnsole` (see `electron/preload.cjs`,

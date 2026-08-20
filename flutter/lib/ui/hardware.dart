@@ -456,6 +456,179 @@ class _HardwareSwitchState extends State<HardwareSwitch>
   }
 }
 
+/// A two-position labeled switch set into a recessed console well. The
+/// selected option rides on a brushed-metal carriage instead of using a flat
+/// segmented-control fill.
+class HardwareChoiceSwitch extends StatelessWidget {
+  const HardwareChoiceSwitch({
+    required this.firstLabel,
+    required this.secondLabel,
+    required this.firstSelected,
+    required this.onChanged,
+    super.key,
+    this.firstKey,
+    this.secondKey,
+  });
+
+  final String firstLabel;
+  final String secondLabel;
+  final bool firstSelected;
+  final ValueChanged<bool>? onChanged;
+  final Key? firstKey;
+  final Key? secondKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    final brightness = Theme.of(context).brightness;
+    final dark = brightness == Brightness.dark;
+    final selectedText = dark
+        ? const Color(0xFF242025)
+        : ClawnsoleColors.plumInk;
+    return Opacity(
+      opacity: enabled ? 1 : .55,
+      child: Container(
+        width: 164,
+        height: 36,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: _well(brightness),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: Colors.black.withValues(alpha: dark ? .5 : .18),
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: _wellShadowAlpha(brightness),
+              ),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: dark ? .06 : .75),
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: <Widget>[
+            AnimatedAlign(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              alignment: firstSelected
+                  ? Alignment.centerLeft
+                  : Alignment.centerRight,
+              child: FractionallySizedBox(
+                widthFactor: .5,
+                heightFactor: 1,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: .38),
+                    ),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: dark
+                          ? const <Color>[
+                              Color(0xFFD0D1CF),
+                              Color(0xFF92959A),
+                              Color(0xFFBFC1BF),
+                            ]
+                          : const <Color>[
+                              Color(0xFFF3F4F2),
+                              Color(0xFFB6B9BD),
+                              Color(0xFFE1E2E0),
+                            ],
+                    ),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: dark ? .5 : .3),
+                        blurRadius: 3,
+                        offset: const Offset(0, 1.5),
+                      ),
+                      BoxShadow(
+                        color: context.tokens.switchOn.withValues(alpha: .35),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: _HardwareChoice(
+                    key: firstKey,
+                    label: firstLabel,
+                    selected: firstSelected,
+                    enabled: enabled,
+                    selectedText: selectedText,
+                    onTap: () => onChanged!(true),
+                  ),
+                ),
+                Expanded(
+                  child: _HardwareChoice(
+                    key: secondKey,
+                    label: secondLabel,
+                    selected: !firstSelected,
+                    enabled: enabled,
+                    selectedText: selectedText,
+                    onTap: () => onChanged!(false),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HardwareChoice extends StatelessWidget {
+  const _HardwareChoice({
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.selectedText,
+    required this.onTap,
+    super.key,
+  });
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final Color selectedText;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    enabled: enabled,
+    label: label,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(7),
+      onTap: enabled ? onTap : null,
+      child: Center(
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: .7,
+            color: selected ? selectedText : context.colors.onSurfaceVariant,
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 class _SwitchPainter extends CustomPainter {
   const _SwitchPainter({
     required this.t,
