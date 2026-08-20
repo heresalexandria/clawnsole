@@ -10,6 +10,21 @@ enum VideoMode { t2v, i2v, v2v, draftEnhance }
 
 enum GenerationOutputKind { video, image }
 
+enum GenerationPlaceholderStyle { broadcastStatic, cyclone }
+
+extension GenerationPlaceholderStyleValue on GenerationPlaceholderStyle {
+  String get label => switch (this) {
+    GenerationPlaceholderStyle.broadcastStatic => 'Static',
+    GenerationPlaceholderStyle.cyclone => 'Cyclone',
+  };
+
+  static GenerationPlaceholderStyle parse(Object? value) =>
+      GenerationPlaceholderStyle.values.firstWhere(
+        (style) => style.name == value,
+        orElse: () => GenerationPlaceholderStyle.broadcastStatic,
+      );
+}
+
 enum KeyframeRole { start, middle, end }
 
 enum MediaReferenceKind { image, video, audio }
@@ -952,6 +967,8 @@ class AppPreferences {
     this.defaultStorage = LibraryStorage.local,
     this.libraryStorageFilter = LibraryStorageFilter.all,
     this.referenceStorageFilter = LibraryStorageFilter.all,
+    this.generationPlaceholderStyle =
+        GenerationPlaceholderStyle.broadcastStatic,
     this.lastLocalGenerationFolderId,
     this.lastDriveGenerationFolderId,
   });
@@ -963,6 +980,7 @@ class AppPreferences {
   final LibraryStorage defaultStorage;
   final LibraryStorageFilter libraryStorageFilter;
   final LibraryStorageFilter referenceStorageFilter;
+  final GenerationPlaceholderStyle generationPlaceholderStyle;
   final String? lastLocalGenerationFolderId;
   final String? lastDriveGenerationFolderId;
 
@@ -974,6 +992,7 @@ class AppPreferences {
     LibraryStorage? defaultStorage,
     LibraryStorageFilter? libraryStorageFilter,
     LibraryStorageFilter? referenceStorageFilter,
+    GenerationPlaceholderStyle? generationPlaceholderStyle,
     String? lastLocalGenerationFolderId,
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
@@ -987,6 +1006,8 @@ class AppPreferences {
     libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
     referenceStorageFilter:
         referenceStorageFilter ?? this.referenceStorageFilter,
+    generationPlaceholderStyle:
+        generationPlaceholderStyle ?? this.generationPlaceholderStyle,
     lastLocalGenerationFolderId: clearLastLocalGenerationFolder
         ? null
         : lastLocalGenerationFolderId ?? this.lastLocalGenerationFolderId,
@@ -1003,6 +1024,7 @@ class AppPreferences {
     'defaultStorage': defaultStorage.name,
     'libraryStorageFilter': libraryStorageFilter.name,
     'referenceStorageFilter': referenceStorageFilter.name,
+    'generationPlaceholderStyle': generationPlaceholderStyle.name,
     if (lastLocalGenerationFolderId != null)
       'lastLocalGenerationFolderId': lastLocalGenerationFolderId,
     if (lastDriveGenerationFolderId != null)
@@ -1031,6 +1053,9 @@ class AppPreferences {
     referenceStorageFilter: LibraryStorageFilter.values.firstWhere(
       (value) => value.name == json['referenceStorageFilter'],
       orElse: () => LibraryStorageFilter.all,
+    ),
+    generationPlaceholderStyle: GenerationPlaceholderStyleValue.parse(
+      json['generationPlaceholderStyle'],
     ),
     lastLocalGenerationFolderId: json['lastLocalGenerationFolderId'] as String?,
     lastDriveGenerationFolderId: json['lastDriveGenerationFolderId'] as String?,

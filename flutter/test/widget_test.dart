@@ -404,14 +404,14 @@ void main() {
   });
 
   testWidgets(
-    'shows the cyclone video placeholder at the generation aspect ratio',
+    'shows broadcast static at the generation aspect ratio by default',
     (tester) async {
       final now = DateTime.utc(2026, 8, 19, 12);
       final item = Generation(
         localId: 'portrait-video',
         status: 'Pending',
         progress: 42,
-        prompt: 'A neon figure moving through a particle field.',
+        prompt: 'A late-night signal fighting through antenna snow.',
         mode: VideoMode.t2v,
         config: const GenerationConfig(
           aspectRatio: '9:16',
@@ -440,6 +440,10 @@ void main() {
       );
 
       expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('generation-loading-static-portrait-video')),
+        findsOneWidget,
+      );
       expect(find.text('Saved generation'), findsNothing);
       expect(find.text('RENDERING — 42%'), findsOneWidget);
       final size = tester.getSize(find.byType(GenerationLoadingPlaceholder));
@@ -449,6 +453,66 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('keeps Cyclone available as a generation placeholder', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 20, 12);
+    final item = Generation(
+      localId: 'cyclone-video',
+      status: 'Pending',
+      prompt: 'Luminous ribbons in a feedback field.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 320,
+          height: 180,
+          child: GenerationLoadingPlaceholder(
+            item: item,
+            style: GenerationPlaceholderStyle.cyclone,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('generation-loading-cyclone-cyclone-video')),
+      findsOneWidget,
+    );
+    expect(find.text('RENDERING'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('generation placeholder preference migrates safely and round-trips', () {
+    expect(
+      AppPreferences.fromJson(
+        const <String, Object?>{},
+      ).generationPlaceholderStyle,
+      GenerationPlaceholderStyle.broadcastStatic,
+    );
+    final restored = AppPreferences.fromJson(
+      const AppPreferences(
+        generationPlaceholderStyle: GenerationPlaceholderStyle.cyclone,
+      ).toJson(),
+    );
+    expect(
+      restored.generationPlaceholderStyle,
+      GenerationPlaceholderStyle.cyclone,
+    );
+  });
 
   test(
     'round-trips compact history, billing, and durable asset references',
@@ -3068,6 +3132,46 @@ void main() {
     expect(
       portrait.backgroundImage,
       const AssetImage('assets/profile-alexandria.jpg'),
+    );
+  });
+
+  testWidgets('settings persists the selected generation placeholder', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: SettingsScreen(controller: controller)),
+      ),
+    );
+
+    expect(find.text('Generation Placeholder'), findsOneWidget);
+    expect(find.text('Static'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('generation-placeholder-style')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cyclone').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      controller.generationPlaceholderStyle,
+      GenerationPlaceholderStyle.cyclone,
+    );
+    expect(
+      gateway.snapshot.preferences.generationPlaceholderStyle,
+      GenerationPlaceholderStyle.cyclone,
     );
   });
 

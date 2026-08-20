@@ -759,7 +759,10 @@ class _GenerationCardState extends State<GenerationCard> {
         if (hasMedia)
           GenerationMedia(controller: widget.controller, item: item)
         else if (isGeneratingVideo)
-          GenerationLoadingPlaceholder(item: item)
+          GenerationLoadingPlaceholder(
+            item: item,
+            style: widget.controller.generationPlaceholderStyle,
+          )
         else
           GenerationInputPreview(controller: widget.controller, item: item),
         Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
