@@ -7,7 +7,7 @@
     <meta name="application-name" content="Clawnsole">
     <meta
       name="description"
-      content="Clawnsole is an AI video generation studio for creating, comparing, and managing video across multiple providers on web, mobile, and desktop."
+      content="Clawnsole is an AI video generation studio for creating, comparing, monitoring, and organizing video across providers. Optional Google Drive access keeps your project library available across devices."
     >
     <link rel="canonical" href="https://clawnsole.app/">
     <meta property="og:site_name" content="Clawnsole">
@@ -15,7 +15,7 @@
     <meta property="og:title" content="Clawnsole | AI video generation studio">
     <meta
       property="og:description"
-      content="Create, compare, and manage AI video across multiple providers from one unified studio on web, mobile, and desktop."
+      content="Create, compare, monitor, and organize AI video across providers. Optionally connect Google Drive to keep your Clawnsole project library available across devices."
     >
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://clawnsole.app/">
@@ -34,7 +34,7 @@
     <meta name="twitter:title" content="Clawnsole | AI video generation studio">
     <meta
       name="twitter:description"
-      content="Create, compare, and manage AI video across multiple providers from one unified studio on web, mobile, and desktop."
+      content="Create, compare, monitor, and organize AI video across providers. Optionally connect Google Drive to keep your Clawnsole project library available across devices."
     >
     <meta
       name="twitter:image"
@@ -62,9 +62,17 @@
         "@type": "SoftwareApplication",
         "name": "Clawnsole",
         "url": "https://clawnsole.app/",
+        "image": "https://clawnsole.app/assets/clawnsole-app-icon.png",
+        "sameAs": "https://github.com/heresalexandria/clawnsole",
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "Web, iOS, Android, macOS, Windows",
-        "description": "Clawnsole is an AI video generation studio for creating, comparing, and managing video across multiple providers on web, mobile, and desktop."
+        "description": "Clawnsole is an AI video generation studio for creating, comparing, monitoring, and organizing video across providers. Optional Google Drive access keeps a user's Clawnsole project library available across devices.",
+        "featureList": [
+          "Text-to-video and image-to-video generation across multiple providers",
+          "Model and estimated-cost comparison",
+          "Generation monitoring and project organization",
+          "Optional Google Drive project-library sync across devices"
+        ]
       }
     </script>
   </head>
@@ -83,6 +91,7 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="#features">Features</a>
+        <a href="#google-drive">Drive access</a>
         <a href="#screenshots">Screenshots</a>
         <a href="privacy/">Privacy</a>
         <a href="tos/">Terms</a>
@@ -117,9 +126,10 @@
           <p class="eyebrow">AI video generation studio</p>
           <h1 id="hero-title">Clawnsole</h1>
           <p class="hero-lede">
-            Clawnsole is an AI video generation studio for creating, comparing,
-            and managing video across multiple providers on web, mobile, and
-            desktop.
+            Clawnsole is an AI video generation studio. Create video from text,
+            images, or existing clips; compare provider models and estimated
+            costs; monitor renders; and organize completed work from web,
+            mobile, or desktop.
           </p>
           <p class="provider-support">
             Use your own provider keys in one consistent workspace. Connect
@@ -168,6 +178,62 @@
               height="2732"
             >
           </div>
+        </div>
+      </section>
+
+      <section class="drive-section section-shell" id="google-drive" aria-labelledby="drive-title">
+        <div class="drive-heading">
+          <div>
+            <p class="eyebrow">Optional Google Drive connection</p>
+            <h2 id="drive-title">Why Clawnsole asks for Google Drive access</h2>
+          </div>
+          <p>
+            Clawnsole uses Google Drive only when you choose to connect it. The
+            connection gives you user-controlled project storage and lets the
+            same Clawnsole library remain available across your devices.
+          </p>
+        </div>
+
+        <div class="drive-grid">
+          <article>
+            <span class="feature-number">01</span>
+            <h3>What Drive enables</h3>
+            <p>
+              Clawnsole creates an app-owned Drive folder so you can reopen
+              generations, references, folders, and tags on another device and
+              continue the same project workflow.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">02</span>
+            <h3>What Clawnsole stores</h3>
+            <p>
+              The folder can contain prompts, generation settings and history,
+              saved-reference metadata, retained inputs, generated media,
+              project folders, tags, and non-secret preferences.
+            </p>
+          </article>
+          <article>
+            <span class="feature-number">03</span>
+            <h3>What access is limited to</h3>
+            <p>
+              Clawnsole requests the narrow <code>drive.file</code> permission.
+              It can access files it creates or files you explicitly make
+              available to it, not the rest of your Google Drive.
+            </p>
+          </article>
+        </div>
+
+        <div class="drive-disclosure">
+          <p>
+            <strong>Your provider API keys and Google OAuth tokens are never
+            stored in Drive.</strong> Drive content is sent to a generation
+            provider only when you deliberately select that content as an input.
+            You can disconnect Drive or delete Clawnsole's Drive data at any time.
+          </p>
+          <a class="button button-secondary" href="privacy/#drive-data">
+            Read how Clawnsole uses Drive data
+          </a>
         </div>
       </section>
 
