@@ -5,9 +5,8 @@ Effective: August 20, 2026
 Clawnsole is a unified client for third-party video generation services across
 web, mobile, and desktop. The native desktop and mobile apps contain no
 analytics or advertising SDKs. The splash page at `clawnsole.app` uses Google
-Analytics only after a visitor allows optional analytics, as described below.
-The developer does not operate an account system or cloud database for project
-data.
+Analytics with region-aware consent controls, as described below. The developer
+does not operate an account system or cloud database for project data.
 
 ## Data stored on your device
 
@@ -103,17 +102,25 @@ visits and interactions, evaluate site performance, and decide what to improve.
 The Analytics tag is not present on the privacy policy, terms of use, hosted web
 app, or native macOS, Windows, iOS, and Android apps.
 
-On the splash page, Google Analytics is off by default. The Google tag is not
-loaded and no data is sent to Google Analytics unless you select **Allow
-analytics**. Selecting **Decline** leaves the tag unloaded. Clawnsole stores your
-choice in your browser's localStorage so it can be honored on later visits. You
-can change the choice through **Analytics choices** in the splash-page footer;
-withdrawing consent disables Analytics and removes accessible Analytics cookies.
-The static page has no first-party country signal, so it presents these controls
-to every visitor rather than sending an IP address to a separate geolocation
-service.
+The splash page uses the time zone reported by your browser through JavaScript's
+`Intl.DateTimeFormat` API as a best-effort estimate of whether you are in the
+European Economic Area, United Kingdom, or Switzerland. This check happens in
+your browser and is not sent to Clawnsole or a separate IP geolocation service.
+Because a device time zone can be changed, unavailable, or different from your
+actual location, it is not a precise country determination. If the time zone is
+unavailable or ambiguous, Clawnsole shows the consent controls.
 
-When you allow analytics, Google Analytics may process the splash-page URL,
+When the browser-reported time zone maps to one of those regions, Google
+Analytics is off by default. The Google tag is not loaded and no data is sent to
+Google Analytics unless you select **Allow analytics**. In other detected
+regions, Analytics loads automatically unless you previously selected
+**Decline**. Clawnsole stores an explicit choice in your browser's localStorage
+so it can be honored on later visits. Visitors everywhere can open **Analytics
+choices** in the splash-page footer. Withdrawing consent disables Analytics,
+removes accessible Analytics cookies, and prevents it from loading on later
+visits in that browser.
+
+When Analytics is enabled, Google Analytics may process the splash-page URL,
 referral information, interactions, session statistics, approximate location,
 browser and device information, IP addresses for processing and coarse
 location, and identifiers stored in first-party cookies. Google processes this
@@ -136,9 +143,9 @@ controls or Google's
 The native Clawnsole apps do not send the developer your API keys, prompts,
 reference media, generated media, generation history, contacts, precise
 location, advertising identifiers, or analytics events. The developer can
-access aggregate and event-level splash-page usage reports for visitors who
-allow Google Analytics, as described above. Clawnsole does not use data for
-advertising or cross-app tracking.
+access aggregate and event-level splash-page usage reports for visits where
+Google Analytics is enabled, as described above. Clawnsole does not use data
+for advertising or cross-app tracking.
 
 Apple, Google, GitHub, the selected generation provider, any underlying model
 provider, and the platform through which you install or use Clawnsole may

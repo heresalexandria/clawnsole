@@ -1,8 +1,57 @@
 (() => {
-  // GitHub Pages exposes no trustworthy first-party country signal, so the
-  // consent-first behavior is intentionally consistent for every visitor.
   const measurementId = 'G-1CKFFHE5GY';
   const storageKey = 'clawnsole-site-analytics-consent-v1';
+  // Intl exposes a device time zone, not a verified location. These zones are
+  // a best-effort match for the EEA, UK, and Switzerland without sending a
+  // visitor's IP address to another geolocation service.
+  const consentRequiredTimeZones = new Set([
+    'Africa/Ceuta',
+    'America/Cayenne',
+    'America/Guadeloupe',
+    'America/Marigot',
+    'America/Martinique',
+    'Asia/Famagusta',
+    'Asia/Nicosia',
+    'Atlantic/Azores',
+    'Atlantic/Canary',
+    'Atlantic/Madeira',
+    'Atlantic/Reykjavik',
+    'Europe/Amsterdam',
+    'Europe/Athens',
+    'Europe/Berlin',
+    'Europe/Bratislava',
+    'Europe/Brussels',
+    'Europe/Bucharest',
+    'Europe/Budapest',
+    'Europe/Busingen',
+    'Europe/Copenhagen',
+    'Europe/Dublin',
+    'Europe/Helsinki',
+    'Europe/Lisbon',
+    'Europe/Ljubljana',
+    'Europe/London',
+    'Europe/Luxembourg',
+    'Europe/Madrid',
+    'Europe/Malta',
+    'Europe/Mariehamn',
+    'Europe/Nicosia',
+    'Europe/Oslo',
+    'Europe/Paris',
+    'Europe/Prague',
+    'Europe/Riga',
+    'Europe/Rome',
+    'Europe/Sofia',
+    'Europe/Stockholm',
+    'Europe/Tallinn',
+    'Europe/Vaduz',
+    'Europe/Vienna',
+    'Europe/Vilnius',
+    'Europe/Warsaw',
+    'Europe/Zagreb',
+    'Europe/Zurich',
+    'Indian/Mayotte',
+    'Indian/Reunion',
+  ]);
   const banner = document.querySelector('[data-analytics-consent]');
   const allowButton = banner?.querySelector('[data-analytics-allow]');
   const declineButton = banner?.querySelector('[data-analytics-decline]');
@@ -34,6 +83,18 @@
     try {
       localStorage.setItem(storageKey, choice);
     } catch (_) {}
+  };
+
+  const browserRequiresConsent = () => {
+    try {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!timeZone || /^(Etc\/)?(GMT|UTC)([+-]\d+)?$/.test(timeZone)) {
+        return true;
+      }
+      return consentRequiredTimeZones.has(timeZone);
+    } catch (_) {
+      return true;
+    }
   };
 
   const ensureGoogleTagQueue = () => {
@@ -87,9 +148,8 @@
     returnFocusTo = null;
   };
 
-  const showBanner = ({ focus = false } = {}) => {
-    const hasChoice = readChoice() !== null;
-    closeButton.hidden = !hasChoice;
+  const showBanner = ({ focus = false, dismissible = false } = {}) => {
+    closeButton.hidden = !dismissible;
     banner.hidden = false;
     if (focus) declineButton.focus();
   };
@@ -116,14 +176,15 @@
   closeButton.addEventListener('click', hideBanner);
   manageButton?.addEventListener('click', () => {
     returnFocusTo = manageButton;
-    showBanner({ focus: true });
+    showBanner({ focus: true, dismissible: true });
   });
 
   banner.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && readChoice() !== null) hideBanner();
+    if (event.key === 'Escape' && !closeButton.hidden) hideBanner();
   });
 
   const choice = readChoice();
   if (choice === 'granted') loadAnalytics();
-  else if (choice === null) showBanner();
+  else if (choice === null && browserRequiresConsent()) showBanner();
+  else if (choice === null) loadAnalytics();
 })();

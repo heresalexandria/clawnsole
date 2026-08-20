@@ -76,10 +76,10 @@ reject content, retain data, experience outages, or discontinue an API without
 notice.
 
 The splash page at `clawnsole.app` uses Google Analytics for audience and
-product measurement only after a visitor allows optional analytics. The
-[privacy policy](PRIVACY.md) explains the splash-page data handled by Google and
-how this differs from the rest of the website and the apps, which contain no
-Analytics tag or SDK.
+product measurement with region-aware consent controls and a manual opt-out.
+The [privacy policy](PRIVACY.md) explains the splash-page data handled by Google
+and how this differs from the rest of the website and the apps, which contain
+no Analytics tag or SDK.
 
 Your use of a third-party service is a relationship between you and that
 service. Its terms and privacy policy apply. Atlas Cloud may send request data

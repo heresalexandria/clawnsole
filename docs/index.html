@@ -56,7 +56,7 @@
       } catch (_) {}
     </script>
     <script src="assets/theme.js" defer></script>
-    <script src="assets/analytics-consent.js" defer></script>
+    <script src="assets/analytics-consent.js?v=region-gate" defer></script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -309,9 +309,9 @@
           <p>
             Clawnsole does not require a developer-operated account or cloud
             database. Native builds contain no analytics or ads. This splash
-            page uses Google Analytics only after you allow optional analytics,
-            as explained in the privacy policy. Your provider keys, prompts,
-            media, and project history are not sent to Google Analytics.
+            page uses Google Analytics with region-aware consent controls, as
+            explained in the privacy policy. Your provider keys, prompts, media,
+            and project history are not sent to Google Analytics.
           </p>
           <a class="button button-light" href="privacy/">How privacy works</a>
         </div>
@@ -430,7 +430,8 @@
         <h2 id="analytics-consent-title">Help improve Clawnsole</h2>
         <p id="analytics-consent-description">
           We use Google Analytics on this splash page to understand visits and
-          improve the site. Analytics stays off unless you allow it.
+          improve the site. Where consent is required, Analytics stays off
+          unless you allow it. You can decline or change your choice at any time.
           <a href="privacy/#site-analytics">See the privacy policy.</a>
         </p>
       </div>
