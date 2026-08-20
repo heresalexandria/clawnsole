@@ -158,7 +158,8 @@ nav {
 }
 
 nav a,
-.site-footer a {
+.site-footer a,
+.site-footer .footer-link {
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
@@ -169,7 +170,9 @@ nav a,
 nav a:hover,
 nav a:focus-visible,
 .site-footer a:hover,
-.site-footer a:focus-visible {
+.site-footer a:focus-visible,
+.site-footer .footer-link:hover,
+.site-footer .footer-link:focus-visible {
   color: var(--plum);
 }
 
@@ -763,6 +766,118 @@ nav a:focus-visible,
   justify-content: flex-end;
 }
 
+.site-footer .footer-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.analytics-consent {
+  position: fixed;
+  z-index: 90;
+  right: 24px;
+  bottom: 24px;
+  left: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 30px;
+  align-items: end;
+  width: min(920px, calc(100% - 48px));
+  max-height: calc(100vh - 48px);
+  margin-inline: auto;
+  padding: 28px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--cream);
+  box-shadow: var(--shadow);
+}
+
+.analytics-consent[hidden],
+.analytics-consent-close[hidden] {
+  display: none;
+}
+
+.analytics-consent-copy {
+  max-width: 620px;
+}
+
+.analytics-consent .eyebrow {
+  margin-bottom: 7px;
+}
+
+.analytics-consent h2 {
+  margin-bottom: 10px;
+  font-size: clamp(1.65rem, 3vw, 2.25rem);
+}
+
+.analytics-consent-copy > p:last-child {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.analytics-consent-copy a {
+  color: var(--plum);
+  font-weight: 700;
+}
+
+.analytics-consent-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.analytics-consent-button {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--plum-action);
+  border-radius: 9px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.analytics-consent-allow {
+  color: white;
+  background: var(--plum-action);
+}
+
+.analytics-consent-decline {
+  color: var(--plum);
+  background: transparent;
+}
+
+.analytics-consent-button:hover,
+.analytics-consent-button:focus-visible,
+.analytics-consent-close:hover,
+.analytics-consent-close:focus-visible {
+  outline: 2px solid var(--plum);
+  outline-offset: 2px;
+}
+
+.analytics-consent-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .privacy-page {
   background:
     linear-gradient(var(--policy-wash-start), var(--policy-wash-end)),
@@ -1095,6 +1210,25 @@ nav a:focus-visible,
 
   .site-footer div {
     justify-content: flex-start;
+  }
+
+  .analytics-consent {
+    right: 17px;
+    bottom: 17px;
+    left: 17px;
+    grid-template-columns: 1fr;
+    gap: 22px;
+    width: calc(100% - 34px);
+    max-height: calc(100vh - 34px);
+    padding: 24px;
+  }
+
+  .analytics-consent-actions {
+    justify-content: flex-start;
+  }
+
+  .analytics-consent-button {
+    flex: 1 1 150px;
   }
 
   .policy-hero {
