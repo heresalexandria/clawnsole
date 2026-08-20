@@ -1438,6 +1438,23 @@ class CreditEstimate {
   final String basis;
 }
 
+class VideoSourceMetadata {
+  const VideoSourceMetadata({
+    required this.width,
+    required this.height,
+    required this.durationSeconds,
+  });
+
+  final int width;
+  final int height;
+  final double durationSeconds;
+
+  bool get isUsable => width > 0 && height > 0 && durationSeconds > 0;
+
+  String get signature =>
+      '$width×$height@${durationSeconds.toStringAsFixed(3)}';
+}
+
 class ProviderAccountStatus {
   const ProviderAccountStatus({
     required this.provider,
@@ -1587,6 +1604,9 @@ class CostEstimate {
     this.providerUnitsMinimum,
     this.providerUnitsMaximum,
     this.providerUnitLabel,
+    this.rateUsd,
+    this.rateUnit,
+    this.calculation,
   });
 
   final double minimumUsd;
@@ -1595,6 +1615,21 @@ class CostEstimate {
   final double? providerUnitsMinimum;
   final double? providerUnitsMaximum;
   final String? providerUnitLabel;
+  final double? rateUsd;
+  final String? rateUnit;
+  final String? calculation;
+
+  CostEstimate withPricingContext(CostEstimate fallback) => CostEstimate(
+    minimumUsd: minimumUsd,
+    maximumUsd: maximumUsd,
+    basis: basis,
+    providerUnitsMinimum: providerUnitsMinimum,
+    providerUnitsMaximum: providerUnitsMaximum,
+    providerUnitLabel: providerUnitLabel,
+    rateUsd: rateUsd ?? fallback.rateUsd,
+    rateUnit: rateUnit ?? fallback.rateUnit,
+    calculation: calculation ?? fallback.calculation,
+  );
 }
 
 class GenerationSubmission {

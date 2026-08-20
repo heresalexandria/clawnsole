@@ -174,6 +174,7 @@ class GenerationFormState {
   PickedAsset? videoAsset;
   String videoUrl = '';
   Uint8List? videoThumbnailBytes;
+  VideoSourceMetadata? videoMetadata;
   PickedAsset? draftAsset;
   String draftUrl = '';
   bool upscale = false;
@@ -780,17 +781,19 @@ class AppController extends ChangeNotifier {
   }
 
   CostEstimate get currentEstimate {
-    if (_liveEstimateRevision == _estimateRevision && _liveEstimate != null) {
-      return _liveEstimate!;
-    }
-    return estimateCost(
+    final fallback = estimateCost(
       selectedProviderId,
       selectedModel.id,
       form.mode,
       currentConfig,
       generations,
       providerPrices[selectedProviderId] ?? const <ProviderModelPrice>[],
+      form.videoMetadata,
     );
+    if (_liveEstimateRevision == _estimateRevision && _liveEstimate != null) {
+      return _liveEstimate!.withPricingContext(fallback);
+    }
+    return fallback;
   }
 
   Future<void> initialize() async {
@@ -1553,6 +1556,7 @@ class AppController extends ChangeNotifier {
       }
       _selectCompatibleModel();
       _normalizeFormForModel();
+      _invalidateProviderEstimate();
       notifyListeners();
     } on Object catch (error) {
       showNotice(_message(error));
@@ -1812,6 +1816,7 @@ class AppController extends ChangeNotifier {
     form.referenceTask = task;
     if (task != MediaReferenceTask.reference) form.aspectRatio = 'auto';
     if (task == MediaReferenceTask.edit) form.autoDuration = true;
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1853,6 +1858,7 @@ class AppController extends ChangeNotifier {
     if (selectedModel.supportsFrameRate) {
       form.frameRate = form.frameRate.clamp(1, 6);
     }
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1887,6 +1893,7 @@ class AppController extends ChangeNotifier {
     ];
     _selectCompatibleModel();
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1933,6 +1940,7 @@ class AppController extends ChangeNotifier {
         clearThumbnailBytes: true,
       );
     }).toList();
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1953,9 +1961,22 @@ class AppController extends ChangeNotifier {
     form.videoThumbnailBytes ??= bytes;
   }
 
+  void rememberVideoSourceMetadata(VideoSourceMetadata metadata) {
+    if (!metadata.isUsable ||
+        form.videoMetadata?.signature == metadata.signature) {
+      return;
+    }
+    form.videoMetadata = metadata;
+    _invalidateProviderEstimate();
+    notifyListeners();
+  }
+
   void updateVideoSourceUrl(String source) {
     updateForm((value) {
-      if (value.videoUrl != source) value.videoThumbnailBytes = null;
+      if (value.videoUrl != source) {
+        value.videoThumbnailBytes = null;
+        value.videoMetadata = null;
+      }
       value.videoUrl = source;
     });
   }
@@ -1980,6 +2001,7 @@ class AppController extends ChangeNotifier {
     form.references = form.references.where((item) => item.id != id).toList();
     _selectCompatibleModel();
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -1997,6 +2019,7 @@ class AppController extends ChangeNotifier {
         return frame;
       }).toList();
     }
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -2056,6 +2079,7 @@ class AppController extends ChangeNotifier {
         seconds: seconds,
       );
     }).toList();
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -2063,6 +2087,7 @@ class AppController extends ChangeNotifier {
     form.keyframes = form.keyframes.where((frame) => frame.id != id).toList();
     _selectCompatibleModel();
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -2073,6 +2098,7 @@ class AppController extends ChangeNotifier {
         updateForm((value) {
           value.videoAsset = asset;
           value.videoThumbnailBytes = null;
+          value.videoMetadata = null;
         });
       }
     } on Object catch (error) {
@@ -2224,6 +2250,21 @@ class AppController extends ChangeNotifier {
         if (source == null ||
             (source.scheme != 'http' && source.scheme != 'https')) {
           return 'Use an HTTP(S) URL for the video you want to upscale.';
+        }
+      }
+      final metadata = form.videoMetadata;
+      if (metadata != null) {
+        if (metadata.durationSeconds > 20.001) {
+          return 'FLUX Video Upscale accepts source clips up to 20 seconds.';
+        }
+        final longest = metadata.width > metadata.height
+            ? metadata.width
+            : metadata.height;
+        final shortest = metadata.width < metadata.height
+            ? metadata.width
+            : metadata.height;
+        if (longest > 2560 || shortest > 1440) {
+          return 'FLUX Video Upscale accepts source resolution up to 2560×1440.';
         }
       }
       if (form.upscaleFactor < 1.5 || form.upscaleFactor > 3) {
@@ -2736,6 +2777,7 @@ class AppController extends ChangeNotifier {
           ? await (gateway as ProviderGateway).listProviderModels(provider)
           : publishedProviderPrices(provider);
       if (models.isNotEmpty) providerPrices[provider] = models;
+      _invalidateProviderEstimate();
       notifyListeners();
     } on Object {
       // Published prices remain visible if a live catalog is unavailable.
@@ -2743,16 +2785,37 @@ class AppController extends ChangeNotifier {
   }
 
   void _invalidateProviderEstimate() {
-    final signature = <Object?>[
-      selectedProviderId,
-      selectedModel.id,
-      form.mode,
-      form.duration,
-      form.resolution,
-      form.generateAudio,
-      form.upscaleFactor,
-      form.upscaleCreativity,
-    ].join('|');
+    final signature = jsonEncode(<String, Object?>{
+      'provider': selectedProviderId,
+      'model': selectedModel.id,
+      'mode': form.mode.wireValue,
+      'prompt': form.prompt.trim(),
+      'aspectRatio': form.aspectRatio,
+      'duration': form.duration,
+      'resolution': form.resolution,
+      'generateAudio': form.generateAudio,
+      'safetyTolerance': form.safetyTolerance,
+      'draft': form.draft,
+      'exactTiming': form.exactTiming,
+      'referenceTask': form.referenceTask.name,
+      'references': form.references
+          .map((reference) => reference.kind.name)
+          .toList(),
+      'keyframes': form.keyframes
+          .map(
+            (frame) => <String, Object?>{
+              'role': frame.role.name,
+              if (form.usesTimedKeyframes) 'seconds': frame.seconds,
+            },
+          )
+          .toList(),
+      'frameRate': form.frameRate,
+      'upscaleFactor': form.upscaleFactor,
+      'upscaleCreativity': form.upscaleCreativity,
+      'hasVideoSource':
+          form.videoAsset != null || form.videoUrl.trim().isNotEmpty,
+      'videoMetadata': form.videoMetadata?.signature,
+    });
     if (_estimateSignature == signature) return;
     _estimateSignature = signature;
     _estimateTimer?.cancel();
@@ -2776,6 +2839,32 @@ class AppController extends ChangeNotifier {
       'duration': form.duration,
       'resolution': form.resolution,
       'generate_audio': form.generateAudio,
+      'safety_tolerance': form.safetyTolerance,
+      'mode': form.mode.wireValue,
+      'draft': form.draft,
+      'exact_timing': form.exactTiming,
+      'frame_rate': form.frameRate,
+      'reference_task': form.referenceTask.name,
+      'reference_count': form.references.length,
+      'reference_types': form.references
+          .map((reference) => reference.kind.name)
+          .toList(),
+      'keyframe_count': form.keyframes.length,
+      'keyframes': form.keyframes
+          .map(
+            (frame) => <String, Object?>{
+              'role': frame.role.name,
+              if (form.usesTimedKeyframes) 'seconds': frame.seconds,
+            },
+          )
+          .toList(),
+      'upscale_factor': form.upscaleFactor,
+      'creativity': form.upscaleCreativity,
+      if (form.videoMetadata != null) ...<String, Object?>{
+        'source_width': form.videoMetadata!.width,
+        'source_height': form.videoMetadata!.height,
+        'source_duration': form.videoMetadata!.durationSeconds,
+      },
     };
     try {
       final estimate = await (gateway as ProviderGateway).quoteProviderCost(
@@ -3162,6 +3251,7 @@ class AppController extends ChangeNotifier {
           ? item.config.source!.value
           : ''
       ..videoThumbnailBytes = sourceThumbnailBytes
+      ..videoMetadata = null
       ..draftAsset = item.mode == VideoMode.draftEnhance ? retainedSource : null
       ..draftUrl =
           item.mode == VideoMode.draftEnhance &&
@@ -3170,6 +3260,7 @@ class AppController extends ChangeNotifier {
           : '';
     _selectCompatibleModel();
     _normalizeFormForModel();
+    _invalidateProviderEstimate();
     formRevision += 1;
     notifyListeners();
   }
@@ -3200,6 +3291,7 @@ class AppController extends ChangeNotifier {
       ..draft = false
       ..draftAsset = null
       ..draftUrl = item.draftCacheUrl!;
+    _invalidateProviderEstimate();
     formRevision += 1;
     notifyListeners();
     unawaited(navigate(AppSection.create));

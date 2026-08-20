@@ -6,11 +6,14 @@ import 'package:flutter/material.dart';
 import '../core/gateway.dart';
 import '../core/models.dart';
 import 'video_frame_loader.dart';
+import 'video_metadata_loader.dart';
 
 final Map<String, Future<Uint8List>> _assetImageJobs =
     <String, Future<Uint8List>>{};
 final Map<String, Future<Uint8List?>> _videoThumbnailJobs =
     <String, Future<Uint8List?>>{};
+final Map<String, Future<VideoSourceMetadata?>> _videoMetadataJobs =
+    <String, Future<VideoSourceMetadata?>>{};
 
 /// A single preview surface for picked, retained, Drive, and remote media.
 ///
@@ -30,7 +33,9 @@ class MediaThumbnail extends StatefulWidget {
     this.source,
     this.fit = BoxFit.cover,
     this.frameLoader,
+    this.metadataLoader,
     this.onThumbnail,
+    this.onVideoMetadata,
     this.semanticsLabel,
   });
 
@@ -45,7 +50,9 @@ class MediaThumbnail extends StatefulWidget {
   final String? source;
   final BoxFit fit;
   final VideoFrameLoader? frameLoader;
+  final VideoMetadataLoader? metadataLoader;
   final ValueChanged<Uint8List>? onThumbnail;
+  final ValueChanged<VideoSourceMetadata>? onVideoMetadata;
   final String? semanticsLabel;
 
   @override
@@ -104,6 +111,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       _imageBytes = _readAsset(widget.reference!);
     } else if (widget.kind == MediaReferenceKind.video) {
       _videoThumbnail = _loadVideoThumbnail();
+      if (widget.onVideoMetadata != null) unawaited(_loadVideoMetadata());
     }
   }
 
@@ -172,6 +180,35 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     );
   }
 
+  Future<void> _loadVideoMetadata() async {
+    final uri = await _videoUri();
+    if (uri == null) return;
+    final key = _fingerprint;
+    var job = _videoMetadataJobs[key];
+    if (job == null) {
+      late final Future<VideoSourceMetadata?> created;
+      created = (widget.metadataLoader ?? loadVideoMetadata)(uri)
+          .then((metadata) {
+            if (metadata == null &&
+                identical(_videoMetadataJobs[key], created)) {
+              _videoMetadataJobs.remove(key);
+            }
+            return metadata;
+          })
+          .catchError((Object error) {
+            if (identical(_videoMetadataJobs[key], created)) {
+              _videoMetadataJobs.remove(key);
+            }
+            return null;
+          });
+      _videoMetadataJobs[key] = created;
+      job = created;
+    }
+    final metadata = await job;
+    if (!mounted || metadata == null) return;
+    widget.onVideoMetadata?.call(metadata);
+  }
+
   Future<Uri?> _videoUri() async {
     final path = widget.localPath?.trim() ?? '';
     if (path.isNotEmpty) {
@@ -191,7 +228,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     final remote = Uri.tryParse(source);
     if (remote?.scheme == 'https') return widget.gateway.mediaUri(source);
     final bytes = widget.bytes;
-    if (kIsWeb && bytes != null && bytes.isNotEmpty) {
+    if (bytes != null && bytes.isNotEmpty) {
       return Uri.parse(
         'data:${widget.mimeType ?? 'video/mp4'};base64,${base64Encode(bytes)}',
       );
