@@ -547,7 +547,11 @@ class _PricingTable extends StatelessWidget {
                       for (final seconds in const <int>[10, 15, 20, 30])
                         DataCell(
                           Text(
-                            model.hasPriceFor(seconds)
+                            model.pricingUnit == 'per-megapixel-second'
+                                ? seconds == 10
+                                      ? '${_usd(model.usdPerSecond)}/MP·s'
+                                      : '—'
+                                : model.hasPriceFor(seconds)
                                 ? _usd(model.priceFor(seconds))
                                 : '—',
                           ),

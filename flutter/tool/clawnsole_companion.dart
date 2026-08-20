@@ -1232,10 +1232,15 @@ class CompanionApp {
       }
       return config.copyWith(keyframes: frames, references: references);
     }
-    if (mode == 'v2v' || mode == 'draft_enhance') {
+    if (mode == 'v2v' ||
+        mode == 'draft_enhance' ||
+        input.containsKey('input_video')) {
       return config.copyWith(
         source: await _store.persistSource(
-          input[mode == 'v2v' ? 'start_video' : 'draft_cache']?.toString() ??
+          (input.containsKey('input_video')
+                      ? input['input_video']
+                      : input[mode == 'v2v' ? 'start_video' : 'draft_cache'])
+                  ?.toString() ??
               '',
           label: config.sourceLabel ?? 'Clawnsole source',
           retained: config.source,

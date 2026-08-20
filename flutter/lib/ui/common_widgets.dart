@@ -494,6 +494,7 @@ class GenerationSpecChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final config = item.config;
+    final upscaling = item.mode == VideoMode.upscale;
     return Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -508,18 +509,19 @@ class GenerationSpecChips extends StatelessWidget {
               ? 'Retired frame animation'
               : item.mode.label,
         ),
-        if (config.referenceTask != MediaReferenceTask.reference)
+        if (!upscaling && config.referenceTask != MediaReferenceTask.reference)
           _SpecChip(
             icon: config.referenceTask == MediaReferenceTask.edit
                 ? Icons.auto_fix_high_rounded
                 : Icons.more_time_rounded,
             label: config.referenceTask.label,
           ),
-        _SpecChip(
-          label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
-          leading: _MiniRatioGlyph(ratio: config.aspectRatio),
-        ),
-        if (!item.isImage)
+        if (!upscaling)
+          _SpecChip(
+            label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
+            leading: _MiniRatioGlyph(ratio: config.aspectRatio),
+          ),
+        if (!item.isImage && !upscaling)
           _SpecChip(
             icon: Icons.timelapse_rounded,
             label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
@@ -529,14 +531,32 @@ class GenerationSpecChips extends StatelessWidget {
             icon: Icons.animation_rounded,
             label: '${config.frameRate} fps',
           ),
-        _SpecChip(
-          label: switch (config.resolution) {
-            'fhd' => item.provider == 'apple-local' ? '768 px' : 'Full HD',
-            'qhd' => '1440p',
-            '4k' => '4K',
-            _ => item.provider == 'apple-local' ? '512 px' : 'HD',
-          },
-        ),
+        if (!upscaling)
+          _SpecChip(
+            label: switch (config.resolution) {
+              'fhd' => item.provider == 'apple-local' ? '768 px' : 'Full HD',
+              'qhd' => '1440p',
+              '4k' => '4K',
+              _ => item.provider == 'apple-local' ? '512 px' : 'HD',
+            },
+          ),
+        if (upscaling) ...<Widget>[
+          _SpecChip(
+            icon: Icons.zoom_out_map_rounded,
+            label:
+                '${config.upscaleFactor == config.upscaleFactor.roundToDouble() ? config.upscaleFactor.toStringAsFixed(0) : config.upscaleFactor.toStringAsFixed(1)}×',
+          ),
+          _SpecChip(
+            icon: config.upscaleCreativity == 0
+                ? Icons.center_focus_strong_rounded
+                : Icons.auto_awesome_rounded,
+            label: config.upscaleCreativity == 0 ? 'Precise' : 'Creative',
+          ),
+          const _SpecChip(
+            icon: Icons.graphic_eq_rounded,
+            label: 'Audio preserved',
+          ),
+        ],
         if (config.generateAudio)
           const _SpecChip(icon: Icons.graphic_eq_rounded, label: 'Audio'),
         if (config.draft)
@@ -847,13 +867,15 @@ class _SourceReferenceChip extends StatelessWidget {
           children: <Widget>[
             SizedBox.square(
               dimension: 42,
-              child: mode == VideoMode.v2v
+              child: mode == VideoMode.v2v || mode == VideoMode.upscale
                   ? MediaThumbnail(
                       gateway: controller.gateway,
                       kind: MediaReferenceKind.video,
                       reference: source,
                       thumbnailReference: thumbnailAsset,
-                      semanticsLabel: 'Starting video thumbnail',
+                      semanticsLabel: mode == VideoMode.upscale
+                          ? 'Video to upscale thumbnail'
+                          : 'Starting video thumbnail',
                       onThumbnail: (bytes) => unawaited(
                         controller.cacheGenerationInputPreview(
                           item,
@@ -1049,9 +1071,11 @@ Future<void> showSourceReferenceSheet(
 ) => showDialog<void>(
   context: context,
   builder: (context) => AlertDialog(
-    title: Text(
-      mode == VideoMode.draftEnhance ? 'Draft cache' : 'Starting video',
-    ),
+    title: Text(switch (mode) {
+      VideoMode.draftEnhance => 'Draft cache',
+      VideoMode.upscale => 'Video to upscale',
+      _ => 'Starting video',
+    }),
     content: Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2022,7 +2046,7 @@ class ActivityCard extends StatelessWidget {
                     Expanded(
                       child: GenerationPrompt(
                         controller: controller,
-                        prompt: item.prompt,
+                        prompt: item.displayPrompt,
                         collapsedLines: 2,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),

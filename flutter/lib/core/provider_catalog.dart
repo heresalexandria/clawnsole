@@ -132,6 +132,8 @@ class VideoModelDefinition {
       maxVideoReferences > 0 ||
       maxAudioReferences > 0;
 
+  bool get isUpscaler => modes.length == 1 && modes.single == VideoMode.upscale;
+
   int maxDurationFor(String resolution, {bool withImageGuidance = false}) {
     final resolutionMaximum =
         maxDurationByResolution[resolution] ?? maxDuration;
@@ -322,7 +324,8 @@ const bflProvider = VideoProviderDefinition(
   id: 'bfl',
   name: 'Black Forest Labs',
   shortName: 'BFL',
-  description: 'Multimodal video with synchronized audio and keyframe control.',
+  description:
+      'Multimodal video generation plus precise and creative finishing tools.',
   consoleUrl: 'https://dashboard.bfl.ai',
   docsUrl: 'https://docs.bfl.ai/flux_3/flux3_video',
   pricingUrl: 'https://bfl.ai/pricing',
@@ -333,7 +336,12 @@ const bflProvider = VideoProviderDefinition(
       canonicalModelId: 'flux-3',
       label: 'FLUX 3',
       description: 'Multimodal generation, continuation, and draft enhance.',
-      modes: VideoMode.values,
+      modes: <VideoMode>[
+        VideoMode.t2v,
+        VideoMode.i2v,
+        VideoMode.v2v,
+        VideoMode.draftEnhance,
+      ],
       aspectRatios: _wideRatios,
       resolutions: <VideoResolutionDefinition>[_hd, _fhd],
       minDuration: 5,
@@ -347,6 +355,28 @@ const bflProvider = VideoProviderDefinition(
       supportsAutoDuration: true,
       supportsDraft: true,
       supportsTimedKeyframes: true,
+    ),
+    VideoModelDefinition(
+      id: 'flux-tools-video-upscale-v1',
+      canonicalModelId: 'flux-video-upscale',
+      label: 'FLUX Video Upscale',
+      description:
+          'Source-faithful or creative super-resolution from 1.5× to 3×.',
+      modes: <VideoMode>[VideoMode.upscale],
+      aspectRatios: <String>['auto'],
+      resolutions: <VideoResolutionDefinition>[
+        VideoResolutionDefinition(
+          'source',
+          'Source aspect',
+          '1.5×–3× · up to 4K',
+        ),
+      ],
+      minDuration: 1,
+      maxDuration: 20,
+      durationStep: 1,
+      maxKeyframes: 0,
+      usdPerSecond: .10,
+      supportsAudio: false,
     ),
   ],
 );
@@ -1400,6 +1430,30 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         source: 'published · 1080p',
         minDuration: 5,
         maxDuration: 20,
+      ),
+      ProviderModelPrice(
+        provider: 'bfl',
+        model: 'flux-tools-video-upscale-v1:precise',
+        canonicalModelId: 'flux-video-upscale',
+        label: 'FLUX Video Upscale · Precise',
+        usdPerSecond: .07,
+        modes: <VideoMode>[VideoMode.upscale],
+        source: 'published · delivered output',
+        minDuration: 1,
+        maxDuration: 20,
+        pricingUnit: 'per-megapixel-second',
+      ),
+      ProviderModelPrice(
+        provider: 'bfl',
+        model: 'flux-tools-video-upscale-v1:creative',
+        canonicalModelId: 'flux-video-upscale',
+        label: 'FLUX Video Upscale · Creative',
+        usdPerSecond: .10,
+        modes: <VideoMode>[VideoMode.upscale],
+        source: 'published · delivered output',
+        minDuration: 1,
+        maxDuration: 20,
+        pricingUnit: 'per-megapixel-second',
       ),
     ];
   }

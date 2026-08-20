@@ -3333,7 +3333,13 @@ void main() {
   });
 
   test('form infers every FLUX 3 generation mode from its inputs', () {
-    expect(VideoMode.values, hasLength(4));
+    expect(VideoMode.values, hasLength(5));
+    expect(modelById('bfl', 'flux-3-video').modes, <VideoMode>[
+      VideoMode.t2v,
+      VideoMode.i2v,
+      VideoMode.v2v,
+      VideoMode.draftEnhance,
+    ]);
     final controller = AppController();
     expect(controller.form.mode, VideoMode.t2v);
     controller.addUrlFrame(KeyframeRole.start);
@@ -3353,6 +3359,144 @@ void main() {
         ..keyframes = <KeyframeDraft>[],
     );
     expect(controller.form.mode, VideoMode.t2v);
+    controller.dispose();
+  });
+
+  test('video upscale builds the standalone BFL request contract', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: true,
+        connectedProviders: <String>{'bfl'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await controller.selectModel('flux-tools-video-upscale-v1');
+    expect(controller.form.mode, VideoMode.upscale);
+    expect(controller.validate(), contains('video you want to upscale'));
+
+    controller.updateVideoSourceUrl('https://cdn.bfl.ai/source.mp4');
+    controller.updateForm(
+      (form) => form
+        ..prompt = ''
+        ..upscaleFactor = 2.5
+        ..upscaleCreativity = 0
+        ..safetyTolerance = 3,
+    );
+
+    expect(controller.validate(), isNull);
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      'input_video': 'https://cdn.bfl.ai/source.mp4',
+      'upscale_factor': 2.5,
+      'creativity': 0,
+      'safety_tolerance': 3,
+    });
+    expect(controller.currentConfig.sourceLabel, contains('source.mp4'));
+    expect(controller.currentConfig.upscaleFactor, 2.5);
+
+    controller.updateVideoSourceUrl('http://cdn.bfl.ai/source.mp4');
+    expect(controller.validate(), isNull);
+    controller.updateForm(
+      (form) => form
+        ..videoUrl = ''
+        ..videoAsset = PickedAsset(
+          name: 'source.mov',
+          bytes: Uint8List.fromList(<int>[1, 2, 3]),
+          mimeType: 'video/quicktime',
+        ),
+    );
+    expect(controller.validate(), contains('local uploads as MP4'));
+    controller.updateForm(
+      (form) => form
+        ..videoAsset = null
+        ..videoUrl = 'https://cdn.bfl.ai/source.mp4',
+    );
+
+    await controller.selectProvider('ltx');
+    await controller.reuse(
+      Generation(
+        localId: 'saved-upscale',
+        provider: 'bfl',
+        model: 'flux-tools-video-upscale-v1',
+        status: 'Ready',
+        prompt: 'Bring out the feathers.',
+        mode: VideoMode.upscale,
+        config: const GenerationConfig(
+          aspectRatio: 'auto',
+          duration: 'source',
+          resolution: 'source',
+          generateAudio: false,
+          safetyTolerance: 1,
+          draft: false,
+          upscaleFactor: 3,
+          upscaleCreativity: 1,
+          source: AssetReference(
+            kind: 'remote',
+            value: 'https://cdn.bfl.ai/bird.mp4',
+            label: 'bird.mp4',
+          ),
+        ),
+        createdAt: DateTime.utc(2026, 8, 20),
+        updatedAt: DateTime.utc(2026, 8, 20),
+      ),
+    );
+    expect(controller.selectedProviderId, 'bfl');
+    expect(controller.selectedModelId, 'flux-tools-video-upscale-v1');
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      'input_video': 'https://cdn.bfl.ai/bird.mp4',
+      'upscale_factor': 3.0,
+      'creativity': 1,
+      'prompt': 'Bring out the feathers.',
+      'safety_tolerance': 1,
+    });
+    controller.dispose();
+  });
+
+  testWidgets('video upscale exposes finishing controls on Create', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: true,
+          connectedProviders: <String>{'bfl'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await controller.selectModel('flux-tools-video-upscale-v1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Make it sharper.'), findsOneWidget);
+    expect(find.text('Video to upscale'), findsOneWidget);
+    expect(find.byKey(const ValueKey('upscale-factor-slider')), findsOneWidget);
+    expect(find.text('PRECISE'), findsOneWidget);
+    expect(find.text('CREATIVE'), findsOneWidget);
+    expect(find.textContaining(r'$0.10 / megapixel-second'), findsOneWidget);
+    expect(find.text('Upscale video'), findsOneWidget);
     controller.dispose();
   });
 

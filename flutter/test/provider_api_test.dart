@@ -12,6 +12,39 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('BFL routes video upscale requests and sends raw base64', () async {
+    late http.Request captured;
+    final api = BflApi(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'id': 'upscale-job',
+            'polling_url': 'https://api.bfl.ai/v1/get_result?id=upscale-job',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final receipt = await api.submit('secret', <String, Object?>{
+      'input_video': 'data:video/mp4;base64,AQID',
+      'upscale_factor': 2.5,
+      'creativity': 0,
+      'safety_tolerance': 2,
+    }, model: 'flux-tools-video-upscale-v1');
+    final body = (jsonDecode(captured.body) as Map<Object?, Object?>).map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+
+    expect(captured.url.path, '/v1/flux-tools/video-upscale-v1');
+    expect(captured.headers['x-key'], 'secret');
+    expect(body['input_video'], 'AQID');
+    expect(body['upscale_factor'], 2.5);
+    expect(body['creativity'], 0);
+    expect(receipt['id'], 'upscale-job');
+  });
+
   test('LTX maps canonical form values to the async API contract', () async {
     late Map<String, Object?> requestBody;
     final api = LtxApi(
@@ -832,6 +865,43 @@ void main() {
       });
       expect(decoded.resolution, resolution);
     }
+  });
+
+  test('video upscale settings and published rates survive history', () {
+    const config = GenerationConfig(
+      aspectRatio: 'auto',
+      duration: 'source',
+      resolution: 'source',
+      generateAudio: false,
+      safetyTolerance: 3,
+      draft: false,
+      upscaleFactor: 2.5,
+      upscaleCreativity: 0,
+    );
+    final decoded = GenerationConfig.fromJson(config.toJson());
+    final precise = estimateCost(
+      'bfl',
+      'flux-tools-video-upscale-v1',
+      VideoMode.upscale,
+      config,
+    );
+    final creative = estimateCost(
+      'bfl',
+      'flux-tools-video-upscale-v1',
+      VideoMode.upscale,
+      config.copyWith(upscaleCreativity: 1),
+    );
+
+    expect(decoded.resolution, 'source');
+    expect(decoded.duration, 'source');
+    expect(decoded.upscaleFactor, 2.5);
+    expect(decoded.upscaleCreativity, 0);
+    expect(precise.maximumUsd, 19.25);
+    expect(precise.providerUnitsMaximum, 1925);
+    expect(creative.maximumUsd, 27.5);
+    expect(modelById('bfl', 'flux-tools-video-upscale-v1').modes, <VideoMode>[
+      VideoMode.upscale,
+    ]);
   });
 
   test('published provider pricing uses the selected tier', () {

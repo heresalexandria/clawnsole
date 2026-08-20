@@ -72,56 +72,65 @@ class _CreateHeading extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final title = ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 650),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Eyebrow(
-              controller.selectedProvider.isLocal
-                  ? 'On-device image studio'
-                  : 'Video studio',
-            ),
-            const SizedBox(height: 10),
-            Text(
-              controller.selectedProvider.isLocal
-                  ? 'Make it local.'
-                  : 'Make it move.',
-              style: Theme.of(context).textTheme.displayLarge,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              controller.selectedProvider.isLocal
-                  ? 'Create private still images on this Apple device, with no account or API key.'
-                  : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
-              style: TextStyle(color: context.colors.onSurfaceVariant),
-            ),
-          ],
-        ),
-      );
-      final plaque = _ProviderPlaque(controller: controller);
-      // Wide layouts pin the plaque to the far right of the page; narrow ones
-      // stack it under the title rather than squeezing both onto one line.
-      if (constraints.maxWidth < 720) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[title, const SizedBox(height: 16), plaque],
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          Expanded(
-            child: Align(alignment: Alignment.centerLeft, child: title),
+  Widget build(BuildContext context) {
+    final upscaling = controller.selectedModel.isUpscaler;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final title = ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 650),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Eyebrow(
+                controller.selectedProvider.isLocal
+                    ? 'On-device image studio'
+                    : upscaling
+                    ? 'Video finishing studio'
+                    : 'Video studio',
+              ),
+              const SizedBox(height: 10),
+              Text(
+                controller.selectedProvider.isLocal
+                    ? 'Make it local.'
+                    : upscaling
+                    ? 'Make it sharper.'
+                    : 'Make it move.',
+                style: Theme.of(context).textTheme.displayLarge,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                controller.selectedProvider.isLocal
+                    ? 'Create private still images on this Apple device, with no account or API key.'
+                    : upscaling
+                    ? 'Remaster a finished clip with source-faithful or creative detail, up to 4K.'
+                    : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
+                style: TextStyle(color: context.colors.onSurfaceVariant),
+              ),
+            ],
           ),
-          const SizedBox(width: 22),
-          plaque,
-        ],
-      );
-    },
-  );
+        );
+        final plaque = _ProviderPlaque(controller: controller);
+        // Wide layouts pin the plaque to the far right of the page; narrow ones
+        // stack it under the title rather than squeezing both onto one line.
+        if (constraints.maxWidth < 720) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[title, const SizedBox(height: 16), plaque],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: <Widget>[
+            Expanded(
+              child: Align(alignment: Alignment.centerLeft, child: title),
+            ),
+            const SizedBox(width: 22),
+            plaque,
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _ProviderPlaque extends StatefulWidget {
@@ -553,13 +562,16 @@ class _ComposerState extends State<_Composer> {
       _showDraftPanel = false;
     }
     final form = controller.form;
+    final upscaling = form.mode == VideoMode.upscale;
     final draftActive =
-        form.draftAsset != null ||
-        form.draftUrl.trim().isNotEmpty ||
-        _showDraftPanel;
+        !upscaling &&
+        (form.draftAsset != null ||
+            form.draftUrl.trim().isNotEmpty ||
+            _showDraftPanel);
     final videoActive =
         !draftActive &&
-        (form.videoAsset != null ||
+        (upscaling ||
+            form.videoAsset != null ||
             form.videoUrl.trim().isNotEmpty ||
             _showVideoPanel);
     final enhancing = form.mode == VideoMode.draftEnhance;
@@ -570,7 +582,10 @@ class _ComposerState extends State<_Composer> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (!enhancing) ...<Widget>[
-            const FieldLabel('Direction', icon: Icons.edit_note_rounded),
+            FieldLabel(
+              upscaling ? 'Detail guidance · optional' : 'Direction',
+              icon: Icons.edit_note_rounded,
+            ),
             const SizedBox(height: 9),
             ReferencePromptField(
               key: ValueKey('generation-prompt-${controller.formRevision}'),
@@ -606,10 +621,13 @@ class _ComposerState extends State<_Composer> {
           else if (videoActive) ...<Widget>[
             _SourceEditor(
               controller: controller,
-              title: 'Continue a video',
-              description:
-                  'FLUX 3 extends the motion of an uploaded clip or a hosted provider-compatible URL.',
-              icon: Icons.movie_filter_rounded,
+              title: upscaling ? 'Video to upscale' : 'Continue a video',
+              description: upscaling
+                  ? 'Upload an MP4 up to 20 seconds and 50 MB, at 2560×1440 or below. Hosted HTTP(S) clips also work, and source audio is preserved.'
+                  : 'FLUX 3 extends the motion of an uploaded clip or a hosted provider-compatible URL.',
+              icon: upscaling
+                  ? Icons.high_quality_rounded
+                  : Icons.movie_filter_rounded,
               mediaKind: MediaReferenceKind.video,
               asset: form.videoAsset,
               url: form.videoUrl,
@@ -679,7 +697,9 @@ class _ComposerState extends State<_Composer> {
           const SizedBox(height: 20),
           Divider(color: context.colors.outlineVariant),
           const SizedBox(height: 20),
-          if (enhancing)
+          if (upscaling)
+            _UpscaleSettings(controller: controller)
+          else if (enhancing)
             _EnhanceSettings(controller: controller)
           else
             _SettingsGrid(controller: controller),
@@ -2031,6 +2051,102 @@ class _SettingsGrid extends StatelessWidget {
   );
 }
 
+class _UpscaleSettings extends StatelessWidget {
+  const _UpscaleSettings({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final form = controller.form;
+      final creative = form.upscaleCreativity == 1;
+      final factor = form.upscaleFactor;
+      final factorText = factor == factor.roundToDouble()
+          ? factor.toStringAsFixed(0)
+          : factor.toStringAsFixed(1);
+      final scale = <Widget>[
+        FieldLabel(
+          'Upscale factor',
+          icon: Icons.zoom_out_map_rounded,
+          trailing: CounterReadout(factorText, unit: '×'),
+        ),
+        const SizedBox(height: 8),
+        HardwareSlider(
+          key: const ValueKey('upscale-factor-slider'),
+          min: 1.5,
+          max: 3,
+          divisions: 15,
+          label: '$factorText×',
+          value: factor,
+          onChanged: (value) => controller.updateForm(
+            (form) => form.upscaleFactor = (value * 10).roundToDouble() / 10,
+          ),
+        ),
+        Text(
+          'The source aspect ratio is preserved. Output is capped at about 14.4 megapixels.',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 10.5,
+          ),
+        ),
+      ];
+      final finish = <Widget>[
+        const FieldLabel('Detail mode', icon: Icons.auto_awesome_rounded),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: HardwareChoiceSwitch(
+            key: const ValueKey('upscale-creativity-switch'),
+            firstLabel: 'PRECISE',
+            secondLabel: 'CREATIVE',
+            firstSelected: !creative,
+            onChanged: (precise) => controller.updateForm(
+              (form) => form.upscaleCreativity = precise ? 0 : 1,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          creative
+              ? 'Creative restores and invents fine detail. It is sharpest on generated footage, but faces and products can drift.'
+              : 'Precise sharpens while preserving identity, text, products, and brand assets as faithfully as possible.',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 10.5,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SafetyControl(controller: controller),
+      ];
+      if (constraints.maxWidth <= 640) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[...scale, const SizedBox(height: 22), ...finish],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: scale,
+            ),
+          ),
+          const SizedBox(width: 26),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: finish,
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 class _EnhanceSettings extends StatelessWidget {
   const _EnhanceSettings({required this.controller});
 
@@ -2505,6 +2621,74 @@ class _CostPreview extends StatelessWidget {
         ),
       );
     }
+    if (controller.form.mode == VideoMode.upscale) {
+      final tokens = context.tokens;
+      final creative = controller.form.upscaleCreativity == 1;
+      final rate = creative ? .10 : .07;
+      final maximum = 13.75 * 20 * rate;
+      final account =
+          controller.providerAccounts[controller.selectedProviderId];
+      return TexturePanel(
+        surface: PanelSurface.hunterFelt,
+        stitched: true,
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.toll_rounded, color: tokens.moneyAccent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '${creative ? 'CREATIVE' : 'PRECISE'} UPSCALE RATE',
+                        style: TextStyle(
+                          color: tokens.onMoneyMuted,
+                          fontSize: 9,
+                          letterSpacing: 1.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '\$${rate.toStringAsFixed(2)} / megapixel-second',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          color: tokens.onMoney,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'BFL bills the delivered output’s actual dimensions × duration. The 20-second, 13.75 MP ceiling would cost at most ${formatUsdAmount(maximum)} in this mode; rejected clips are not charged.',
+              style: TextStyle(color: tokens.onMoneyMuted, fontSize: 10.5),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              controller.credits == null
+                  ? (controller.hasApiKey
+                        ? account?.balanceLabel ?? 'BFL account connected'
+                        : 'Add a BFL API key to upscale')
+                  : '${formatCredits(controller.credits!)} credits available',
+              style: TextStyle(
+                color: tokens.moneyAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final tokens = context.tokens;
     final estimate = controller.currentEstimate;
     final providerUnits = estimate.providerUnitsMinimum != null;
@@ -2781,6 +2965,8 @@ class _ComposerFooter extends StatelessWidget {
       label: Text(
         controller.selectedModel.outputKind == GenerationOutputKind.image
             ? 'Generate image'
+            : form.mode == VideoMode.upscale
+            ? 'Upscale video'
             : 'Generate video',
       ),
     );

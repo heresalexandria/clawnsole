@@ -6,10 +6,12 @@ Electron owns only macOS desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
-- BFL FLUX 3, LTX 2.3, ArtCraft’s live video catalog, and selected
+- BFL FLUX 3 and FLUX Video Upscale, LTX 2.3, ArtCraft’s live video catalog, and selected
   Create-ready Atlas Cloud models
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
   video continuation and draft enhance
+- BFL video super-resolution from 1.5×–3× with Precise/Creative detail modes,
+  optional guidance, preserved source audio, and delivered-output rate display
 - Model-aware multi-upload image, video, and audio references, kept distinct
   from first/last or explicitly timed keyframes
 - A searchable saved-reference library with independent nested folders, tags,
@@ -35,6 +37,8 @@ treating every image as a keyframe:
 
 - BFL FLUX 3 exposes up to ten ordered/timed keyframes and one continuation
   video.
+- BFL FLUX Video Upscale accepts a source clip up to 20 seconds and 50 MB,
+  preserves its aspect ratio and audio, and delivers up to roughly 14.4 MP.
 - LTX 2.3 exposes first/last-frame interpolation; Pro also exposes one
   audio-driven input up to 20 seconds at 720p/1080p or 10 seconds at 1440p/4K.
 - ArtCraft’s checked-in create-ready catalog mirrors the public Omni catalog’s

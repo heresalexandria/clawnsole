@@ -894,7 +894,7 @@ class _GenerationCardState extends State<GenerationCard> {
                     Expanded(
                       child: GenerationPrompt(
                         controller: widget.controller,
-                        prompt: item.prompt,
+                        prompt: item.displayPrompt,
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
@@ -1568,7 +1568,7 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
           ),
           const SizedBox(height: 6),
           Text(
-            widget.item.prompt,
+            widget.item.displayPrompt,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: context.colors.onSurfaceVariant),
