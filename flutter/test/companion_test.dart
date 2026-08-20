@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -197,6 +198,162 @@ void main() {
     } finally {
       await subscription.cancel();
       await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
+  test('companion serves persisted preview assets after a restart', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-preview-restart-test.',
+    );
+    final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final now = DateTime.utc(2026, 8, 19, 12);
+    final inputVideo = await store.writeAsset(
+      base64Decode('CQ=='),
+      label: 'input.mp4',
+      contentType: 'video/mp4',
+    );
+    await store.replace(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'preview-film',
+            status: 'Ready',
+            prompt: 'A retained film.',
+            mode: VideoMode.i2v,
+            config: GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+              references: <MediaReferenceLabel>[
+                MediaReferenceLabel(
+                  label: 'input.mp4',
+                  kind: MediaReferenceKind.video,
+                  source: inputVideo,
+                ),
+              ],
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'preview-reference',
+            name: 'Preview reference',
+            kind: MediaReferenceKind.video,
+            asset: inputVideo,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        ],
+      ),
+    );
+
+    HttpServer? server;
+    StreamSubscription<HttpRequest>? subscription;
+    try {
+      final firstApp = CompanionApp(store: store, api: BflApi());
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      subscription = server.listen(firstApp.handle);
+      var base = Uri.parse('http://127.0.0.1:${server.port}');
+      final cached = await http.patch(
+        base.resolve('/state'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'action': 'saveGenerationPreviews',
+          'value': <String, Object?>{
+            'localId': 'preview-film',
+            'thumbnail': base64Encode(<int>[1, 2, 3]),
+            'timeline': base64Encode(<int>[4, 5, 6]),
+          },
+        }),
+      );
+      expect(cached.statusCode, 200);
+      final outputSnapshot = LocalSnapshot.fromJson(
+        (jsonDecode(cached.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      );
+      final thumbnail = outputSnapshot.generations.single.thumbnailAsset!;
+      final timeline =
+          outputSnapshot.generations.single.timelineThumbnailAsset!;
+      final referenceCached = await http.patch(
+        base.resolve('/state'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'action': 'saveReferencePreview',
+          'value': <String, Object?>{
+            'referenceId': 'preview-reference',
+            'thumbnail': base64Encode(<int>[7, 8]),
+          },
+        }),
+      );
+      expect(referenceCached.statusCode, 200);
+      final inputCached = await http.patch(
+        base.resolve('/state'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'action': 'saveGenerationInputPreview',
+          'value': <String, Object?>{
+            'localId': 'preview-film',
+            'sourceAssetValue': inputVideo.value,
+            'thumbnail': base64Encode(<int>[9, 10]),
+          },
+        }),
+      );
+      expect(inputCached.statusCode, 200);
+      final mediaSnapshot = LocalSnapshot.fromJson(
+        (jsonDecode(inputCached.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      );
+      final referenceThumbnail =
+          mediaSnapshot.savedReferences.single.thumbnailAsset!;
+      final inputThumbnail = mediaSnapshot
+          .generations
+          .single
+          .config
+          .references!
+          .single
+          .thumbnailAsset!;
+
+      await subscription.cancel();
+      subscription = null;
+      await server.close(force: true);
+      server = null;
+
+      final restartedApp = CompanionApp(store: store, api: BflApi());
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      subscription = server.listen(restartedApp.handle);
+      base = Uri.parse('http://127.0.0.1:${server.port}');
+
+      final thumbnailResponse = await http.get(
+        base.resolve('/assets?id=${thumbnail.value}'),
+      );
+      final timelineResponse = await http.get(
+        base.resolve('/assets?id=${timeline.value}'),
+      );
+      final referenceResponse = await http.get(
+        base.resolve('/assets?id=${referenceThumbnail.value}'),
+      );
+      final inputResponse = await http.get(
+        base.resolve('/assets?id=${inputThumbnail.value}'),
+      );
+      expect(thumbnailResponse.statusCode, 200);
+      expect(thumbnailResponse.bodyBytes, <int>[1, 2, 3]);
+      expect(timelineResponse.statusCode, 200);
+      expect(timelineResponse.bodyBytes, <int>[4, 5, 6]);
+      expect(referenceResponse.statusCode, 200);
+      expect(referenceResponse.bodyBytes, <int>[7, 8]);
+      expect(inputResponse.statusCode, 200);
+      expect(inputResponse.bodyBytes, <int>[9, 10]);
+    } finally {
+      await subscription?.cancel();
+      await server?.close(force: true);
       await temporary.delete(recursive: true);
     }
   });

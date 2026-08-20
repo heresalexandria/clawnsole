@@ -26,6 +26,7 @@ class WebGateway
         ReferenceLibraryGateway,
         FavoriteGateway,
         GenerationPreviewGateway,
+        MediaPreviewGateway,
         GoogleDriveGateway {
   WebGateway({
     http.Client? client,
@@ -354,6 +355,26 @@ class WebGateway
     'localId': localId,
     if (thumbnailBytes != null) 'thumbnail': base64Encode(thumbnailBytes),
     if (timelineBytes != null) 'timeline': base64Encode(timelineBytes),
+  });
+
+  @override
+  Future<LocalSnapshot> saveReferencePreview(
+    String referenceId,
+    Uint8List thumbnailBytes,
+  ) => _action('saveReferencePreview', <String, Object?>{
+    'referenceId': referenceId,
+    'thumbnail': base64Encode(thumbnailBytes),
+  });
+
+  @override
+  Future<LocalSnapshot> saveGenerationInputPreview(
+    String localId,
+    String sourceAssetValue,
+    Uint8List thumbnailBytes,
+  ) => _action('saveGenerationInputPreview', <String, Object?>{
+    'localId': localId,
+    'sourceAssetValue': sourceAssetValue,
+    'thumbnail': base64Encode(thumbnailBytes),
   });
 
   @override

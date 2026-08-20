@@ -26,6 +26,7 @@ import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/hardware.dart';
+import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -37,6 +38,56 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  testWidgets('video media thumbnail extracts and exposes a reusable frame', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    Uri? requested;
+    Uint8List? generated;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SizedBox(
+          width: 160,
+          height: 90,
+          child: MediaThumbnail(
+            gateway: gateway,
+            kind: MediaReferenceKind.video,
+            reference: const AssetReference(
+              kind: 'remote',
+              value: 'https://cdn.test/reference.mp4',
+              label: 'reference.mp4',
+              contentType: 'video/mp4',
+            ),
+            frameLoader: (uri, _) async {
+              requested = uri;
+              return frame;
+            },
+            onThumbnail: (bytes) => generated = bytes,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(requested, Uri.parse('https://cdn.test/reference.mp4'));
+    expect(generated, frame);
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsOneWidget,
+    );
+  });
+
   test('duration defaults to manual and model capabilities gate Auto', () {
     final controller = AppController();
 
@@ -562,7 +613,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 14);
+    expect(decoded.toJson()['schemaVersion'], 15);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -696,7 +747,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 14);
+      expect(decoded.toJson()['schemaVersion'], 15);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',

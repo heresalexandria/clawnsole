@@ -12,6 +12,7 @@ import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
 import 'hardware.dart';
+import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
@@ -582,6 +583,7 @@ class _ComposerState extends State<_Composer> {
           ],
           if (draftActive)
             _SourceEditor(
+              controller: controller,
               title: 'Enhance a draft render',
               description:
                   'Re-render a saved FLUX 3 draft cache at full quality. Prompt, framing, and duration come from the original.',
@@ -602,20 +604,22 @@ class _ComposerState extends State<_Composer> {
             )
           else if (videoActive) ...<Widget>[
             _SourceEditor(
+              controller: controller,
               title: 'Continue a video',
               description:
                   'FLUX 3 extends the motion of an uploaded clip or a hosted provider-compatible URL.',
               icon: Icons.movie_filter_rounded,
+              mediaKind: MediaReferenceKind.video,
               asset: form.videoAsset,
               url: form.videoUrl,
               onPick: controller.pickVideo,
-              onUrl: (value) =>
-                  controller.updateForm((form) => form.videoUrl = value),
+              onUrl: controller.updateVideoSourceUrl,
               onDismiss: () {
                 setState(() => _showVideoPanel = false);
                 controller.updateForm((form) {
                   form.videoAsset = null;
                   form.videoUrl = '';
+                  form.videoThumbnailBytes = null;
                 });
               },
               formRevision: controller.formRevision,
@@ -1275,34 +1279,28 @@ class _ReferenceTile extends StatelessWidget {
               child: SizedBox(
                 height: 76,
                 width: double.infinity,
-                child:
-                    reference.kind == MediaReferenceKind.image &&
-                        reference.asset != null
-                    ? Image.memory(reference.asset!.bytes, fit: BoxFit.cover)
-                    : Builder(
-                        builder: (context) {
-                          final dark =
-                              Theme.of(context).brightness == Brightness.dark;
-                          return Container(
-                            color: dark
-                                ? ClawnsoleColors.plumInk
-                                : context.colors.surfaceContainer,
-                            child: Icon(
-                              switch (reference.kind) {
-                                MediaReferenceKind.image => Icons.image_rounded,
-                                MediaReferenceKind.video =>
-                                  Icons.video_library_rounded,
-                                MediaReferenceKind.audio =>
-                                  Icons.graphic_eq_rounded,
-                              },
-                              color: dark
-                                  ? ClawnsoleColors.creamMuted
-                                  : context.colors.onSurfaceVariant,
-                              size: 24,
-                            ),
-                          );
-                        },
-                      ),
+                child: MediaThumbnail(
+                  gateway: controller.gateway,
+                  kind: reference.kind,
+                  bytes: reference.asset?.bytes,
+                  mimeType: reference.asset?.mimeType,
+                  localPath: reference.asset?.path,
+                  reference: reference.asset?.retained ?? reference.retained,
+                  thumbnailReference:
+                      reference.thumbnailAsset ??
+                      reference.asset?.thumbnailAsset,
+                  thumbnailBytes:
+                      reference.thumbnailBytes ??
+                      reference.asset?.thumbnailBytes,
+                  source: reference.source,
+                  semanticsLabel: '${reference.label} thumbnail',
+                  onThumbnail: reference.kind == MediaReferenceKind.video
+                      ? (bytes) => controller.rememberReferenceThumbnail(
+                          reference.id,
+                          bytes,
+                        )
+                      : null,
+                ),
               ),
             ),
             Positioned(
@@ -1753,6 +1751,7 @@ class _AddFrameButton extends StatelessWidget {
 
 class _SourceEditor extends StatelessWidget {
   const _SourceEditor({
+    required this.controller,
     required this.title,
     required this.description,
     required this.icon,
@@ -1762,8 +1761,10 @@ class _SourceEditor extends StatelessWidget {
     required this.onUrl,
     required this.onDismiss,
     required this.formRevision,
+    this.mediaKind,
   });
 
+  final AppController controller;
   final String title;
   final String description;
   final IconData icon;
@@ -1773,6 +1774,7 @@ class _SourceEditor extends StatelessWidget {
   final ValueChanged<String> onUrl;
   final VoidCallback onDismiss;
   final int formRevision;
+  final MediaReferenceKind? mediaKind;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1826,7 +1828,29 @@ class _SourceEditor extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(11),
             ),
-            leading: const Icon(Icons.insert_drive_file_rounded),
+            leading: mediaKind == null
+                ? const Icon(Icons.insert_drive_file_rounded)
+                : ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: SizedBox(
+                      width: 66,
+                      height: 44,
+                      child: MediaThumbnail(
+                        gateway: controller.gateway,
+                        kind: mediaKind!,
+                        bytes: asset!.bytes,
+                        mimeType: asset!.mimeType,
+                        localPath: asset!.path,
+                        reference: asset!.retained,
+                        thumbnailReference: asset!.thumbnailAsset,
+                        thumbnailBytes: asset!.thumbnailBytes,
+                        semanticsLabel: '${asset!.name} thumbnail',
+                        onThumbnail: mediaKind == MediaReferenceKind.video
+                            ? controller.rememberVideoSourceThumbnail
+                            : null,
+                      ),
+                    ),
+                  ),
             title: Text(
               asset!.name,
               maxLines: 1,
@@ -1840,36 +1864,62 @@ class _SourceEditor extends StatelessWidget {
             ),
           )
         else
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              OutlinedButton.icon(
-                onPressed: () => unawaited(onPick()),
-                icon: const Icon(Icons.upload_file_rounded, size: 16),
-                label: const Text('Choose file'),
-              ),
-              Text(
-                'or',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
-              SizedBox(
-                width: 300,
-                child: TextFormField(
-                  key: ValueKey('$title-url-$formRevision'),
-                  initialValue: url,
-                  onChanged: onUrl,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.link_rounded, size: 17),
-                    hintText: 'Paste a hosted URL',
-                    isDense: true,
+              if (mediaKind != null &&
+                  Uri.tryParse(url.trim())?.scheme == 'https') ...<Widget>[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: SizedBox(
+                    width: 160,
+                    height: 90,
+                    child: MediaThumbnail(
+                      gateway: controller.gateway,
+                      kind: mediaKind!,
+                      source: url.trim(),
+                      thumbnailBytes: controller.form.videoThumbnailBytes,
+                      semanticsLabel: '$title source thumbnail',
+                      onThumbnail: mediaKind == MediaReferenceKind.video
+                          ? controller.rememberVideoSourceThumbnail
+                          : null,
+                    ),
                   ),
-                  style: const TextStyle(fontSize: 12.5),
                 ),
+                const SizedBox(height: 10),
+              ],
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(onPick()),
+                    icon: const Icon(Icons.upload_file_rounded, size: 16),
+                    label: const Text('Choose file'),
+                  ),
+                  Text(
+                    'or',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 300,
+                    child: TextFormField(
+                      key: ValueKey('$title-url-$formRevision'),
+                      initialValue: url,
+                      onChanged: onUrl,
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.link_rounded, size: 17),
+                        hintText: 'Paste a hosted URL',
+                        isDense: true,
+                      ),
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

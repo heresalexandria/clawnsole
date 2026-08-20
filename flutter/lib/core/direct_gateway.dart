@@ -41,7 +41,8 @@ class DirectGateway
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         FavoriteGateway,
-        GenerationPreviewGateway {
+        GenerationPreviewGateway,
+        MediaPreviewGateway {
   DirectGateway({
     required DurableDataStore store,
     BflApi? api,
@@ -423,6 +424,7 @@ class DirectGateway
       name: name,
       kind: reference.kind,
       asset: asset,
+      thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
       createdAt: existing?.createdAt ?? reference.createdAt,
       updatedAt: DateTime.now().toUtc(),
       folderId: reference.folderId,
@@ -514,7 +516,7 @@ class DirectGateway
         .where((item) => item.localId == localId)
         .firstOrNull;
     if (target == null) throw StateError('That generation no longer exists.');
-    final thumbnail = thumbnailBytes == null || target.thumbnailAsset != null
+    final thumbnail = thumbnailBytes == null
         ? target.thumbnailAsset
         : await _store.writeAsset(
             thumbnailBytes,
@@ -522,8 +524,7 @@ class DirectGateway
             contentType: 'image/jpeg',
             storage: target.storage,
           );
-    final timeline =
-        timelineBytes == null || target.timelineThumbnailAsset != null
+    final timeline = timelineBytes == null
         ? target.timelineThumbnailAsset
         : await _store.writeAsset(
             timelineBytes,
@@ -545,15 +546,112 @@ class DirectGateway
           .map(
             (item) => item.localId == localId
                 ? item.copyWith(
-                    thumbnailAsset: item.thumbnailAsset ?? thumbnail,
+                    thumbnailAsset: thumbnail ?? item.thumbnailAsset,
                     timelineThumbnailAsset:
-                        item.timelineThumbnailAsset ?? timeline,
+                        timeline ?? item.timelineThumbnailAsset,
                   )
                 : item,
           )
           .toList(),
     );
     await _store.write(next);
+    await _store.pruneAssets(next.generations, next.savedReferences);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> saveReferencePreview(
+    String referenceId,
+    Uint8List thumbnailBytes,
+  ) async {
+    if (thumbnailBytes.isEmpty) return _snapshot();
+    final current = await _store.read();
+    final target = current.savedReferences
+        .where((item) => item.id == referenceId)
+        .firstOrNull;
+    if (target == null) throw StateError('That reference no longer exists.');
+    final thumbnail = await _store.writeAsset(
+      thumbnailBytes,
+      label: 'clawnsole-$referenceId-thumbnail.jpg',
+      contentType: 'image/jpeg',
+      storage: target.storage,
+    );
+    final latest = await _store.read();
+    if (!latest.savedReferences.any((item) => item.id == referenceId)) {
+      throw StateError('That reference no longer exists.');
+    }
+    final next = latest.copyWith(
+      savedReferences: latest.savedReferences
+          .map(
+            (item) => item.id == referenceId
+                ? item.copyWith(thumbnailAsset: thumbnail)
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    await _store.pruneAssets(next.generations, next.savedReferences);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> saveGenerationInputPreview(
+    String localId,
+    String sourceAssetValue,
+    Uint8List thumbnailBytes,
+  ) async {
+    if (sourceAssetValue.isEmpty || thumbnailBytes.isEmpty) return _snapshot();
+    final current = await _store.read();
+    final target = current.generations
+        .where((item) => item.localId == localId)
+        .firstOrNull;
+    if (target == null) throw StateError('That generation no longer exists.');
+    final matchesSource = target.config.source?.value == sourceAssetValue;
+    final matchesReference =
+        target.config.references?.any(
+          (item) => item.source?.value == sourceAssetValue,
+        ) ==
+        true;
+    if (!matchesSource && !matchesReference) {
+      throw StateError('That generation input no longer exists.');
+    }
+    final thumbnail = await _store.writeAsset(
+      thumbnailBytes,
+      label: 'clawnsole-$localId-input-thumbnail.jpg',
+      contentType: 'image/jpeg',
+      storage: target.storage,
+    );
+    final latest = await _store.read();
+    final latestTarget = latest.generations
+        .where((item) => item.localId == localId)
+        .firstOrNull;
+    if (latestTarget == null) {
+      throw StateError('That generation no longer exists.');
+    }
+    final references = latestTarget.config.references
+        ?.map(
+          (item) => item.source?.value == sourceAssetValue
+              ? item.copyWith(thumbnailAsset: thumbnail)
+              : item,
+        )
+        .toList();
+    final config = latestTarget.config.copyWith(
+      references: references,
+      sourceThumbnailAsset:
+          latestTarget.config.source?.value == sourceAssetValue
+          ? thumbnail
+          : latestTarget.config.sourceThumbnailAsset,
+    );
+    final next = latest.copyWith(
+      generations: latest.generations
+          .map(
+            (item) =>
+                item.localId == localId ? item.copyWith(config: config) : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    await _store.pruneAssets(next.generations, next.savedReferences);
     return _snapshot(next);
   }
 
@@ -618,6 +716,7 @@ class DirectGateway
           MediaReferenceLabel(
             label: media.label,
             kind: media.kind,
+            thumbnailAsset: media.thumbnailAsset,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
@@ -638,6 +737,7 @@ class DirectGateway
           retained: config.source,
           storage: storage,
         ),
+        sourceThumbnailAsset: config.sourceThumbnailAsset,
       );
     }
     return config;

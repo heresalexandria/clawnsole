@@ -189,6 +189,7 @@ class CompanionStore implements DurableDataStore {
       add(generation.thumbnailAsset);
       add(generation.timelineThumbnailAsset);
       add(generation.config.source);
+      add(generation.config.sourceThumbnailAsset);
       for (final frame
           in generation.config.keyframes ?? const <KeyframeLabel>[]) {
         add(frame.source);
@@ -196,10 +197,12 @@ class CompanionStore implements DurableDataStore {
       for (final media
           in generation.config.references ?? const <MediaReferenceLabel>[]) {
         add(media.source);
+        add(media.thumbnailAsset);
       }
     }
     for (final reference in savedReferences) {
       add(reference.asset);
+      add(reference.thumbnailAsset);
     }
     return retained;
   }
@@ -868,8 +871,7 @@ class CompanionApp {
         }
         final thumbnailSource = map['thumbnail']?.toString();
         final timelineSource = map['timeline']?.toString();
-        final thumbnail =
-            thumbnailSource == null || target.thumbnailAsset != null
+        final thumbnail = thumbnailSource == null
             ? target.thumbnailAsset
             : await _store.writeAsset(
                 base64Decode(thumbnailSource),
@@ -877,8 +879,7 @@ class CompanionApp {
                 contentType: 'image/jpeg',
                 storage: target.storage,
               );
-        final timeline =
-            timelineSource == null || target.timelineThumbnailAsset != null
+        final timeline = timelineSource == null
             ? target.timelineThumbnailAsset
             : await _store.writeAsset(
                 base64Decode(timelineSource),
@@ -891,9 +892,89 @@ class CompanionApp {
               .map(
                 (item) => item.localId == localId
                     ? item.copyWith(
-                        thumbnailAsset: thumbnail,
-                        timelineThumbnailAsset: timeline,
+                        thumbnailAsset: thumbnail ?? item.thumbnailAsset,
+                        timelineThumbnailAsset:
+                            timeline ?? item.timelineThumbnailAsset,
                       )
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'saveReferencePreview') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final referenceId = map['referenceId']?.toString() ?? '';
+        final target = current.savedReferences
+            .where((item) => item.id == referenceId)
+            .firstOrNull;
+        if (target == null) {
+          throw StateError('That reference no longer exists.');
+        }
+        final encoded = map['thumbnail']?.toString() ?? '';
+        if (encoded.isEmpty) {
+          throw StateError('A reference thumbnail is required.');
+        }
+        final thumbnail = await _store.writeAsset(
+          base64Decode(encoded),
+          label: 'clawnsole-$referenceId-thumbnail.jpg',
+          contentType: 'image/jpeg',
+          storage: target.storage,
+        );
+        next = current.copyWith(
+          savedReferences: current.savedReferences
+              .map(
+                (item) => item.id == referenceId
+                    ? item.copyWith(thumbnailAsset: thumbnail)
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'saveGenerationInputPreview') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final localId = map['localId']?.toString() ?? '';
+        final sourceAssetValue = map['sourceAssetValue']?.toString() ?? '';
+        final target = current.generations
+            .where((item) => item.localId == localId)
+            .firstOrNull;
+        if (target == null) {
+          throw StateError('That generation no longer exists.');
+        }
+        final matchesSource = target.config.source?.value == sourceAssetValue;
+        final matchesReference =
+            target.config.references?.any(
+              (item) => item.source?.value == sourceAssetValue,
+            ) ==
+            true;
+        if (!matchesSource && !matchesReference) {
+          throw StateError('That generation input no longer exists.');
+        }
+        final encoded = map['thumbnail']?.toString() ?? '';
+        if (encoded.isEmpty) {
+          throw StateError('An input thumbnail is required.');
+        }
+        final thumbnail = await _store.writeAsset(
+          base64Decode(encoded),
+          label: 'clawnsole-$localId-input-thumbnail.jpg',
+          contentType: 'image/jpeg',
+          storage: target.storage,
+        );
+        final references = target.config.references
+            ?.map(
+              (item) => item.source?.value == sourceAssetValue
+                  ? item.copyWith(thumbnailAsset: thumbnail)
+                  : item,
+            )
+            .toList();
+        final config = target.config.copyWith(
+          references: references,
+          sourceThumbnailAsset: matchesSource
+              ? thumbnail
+              : target.config.sourceThumbnailAsset,
+        );
+        next = current.copyWith(
+          generations: current.generations
+              .map(
+                (item) => item.localId == localId
+                    ? item.copyWith(config: config)
                     : item,
               )
               .toList(),
@@ -948,6 +1029,7 @@ class CompanionApp {
           name: name,
           kind: reference.kind,
           asset: asset,
+          thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
           createdAt: existing?.createdAt ?? reference.createdAt,
           updatedAt: DateTime.now().toUtc(),
           folderId: reference.folderId,
@@ -989,7 +1071,11 @@ class CompanionApp {
       }
       return StoreChange<void>(next, null);
     });
-    if (action == 'clearHistory' || action == 'deleteReference') {
+    if (action == 'clearHistory' ||
+        action == 'deleteReference' ||
+        action == 'saveGenerationPreviews' ||
+        action == 'saveReferencePreview' ||
+        action == 'saveGenerationInputPreview') {
       final data = await _store.read();
       await _store.pruneAssets(data.generations, data.savedReferences);
     }
@@ -1134,6 +1220,7 @@ class CompanionApp {
           MediaReferenceLabel(
             label: media.label,
             kind: media.kind,
+            thumbnailAsset: media.thumbnailAsset,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
@@ -1154,6 +1241,7 @@ class CompanionApp {
           retained: config.source,
           storage: storage,
         ),
+        sourceThumbnailAsset: config.sourceThumbnailAsset,
       );
     }
     return config;
@@ -1456,20 +1544,27 @@ class CompanionApp {
     String id,
   ) {
     for (final reference in savedReferences) {
-      if (reference.asset.isLocal && reference.asset.value == id) {
-        return reference.asset;
+      for (final asset in <AssetReference?>[
+        reference.asset,
+        reference.thumbnailAsset,
+      ]) {
+        if (asset?.isLocal == true && asset!.value == id) return asset;
       }
     }
     for (final generation in generations) {
       final references = <AssetReference?>[
         generation.resultAsset,
+        generation.thumbnailAsset,
+        generation.timelineThumbnailAsset,
         generation.config.source,
+        generation.config.sourceThumbnailAsset,
         ...(generation.config.keyframes ?? const <KeyframeLabel>[]).map(
           (frame) => frame.source,
         ),
-        ...(generation.config.references ?? const <MediaReferenceLabel>[]).map(
-          (media) => media.source,
-        ),
+        ...(generation.config.references ?? const <MediaReferenceLabel>[])
+            .expand(
+              (media) => <AssetReference?>[media.source, media.thumbnailAsset],
+            ),
       ];
       for (final reference in references) {
         if (reference?.isLocal == true && reference!.value == id) {
