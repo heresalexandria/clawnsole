@@ -256,16 +256,16 @@ nav a:focus-visible,
 }
 
 .button-light {
-  border-color: var(--paper);
-  color: var(--plum-dark);
-  background: var(--paper);
+  border-color: #f8f3e8;
+  color: #2b1a29;
+  background: #f8f3e8;
   box-shadow: none;
 }
 
 .button-light:hover,
 .button-light:focus-visible {
-  color: var(--plum-dark);
-  background: white;
+  color: #2b1a29;
+  background: #ffffff;
 }
 
 .eyebrow {
@@ -398,9 +398,81 @@ nav a:focus-visible,
   text-transform: uppercase;
 }
 
+.drive-section,
 .feature-section,
 .screens-section {
   padding-block: 120px;
+}
+
+.drive-section {
+  border-top: 1px solid var(--line);
+}
+
+.drive-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  gap: 80px;
+  align-items: end;
+  margin-bottom: 48px;
+}
+
+.drive-heading > p {
+  margin-bottom: 5px;
+  color: var(--muted);
+}
+
+.drive-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 17px;
+}
+
+.drive-grid article {
+  min-height: 310px;
+  padding: 38px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.drive-grid h3 {
+  margin-top: 48px;
+}
+
+.drive-grid p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.drive-grid code {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.drive-disclosure {
+  display: flex;
+  gap: 32px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 17px;
+  padding: 28px 32px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-deep);
+}
+
+.drive-disclosure p {
+  max-width: 860px;
+  margin: 0;
+  color: var(--muted);
+}
+
+.drive-disclosure strong {
+  color: var(--ink);
+}
+
+.drive-disclosure .button {
+  flex: 0 0 auto;
 }
 
 .section-heading {
@@ -813,6 +885,24 @@ nav a:focus-visible,
     padding-block: 65px;
   }
 
+  .drive-heading {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .drive-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drive-grid article {
+    min-height: 0;
+  }
+
+  .drive-disclosure {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .privacy-band-inner > p {
     grid-column: 2;
   }
@@ -865,6 +955,7 @@ nav a:focus-visible,
     height: 27px;
   }
 
+  .drive-section,
   .feature-section,
   .screens-section {
     padding-block: 82px;
