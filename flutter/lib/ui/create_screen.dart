@@ -1028,20 +1028,21 @@ class _FramesSection extends StatelessWidget {
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
+    final frameLimit = model.supportsTimedKeyframes
+        ? '${model.maxKeyframes} frames max · custom timing available'
+        : model.supportsEndFrame
+        ? '${model.maxKeyframes} frames max · first + last'
+        : '1 first frame max';
+    final exclusiveInputs = model.maxKeyframes == 1
+        ? 'a first frame or creative references'
+        : 'first/last frames or creative references';
     final caption = conflicted
-        ? '${model.label} takes pinned frames or creative references, not both — remove one side before generating.'
+        ? '${model.label} cannot combine $exclusiveInputs. Remove one side.'
         : setAside
-        ? 'Creative references are attached, and ${model.label} takes frames or references — never both. Remove the references below to pin frames instead.'
-        : form.keyframes.isEmpty
-        ? controller.selectedProvider.isLocal
-              ? 'Add one image to anchor the design, or leave this empty to begin from the continuity-locked text prompt.'
-              : model.supportsTimedKeyframes
-              ? 'Pin up to ${model.maxKeyframes} images at exact moments in ${model.label}.'
-              : 'Set the first${model.supportsEndFrame ? ' and optional last' : ''} frame for ${model.label}.'
-                    '${model.framesExclusiveWithReferences ? ' Pinning a frame sets creative references aside.' : ''}'
-        : form.requiresTimedKeyframes
-        ? 'This sparse layout uses timestamps automatically. A last frame can stand alone; middle frames can too.'
-        : 'First-only pins the opening. First + last pins both ends. Reference behavior follows ${controller.selectedProvider.shortName}.';
+        ? '$frameLimit. References attached — remove them to add frames.'
+        : model.framesExclusiveWithReferences
+        ? '$frameLimit. ${model.label}: use $exclusiveInputs, not both.'
+        : frameLimit;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1124,14 +1125,27 @@ class _ReferencesSection extends StatelessWidget {
     final model = controller.selectedModel;
     final limits = MediaReferenceKind.values
         .where((kind) => model.maxReferences(kind) > 0)
-        .map((kind) => '${controller.referenceLimit(kind)} ${kind.pluralLabel}')
+        .map((kind) {
+          final maximum = controller.referenceLimit(kind);
+          final label = maximum == 1
+              ? switch (kind) {
+                  MediaReferenceKind.image => 'image',
+                  MediaReferenceKind.video => 'video',
+                  MediaReferenceKind.audio => 'audio clip',
+                }
+              : kind.pluralLabel;
+          final seconds = model.maxReferenceSeconds(kind, form.resolution);
+          final duration = seconds == null
+              ? ''
+              : maximum == 1
+              ? ' (up to ${seconds}s)'
+              : ' (${seconds}s total)';
+          return '$maximum $label$duration';
+        })
         .join(' · ');
-    final durationNotes = <String>{
-      if (model.maxReferenceVideoSeconds != null)
-        '${model.maxReferenceVideoSeconds}s total video',
-      if (model.maxReferenceAudioSeconds != null)
-        '${model.maxReferenceAudioSeconds}s total audio',
-    }.join(' · ');
+    final limitSummary = model.maxTotalReferences == null
+        ? limits
+        : '$limits · ${model.maxTotalReferences} files total';
     final required =
         !model.modes.contains(VideoMode.t2v) && model.maxKeyframes == 0;
     final setAside = controller.referencesBlockedByFrames;
@@ -1171,28 +1185,36 @@ class _ReferencesSection extends StatelessWidget {
           const SizedBox(height: 9),
         ],
         Text(
-          conflicted
-              ? '${model.label} takes pinned frames or creative references, not both — remove one side before generating.'
-              : setAside
-              ? 'Frames are pinned above, and ${model.label} takes frames or references — never both. Remove the frames to guide with references instead.'
-              : '${switch (form.referenceTask) {
-                      MediaReferenceTask.reference => 'Guide identity, style, motion, or sound without pinning media to a timeline.',
-                      MediaReferenceTask.edit => 'Change one reference video while preserving its length and framing.',
-                      MediaReferenceTask.extend => 'Continue one reference video while preserving its framing.',
-                    }} '
-                    '$limits${durationNotes.isEmpty ? '' : ' · $durationNotes'}. '
-                    'Type @ in Direction to mention attached media; Clawnsole '
-                    'adapts the tag for ${model.label}. '
-                    '${model.referencePromptHint ?? 'References keep the numbered order shown here.'}'
-                    '${model.framesExclusiveWithReferences && form.references.isEmpty ? ' Attaching a reference sets pinned frames aside.' : ''}',
+          limitSummary,
           style: TextStyle(
-            color: conflicted
-                ? context.colors.error
-                : context.colors.onSurfaceVariant,
+            color: context.colors.onSurfaceVariant,
             fontSize: 11.5,
             height: 1.4,
           ),
         ),
+        if (setAside && !conflicted) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            'Frames attached — remove them to add creative references.',
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
+        if (!setAside &&
+            form.referenceTask != MediaReferenceTask.reference) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            form.referenceTask == MediaReferenceTask.edit
+                ? 'Edit uses exactly 1 video · Auto duration · source aspect ratio'
+                : 'Extend uses exactly 1 video · source aspect ratio',
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+            ),
+          ),
+        ],
         if (!setAside && model.requiresVisualReferenceForAudio) ...<Widget>[
           const SizedBox(height: 5),
           Text(
@@ -2153,7 +2175,7 @@ class _DurationControl extends StatelessWidget {
   Widget build(BuildContext context) {
     final form = controller.form;
     final model = controller.selectedModel;
-    final range = model.durationRangeFor(form.resolution);
+    final range = controller.selectedDurationRange;
     final autoLocked =
         form.requiresFixedDuration ||
         form.referenceTask == MediaReferenceTask.edit;

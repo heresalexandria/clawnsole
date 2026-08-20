@@ -36,10 +36,12 @@ treating every image as a keyframe:
 - BFL FLUX 3 exposes up to ten ordered/timed keyframes and one continuation
   video.
 - LTX 2.3 exposes first/last-frame interpolation; Pro also exposes one
-  audio-driven input up to 20 seconds.
+  audio-driven input up to 20 seconds at 720p/1080p or 10 seconds at 1440p/4K.
 - ArtCraft’s checked-in create-ready catalog mirrors the public Omni catalog’s
-  model-specific start/end, image, video, and audio limits; the live catalog
-  still determines current availability and rate rows.
+  model-specific start/end, image, video, audio, and combined-reference limits.
+  Where upstream modes are separate, Create keeps keyframes and creative
+  references mutually exclusive; the live catalog still determines current
+  availability and rate rows.
 - Atlas Seedance 2.5 References exposes 30 images, 10 videos, and 10 audio
   clips (30 seconds total per media kind), plus explicit new-video, edit, and
   extend tasks. Seedance 2.0 References variants expose 9 images, 3 videos, and
