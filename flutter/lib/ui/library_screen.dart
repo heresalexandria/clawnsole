@@ -8,6 +8,7 @@ import '../core/models.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_view_widgets.dart';
 import 'hardware.dart';
 import 'video_save_sheet.dart';
 
@@ -78,15 +79,38 @@ class _LibraryResults extends StatelessWidget {
       const SizedBox(height: 18),
       if (controller.filteredGenerations.isEmpty)
         _LibraryEmpty(controller: controller)
+      else if (controller.libraryViewMode == GenerationViewMode.compact)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: controller.filteredGenerations
+              .map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: GenerationCard(
+                    controller: controller,
+                    item: item,
+                    viewMode: GenerationViewMode.compact,
+                  ),
+                ),
+              )
+              .toList(),
+        )
       else
         LayoutBuilder(
           builder: (context, grid) {
-            final columns = grid.maxWidth >= 1120
+            final fullColumns = grid.maxWidth >= 1120
                 ? 3
                 : grid.maxWidth >= 650
                 ? 2
                 : 1;
             const gap = 16.0;
+            final columns =
+                controller.libraryViewMode == GenerationViewMode.full
+                ? fullColumns
+                : ((grid.maxWidth + gap) / (160 + gap)).floor().clamp(
+                    1,
+                    fullColumns * 2,
+                  );
             final width = (grid.maxWidth - gap * (columns - 1)) / columns;
             return Wrap(
               spacing: gap,
@@ -95,7 +119,11 @@ class _LibraryResults extends StatelessWidget {
                   .map(
                     (item) => SizedBox(
                       width: width,
-                      child: GenerationCard(controller: controller, item: item),
+                      child: GenerationCard(
+                        controller: controller,
+                        item: item,
+                        viewMode: controller.libraryViewMode,
+                      ),
                     ),
                   )
                   .toList(),
@@ -494,6 +522,16 @@ class _LibraryToolbar extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        Align(
+          alignment: Alignment.centerRight,
+          child: GenerationViewToggle(
+            keyPrefix: 'library-view',
+            value: controller.libraryViewMode,
+            onChanged: (value) =>
+                unawaited(controller.setLibraryViewMode(value)),
+          ),
+        ),
+        const SizedBox(height: 9),
         if (controller.supportsLocalLibrary) ...<Widget>[
           StorageFilterChips(
             value: controller.libraryStorageFilter,
@@ -701,10 +739,12 @@ class GenerationCard extends StatefulWidget {
     required this.controller,
     required this.item,
     super.key,
+    this.viewMode = GenerationViewMode.full,
   });
 
   final AppController controller;
   final Generation item;
+  final GenerationViewMode viewMode;
 
   @override
   State<GenerationCard> createState() => _GenerationCardState();
@@ -750,6 +790,40 @@ class _GenerationCardState extends State<GenerationCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
+    void organize() => unawaited(
+      _showGenerationOrganizer(
+        context,
+        controller: widget.controller,
+        item: item,
+      ),
+    );
+    final copyToDrive =
+        item.storage == LibraryStorage.local &&
+            widget.controller.googleDriveConnected
+        ? () => unawaited(
+            widget.controller.copyLocalLibraryToGoogleDrive(
+              generationIds: <String>{item.localId},
+            ),
+          )
+        : null;
+    if (widget.viewMode == GenerationViewMode.compact) {
+      return CompactGenerationRow(
+        controller: widget.controller,
+        item: item,
+        onOrganize: organize,
+        onDelete: () => unawaited(_remove()),
+        onCopyToDrive: copyToDrive,
+      );
+    }
+    if (widget.viewMode == GenerationViewMode.mini) {
+      return MiniGenerationCard(
+        controller: widget.controller,
+        item: item,
+        onOrganize: organize,
+        onDelete: () => unawaited(_remove()),
+        onCopyToDrive: copyToDrive,
+      );
+    }
     final folder = widget.controller.folderById(item.folderId);
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
     final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;

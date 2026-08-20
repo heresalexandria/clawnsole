@@ -222,6 +222,8 @@ class AppController extends ChangeNotifier {
   LocalSnapshot? snapshot;
   AppSection section = AppSection.create;
   LibraryFilter libraryFilter = LibraryFilter.all;
+  GenerationViewMode recentWorkViewMode = GenerationViewMode.full;
+  GenerationViewMode libraryViewMode = GenerationViewMode.full;
   LibraryStorageFilter libraryStorageFilter = LibraryStorageFilter.all;
   LibraryStorageFilter referenceStorageFilter = LibraryStorageFilter.all;
   FavoriteFilter libraryFavoriteFilter = FavoriteFilter.all;
@@ -819,6 +821,8 @@ class AppController extends ChangeNotifier {
     if (restorePreferences) {
       section = value.preferences.activeSection;
       libraryFilter = value.preferences.libraryFilter;
+      recentWorkViewMode = value.preferences.recentWorkViewMode;
+      libraryViewMode = value.preferences.libraryViewMode;
       libraryStorageFilter = value.preferences.libraryStorageFilter;
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       defaultStorage = supportsLocalLibrary
@@ -909,6 +913,26 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences(libraryFilter: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setRecentWorkViewMode(GenerationViewMode value) async {
+    recentWorkViewMode = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(recentWorkViewMode: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setLibraryViewMode(GenerationViewMode value) async {
+    libraryViewMode = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(libraryViewMode: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -1531,6 +1555,8 @@ class AppController extends ChangeNotifier {
   AppPreferences _preferences({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
+    GenerationViewMode? recentWorkViewMode,
+    GenerationViewMode? libraryViewMode,
     LibraryStorage? defaultStorage,
     LibraryStorageFilter? libraryStorageFilter,
     LibraryStorageFilter? referenceStorageFilter,
@@ -1541,6 +1567,8 @@ class AppController extends ChangeNotifier {
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
+    recentWorkViewMode: recentWorkViewMode ?? this.recentWorkViewMode,
+    libraryViewMode: libraryViewMode ?? this.libraryViewMode,
     provider: selectedProviderId,
     model: selectedModelId,
     defaultStorage: defaultStorage ?? this.defaultStorage,

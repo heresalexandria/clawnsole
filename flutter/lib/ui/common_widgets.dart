@@ -1249,99 +1249,97 @@ class GenerationDetailsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!item.hasProviderDetails) return const SizedBox.shrink();
     return OutlinedButton.icon(
-      onPressed: () => showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Generation details'),
-          content: SizedBox(
-            width: 620,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  _GenerationDetailLine(
-                    label: 'State',
-                    value: item.statusLabel,
-                  ),
-                  _GenerationDetailLine(
-                    label: 'Provider',
-                    value: item.provider.toUpperCase(),
-                  ),
-                  _GenerationDetailLine(label: 'Model', value: item.model),
-                  if (item.requestId != null)
-                    _GenerationDetailLine(
-                      label: 'Request ID',
-                      value: item.requestId!,
-                    ),
-                  if (item.lastProviderStatusCode != null)
-                    _GenerationDetailLine(
-                      label: 'HTTP status',
-                      value: item.lastProviderStatusCode.toString(),
-                    ),
-                  if (item.lastProviderResponseAt != null)
-                    _GenerationDetailLine(
-                      label: 'Response received',
-                      value: formatTimestamp(item.lastProviderResponseAt!),
-                    ),
-                  if (item.error != null) ...<Widget>[
-                    const SizedBox(height: 14),
-                    const Eyebrow('Error', icon: Icons.error_outline_rounded),
-                    const SizedBox(height: 7),
-                    SelectableText(item.error!),
-                  ],
-                  if (item.lastCheckError != null) ...<Widget>[
-                    const SizedBox(height: 14),
-                    const Eyebrow(
-                      'Last status-check error',
-                      icon: Icons.sync_problem_rounded,
-                    ),
-                    const SizedBox(height: 7),
-                    SelectableText(item.lastCheckError!),
-                  ],
-                  if (item.lastProviderResponse != null) ...<Widget>[
-                    const SizedBox(height: 14),
-                    const Eyebrow(
-                      'Provider response',
-                      icon: Icons.data_object_rounded,
-                    ),
-                    const SizedBox(height: 7),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: context.colors.surfaceContainerLow,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: context.colors.outlineVariant,
-                        ),
-                      ),
-                      child: SelectableText(
-                        item.lastProviderResponse!,
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                          height: 1.45,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: <Widget>[
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
-      ),
+      onPressed: () => showGenerationDetails(context, item),
       icon: const Icon(Icons.receipt_long_rounded, size: 15),
       label: const Text('View details'),
     );
   }
 }
+
+Future<void> showGenerationDetails(BuildContext context, Generation item) =>
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Generation details'),
+        content: SizedBox(
+          width: 620,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _GenerationDetailLine(label: 'State', value: item.statusLabel),
+                _GenerationDetailLine(
+                  label: 'Provider',
+                  value: item.provider.toUpperCase(),
+                ),
+                _GenerationDetailLine(label: 'Model', value: item.model),
+                if (item.requestId != null)
+                  _GenerationDetailLine(
+                    label: 'Request ID',
+                    value: item.requestId!,
+                  ),
+                if (item.lastProviderStatusCode != null)
+                  _GenerationDetailLine(
+                    label: 'HTTP status',
+                    value: item.lastProviderStatusCode.toString(),
+                  ),
+                if (item.lastProviderResponseAt != null)
+                  _GenerationDetailLine(
+                    label: 'Response received',
+                    value: formatTimestamp(item.lastProviderResponseAt!),
+                  ),
+                if (item.error != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Eyebrow('Error', icon: Icons.error_outline_rounded),
+                  const SizedBox(height: 7),
+                  SelectableText(item.error!),
+                ],
+                if (item.lastCheckError != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Eyebrow(
+                    'Last status-check error',
+                    icon: Icons.sync_problem_rounded,
+                  ),
+                  const SizedBox(height: 7),
+                  SelectableText(item.lastCheckError!),
+                ],
+                if (item.lastProviderResponse != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Eyebrow(
+                    'Provider response',
+                    icon: Icons.data_object_rounded,
+                  ),
+                  const SizedBox(height: 7),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.colors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: context.colors.outlineVariant),
+                    ),
+                    child: SelectableText(
+                      item.lastProviderResponse!,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
 
 class _GenerationDetailLine extends StatelessWidget {
   const _GenerationDetailLine({required this.label, required this.value});
@@ -1864,7 +1862,16 @@ class _MediaPlaceholder extends StatelessWidget {
           children: <Widget>[
             Icon(icon, color: foreground, size: 28),
             const SizedBox(height: 8),
-            Text(label, style: TextStyle(color: foreground, fontSize: 11.5)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: foreground, fontSize: 11.5),
+              ),
+            ),
           ],
         ),
       ),

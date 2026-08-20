@@ -133,6 +133,8 @@ extension on AppPreferences {
   AppPreferences copyWithStorageDefault() => AppPreferences(
     activeSection: activeSection,
     libraryFilter: libraryFilter,
+    recentWorkViewMode: recentWorkViewMode,
+    libraryViewMode: libraryViewMode,
     provider: provider,
     model: model,
     defaultStorage: LibraryStorage.drive,

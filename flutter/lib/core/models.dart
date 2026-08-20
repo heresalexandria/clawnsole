@@ -6,6 +6,8 @@ enum AppSection { create, library, references, providers, settings }
 
 enum LibraryFilter { all, working, ready, failed }
 
+enum GenerationViewMode { compact, mini, full }
+
 enum VideoMode { t2v, i2v, v2v, draftEnhance }
 
 enum GenerationOutputKind { video, image }
@@ -947,6 +949,8 @@ class AppPreferences {
   const AppPreferences({
     this.activeSection = AppSection.create,
     this.libraryFilter = LibraryFilter.all,
+    this.recentWorkViewMode = GenerationViewMode.full,
+    this.libraryViewMode = GenerationViewMode.full,
     this.provider = 'bfl',
     this.model = 'flux-3-video',
     this.defaultStorage = LibraryStorage.local,
@@ -958,6 +962,8 @@ class AppPreferences {
 
   final AppSection activeSection;
   final LibraryFilter libraryFilter;
+  final GenerationViewMode recentWorkViewMode;
+  final GenerationViewMode libraryViewMode;
   final String provider;
   final String model;
   final LibraryStorage defaultStorage;
@@ -969,6 +975,8 @@ class AppPreferences {
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
+    GenerationViewMode? recentWorkViewMode,
+    GenerationViewMode? libraryViewMode,
     String? provider,
     String? model,
     LibraryStorage? defaultStorage,
@@ -981,6 +989,8 @@ class AppPreferences {
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
+    recentWorkViewMode: recentWorkViewMode ?? this.recentWorkViewMode,
+    libraryViewMode: libraryViewMode ?? this.libraryViewMode,
     provider: provider ?? this.provider,
     model: model ?? this.model,
     defaultStorage: defaultStorage ?? this.defaultStorage,
@@ -998,6 +1008,8 @@ class AppPreferences {
   Map<String, Object?> toJson() => <String, Object?>{
     'activeSection': activeSection.name,
     'libraryFilter': libraryFilter.name,
+    'recentWorkViewMode': recentWorkViewMode.name,
+    'libraryViewMode': libraryViewMode.name,
     'provider': provider,
     'model': model,
     'defaultStorage': defaultStorage.name,
@@ -1017,6 +1029,14 @@ class AppPreferences {
     libraryFilter: LibraryFilter.values.firstWhere(
       (value) => value.name == json['libraryFilter'],
       orElse: () => LibraryFilter.all,
+    ),
+    recentWorkViewMode: GenerationViewMode.values.firstWhere(
+      (value) => value.name == json['recentWorkViewMode'],
+      orElse: () => GenerationViewMode.full,
+    ),
+    libraryViewMode: GenerationViewMode.values.firstWhere(
+      (value) => value.name == json['libraryViewMode'],
+      orElse: () => GenerationViewMode.full,
     ),
     provider: json['provider'] as String? ?? 'bfl',
     model: json['model'] as String? ?? 'flux-3-video',
@@ -1131,7 +1151,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 15,
+    'schemaVersion': 16,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,

@@ -185,7 +185,7 @@ void main() {
   });
 
   test(
-    'schema 15 preserves Drive provenance and migrates old items locally',
+    'schema 16 preserves Drive provenance and migrates old items locally',
     () {
       final driveAsset = AssetReference.fromJson(<String, Object?>{
         'kind': 'drive',
@@ -211,11 +211,11 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 15);
+      expect(migrated.toJson()['schemaVersion'], 16);
     },
   );
 
-  test('schema 15 round-trips favorites, preview caches, and last folders', () {
+  test('schema 16 round-trips favorites, previews, folders, and views', () {
     final now = DateTime.utc(2026, 8, 19, 12);
     const thumbnail = AssetReference(
       kind: 'drive',
@@ -233,6 +233,8 @@ void main() {
       StoredData(
         preferences: const AppPreferences(
           defaultStorage: LibraryStorage.drive,
+          recentWorkViewMode: GenerationViewMode.mini,
+          libraryViewMode: GenerationViewMode.compact,
           lastLocalGenerationFolderId: 'local-folder',
           lastDriveGenerationFolderId: 'drive-folder',
         ),
@@ -290,6 +292,8 @@ void main() {
 
     expect(decoded.preferences.lastLocalGenerationFolderId, 'local-folder');
     expect(decoded.preferences.lastDriveGenerationFolderId, 'drive-folder');
+    expect(decoded.preferences.recentWorkViewMode, GenerationViewMode.mini);
+    expect(decoded.preferences.libraryViewMode, GenerationViewMode.compact);
     expect(decoded.generations.single.favorite, isTrue);
     expect(decoded.generations.single.thumbnailAsset?.value, 'thumbnail-file');
     expect(
