@@ -1,6 +1,6 @@
 # Clawnsole terms of use
 
-Effective: August 19, 2026
+Effective: August 20, 2026
 
 These terms govern your use of the official Clawnsole website, applications,
 and release builds (collectively, "Clawnsole"). By using Clawnsole, you agree to
@@ -75,10 +75,11 @@ not controlled by the Clawnsole developer and may change, suspend access,
 reject content, retain data, experience outages, or discontinue an API without
 notice.
 
-The public website also uses Google Analytics for audience and product
-measurement. The [privacy policy](PRIVACY.md) explains the website data handled
-by Google and how this differs from the native apps, which contain no analytics
-SDK.
+The splash page at `clawnsole.app` uses Google Analytics for audience and
+product measurement only after a visitor allows optional analytics. The
+[privacy policy](PRIVACY.md) explains the splash-page data handled by Google and
+how this differs from the rest of the website and the apps, which contain no
+Analytics tag or SDK.
 
 Your use of a third-party service is a relationship between you and that
 service. Its terms and privacy policy apply. Atlas Cloud may send request data

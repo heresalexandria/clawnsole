@@ -1,12 +1,13 @@
 # Clawnsole privacy policy
 
-Effective: August 19, 2026
+Effective: August 20, 2026
 
 Clawnsole is a unified client for third-party video generation services across
 web, mobile, and desktop. The native desktop and mobile apps contain no
-analytics or advertising SDKs. The public website uses Google Analytics as
-described below. The developer does not operate an account system or cloud
-database for project data.
+analytics or advertising SDKs. The splash page at `clawnsole.app` uses Google
+Analytics only after a visitor allows optional analytics, as described below.
+The developer does not operate an account system or cloud database for project
+data.
 
 ## Data stored on your device
 
@@ -18,7 +19,8 @@ private local storage. Depending on how you use the app, this can include:
   estimated or provider-reported usage and cost;
 - saved and in-progress reference images, video, and audio; generated media;
   local file references; and reference names, folders, and tags;
-- appearance, retention, and other app preferences.
+- appearance, retention, and other app preferences; and
+- on the `clawnsole.app` splash page, your analytics consent choice.
 
 Provider keys can be added, replaced, or removed from **Providers**. Saved
 references can be renamed, reorganized, or deleted from **References**.
@@ -96,26 +98,37 @@ destination site's policy.
 
 ## Google Analytics on clawnsole.app
 
-The public Clawnsole website uses Google Analytics to understand visits and
-interactions, evaluate site performance, and decide what to improve. If the
-hosted web app is made available on clawnsole.app, the same site analytics may
-measure visits and interactions with that web experience. The native macOS,
-Windows, iOS, and Android apps do not use Google Analytics or send analytics
-events.
+The splash page at `https://clawnsole.app/` uses Google Analytics to understand
+visits and interactions, evaluate site performance, and decide what to improve.
+The Analytics tag is not present on the privacy policy, terms of use, hosted web
+app, or native macOS, Windows, iOS, and Android apps.
 
-Google Analytics may process page URLs, referral information, interactions,
-session statistics, approximate location, browser and device information, IP
-addresses for processing and coarse location, and identifiers stored in
-first-party cookies. Google processes this information under its
+On the splash page, Google Analytics is off by default. The Google tag is not
+loaded and no data is sent to Google Analytics unless you select **Allow
+analytics**. Selecting **Decline** leaves the tag unloaded. Clawnsole stores your
+choice in your browser's localStorage so it can be honored on later visits. You
+can change the choice through **Analytics choices** in the splash-page footer;
+withdrawing consent disables Analytics and removes accessible Analytics cookies.
+The static page has no first-party country signal, so it presents these controls
+to every visitor rather than sending an IP address to a separate geolocation
+service.
+
+When you allow analytics, Google Analytics may process the splash-page URL,
+referral information, interactions, session statistics, approximate location,
+browser and device information, IP addresses for processing and coarse
+location, and identifiers stored in first-party cookies. Google processes this
+information under its
 [explanation for sites that use Google services](https://policies.google.com/technologies/partner-sites)
 and its [privacy policy](https://policies.google.com/privacy).
 
 Clawnsole does not intentionally send provider API keys, prompts, reference
 media, generated media, Google Drive contents, or project history to Google
-Analytics. Analytics data is used for audience and product measurement, not
-advertising or cross-app tracking. Google Analytics retention is controlled
-through the Analytics property settings. You can limit Analytics through your
-browser's cookie controls or Google's
+Analytics. Analytics data is used for splash-page audience and product
+measurement, not advertising or cross-app tracking. Advertising storage, ads
+user data, ads personalization, Google signals, and ad personalization signals
+remain disabled. Google Analytics retention is controlled through the Analytics
+property settings. You can also limit Analytics through your browser's cookie
+controls or Google's
 [Analytics opt-out browser add-on](https://tools.google.com/dlpage/gaoptout).
 
 ## Data collected by the developer
@@ -123,8 +136,8 @@ browser's cookie controls or Google's
 The native Clawnsole apps do not send the developer your API keys, prompts,
 reference media, generated media, generation history, contacts, precise
 location, advertising identifiers, or analytics events. The developer can
-access aggregate and event-level website usage reports collected through
-Google Analytics, as described above. Clawnsole does not use data for
+access aggregate and event-level splash-page usage reports for visitors who
+allow Google Analytics, as described above. Clawnsole does not use data for
 advertising or cross-app tracking.
 
 Apple, Google, GitHub, the selected generation provider, any underlying model

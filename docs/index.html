@@ -46,7 +46,7 @@
     >
     <title>Clawnsole | AI video generation studio</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="assets/site.css?v=unified-studio-theme">
+    <link rel="stylesheet" href="assets/site.css?v=analytics-consent">
     <script>
       try {
         const theme = localStorage.getItem('clawnsole-site-theme');
@@ -56,6 +56,7 @@
       } catch (_) {}
     </script>
     <script src="assets/theme.js" defer></script>
+    <script src="assets/analytics-consent.js" defer></script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -307,10 +308,10 @@
           </div>
           <p>
             Clawnsole does not require a developer-operated account or cloud
-            database. Native builds contain no analytics or ads. The public
-            website uses Google Analytics for traffic and usage measurement, as
-            explained in the privacy policy. Your provider keys, prompts, media,
-            and project history are not sent to Google Analytics.
+            database. Native builds contain no analytics or ads. This splash
+            page uses Google Analytics only after you allow optional analytics,
+            as explained in the privacy policy. Your provider keys, prompts,
+            media, and project history are not sent to Google Analytics.
           </p>
           <a class="button button-light" href="privacy/">How privacy works</a>
         </div>
@@ -399,10 +400,56 @@
       <div>
         <a href="privacy/">Privacy</a>
         <a href="tos/">Terms</a>
+        <button class="footer-link" type="button" data-analytics-manage>
+          Analytics choices
+        </button>
         <a href="https://github.com/heresalexandria/clawnsole">View on GitHub</a>
         <a href="https://github.com/heresalexandria/clawnsole/issues">Support</a>
         <a href="https://heresalexandria.com/">Made by Alexandria</a>
       </div>
     </footer>
+
+    <section
+      class="analytics-consent"
+      role="dialog"
+      aria-labelledby="analytics-consent-title"
+      aria-describedby="analytics-consent-description"
+      data-analytics-consent
+      hidden
+    >
+      <button
+        class="analytics-consent-close"
+        type="button"
+        aria-label="Close analytics choices"
+        data-analytics-close
+      >
+        <span aria-hidden="true">×</span>
+      </button>
+      <div class="analytics-consent-copy">
+        <p class="eyebrow">Optional analytics</p>
+        <h2 id="analytics-consent-title">Help improve Clawnsole</h2>
+        <p id="analytics-consent-description">
+          We use Google Analytics on this splash page to understand visits and
+          improve the site. Analytics stays off unless you allow it.
+          <a href="privacy/#site-analytics">See the privacy policy.</a>
+        </p>
+      </div>
+      <div class="analytics-consent-actions">
+        <button
+          class="analytics-consent-button analytics-consent-decline"
+          type="button"
+          data-analytics-decline
+        >
+          Decline
+        </button>
+        <button
+          class="analytics-consent-button analytics-consent-allow"
+          type="button"
+          data-analytics-allow
+        >
+          Allow analytics
+        </button>
+      </div>
+    </section>
   </body>
 </html>
