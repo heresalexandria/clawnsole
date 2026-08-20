@@ -101,7 +101,11 @@ platform OAuth client before launching:
 - Android: `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`, using the registered
   web client ID; also register the Android package and every signing SHA
 - iOS: `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`; the iOS scripts derive and inject its
-  reversed callback URL scheme
+  native client ID and reversed callback URL scheme. TestFlight and App Store
+  builds use Apple App Attest for Google Sign-In App Check. Local development
+  and simulator requests may remain unverified unless a debug provider is
+  configured, so enable App Check enforcement only after a Drive sign-in from
+  a TestFlight or App Store build appears as verified in Google Cloud.
 - standalone web: `CLAWNSOLE_GOOGLE_CLIENT_ID`
 
 Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or

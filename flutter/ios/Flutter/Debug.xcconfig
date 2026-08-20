@@ -1,4 +1,5 @@
 #include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
 #include "Generated.xcconfig"
+GOOGLE_IOS_CLIENT_ID =
 GOOGLE_REVERSED_CLIENT_ID = app.clawnsole.clawnsole.google-drive-disabled
 #include? "GoogleDriveOAuth.xcconfig"
