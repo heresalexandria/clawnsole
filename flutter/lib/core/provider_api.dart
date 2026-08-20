@@ -42,7 +42,7 @@ class ProviderApiRouter {
     'ltx' => ltx.submit(key, model, input),
     'artcraft' => artcraft.submit(key, model, input),
     'atlas' => atlas.submit(key, model, input),
-    _ => bfl.submit(key, input),
+    _ => bfl.submit(key, input, model: model),
   };
 
   Future<Map<String, Object?>> poll(

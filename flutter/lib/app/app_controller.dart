@@ -176,11 +176,16 @@ class GenerationFormState {
   Uint8List? videoThumbnailBytes;
   PickedAsset? draftAsset;
   String draftUrl = '';
+  bool upscale = false;
+  double upscaleFactor = 2;
+  int upscaleCreativity = 1;
 
-  /// The generation mode implied by what is attached. There is no mode
-  /// picker: a draft cache wins, then a starting video, then keyframes or
-  /// creative references, and plain text otherwise.
+  /// The operation selected by the model or implied by what is attached.
+  /// Upscale is a dedicated model; generation modes otherwise need no picker:
+  /// a draft cache wins, then a starting video, then frames/references, then
+  /// plain text.
   VideoMode get mode {
+    if (upscale) return VideoMode.upscale;
     if (draftAsset != null || draftUrl.trim().isNotEmpty) {
       return VideoMode.draftEnhance;
     }
@@ -513,7 +518,7 @@ class AppController extends ChangeNotifier {
           ? ''
           : folderPath(item.folderId!).toLowerCase();
       if (query.isNotEmpty &&
-          !item.prompt.toLowerCase().contains(query) &&
+          !item.displayPrompt.toLowerCase().contains(query) &&
           !folderName.contains(query) &&
           !item.tags.any((tag) => tag.toLowerCase().contains(query))) {
         return false;
@@ -688,13 +693,14 @@ class AppController extends ChangeNotifier {
 
   GenerationConfig get currentConfig {
     final orderedFrames = _orderedFrames();
+    final upscaling = form.mode == VideoMode.upscale;
     return GenerationConfig(
-      aspectRatio: form.aspectRatio,
-      duration: form.duration,
-      resolution: form.resolution,
-      generateAudio: form.generateAudio,
+      aspectRatio: upscaling ? 'auto' : form.aspectRatio,
+      duration: upscaling ? 'source' : form.duration,
+      resolution: upscaling ? 'source' : form.resolution,
+      generateAudio: upscaling ? false : form.generateAudio,
       safetyTolerance: form.safetyTolerance,
-      draft: form.draft,
+      draft: upscaling ? false : form.draft,
       frameRate: form.frameRate,
       exactTiming: form.usesTimedKeyframes,
       keyframes: form.mode == VideoMode.i2v
@@ -738,6 +744,9 @@ class AppController extends ChangeNotifier {
         VideoMode.draftEnhance =>
           form.draftAsset?.name ??
               (form.draftUrl.trim().isEmpty ? null : form.draftUrl.trim()),
+        VideoMode.upscale =>
+          form.videoAsset?.name ??
+              (form.videoUrl.trim().isEmpty ? null : form.videoUrl.trim()),
         _ => null,
       },
       source: switch (form.mode) {
@@ -751,14 +760,22 @@ class AppController extends ChangeNotifier {
           form.draftUrl,
           form.draftAsset?.name ?? 'FLUX 3 draft cache',
         ),
+        VideoMode.upscale => _reference(
+          form.videoAsset,
+          form.videoUrl,
+          form.videoAsset?.name ?? 'Video to upscale',
+        ),
         _ => null,
       },
-      sourceThumbnailAsset: form.mode == VideoMode.v2v
+      sourceThumbnailAsset:
+          form.mode == VideoMode.v2v || form.mode == VideoMode.upscale
           ? _previewForStorage(
               form.videoAsset?.thumbnailAsset,
               effectiveStorage,
             )
           : null,
+      upscaleFactor: form.upscaleFactor,
+      upscaleCreativity: form.upscaleCreativity,
     );
   }
 
@@ -1460,16 +1477,16 @@ class AppController extends ChangeNotifier {
               AssetReference(
                 kind: 'remote',
                 value: item.resultUrl!,
-                label: item.prompt.trim().isEmpty
+                label: item.displayPrompt.trim().isEmpty
                     ? 'Generated ${kind.label.toLowerCase()}'
-                    : item.prompt.trim(),
+                    : item.displayPrompt.trim(),
                 contentType: item.isImage ? 'image/png' : 'video/mp4',
               );
           return ReferenceCandidate(
             id: item.localId,
-            name: item.prompt.trim().isEmpty
+            name: item.displayPrompt.trim().isEmpty
                 ? 'Generated ${kind.label.toLowerCase()}'
-                : item.prompt.trim(),
+                : item.displayPrompt.trim(),
             kind: kind,
             asset: asset,
             thumbnailAsset: item.isImage ? null : item.thumbnailAsset,
@@ -1687,6 +1704,7 @@ class AppController extends ChangeNotifier {
 
   void _normalizeFormForModel() {
     final model = selectedModel;
+    form.upscale = model.isUpscaler;
     if (!model.supportsAutoDuration) form.autoDuration = false;
     if (!model.supportsAudio) form.generateAudio = false;
     if (!model.supportsDraft) form.draft = false;
@@ -2088,7 +2106,9 @@ class AppController extends ChangeNotifier {
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
     }
-    if (form.mode != VideoMode.draftEnhance && form.prompt.trim().isEmpty) {
+    if (form.mode != VideoMode.draftEnhance &&
+        form.mode != VideoMode.upscale &&
+        form.prompt.trim().isEmpty) {
       return model.outputKind == GenerationOutputKind.image
           ? 'Describe the image you want to make.'
           : 'Describe the animation you want to make.';
@@ -2183,6 +2203,33 @@ class AppController extends ChangeNotifier {
         form.videoUrl.trim().isEmpty) {
       return 'Add the video you want ${model.label} to continue.';
     }
+    if (form.mode == VideoMode.upscale) {
+      if (form.videoAsset == null && form.videoUrl.trim().isEmpty) {
+        return 'Add the video you want to upscale.';
+      }
+      final asset = form.videoAsset;
+      if (asset != null) {
+        final mp4 =
+            asset.name.toLowerCase().endsWith('.mp4') ||
+            asset.mimeType.toLowerCase().contains('mp4');
+        if (!mp4) {
+          return 'FLUX Video Upscale accepts local uploads as MP4 files.';
+        }
+        if (asset.bytes.length > 50 * 1024 * 1024) {
+          return 'FLUX Video Upscale accepts source files up to 50 MB.';
+        }
+      }
+      if (asset == null) {
+        final source = Uri.tryParse(form.videoUrl.trim());
+        if (source == null ||
+            (source.scheme != 'http' && source.scheme != 'https')) {
+          return 'Use an HTTP(S) URL for the video you want to upscale.';
+        }
+      }
+      if (form.upscaleFactor < 1.5 || form.upscaleFactor > 3) {
+        return 'Choose an upscale factor between 1.5× and 3×.';
+      }
+    }
     if (form.mode == VideoMode.draftEnhance &&
         form.draftAsset == null &&
         form.draftUrl.trim().isEmpty) {
@@ -2195,6 +2242,16 @@ class AppController extends ChangeNotifier {
   }
 
   Map<String, Object?> _buildInput() {
+    if (form.mode == VideoMode.upscale) {
+      final prompt = form.prompt.trim();
+      return <String, Object?>{
+        'input_video': form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        'upscale_factor': form.upscaleFactor,
+        'creativity': form.upscaleCreativity,
+        if (prompt.isNotEmpty) 'prompt': prompt,
+        'safety_tolerance': form.safetyTolerance,
+      };
+    }
     if (form.mode == VideoMode.draftEnhance) {
       return <String, Object?>{
         'mode': 'draft_enhance',
@@ -2329,7 +2386,11 @@ class AppController extends ChangeNotifier {
     }
     submitting = true;
     notifyListeners();
-    showNotice('Generation sent. Clawnsole will keep an eye on it.');
+    showNotice(
+      form.mode == VideoMode.upscale
+          ? 'Upscale sent. Clawnsole will keep an eye on it.'
+          : 'Generation sent. Clawnsole will keep an eye on it.',
+    );
     try {
       pending = await gateway.submit(
         GenerationSubmission(record: pending, input: _buildInput()),
@@ -2689,6 +2750,8 @@ class AppController extends ChangeNotifier {
       form.duration,
       form.resolution,
       form.generateAudio,
+      form.upscaleFactor,
+      form.upscaleCreativity,
     ].join('|');
     if (_estimateSignature == signature) return;
     _estimateSignature = signature;
@@ -2956,6 +3019,11 @@ class AppController extends ChangeNotifier {
     Generation item, {
     bool includePrompt = false,
   }) async {
+    if (includePrompt &&
+        providers.any((provider) => provider.id == item.provider)) {
+      selectedProviderId = item.provider;
+      selectedModelId = modelById(item.provider, item.model).id;
+    }
     final retainedFrames = <KeyframeDraft>[];
     for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
       final reference = frame.source;
@@ -3028,7 +3096,9 @@ class AppController extends ChangeNotifier {
       );
     }
     PickedAsset? retainedSource;
-    if ((item.mode == VideoMode.v2v || item.mode == VideoMode.draftEnhance) &&
+    if ((item.mode == VideoMode.v2v ||
+            item.mode == VideoMode.draftEnhance ||
+            item.mode == VideoMode.upscale) &&
         item.config.source?.isLocal == true) {
       try {
         retainedSource = await _retainedAsset(
@@ -3038,7 +3108,9 @@ class AppController extends ChangeNotifier {
       } on Object {
         // Preserve the rest of the last-used settings when an asset is gone.
         showNotice(
-          item.mode == VideoMode.v2v
+          item.mode == VideoMode.upscale
+              ? 'The retained source video is no longer available. Attach a video to upscale.'
+              : item.mode == VideoMode.v2v
               ? 'The retained starting video is no longer available. Attach a video to continue one.'
               : 'The retained draft cache is no longer available. Attach a draft to enhance it.',
         );
@@ -3073,13 +3145,20 @@ class AppController extends ChangeNotifier {
       ..generateAudio = item.config.generateAudio
       ..safetyTolerance = item.config.safetyTolerance
       ..draft = item.config.draft
+      ..upscale = item.mode == VideoMode.upscale
+      ..upscaleFactor = item.config.upscaleFactor
+      ..upscaleCreativity = item.config.upscaleCreativity
       ..exactTiming = item.config.exactTiming
       ..keyframes = retainedFrames
       ..references = retainedReferences
       ..referenceTask = restoredTask
-      ..videoAsset = item.mode == VideoMode.v2v ? retainedSource : null
+      ..videoAsset =
+          item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
+          ? retainedSource
+          : null
       ..videoUrl =
-          item.mode == VideoMode.v2v && item.config.source?.kind == 'remote'
+          (item.mode == VideoMode.v2v || item.mode == VideoMode.upscale) &&
+              item.config.source?.kind == 'remote'
           ? item.config.source!.value
           : ''
       ..videoThumbnailBytes = sourceThumbnailBytes
@@ -3089,6 +3168,7 @@ class AppController extends ChangeNotifier {
               item.config.source?.kind == 'remote'
           ? item.config.source!.value
           : '';
+    _selectCompatibleModel();
     _normalizeFormForModel();
     formRevision += 1;
     notifyListeners();

@@ -728,8 +728,12 @@ class DirectGateway
       }
       return config.copyWith(keyframes: frames, references: references);
     }
-    if (mode == 'v2v' || mode == 'draft_enhance') {
-      final source = input[mode == 'v2v' ? 'start_video' : 'draft_cache'];
+    if (mode == 'v2v' ||
+        mode == 'draft_enhance' ||
+        input.containsKey('input_video')) {
+      final source = input.containsKey('input_video')
+          ? input['input_video']
+          : input[mode == 'v2v' ? 'start_video' : 'draft_cache'];
       return config.copyWith(
         source: await _store.persistSource(
           source?.toString() ?? '',

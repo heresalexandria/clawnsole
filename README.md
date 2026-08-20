@@ -37,7 +37,8 @@ and optional Google Drive sync keep work organized wherever you create.
 
 ## What it does
 
-- Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation and draft enhancement
+- Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation,
+  draft enhancement, and FLUX Video Upscale finishing at 1.5×–3×
 - Model-aware image, video, and audio references, with timing and placement controls where supported
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
 - Live polling, manual status refresh, surfaced provider errors, and progress
@@ -181,7 +182,8 @@ npm test
 ```
 
 Provider contracts and fallback rates follow the official
-[BFL documentation](https://docs.bfl.ai/flux_3/flux3_video),
+[BFL video documentation](https://docs.bfl.ai/flux_3/flux3_video),
+[BFL Video Upscale documentation](https://docs.bfl.ai/flux_tools/flux_video_upscale),
 [LTX documentation](https://docs.ltx.io), and
 [Atlas Cloud video documentation](https://www.atlascloud.ai/docs/models/video).
 Atlas models are refreshed from its public catalog and Create-ready costs use

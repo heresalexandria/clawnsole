@@ -8,7 +8,7 @@ enum LibraryFilter { all, working, ready, failed }
 
 enum GenerationViewMode { compact, mini, full }
 
-enum VideoMode { t2v, i2v, v2v, draftEnhance }
+enum VideoMode { t2v, i2v, v2v, draftEnhance, upscale }
 
 enum GenerationOutputKind { video, image }
 
@@ -132,6 +132,7 @@ extension VideoModeValue on VideoMode {
     VideoMode.i2v => 'i2v',
     VideoMode.v2v => 'v2v',
     VideoMode.draftEnhance => 'draft_enhance',
+    VideoMode.upscale => 'upscale',
   };
 
   String get label => switch (this) {
@@ -139,6 +140,7 @@ extension VideoModeValue on VideoMode {
     VideoMode.i2v => 'Image to video',
     VideoMode.v2v => 'Video continuation',
     VideoMode.draftEnhance => 'Draft enhance',
+    VideoMode.upscale => 'Video upscale',
   };
 
   String get shortLabel => switch (this) {
@@ -146,6 +148,7 @@ extension VideoModeValue on VideoMode {
     VideoMode.i2v => 'Frames',
     VideoMode.v2v => 'Continue',
     VideoMode.draftEnhance => 'Enhance',
+    VideoMode.upscale => 'Upscale',
   };
 
   static VideoMode parse(Object? value) => VideoMode.values.firstWhere(
@@ -210,6 +213,8 @@ class GenerationConfig {
     this.sourceLabel,
     this.source,
     this.sourceThumbnailAsset,
+    this.upscaleFactor = 2,
+    this.upscaleCreativity = 1,
   });
 
   final String aspectRatio;
@@ -226,6 +231,8 @@ class GenerationConfig {
   final String? sourceLabel;
   final AssetReference? source;
   final AssetReference? sourceThumbnailAsset;
+  final double upscaleFactor;
+  final int upscaleCreativity;
 
   GenerationConfig copyWith({
     List<KeyframeLabel>? keyframes,
@@ -234,6 +241,8 @@ class GenerationConfig {
     AssetReference? source,
     AssetReference? sourceThumbnailAsset,
     int? frameRate,
+    double? upscaleFactor,
+    int? upscaleCreativity,
   }) => GenerationConfig(
     aspectRatio: aspectRatio,
     duration: duration,
@@ -249,6 +258,8 @@ class GenerationConfig {
     sourceLabel: sourceLabel,
     source: source ?? this.source,
     sourceThumbnailAsset: sourceThumbnailAsset ?? this.sourceThumbnailAsset,
+    upscaleFactor: upscaleFactor ?? this.upscaleFactor,
+    upscaleCreativity: upscaleCreativity ?? this.upscaleCreativity,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -270,6 +281,8 @@ class GenerationConfig {
     if (source != null) 'source': source!.toJson(),
     if (sourceThumbnailAsset != null)
       'sourceThumbnailAsset': sourceThumbnailAsset!.toJson(),
+    if (upscaleFactor != 2) 'upscaleFactor': upscaleFactor,
+    if (upscaleCreativity != 1) 'upscaleCreativity': upscaleCreativity,
   };
 
   factory GenerationConfig.fromJson(Map<String, Object?> json) {
@@ -300,9 +313,17 @@ class GenerationConfig {
       aspectRatio: json['aspectRatio'] is String
           ? json['aspectRatio']! as String
           : '16:9',
-      duration: rawDuration is num ? rawDuration.toInt() : 'auto',
+      duration: rawDuration is num
+          ? rawDuration.toInt()
+          : rawDuration == 'source'
+          ? 'source'
+          : 'auto',
       resolution: switch (json['resolution']) {
-        'sd' || 'fhd' || 'qhd' || '4k' => json['resolution']! as String,
+        'sd' ||
+        'fhd' ||
+        'qhd' ||
+        '4k' ||
+        'source' => json['resolution']! as String,
         _ => 'hd',
       },
       generateAudio: json['generateAudio'] != false,
@@ -329,6 +350,10 @@ class GenerationConfig {
               ),
             )
           : null,
+      upscaleFactor: (json['upscaleFactor'] as num?)?.toDouble() ?? 2,
+      upscaleCreativity: (json['upscaleCreativity'] as num?)?.toInt() == 0
+          ? 0
+          : 1,
     );
   }
 }
@@ -686,6 +711,16 @@ class Generation {
       isGenerationWorkingStatus(status, canPoll: canCheckStatus);
   bool get isReady => normalizeGenerationStatus(status) == 'Ready';
   bool get isImage => outputKind == GenerationOutputKind.image;
+  String get displayPrompt {
+    if (mode != VideoMode.upscale || prompt.trim().isNotEmpty) return prompt;
+    final source = config.sourceLabel?.trim() ?? '';
+    final uri = Uri.tryParse(source);
+    final label = uri != null && uri.pathSegments.isNotEmpty
+        ? uri.pathSegments.last
+        : source;
+    return 'Upscale ${label.isEmpty ? 'source video' : label}';
+  }
+
   bool get isFailed => isGenerationFailureStatus(status);
   bool get isStatusUnavailable =>
       isWorking && lastCheckError?.trim().isNotEmpty == true;

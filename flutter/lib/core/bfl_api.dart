@@ -63,16 +63,34 @@ class BflApi {
 
   Future<Map<String, Object?>> submit(
     String apiKey,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    String model = 'flux-3-video',
+  }) async {
+    final upscale = model == 'flux-tools-video-upscale-v1';
+    final requestInput = Map<String, Object?>.from(input);
+    if (upscale) {
+      final video = requestInput['input_video'];
+      if (video is String && video.startsWith('data:')) {
+        final separator = video.indexOf(',');
+        if (separator < 0) {
+          throw const ProviderException(
+            'The selected video is malformed.',
+            status: 400,
+          );
+        }
+        requestInput['input_video'] = video.substring(separator + 1);
+      }
+    }
     final payload = await _read(
       await _request(
         _client.post(
-          _baseUrl.resolve('/v1/flux-3-video'),
+          _baseUrl.resolve(
+            upscale ? '/v1/flux-tools/video-upscale-v1' : '/v1/flux-3-video',
+          ),
           headers: _headers(apiKey, json: true),
-          body: jsonEncode(input),
+          body: jsonEncode(requestInput),
         ),
-        'submit the generation',
+        upscale ? 'submit the video upscale' : 'submit the generation',
       ),
     );
     if (payload is! Map<String, Object?>) {

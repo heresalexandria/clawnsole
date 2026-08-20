@@ -34,6 +34,21 @@ CreditEstimate estimateCredits(
   GenerationConfig config, [
   List<Generation> history = const <Generation>[],
 ]) {
+  if (mode == VideoMode.upscale) {
+    final usdPerMegapixelSecond = config.upscaleCreativity == 0 ? .07 : .10;
+    const maximumOutputMegapixels = 13.75;
+    const maximumDurationSeconds = 20;
+    return CreditEstimate(
+      minimum: 0,
+      maximum: _roundCredits(
+        maximumOutputMegapixels *
+            maximumDurationSeconds *
+            usdPerMegapixelSecond /
+            bflUsdPerCredit,
+      ),
+      basis: 'published-output-megapixel-rate',
+    );
+  }
   final exact = history
       .where((item) => item.cost != null && _sameSignature(item, mode, config))
       .map((item) => item.cost!)
@@ -199,7 +214,11 @@ RouteCostObservation? routeCostObservation(
     if (generation.model == route.model) return true;
     if (!route.model.startsWith('${generation.model}:')) return false;
     final routeTier = route.model.split(':').last.toLowerCase();
-    final generationTier = generation.config.draft
+    final generationTier = generation.mode == VideoMode.upscale
+        ? generation.config.upscaleCreativity == 0
+              ? 'precise'
+              : 'creative'
+        : generation.config.draft
         ? 'draft'
         : switch (generation.config.resolution) {
             'fhd' => route.provider == 'ltx' ? '1080p' : 'fhd',
@@ -254,6 +273,12 @@ ProviderModelPrice? _pricedModel(
   List<ProviderModelPrice> prices,
 ) {
   if (providerId == 'bfl') {
+    if (mode == VideoMode.upscale) {
+      return (
+        usdPerSecond: config.upscaleCreativity == 0 ? .07 : .10,
+        source: 'published-output-megapixel-rate',
+      );
+    }
     final rates = mode == VideoMode.v2v ? _videoRates : _textOrImageRates;
     final credits = config.draft && mode != VideoMode.draftEnhance
         ? rates['draft']!
