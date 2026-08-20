@@ -24,6 +24,8 @@ class WebGateway
         ProviderGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
+        FavoriteGateway,
+        GenerationPreviewGateway,
         GoogleDriveGateway {
   WebGateway({
     http.Client? client,
@@ -326,6 +328,33 @@ class WebGateway
   @override
   Future<LocalSnapshot> deleteReference(String referenceId) =>
       _action('deleteReference', referenceId);
+
+  @override
+  Future<LocalSnapshot> setGenerationFavorite(String localId, bool favorite) =>
+      _action('setGenerationFavorite', <String, Object?>{
+        'localId': localId,
+        'favorite': favorite,
+      });
+
+  @override
+  Future<LocalSnapshot> setReferenceFavorite(
+    String referenceId,
+    bool favorite,
+  ) => _action('setReferenceFavorite', <String, Object?>{
+    'referenceId': referenceId,
+    'favorite': favorite,
+  });
+
+  @override
+  Future<LocalSnapshot> saveGenerationPreviews(
+    String localId, {
+    Uint8List? thumbnailBytes,
+    Uint8List? timelineBytes,
+  }) => _action('saveGenerationPreviews', <String, Object?>{
+    'localId': localId,
+    if (thumbnailBytes != null) 'thumbnail': base64Encode(thumbnailBytes),
+    if (timelineBytes != null) 'timeline': base64Encode(timelineBytes),
+  });
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async {

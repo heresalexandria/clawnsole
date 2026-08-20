@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_theme.dart';
@@ -251,7 +251,6 @@ class _TimelineFrame extends StatelessWidget {
   );
 }
 
-@visibleForTesting
 List<Duration> videoTimelinePositions(Duration duration, int frameCount) {
   if (frameCount <= 0) return const <Duration>[];
   if (frameCount == 1 || duration <= Duration.zero) {

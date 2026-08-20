@@ -244,6 +244,11 @@ class _ReferenceToolbar extends StatelessWidget {
           ),
           const SizedBox(height: 9),
         ],
+        FavoriteFilterChips(
+          value: controller.referenceFavoriteFilter,
+          onChanged: controller.setReferenceFavoriteFilter,
+        ),
+        const SizedBox(height: 9),
         LayoutBuilder(
           builder: (context, constraints) {
             final kindFilters = Wrap(
@@ -425,6 +430,19 @@ class _ReferenceCard extends StatelessWidget {
                   ],
                 ),
               ),
+              IconButton(
+                tooltip: reference.favorite
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+                onPressed: () =>
+                    unawaited(controller.toggleReferenceFavorite(reference)),
+                icon: Icon(
+                  reference.favorite
+                      ? Icons.star_rounded
+                      : Icons.star_border_rounded,
+                  color: reference.favorite ? context.tokens.brass : null,
+                ),
+              ),
               PopupMenuButton<String>(
                 tooltip: '${reference.name} options',
                 onSelected: (value) {
@@ -455,9 +473,14 @@ class _ReferenceCard extends StatelessWidget {
                   ),
                   if (reference.storage == LibraryStorage.local &&
                       controller.googleDriveConnected)
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'copy',
-                      child: Text('Copy to Google Drive'),
+                      enabled: !controller.isCopyingReference(reference.id),
+                      child: Text(
+                        controller.isCopyingReference(reference.id)
+                            ? 'Copying to Google Drive…'
+                            : 'Copy to Google Drive',
+                      ),
                     ),
                   const PopupMenuItem(value: 'delete', child: Text('Delete')),
                 ],

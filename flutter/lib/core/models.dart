@@ -22,6 +22,22 @@ enum LibraryStorage { local, drive }
 
 enum LibraryStorageFilter { all, local, drive }
 
+enum FavoriteFilter { all, starred, unstarred }
+
+extension FavoriteFilterValue on FavoriteFilter {
+  bool matches(bool favorite) => switch (this) {
+    FavoriteFilter.all => true,
+    FavoriteFilter.starred => favorite,
+    FavoriteFilter.unstarred => !favorite,
+  };
+
+  String get label => switch (this) {
+    FavoriteFilter.all => 'All',
+    FavoriteFilter.starred => 'Starred',
+    FavoriteFilter.unstarred => 'Unstarred',
+  };
+}
+
 extension LibraryStorageValue on LibraryStorage {
   String get label => switch (this) {
     LibraryStorage.local => 'On this device',
@@ -428,6 +444,7 @@ class SavedReference {
     required this.updatedAt,
     this.folderId,
     this.tags = const <String>[],
+    this.favorite = false,
     this.storage = LibraryStorage.local,
   });
 
@@ -439,6 +456,7 @@ class SavedReference {
   final DateTime updatedAt;
   final String? folderId;
   final List<String> tags;
+  final bool favorite;
   final LibraryStorage storage;
 
   SavedReference copyWith({
@@ -448,6 +466,7 @@ class SavedReference {
     String? folderId,
     bool clearFolder = false,
     List<String>? tags,
+    bool? favorite,
     LibraryStorage? storage,
   }) => SavedReference(
     id: id,
@@ -458,6 +477,7 @@ class SavedReference {
     updatedAt: updatedAt ?? this.updatedAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
+    favorite: favorite ?? this.favorite,
     storage: storage ?? this.storage,
   );
 
@@ -470,6 +490,7 @@ class SavedReference {
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
+    if (favorite) 'favorite': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
@@ -495,6 +516,7 @@ class SavedReference {
           .whereType<String>()
           .where((tag) => tag.trim().isNotEmpty)
           .toList(),
+      favorite: json['favorite'] == true,
       storage: LibraryStorage.values.firstWhere(
         (value) => value.name == json['storage'],
         orElse: () => LibraryStorage.local,
@@ -522,6 +544,8 @@ class Generation {
     this.progress,
     this.resultUrl,
     this.resultAsset,
+    this.thumbnailAsset,
+    this.timelineThumbnailAsset,
     this.draftCacheUrl,
     this.deliveryExpiresAt,
     this.deliveryExpired = false,
@@ -545,6 +569,7 @@ class Generation {
     this.lastProviderResponseAt,
     this.folderId,
     this.tags = const <String>[],
+    this.favorite = false,
     this.storage = LibraryStorage.local,
   });
 
@@ -565,6 +590,8 @@ class Generation {
   final DateTime updatedAt;
   final String? resultUrl;
   final AssetReference? resultAsset;
+  final AssetReference? thumbnailAsset;
+  final AssetReference? timelineThumbnailAsset;
   final String? draftCacheUrl;
   final DateTime? deliveryExpiresAt;
   final bool deliveryExpired;
@@ -588,6 +615,7 @@ class Generation {
   final DateTime? lastProviderResponseAt;
   final String? folderId;
   final List<String> tags;
+  final bool favorite;
   final LibraryStorage storage;
 
   bool get canCheckStatus => pollingUrl?.trim().isNotEmpty == true;
@@ -641,6 +669,8 @@ class Generation {
     DateTime? updatedAt,
     String? resultUrl,
     AssetReference? resultAsset,
+    AssetReference? thumbnailAsset,
+    AssetReference? timelineThumbnailAsset,
     String? draftCacheUrl,
     DateTime? deliveryExpiresAt,
     bool? deliveryExpired,
@@ -668,6 +698,7 @@ class Generation {
     String? folderId,
     bool clearFolder = false,
     List<String>? tags,
+    bool? favorite,
     LibraryStorage? storage,
   }) => Generation(
     localId: localId,
@@ -687,6 +718,9 @@ class Generation {
     updatedAt: updatedAt ?? this.updatedAt,
     resultUrl: resultUrl ?? this.resultUrl,
     resultAsset: resultAsset ?? this.resultAsset,
+    thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
+    timelineThumbnailAsset:
+        timelineThumbnailAsset ?? this.timelineThumbnailAsset,
     draftCacheUrl: draftCacheUrl ?? this.draftCacheUrl,
     deliveryExpiresAt: deliveryExpiresAt ?? this.deliveryExpiresAt,
     deliveryExpired: deliveryExpired ?? this.deliveryExpired,
@@ -715,6 +749,7 @@ class Generation {
         lastProviderResponseAt ?? this.lastProviderResponseAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
+    favorite: favorite ?? this.favorite,
     storage: storage ?? this.storage,
   );
 
@@ -736,6 +771,9 @@ class Generation {
     'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (resultUrl != null) 'resultUrl': resultUrl,
     if (resultAsset != null) 'resultAsset': resultAsset!.toJson(),
+    if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
+    if (timelineThumbnailAsset != null)
+      'timelineThumbnailAsset': timelineThumbnailAsset!.toJson(),
     if (draftCacheUrl != null) 'draftCacheUrl': draftCacheUrl,
     if (deliveryExpiresAt != null)
       'deliveryExpiresAt': deliveryExpiresAt!.toUtc().toIso8601String(),
@@ -767,6 +805,7 @@ class Generation {
           .toIso8601String(),
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
+    if (favorite) 'favorite': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
@@ -804,6 +843,21 @@ class Generation {
             ),
           )
         : null,
+    thumbnailAsset: json['thumbnailAsset'] is Map<Object?, Object?>
+        ? AssetReference.fromJson(
+            (json['thumbnailAsset']! as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          )
+        : null,
+    timelineThumbnailAsset:
+        json['timelineThumbnailAsset'] is Map<Object?, Object?>
+        ? AssetReference.fromJson(
+            (json['timelineThumbnailAsset']! as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          )
+        : null,
     draftCacheUrl: json['draftCacheUrl'] as String?,
     deliveryExpiresAt: DateTime.tryParse(
       json['deliveryExpiresAt'] as String? ?? '',
@@ -835,6 +889,7 @@ class Generation {
         .whereType<String>()
         .where((tag) => tag.trim().isNotEmpty)
         .toList(),
+    favorite: json['favorite'] == true,
     storage: LibraryStorage.values.firstWhere(
       (value) => value.name == json['storage'],
       orElse: () => LibraryStorage.local,
@@ -851,6 +906,8 @@ class AppPreferences {
     this.defaultStorage = LibraryStorage.local,
     this.libraryStorageFilter = LibraryStorageFilter.all,
     this.referenceStorageFilter = LibraryStorageFilter.all,
+    this.lastLocalGenerationFolderId,
+    this.lastDriveGenerationFolderId,
   });
 
   final AppSection activeSection;
@@ -860,6 +917,8 @@ class AppPreferences {
   final LibraryStorage defaultStorage;
   final LibraryStorageFilter libraryStorageFilter;
   final LibraryStorageFilter referenceStorageFilter;
+  final String? lastLocalGenerationFolderId;
+  final String? lastDriveGenerationFolderId;
 
   AppPreferences copyWith({
     AppSection? activeSection,
@@ -869,6 +928,10 @@ class AppPreferences {
     LibraryStorage? defaultStorage,
     LibraryStorageFilter? libraryStorageFilter,
     LibraryStorageFilter? referenceStorageFilter,
+    String? lastLocalGenerationFolderId,
+    bool clearLastLocalGenerationFolder = false,
+    String? lastDriveGenerationFolderId,
+    bool clearLastDriveGenerationFolder = false,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -878,6 +941,12 @@ class AppPreferences {
     libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
     referenceStorageFilter:
         referenceStorageFilter ?? this.referenceStorageFilter,
+    lastLocalGenerationFolderId: clearLastLocalGenerationFolder
+        ? null
+        : lastLocalGenerationFolderId ?? this.lastLocalGenerationFolderId,
+    lastDriveGenerationFolderId: clearLastDriveGenerationFolder
+        ? null
+        : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -888,6 +957,10 @@ class AppPreferences {
     'defaultStorage': defaultStorage.name,
     'libraryStorageFilter': libraryStorageFilter.name,
     'referenceStorageFilter': referenceStorageFilter.name,
+    if (lastLocalGenerationFolderId != null)
+      'lastLocalGenerationFolderId': lastLocalGenerationFolderId,
+    if (lastDriveGenerationFolderId != null)
+      'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -913,6 +986,8 @@ class AppPreferences {
       (value) => value.name == json['referenceStorageFilter'],
       orElse: () => LibraryStorageFilter.all,
     ),
+    lastLocalGenerationFolderId: json['lastLocalGenerationFolderId'] as String?,
+    lastDriveGenerationFolderId: json['lastDriveGenerationFolderId'] as String?,
   );
 }
 
@@ -1010,7 +1085,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 13,
+    'schemaVersion': 14,
     'apiKeys': <String, Object?>{
       if (apiKey.isNotEmpty) 'bfl': apiKey,
       ...apiKeys,

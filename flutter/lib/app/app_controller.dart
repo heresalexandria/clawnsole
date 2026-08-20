@@ -188,7 +188,11 @@ class AppController extends ChangeNotifier {
   LibraryFilter libraryFilter = LibraryFilter.all;
   LibraryStorageFilter libraryStorageFilter = LibraryStorageFilter.all;
   LibraryStorageFilter referenceStorageFilter = LibraryStorageFilter.all;
+  FavoriteFilter libraryFavoriteFilter = FavoriteFilter.all;
+  FavoriteFilter referenceFavoriteFilter = FavoriteFilter.all;
   LibraryStorage defaultStorage = LibraryStorage.local;
+  String? lastLocalGenerationFolderId;
+  String? lastDriveGenerationFolderId;
   String librarySearch = '';
   String libraryFolderView = libraryFolderAll;
   String? libraryTag;
@@ -295,6 +299,9 @@ class AppController extends ChangeNotifier {
           state: GoogleDriveConnectionState.unavailable,
         );
   bool googleDriveBusy = false;
+  final Set<String> copyingGenerationIds = <String>{};
+  final Set<String> copyingReferenceIds = <String>{};
+  Future<void> _driveCopyQueue = Future<void>.value();
   int get workingCount => generations.where((item) => item.isWorking).length;
   int get readyCount => generations.where((item) => item.isReady).length;
   double get spentCredits => generations
@@ -305,6 +312,10 @@ class AppController extends ChangeNotifier {
     (total, item) => total + (recordedRealizedCostUsd(item) ?? 0),
   );
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
+  bool isCopyingGeneration(String localId) =>
+      copyingGenerationIds.contains(localId);
+  bool isCopyingReference(String referenceId) =>
+      copyingReferenceIds.contains(referenceId);
   bool canReuse(Generation item) => item.provider != 'apple-local';
 
   LibraryFolder? folderById(
@@ -454,6 +465,7 @@ class AppController extends ChangeNotifier {
         : const <String>{};
     return generations.where((item) {
       if (!libraryStorageFilter.matches(item.storage)) return false;
+      if (!libraryFavoriteFilter.matches(item.favorite)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(item.folderId!).toLowerCase();
@@ -564,6 +576,7 @@ class AppController extends ChangeNotifier {
         : const <String>{};
     final values = savedReferences.where((item) {
       if (!referenceStorageFilter.matches(item.storage)) return false;
+      if (!referenceFavoriteFilter.matches(item.favorite)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(
@@ -738,6 +751,16 @@ class AppController extends ChangeNotifier {
     defaultStorage = supportsLocalLibrary
         ? value.preferences.defaultStorage
         : LibraryStorage.drive;
+    lastLocalGenerationFolderId = value.preferences.lastLocalGenerationFolderId;
+    lastDriveGenerationFolderId = value.preferences.lastDriveGenerationFolderId;
+    if (folderById(lastLocalGenerationFolderId)?.storage !=
+        LibraryStorage.local) {
+      lastLocalGenerationFolderId = null;
+    }
+    if (folderById(lastDriveGenerationFolderId)?.storage !=
+        LibraryStorage.drive) {
+      lastDriveGenerationFolderId = null;
+    }
     final preferredProvider = providerById(value.preferences.provider);
     final available = providers;
     final previousModelId = selectedModelId;
@@ -843,6 +866,78 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       _apply(await gateway.setPreferences(_preferences(defaultStorage: value)));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  String? get selectedGenerationFolderId =>
+      effectiveStorage == LibraryStorage.drive
+      ? lastDriveGenerationFolderId
+      : lastLocalGenerationFolderId;
+
+  Future<void> setGenerationFolder(String? folderId) async {
+    final folder = folderById(folderId);
+    if (folderId != null &&
+        (folder == null || folder.storage != effectiveStorage)) {
+      showNotice('That destination folder is no longer available.');
+      return;
+    }
+    if (effectiveStorage == LibraryStorage.drive) {
+      lastDriveGenerationFolderId = folderId;
+    } else {
+      lastLocalGenerationFolderId = folderId;
+    }
+    notifyListeners();
+    try {
+      _apply(
+        await gateway.setPreferences(
+          _preferences(
+            lastLocalGenerationFolderId: lastLocalGenerationFolderId,
+            clearLastLocalGenerationFolder: lastLocalGenerationFolderId == null,
+            lastDriveGenerationFolderId: lastDriveGenerationFolderId,
+            clearLastDriveGenerationFolder: lastDriveGenerationFolderId == null,
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  void setLibraryFavoriteFilter(FavoriteFilter value) {
+    libraryFavoriteFilter = value;
+    notifyListeners();
+  }
+
+  void setReferenceFavoriteFilter(FavoriteFilter value) {
+    referenceFavoriteFilter = value;
+    notifyListeners();
+  }
+
+  Future<void> toggleGenerationFavorite(Generation item) async {
+    if (gateway is! FavoriteGateway) return;
+    try {
+      _apply(
+        await (gateway as FavoriteGateway).setGenerationFavorite(
+          item.localId,
+          !item.favorite,
+        ),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> toggleReferenceFavorite(SavedReference item) async {
+    if (gateway is! FavoriteGateway) return;
+    try {
+      _apply(
+        await (gateway as FavoriteGateway).setReferenceFavorite(
+          item.id,
+          !item.favorite,
+        ),
+      );
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -1323,6 +1418,10 @@ class AppController extends ChangeNotifier {
     LibraryStorage? defaultStorage,
     LibraryStorageFilter? libraryStorageFilter,
     LibraryStorageFilter? referenceStorageFilter,
+    String? lastLocalGenerationFolderId,
+    bool clearLastLocalGenerationFolder = false,
+    String? lastDriveGenerationFolderId,
+    bool clearLastDriveGenerationFolder = false,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1332,6 +1431,12 @@ class AppController extends ChangeNotifier {
     libraryStorageFilter: libraryStorageFilter ?? this.libraryStorageFilter,
     referenceStorageFilter:
         referenceStorageFilter ?? this.referenceStorageFilter,
+    lastLocalGenerationFolderId: clearLastLocalGenerationFolder
+        ? null
+        : lastLocalGenerationFolderId ?? this.lastLocalGenerationFolderId,
+    lastDriveGenerationFolderId: clearLastDriveGenerationFolder
+        ? null
+        : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
   );
 
   int _validDuration(int value) {
@@ -1982,6 +2087,7 @@ class AppController extends ChangeNotifier {
       estimateBasis: estimate.basis,
       quotedCostUsdMin: estimate.minimumUsd,
       quotedCostUsdMax: estimate.maximumUsd,
+      folderId: selectedGenerationFolderId,
       storage: effectiveStorage,
     );
     final current = snapshot;
@@ -2457,19 +2563,32 @@ class AppController extends ChangeNotifier {
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
   }) async {
-    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    if (gateway is! GoogleDriveGateway) return;
     if (!googleDriveConnected) {
       showNotice('Connect Google Drive before copying local items.');
       return;
     }
-    googleDriveBusy = true;
+    final bulk = generationIds.isEmpty && referenceIds.isEmpty;
+    if (bulk && googleDriveBusy) return;
+    if (generationIds.any(copyingGenerationIds.contains) ||
+        referenceIds.any(copyingReferenceIds.contains)) {
+      return;
+    }
+    if (bulk) googleDriveBusy = true;
+    copyingGenerationIds.addAll(generationIds);
+    copyingReferenceIds.addAll(referenceIds);
     notifyListeners();
     try {
-      final copied = await (gateway as GoogleDriveGateway)
-          .copyLocalLibraryToGoogleDrive(
-            generationIds: generationIds,
-            referenceIds: referenceIds,
-          );
+      late GoogleDriveCopyResult copied;
+      final operation = _driveCopyQueue.then((_) async {
+        copied = await (gateway as GoogleDriveGateway)
+            .copyLocalLibraryToGoogleDrive(
+              generationIds: generationIds,
+              referenceIds: referenceIds,
+            );
+      });
+      _driveCopyQueue = operation.then<void>((_) {}, onError: (_) {});
+      await operation;
       _apply(copied.snapshot);
       final total = copied.generations + copied.references;
       showNotice(
@@ -2480,8 +2599,32 @@ class AppController extends ChangeNotifier {
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
-      googleDriveBusy = false;
+      if (bulk) googleDriveBusy = false;
+      copyingGenerationIds.removeAll(generationIds);
+      copyingReferenceIds.removeAll(referenceIds);
       notifyListeners();
+    }
+  }
+
+  Future<void> cacheGenerationPreviews(
+    Generation item, {
+    Uint8List? thumbnailBytes,
+    Uint8List? timelineBytes,
+  }) async {
+    if (gateway is! GenerationPreviewGateway ||
+        (thumbnailBytes == null && timelineBytes == null)) {
+      return;
+    }
+    try {
+      _apply(
+        await (gateway as GenerationPreviewGateway).saveGenerationPreviews(
+          item.localId,
+          thumbnailBytes: thumbnailBytes,
+          timelineBytes: timelineBytes,
+        ),
+      );
+    } on Object {
+      // Playback remains available if a best-effort preview backfill fails.
     }
   }
 

@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
+import 'package:clawnsole/core/direct_gateway.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -183,7 +185,7 @@ void main() {
   });
 
   test(
-    'schema 13 preserves Drive provenance and migrates old items locally',
+    'schema 14 preserves Drive provenance and migrates old items locally',
     () {
       final driveAsset = AssetReference.fromJson(<String, Object?>{
         'kind': 'drive',
@@ -209,7 +211,172 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 13);
+      expect(migrated.toJson()['schemaVersion'], 14);
+    },
+  );
+
+  test('schema 14 round-trips favorites, preview caches, and last folders', () {
+    final now = DateTime.utc(2026, 8, 19, 12);
+    const thumbnail = AssetReference(
+      kind: 'drive',
+      value: 'thumbnail-file',
+      label: 'thumbnail.jpg',
+      contentType: 'image/jpeg',
+    );
+    const timeline = AssetReference(
+      kind: 'drive',
+      value: 'timeline-file',
+      label: 'timeline.png',
+      contentType: 'image/png',
+    );
+    final decoded = StoredData.decode(
+      StoredData(
+        preferences: const AppPreferences(
+          defaultStorage: LibraryStorage.drive,
+          lastLocalGenerationFolderId: 'local-folder',
+          lastDriveGenerationFolderId: 'drive-folder',
+        ),
+        generations: <Generation>[
+          Generation(
+            localId: 'favorite-film',
+            status: 'Ready',
+            prompt: 'Favorite film',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+            thumbnailAsset: thumbnail,
+            timelineThumbnailAsset: timeline,
+            favorite: true,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'favorite-reference',
+            name: 'Favorite reference',
+            kind: MediaReferenceKind.image,
+            asset: thumbnail,
+            createdAt: now,
+            updatedAt: now,
+            favorite: true,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+      ).encode(),
+    );
+
+    expect(decoded.preferences.lastLocalGenerationFolderId, 'local-folder');
+    expect(decoded.preferences.lastDriveGenerationFolderId, 'drive-folder');
+    expect(decoded.generations.single.favorite, isTrue);
+    expect(decoded.generations.single.thumbnailAsset?.value, 'thumbnail-file');
+    expect(
+      decoded.generations.single.timelineThumbnailAsset?.value,
+      'timeline-file',
+    );
+    expect(decoded.savedReferences.single.favorite, isTrue);
+  });
+
+  test(
+    'preview and favorite updates persist as compact retained assets',
+    () async {
+      final now = DateTime.utc(2026, 8, 19, 12);
+      final store = _MemoryStore(
+        StoredData(
+          generations: <Generation>[
+            Generation(
+              localId: 'film',
+              status: 'Ready',
+              prompt: 'Film',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 8,
+                resolution: 'hd',
+                generateAudio: true,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ],
+        ),
+      );
+      final gateway = DirectGateway(store: store);
+
+      await gateway.saveGenerationPreviews(
+        'film',
+        thumbnailBytes: Uint8List.fromList(<int>[1, 2]),
+        timelineBytes: Uint8List.fromList(<int>[3, 4, 5]),
+      );
+      await gateway.setGenerationFavorite('film', true);
+
+      final film = store.data.generations.single;
+      expect(film.favorite, isTrue);
+      expect(film.thumbnailAsset?.contentType, 'image/jpeg');
+      expect(film.timelineThumbnailAsset?.contentType, 'image/png');
+      expect(store.assets, hasLength(2));
+    },
+  );
+
+  test(
+    'generation destination remembers its folder and favorite filters apply',
+    () async {
+      final now = DateTime.utc(2026, 8, 19, 12);
+      Generation film(String id, {required bool favorite}) => Generation(
+        localId: id,
+        status: 'Ready',
+        prompt: id,
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        favorite: favorite,
+      );
+      final store = _MemoryStore(
+        StoredData(
+          generations: <Generation>[
+            film('starred', favorite: true),
+            film('plain', favorite: false),
+          ],
+        ),
+      );
+      final controller = AppController(gateway: DirectGateway(store: store));
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(
+        await controller.saveLibraryFolder(
+          'Campaign',
+          storage: LibraryStorage.local,
+        ),
+        isTrue,
+      );
+      final folderId = controller.folders.single.id;
+      await controller.setGenerationFolder(folderId);
+      controller.setLibraryFavoriteFilter(FavoriteFilter.starred);
+
+      expect(store.data.preferences.lastLocalGenerationFolderId, folderId);
+      expect(controller.selectedGenerationFolderId, folderId);
+      expect(
+        controller.filteredGenerations.map((item) => item.localId),
+        <String>['starred'],
+      );
     },
   );
 
@@ -229,6 +396,18 @@ void main() {
         label: 'reference.png',
         contentType: 'image/png',
       );
+      final thumbnailAsset = const AssetReference(
+        kind: 'local',
+        value: 'local-thumbnail',
+        label: 'thumbnail.jpg',
+        contentType: 'image/jpeg',
+      );
+      final timelineAsset = const AssetReference(
+        kind: 'local',
+        value: 'local-timeline',
+        label: 'timeline.png',
+        contentType: 'image/png',
+      );
       Generation generation(String id, LibraryStorage storage) => Generation(
         localId: id,
         status: 'Ready',
@@ -245,6 +424,11 @@ void main() {
         createdAt: now,
         updatedAt: now,
         resultAsset: storage == LibraryStorage.local ? localAsset : null,
+        thumbnailAsset: storage == LibraryStorage.local ? thumbnailAsset : null,
+        timelineThumbnailAsset: storage == LibraryStorage.local
+            ? timelineAsset
+            : null,
+        favorite: storage == LibraryStorage.local,
         storage: storage,
       );
 
@@ -264,12 +448,15 @@ void main() {
               asset: referenceAsset,
               createdAt: now,
               updatedAt: now,
+              favorite: true,
             ),
           ],
         ),
         assets: <String, Uint8List>{
           'local-video': Uint8List.fromList(<int>[1, 2, 3]),
           'local-image': Uint8List.fromList(<int>[4, 5]),
+          'local-thumbnail': Uint8List.fromList(<int>[6, 7]),
+          'local-timeline': Uint8List.fromList(<int>[8, 9]),
         },
       );
       final drive = _MemoryDriveStore(
@@ -316,7 +503,19 @@ void main() {
         copied.savedReferences.map((item) => item.id),
         containsAll(<String>['local-reference', 'drive-local-reference']),
       );
-      expect(drive.assets.values, hasLength(2));
+      expect(drive.assets.values, hasLength(4));
+      expect(
+        copied.generations
+            .singleWhere((item) => item.localId == 'drive-local-generation')
+            .favorite,
+        isTrue,
+      );
+      expect(
+        copied.savedReferences
+            .singleWhere((item) => item.id == 'drive-local-reference')
+            .favorite,
+        isTrue,
+      );
       expect(drive.data.encode(), isNot(contains('device-secret')));
 
       await hybrid.disconnect();
