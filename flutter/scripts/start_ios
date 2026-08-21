@@ -10,6 +10,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_IOS_SIMULATOR_ID  Simulator UDID override"
   echo "  CLAWNSOLE_GOOGLE_IOS_CLIENT_ID  Google OAuth iOS client"
+  echo "  INCLUDE_IOS_TEST_KEYS  true to compile configured provider test keys"
+  echo "                         (default: false)"
   exit 0
 fi
 

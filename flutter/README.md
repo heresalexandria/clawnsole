@@ -192,15 +192,17 @@ encrypted settings vault.
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate. Xcode signing must already be configured. iOS
   builds are deliberately local-only and are not run or published by GitHub
-  Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
+  Actions. Provider test keys are opt-in and excluded by default. To prepare a
+  review build that includes them, set `INCLUDE_IOS_TEST_KEYS=true` plus
+  `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
   `CLAWNSOLE_IOS_REVIEW_LTX_API_KEY`,
   `CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY`, and/or
   `CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY`. A local, Git-ignored
   `flutter/.env.ios-review` or repository `.env` is loaded automatically; the
   ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
   `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
-  passes credentials only to the iOS compiler; Android, macOS, Windows, and the
-  internal renderer build do not receive it.
+  passes credentials only to the iOS compiler when the opt-in is true;
+  Android, macOS, Windows, and the internal renderer build do not receive them.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.

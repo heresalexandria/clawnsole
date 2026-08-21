@@ -10,6 +10,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_IOS_EXPORT_METHOD  app-store, ad-hoc, development, or enterprise"
   echo "                                (default: app-store)"
+  echo "  INCLUDE_IOS_TEST_KEYS                   true to compile App Review keys"
+  echo "                                          (default: false)"
   echo "  CLAWNSOLE_IOS_REVIEW_BFL_API_KEY       App Review BFL key"
   echo "  CLAWNSOLE_IOS_REVIEW_LTX_API_KEY       App Review LTX key"
   echo "  CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY     App Review Atlas Cloud key"
