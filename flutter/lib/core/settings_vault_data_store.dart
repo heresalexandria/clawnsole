@@ -564,12 +564,16 @@ class SettingsVaultDataStore
         await _delegate.write(_withoutCredentials(data));
       }
       return state;
-    } on Object {
+    } on Object catch (error) {
       _state = null;
+      // Retry on the next call: a single failed open must not hide every
+      // stored key until the process restarts.
+      _stateLoaded = false;
       _status = SettingsVaultStatus(
         state: SettingsVaultState.error,
         message:
-            'Secure settings on this device could not be opened. They were not overwritten.',
+            'Secure settings on this device could not be opened. They were '
+            'not overwritten. (${_safeMessage(error)})',
       );
       return null;
     }
@@ -578,7 +582,9 @@ class SettingsVaultDataStore
   Future<_DeviceVaultState> _requireState() async {
     final state = await _ensureState(await _delegate.read());
     if (state == null) {
-      throw StateError('Secure settings on this device are unavailable.');
+      throw StateError(
+        'Secure settings on this device are unavailable. ${_status.message}',
+      );
     }
     return state;
   }
@@ -715,8 +721,17 @@ class SettingsVaultDataStore
     return previous.add(const Duration(microseconds: 1));
   }
 
-  String _randomId() =>
-      _encodeKey(List<int>.generate(32, (_) => _random.nextInt(256)));
+  String _randomId() {
+    while (true) {
+      final id = _encodeKey(
+        List<int>.generate(32, (_) => _random.nextInt(256)),
+      );
+      // Device ids must start with an alphanumeric character, but base64url
+      // can open with '-' or '_' (1 in 32 draws); redraw those instead of
+      // minting an id the vault's own validation rejects.
+      if (id.startsWith(RegExp(r'[A-Za-z0-9]'))) return id;
+    }
+  }
 
   String _safeMessage(Object error) {
     if (error is StateError) return error.message;
