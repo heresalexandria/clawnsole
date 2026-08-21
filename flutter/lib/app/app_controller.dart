@@ -240,6 +240,9 @@ class AppController extends ChangeNotifier {
   LibraryStorage defaultStorage = LibraryStorage.local;
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
+
+  /// Visible cost-desk column ids in display order; null keeps the defaults.
+  List<String>? costDeskColumns;
   String? lastLocalGenerationFolderId;
   String? lastDriveGenerationFolderId;
   String librarySearch = '';
@@ -878,6 +881,7 @@ class AppController extends ChangeNotifier {
       libraryStorageFilter = value.preferences.libraryStorageFilter;
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
+      costDeskColumns = value.preferences.costDeskColumns;
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
           : LibraryStorage.drive;
@@ -1006,6 +1010,20 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences(referenceStorageFilter: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setCostDeskColumns(List<String>? value) async {
+    costDeskColumns = value == null ? null : List<String>.of(value);
+    notifyListeners();
+    try {
+      await _savePreferences(
+        value == null
+            ? _preferences(clearCostDeskColumns: true)
+            : _preferences(costDeskColumns: costDeskColumns),
+      );
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -1936,6 +1954,8 @@ class AppController extends ChangeNotifier {
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
     bool clearLastDriveGenerationFolder = false,
+    List<String>? costDeskColumns,
+    bool clearCostDeskColumns = false,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1954,6 +1974,9 @@ class AppController extends ChangeNotifier {
     lastDriveGenerationFolderId: clearLastDriveGenerationFolder
         ? null
         : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
+    costDeskColumns: clearCostDeskColumns
+        ? null
+        : costDeskColumns ?? this.costDeskColumns,
   );
 
   int _validDuration(int value) {
