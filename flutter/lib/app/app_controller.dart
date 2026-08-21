@@ -2933,16 +2933,16 @@ class AppController extends ChangeNotifier {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
         showNotice(
-          '${providerShortNameForHistory(item.provider)} reports that this film is ready.',
+          '${providerNameForHistory(item.provider)} reports that this film is ready.',
         );
       } else if (updated.isFailed) {
         showNotice(
           updated.error ??
-              '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel}.',
+              '${providerNameForHistory(item.provider)} reports ${updated.statusLabel}.',
         );
       } else {
         showNotice(
-          '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel.toLowerCase()}.',
+          '${providerNameForHistory(item.provider)} reports ${updated.statusLabel.toLowerCase()}.',
         );
       }
     } on Object catch (error) {
@@ -3093,7 +3093,7 @@ class AppController extends ChangeNotifier {
     }
     creditError = null;
     showNotice(
-      '${providerById(provider).shortName} key verified and saved locally.',
+      '${providerById(provider).name} key verified and saved locally.',
     );
   }
 
@@ -3113,7 +3113,7 @@ class AppController extends ChangeNotifier {
     providerAccounts.remove(provider);
     if (provider == selectedProviderId) credits = null;
     showNotice(
-      '${providerById(provider).shortName} access removed from this device.',
+      '${providerById(provider).name} access removed from this device.',
     );
   }
 

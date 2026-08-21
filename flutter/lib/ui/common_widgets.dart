@@ -502,7 +502,7 @@ class GenerationSpecChips extends StatelessWidget {
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
-        _SpecChip(label: providerShortNameForHistory(item.provider)),
+        _SpecChip(label: providerNameForHistory(item.provider)),
         _SpecChip(
           label: item.isImage
               ? (item.mode == VideoMode.i2v
@@ -1944,7 +1944,7 @@ class GenerationCost extends StatelessWidget {
               ),
               Text(
                 usesUsd
-                    ? providerShortNameForHistory(item.provider)
+                    ? providerNameForHistory(item.provider)
                     : formatUsdRange(minimum, maximum),
                 style: TextStyle(
                   fontSize: compact ? 11 : 12,

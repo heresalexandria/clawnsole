@@ -3039,7 +3039,7 @@ void main() {
       const ValueKey<String>('selected-provider-balance'),
     );
     expect(artcraftBalance, findsOneWidget);
-    expect(tester.widget<Text>(artcraftBalance).data, 'ArtCraft balance ↗');
+    expect(tester.widget<Text>(artcraftBalance).data, 'ArtCraft ↗');
     expect(find.byTooltip('Open ArtCraft to view the balance'), findsOneWidget);
 
     final bflGateway = _ProviderMemoryGateway(
@@ -3067,6 +3067,51 @@ void main() {
       find.byTooltip('Refresh the Black Forest Labs balance'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('complete provider names fit compact chrome and Create', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final provider in videoProviders) {
+      final gateway = _ProviderMemoryGateway(
+        LocalSnapshot(
+          generations: const <Generation>[],
+          preferences: AppPreferences(
+            provider: provider.id,
+            model: provider.defaultModel.id,
+          ),
+          hasApiKey: false,
+          connectedProviders: <String>{provider.id},
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        ProviderAccountStatus(
+          provider: provider.id,
+          currency: 'credits',
+          balanceLabel: 'Open ${provider.name} to view balance ↗',
+        ),
+      );
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+
+      final balance = find.byKey(
+        const ValueKey<String>('selected-provider-balance'),
+      );
+      expect(tester.widget<Text>(balance).data, '${provider.name} ↗');
+      expect(find.text(provider.name), findsAtLeastNWidgets(1));
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '${provider.name} should fit compact app chrome',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
   });
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
@@ -3310,6 +3355,38 @@ void main() {
         );
       }
     }
+  });
+
+  testWidgets('dense library metadata keeps the complete provider name', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: <Generation>[
+          _viewModeGeneration(
+            0,
+            provider: atlasProvider.id,
+            model: atlasProvider.defaultModel.id,
+          ),
+        ],
+        preferences: const AppPreferences(
+          activeSection: AppSection.library,
+          libraryViewMode: GenerationViewMode.compact,
+        ),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('library dense views hide status badges', (tester) async {
@@ -3893,7 +3970,11 @@ void main() {
   });
 }
 
-Generation _viewModeGeneration(int index) {
+Generation _viewModeGeneration(
+  int index, {
+  String provider = 'bfl',
+  String model = 'flux-3-video',
+}) {
   final createdAt = DateTime.utc(
     2026,
     8,
@@ -3902,6 +3983,8 @@ Generation _viewModeGeneration(int index) {
   ).subtract(Duration(minutes: index));
   return Generation(
     localId: 'view-generation-$index',
+    provider: provider,
+    model: model,
     status: 'Ready',
     prompt: 'A compact generation preview number $index.',
     mode: VideoMode.t2v,

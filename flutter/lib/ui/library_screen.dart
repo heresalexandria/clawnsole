@@ -610,15 +610,12 @@ class _LibraryToolbar extends StatelessWidget {
           children: <Widget>[
             search,
             const SizedBox(height: 10),
-            Row(
-              children: <Widget>[
-                const Spacer(),
-                filterButton,
-                const SizedBox(width: 8),
-                viewToggle,
-                const SizedBox(width: 8),
-                selectButton,
-              ],
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[filterButton, viewToggle, selectButton],
             ),
           ],
         );

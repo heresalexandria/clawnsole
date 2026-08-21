@@ -210,14 +210,11 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
                 border: Border.all(color: ink.accent),
                 color: ink.on.withValues(alpha: .06),
               ),
-              child: Text(
-                controller.selectedProvider.shortName,
-                style: TextStyle(
-                  color: ink.accent,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: .5,
-                ),
+              child: Icon(
+                _providerPlaqueIcon(controller.selectedProvider.id),
+                color: ink.accent,
+                size: 18,
+                semanticLabel: controller.selectedProvider.name,
               ),
             ),
             const SizedBox(width: 12),
@@ -256,6 +253,14 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     );
   }
 }
+
+IconData _providerPlaqueIcon(String providerId) => switch (providerId) {
+  'artcraft' => Icons.palette_outlined,
+  'atlas' => Icons.cloud_outlined,
+  'bfl' => Icons.forest_outlined,
+  'ltx' => Icons.movie_filter_outlined,
+  _ => Icons.auto_awesome_motion_outlined,
+};
 
 class _ProviderSearchMenu extends StatefulWidget {
   const _ProviderSearchMenu({
@@ -302,8 +307,7 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
           })
         >[];
     for (final provider in widget.providers) {
-      final providerIdentity =
-          '${provider.name} ${provider.shortName} ${provider.id}';
+      final providerIdentity = '${provider.name} ${provider.id}';
       final providerMatches = query.isNotEmpty && containsAll(providerIdentity);
       final models = query.isEmpty || providerMatches
           ? provider.models

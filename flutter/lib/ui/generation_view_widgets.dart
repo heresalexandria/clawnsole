@@ -131,16 +131,7 @@ class MiniGenerationCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 7),
-              Text(
-                _denseGenerationSummary(item),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  height: 1.35,
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
+              _DenseGenerationMetadata(item: item),
               const SizedBox(height: 7),
               Row(
                 children: <Widget>[
@@ -241,15 +232,7 @@ class CompactGenerationRow extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 5),
-              Text(
-                _denseGenerationSummary(item),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
+              _DenseGenerationMetadata(item: item),
               const SizedBox(height: 5),
               Row(
                 children: <Widget>[
@@ -480,7 +463,38 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.delete => 'Delete history record',
 };
 
-String _denseGenerationSummary(Generation item) {
+class _DenseGenerationMetadata extends StatelessWidget {
+  const _DenseGenerationMetadata({required this.item});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = _denseGenerationMetadata(item);
+    final style = TextStyle(
+      height: 1.35,
+      fontSize: 10.5,
+      color: context.colors.onSurfaceVariant,
+    );
+    return Wrap(
+      spacing: 5,
+      runSpacing: 1,
+      children: <Widget>[
+        for (final entry in parts.indexed) ...<Widget>[
+          if (entry.$1 > 0) Text('·', style: style),
+          Text(
+            entry.$2,
+            style: entry.$1 == 0
+                ? style.copyWith(fontWeight: FontWeight.w700)
+                : style,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+List<String> _denseGenerationMetadata(Generation item) {
   final duration = item.config.duration == 'auto'
       ? 'Auto duration'
       : '${item.config.duration}s';
@@ -489,6 +503,10 @@ String _denseGenerationSummary(Generation item) {
       : item.provider == 'apple-local'
       ? 'Frame animation'
       : item.mode.shortLabel;
-  return '${providerShortNameForHistory(item.provider)} · $kind · '
-      '${item.config.aspectRatio} · $duration';
+  return <String>[
+    providerNameForHistory(item.provider),
+    kind,
+    item.config.aspectRatio,
+    duration,
+  ];
 }

@@ -540,70 +540,79 @@ class _TopBar extends StatelessWidget {
   final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 64,
-    padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 26),
-    decoration: BoxDecoration(
-      color: context.colors.surface.withValues(alpha: .84),
-      border: Border(bottom: BorderSide(color: context.colors.outlineVariant)),
-    ),
-    child: Row(
-      children: <Widget>[
-        Expanded(
-          child: Row(
-            children: <Widget>[
-              Flexible(
-                child: InkWell(
-                  onTap: () =>
-                      unawaited(controller.navigate(AppSection.create)),
-                  borderRadius: BorderRadius.circular(9),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 4,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        ClawMark(
-                          size: compact ? 19 : 21,
-                          color: context.tokens.brass,
-                        ),
-                        const SizedBox(width: 9),
-                        Flexible(
-                          child: Text(
-                            'Clawnsole',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontFamily: 'Fraunces',
-                              fontSize: compact ? 19 : 21,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: -.3,
-                              color: context.colors.onSurface,
+  Widget build(BuildContext context) {
+    final veryCompact = MediaQuery.sizeOf(context).width < 360;
+    return Container(
+      height: 64,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 26),
+      decoration: BoxDecoration(
+        color: context.colors.surface.withValues(alpha: .84),
+        border: Border(
+          bottom: BorderSide(color: context.colors.outlineVariant),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                Flexible(
+                  child: InkWell(
+                    onTap: () =>
+                        unawaited(controller.navigate(AppSection.create)),
+                    borderRadius: BorderRadius.circular(9),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 4,
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            ClawMark(
+                              size: compact ? 19 : 21,
+                              color: context.tokens.brass,
                             ),
-                          ),
+                            if (!veryCompact) ...<Widget>[
+                              const SizedBox(width: 9),
+                              Text(
+                                'Clawnsole',
+                                style: TextStyle(
+                                  fontFamily: 'Fraunces',
+                                  fontSize: compact ? 19 : 21,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -.3,
+                                  color: context.colors.onSurface,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              _VersionChip(compact: compact, status: updateStatus),
-            ],
+                if (!veryCompact) ...<Widget>[
+                  const SizedBox(width: 6),
+                  _VersionChip(compact: compact, status: updateStatus),
+                ],
+              ],
+            ),
           ),
-        ),
-        _CreditsPill(controller: controller, compact: compact),
-        const SizedBox(width: 8),
-        if (!compact) ...<Widget>[
-          _KeyPill(controller: controller),
+          _CreditsPill(controller: controller, compact: compact),
           const SizedBox(width: 8),
+          if (!compact) ...<Widget>[
+            _KeyPill(controller: controller),
+            const SizedBox(width: 8),
+          ],
+          _ThemeModeButton(mode: themeMode, onChanged: onThemeModeChanged),
         ],
-        _ThemeModeButton(mode: themeMode, onChanged: onThemeModeChanged),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _VersionChip extends StatelessWidget {
@@ -701,7 +710,10 @@ class _CreditsPill extends StatelessWidget {
             : () => unawaited(controller.refreshCredits()),
         borderRadius: BorderRadius.circular(999),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 5 : 13,
+            vertical: 9,
+          ),
           decoration: BoxDecoration(
             color: controller.creditError == null
                 ? context.colors.surfaceContainerLow
@@ -717,14 +729,25 @@ class _CreditsPill extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else
-                Icon(Icons.toll_rounded, size: 15, color: context.tokens.brass),
-              const SizedBox(width: 7),
-              Text(
-                _balanceText(controller, account),
-                key: const ValueKey<String>('selected-provider-balance'),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+                Icon(
+                  Icons.toll_rounded,
+                  size: compact ? 14 : 15,
+                  color: context.tokens.brass,
+                ),
+              SizedBox(width: compact ? 3 : 7),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: compact ? 140 : 240),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _balanceText(controller, account, compact: compact),
+                    key: const ValueKey<String>('selected-provider-balance'),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -736,18 +759,20 @@ class _CreditsPill extends StatelessWidget {
 
   String _balanceText(
     AppController controller,
-    ProviderAccountStatus? account,
-  ) {
+    ProviderAccountStatus? account, {
+    required bool compact,
+  }) {
     if (!controller.hasApiKey) return 'Add key';
     if (account?.balance == null) {
       if (account?.balanceLabel != null &&
           controller.selectedProvider.consoleUrl.isNotEmpty) {
-        final provider = compact
-            ? controller.selectedProvider.shortName
-            : controller.selectedProvider.name;
-        return '$provider balance ↗';
+        return compact
+            ? '${controller.selectedProvider.name} ↗'
+            : '${controller.selectedProvider.name} balance ↗';
       }
-      return '${controller.selectedProvider.shortName} connected';
+      return compact
+          ? controller.selectedProvider.name
+          : '${controller.selectedProvider.name} connected';
     }
     if (account!.currency == 'credits') {
       return '${formatCredits(account.balance!)} cr';
@@ -788,16 +813,23 @@ class _KeyPill extends StatelessWidget {
                   : context.colors.onSurfaceVariant,
             ),
             const SizedBox(width: 6),
-            Text(
-              active
-                  ? '${controller.selectedProvider.shortName} connected'
-                  : 'Add provider key',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: active
-                    ? context.colors.onPrimaryContainer
-                    : context.colors.onSurface,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  active
+                      ? '${controller.selectedProvider.name} connected'
+                      : 'Add provider key',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: active
+                        ? context.colors.onPrimaryContainer
+                        : context.colors.onSurface,
+                  ),
+                ),
               ),
             ),
           ],
