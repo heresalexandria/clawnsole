@@ -1130,6 +1130,7 @@ class StoredData {
     this.preferencesUpdatedAt,
     this.driveFolderName = '',
     this.driveFolderId = '',
+    this.driveAutoConnect = false,
   });
 
   final String apiKey;
@@ -1143,6 +1144,7 @@ class StoredData {
   final DateTime? preferencesUpdatedAt;
   final String driveFolderName;
   final String driveFolderId;
+  final bool driveAutoConnect;
 
   StoredData copyWith({
     String? apiKey,
@@ -1157,6 +1159,7 @@ class StoredData {
     bool clearPreferencesUpdatedAt = false,
     String? driveFolderName,
     String? driveFolderId,
+    bool? driveAutoConnect,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -1173,6 +1176,7 @@ class StoredData {
         : preferencesUpdatedAt ?? this.preferencesUpdatedAt,
     driveFolderName: driveFolderName ?? this.driveFolderName,
     driveFolderId: driveFolderId ?? this.driveFolderId,
+    driveAutoConnect: driveAutoConnect ?? this.driveAutoConnect,
   );
 
   String apiKeyFor(String provider) =>
@@ -1211,7 +1215,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 17,
+    'schemaVersion': 18,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1221,6 +1225,7 @@ class StoredData {
       'preferencesUpdatedAt': preferencesUpdatedAt!.toUtc().toIso8601String(),
     if (driveFolderName.isNotEmpty) 'driveFolderName': driveFolderName,
     if (driveFolderId.isNotEmpty) 'driveFolderId': driveFolderId,
+    'driveAutoConnect': driveAutoConnect,
     if (folders.isNotEmpty)
       'folders': folders.map((folder) => folder.toJson()).toList(),
     if (savedReferences.isNotEmpty)
@@ -1257,6 +1262,10 @@ class StoredData {
       ),
       driveFolderName: json['driveFolderName'] as String? ?? '',
       driveFolderId: json['driveFolderId'] as String? ?? '',
+      driveAutoConnect: json.containsKey('driveAutoConnect')
+          ? json['driveAutoConnect'] == true
+          : (json['driveFolderName'] as String? ?? '').isNotEmpty ||
+                (json['driveFolderId'] as String? ?? '').isNotEmpty,
       folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
           .whereType<Map<Object?, Object?>>()
           .map(
@@ -1319,18 +1328,24 @@ class SettingsVaultStatus {
     this.vaultId = '',
     this.lastSyncedAt,
     this.message = '',
+    this.localCredentialCount = 0,
+    this.hasLocalPreferences = false,
   });
 
   const SettingsVaultStatus.unavailable()
     : state = SettingsVaultState.unavailable,
       vaultId = '',
       lastSyncedAt = null,
-      message = '';
+      message = '',
+      localCredentialCount = 0,
+      hasLocalPreferences = false;
 
   final SettingsVaultState state;
   final String vaultId;
   final DateTime? lastSyncedAt;
   final String message;
+  final int localCredentialCount;
+  final bool hasLocalPreferences;
 
   bool get isReady => state == SettingsVaultState.ready;
   bool get needsPassphrase => state == SettingsVaultState.locked;
@@ -1342,6 +1357,8 @@ class SettingsVaultStatus {
     if (lastSyncedAt != null)
       'lastSyncedAt': lastSyncedAt!.toUtc().toIso8601String(),
     if (message.isNotEmpty) 'message': message,
+    if (localCredentialCount > 0) 'localCredentialCount': localCredentialCount,
+    if (hasLocalPreferences) 'hasLocalPreferences': true,
   };
 
   factory SettingsVaultStatus.fromJson(Map<String, Object?> json) =>
@@ -1353,6 +1370,9 @@ class SettingsVaultStatus {
         vaultId: json['vaultId'] as String? ?? '',
         lastSyncedAt: DateTime.tryParse(json['lastSyncedAt'] as String? ?? ''),
         message: json['message'] as String? ?? '',
+        localCredentialCount:
+            (json['localCredentialCount'] as num?)?.toInt() ?? 0,
+        hasLocalPreferences: json['hasLocalPreferences'] == true,
       );
 }
 

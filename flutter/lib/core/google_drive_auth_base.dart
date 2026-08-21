@@ -3,5 +3,6 @@ abstract interface class GoogleDriveAuthorizer {
   String get unavailableMessage;
 
   Future<String> authorize();
+  Future<String?> restore();
   Future<void> disconnect();
 }

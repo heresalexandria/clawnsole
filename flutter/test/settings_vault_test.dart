@@ -147,7 +147,7 @@ void main() {
       );
     });
 
-    test('whole preferences use timestamp then device id', () {
+    test('legacy whole preferences use timestamp then device id', () {
       final merged = mergeVaultPayloads(
         VaultPayload(
           preferences: VaultPreferencesRecord(
@@ -166,6 +166,67 @@ void main() {
       );
 
       expect(merged.preferences!.value, <String, Object?>{'theme': 'dark'});
+    });
+
+    test('independent preference fields merge without overwriting', () {
+      final older = DateTime.utc(2026, 8, 20, 10);
+      final newer = older.add(const Duration(minutes: 1));
+      final merged = mergeVaultPayloads(
+        VaultPayload(
+          preferenceFields: <String, VaultPreferenceFieldRecord>{
+            'provider': VaultPreferenceFieldRecord(
+              value: 'ltx',
+              updatedAt: newer,
+              deviceId: 'iphone',
+            ),
+            'libraryViewMode': VaultPreferenceFieldRecord(
+              value: 'full',
+              updatedAt: older,
+              deviceId: 'iphone',
+            ),
+          },
+        ),
+        VaultPayload(
+          preferenceFields: <String, VaultPreferenceFieldRecord>{
+            'provider': VaultPreferenceFieldRecord(
+              value: 'bfl',
+              updatedAt: older,
+              deviceId: 'windows',
+            ),
+            'libraryViewMode': VaultPreferenceFieldRecord(
+              value: 'compact',
+              updatedAt: newer,
+              deviceId: 'windows',
+            ),
+          },
+        ),
+      );
+
+      expect(merged.preferences!.value['provider'], 'ltx');
+      expect(merged.preferences!.value['libraryViewMode'], 'compact');
+    });
+
+    test('legacy preference payloads expand into per-field registers', () {
+      final decoded = VaultPayload.decode(
+        jsonEncode(<String, Object?>{
+          'version': settingsVaultPayloadVersion,
+          'credentials': <String, Object?>{},
+          'preferences': <String, Object?>{
+            'value': <String, Object?>{
+              'provider': 'atlas',
+              'libraryViewMode': 'mini',
+            },
+            'updatedAt': '2026-08-20T12:00:00.000Z',
+            'deviceId': 'legacy-device',
+          },
+        }),
+      );
+
+      expect(decoded.preferenceFields.keys, <String>{
+        'provider',
+        'libraryViewMode',
+      });
+      expect(decoded.preferenceFields['provider']!.value, 'atlas');
     });
 
     test('rejects non-JSON preference values', () {

@@ -33,6 +33,25 @@ on macOS. Changing the passphrase does not invalidate already unlocked devices.
 Disconnecting Drive leaves local credentials and the encrypted Drive files in
 place. **Forget cached unlock** removes only that device's remembered vault key.
 
+After the first explicit connection, Clawnsole silently restores the authorized
+Drive session at launch, when the app returns to the foreground, and during a
+five-minute periodic refresh while it is running. It never opens interactive
+Google authorization during a silent restore. The Drive panel shows the active
+Google account when Drive provides it. A single existing app-owned Clawnsole
+folder is reused even if a different name is entered; when multiple app-owned
+folders exist, an exact existing name is required so a second vault is not
+selected or created accidentally.
+
+Unlocking on a new device merges local provider keys and preferences with the
+Drive vault. Provider keys and individual preference fields use independent
+last-writer-wins records, including tombstones for removals, so unrelated edits
+on two devices do not overwrite one another. If both the passphrase and recovery
+code are lost, **Reset encrypted sync** replaces only the encrypted vault after
+an explicit warning. It preserves the current device's secure keys and
+preferences plus the portable Drive library, then issues a new recovery code.
+Deleting all Local and Drive data is separate and warns that it removes the
+shared encrypted vault for every device.
+
 ## Google Cloud setup
 
 1. Create or select a Google Cloud project and enable the Google Drive API.

@@ -11,6 +11,22 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'controller silently resumes a configured Drive session at launch',
+    () async {
+      final gateway = _VaultGateway(
+        SettingsVaultState.driveDisconnected,
+        autoReconnect: true,
+      );
+      final controller = AppController(gateway: gateway);
+
+      await controller.initialize();
+
+      expect(gateway.resumeCalls, 1);
+      controller.dispose();
+    },
+  );
+
   testWidgets(
     'vault setup preserves the exact passphrase and gates recovery dismissal',
     (tester) async {
@@ -156,6 +172,52 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('lost credentials reset requires warning and returns recovery', (
+    tester,
+  ) async {
+    final gateway = _VaultGateway(SettingsVaultState.locked);
+    final controller = await _controller(gateway);
+    await _pumpSettings(tester, controller);
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('settings-vault-reset')),
+    );
+    await tester.tap(find.byKey(const ValueKey('settings-vault-reset')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset encrypted settings sync?'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('settings-vault-reset-confirm')),
+    );
+    await tester.pumpAndSettle();
+
+    const passphrase = 'replacement passphrase';
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-vault-passphrase')),
+      passphrase,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('settings-vault-passphrase-confirmation')),
+      passphrase,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('settings-vault-passphrase-submit')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(gateway.values.last, ('reset', passphrase));
+    expect(
+      find.byKey(const ValueKey('settings-vault-recovery-code')),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('I saved this recovery code somewhere safe.'));
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('settings-vault-recovery-done')),
+    );
+    await tester.pumpAndSettle();
+    controller.dispose();
+  });
+
   testWidgets(
     'pending vault exposes sync, passphrase change, and forget flows',
     (tester) async {
@@ -261,11 +323,14 @@ class _VaultGateway
   _VaultGateway(
     SettingsVaultState state, {
     Set<String> connectedProviders = const <String>{},
+    this.autoReconnect = false,
   }) : _snapshot = _makeSnapshot(state, connectedProviders);
 
   LocalSnapshot _snapshot;
   final List<(String, String)> values = <(String, String)>[];
   final String recoveryCode = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFG';
+  final bool autoReconnect;
+  int resumeCalls = 0;
 
   void setState(SettingsVaultState state) {
     _snapshot = _makeSnapshot(state, _snapshot.connectedProviders);
@@ -280,12 +345,12 @@ class _VaultGateway
   SettingsVaultStatus get settingsVaultStatus => _snapshot.settingsVault;
 
   @override
-  GoogleDriveConnection get googleDriveConnection =>
-      const GoogleDriveConnection(
-        state: GoogleDriveConnectionState.connected,
-        folderName: 'Clawnsole',
-        folderId: 'drive-root',
-      );
+  GoogleDriveConnection get googleDriveConnection => GoogleDriveConnection(
+    state: GoogleDriveConnectionState.connected,
+    folderName: 'Clawnsole',
+    folderId: 'drive-root',
+    autoReconnect: autoReconnect,
+  );
 
   @override
   bool get supportsLocalLibrary => true;
@@ -344,6 +409,17 @@ class _VaultGateway
   }
 
   @override
+  Future<SettingsVaultSetupResult> resetSettingsVault(
+    String newPassphrase,
+  ) async {
+    values.add(('reset', newPassphrase));
+    return SettingsVaultSetupResult(
+      snapshot: _update(SettingsVaultState.ready),
+      recoveryCode: recoveryCode,
+    );
+  }
+
+  @override
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async =>
       _snapshot;
 
@@ -352,6 +428,12 @@ class _VaultGateway
 
   @override
   Future<LocalSnapshot> refreshGoogleDrive() async => _snapshot;
+
+  @override
+  Future<LocalSnapshot> resumeGoogleDrive() async {
+    resumeCalls += 1;
+    return _snapshot;
+  }
 
   @override
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({

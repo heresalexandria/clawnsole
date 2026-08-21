@@ -169,6 +169,164 @@ void main() {
     expect(server.writeCount, writes);
     expect(server.bytes, ciphertext);
   });
+
+  test(
+    'independent preference edits from two devices merge per field',
+    () async {
+      final server = _RemoteServer();
+      var firstNow = DateTime.utc(2026, 8, 20, 10);
+      var secondNow = firstNow;
+      final first = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+        clock: () => firstNow,
+      );
+      await first.read();
+      await first.connectRemote('token', 'folder');
+      await first.setup('a correct horse battery staple');
+
+      final second = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+        clock: () => secondNow,
+      );
+      await second.read();
+      await second.connectRemote('token', 'folder');
+      await second.unlock('a correct horse battery staple');
+
+      firstNow = DateTime.utc(2026, 8, 20, 10, 1);
+      await first.write(
+        (await first.read()).copyWith(
+          preferences: const AppPreferences(provider: 'ltx'),
+          preferencesUpdatedAt: firstNow,
+        ),
+      );
+      secondNow = DateTime.utc(2026, 8, 20, 10, 2);
+      await second.write(
+        (await second.read()).copyWith(
+          preferences: const AppPreferences(
+            libraryViewMode: GenerationViewMode.compact,
+          ),
+          preferencesUpdatedAt: secondNow,
+        ),
+      );
+
+      final verifier = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+      );
+      await verifier.read();
+      await verifier.connectRemote('token', 'folder');
+      await verifier.unlock('a correct horse battery staple');
+      final merged = await verifier.read();
+
+      expect(merged.preferences.provider, 'ltx');
+      expect(merged.preferences.libraryViewMode, GenerationViewMode.compact);
+    },
+  );
+
+  test(
+    'locked status explains the local data that unlock will merge',
+    () async {
+      final server = _RemoteServer();
+      final creator = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+      );
+      await creator.read();
+      await creator.connectRemote('token', 'folder');
+      await creator.setup('a correct horse battery staple');
+
+      final joining = SettingsVaultDataStore(
+        delegate: _MemoryStore(
+          StoredData(
+            apiKeys: const <String, String>{'atlas': 'local-atlas'},
+            preferences: const AppPreferences(provider: 'atlas'),
+            preferencesUpdatedAt: DateTime.utc(2026, 8, 20, 12),
+          ),
+        ),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+      );
+      await joining.read();
+      await joining.connectRemote('token', 'folder');
+
+      expect(joining.settingsVaultStatus.state, SettingsVaultState.locked);
+      expect(joining.settingsVaultStatus.localCredentialCount, 1);
+      expect(joining.settingsVaultStatus.hasLocalPreferences, isTrue);
+    },
+  );
+
+  test(
+    'reset replaces only the vault and preserves local secure data',
+    () async {
+      final server = _RemoteServer();
+      final local = _MemoryStore(
+        StoredData(
+          apiKeys: const <String, String>{'bfl': 'preserved-key'},
+          preferences: const AppPreferences(provider: 'ltx'),
+          preferencesUpdatedAt: DateTime.utc(2026, 8, 20, 12),
+        ),
+      );
+      final store = SettingsVaultDataStore(
+        delegate: local,
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+      );
+      await store.read();
+      await store.connectRemote('token', 'folder');
+      await store.setup('old correct horse battery staple');
+      final oldCiphertext = Uint8List.fromList(server.bytes!);
+
+      await expectLater(
+        store.reset('too short'),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(server.bytes, orderedEquals(oldCiphertext));
+
+      server.failWrites = true;
+      await expectLater(
+        store.reset('temporary correct horse battery staple'),
+        throwsA(isA<GoogleDriveException>()),
+      );
+      server.failWrites = false;
+      expect(server.bytes, orderedEquals(oldCiphertext));
+      expect((await store.read()).apiKeyFor('bfl'), 'preserved-key');
+
+      final recovery = await store.reset('new correct horse battery staple');
+
+      expect(recovery, hasLength(43));
+      expect(server.bytes, isNot(orderedEquals(oldCiphertext)));
+      expect((await store.read()).apiKeyFor('bfl'), 'preserved-key');
+      expect((await store.read()).preferences.provider, 'ltx');
+      expect(local.data.encode(), isNot(contains('preserved-key')));
+
+      final joining = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+      );
+      await joining.read();
+      await joining.connectRemote('token', 'folder');
+      await expectLater(
+        joining.unlock('old correct horse battery staple'),
+        throwsA(isA<SettingsVaultAuthenticationException>()),
+      );
+      await joining.unlock('new correct horse battery staple');
+      expect((await joining.read()).apiKeyFor('bfl'), 'preserved-key');
+    },
+  );
 }
 
 class _RemoteServer {

@@ -303,6 +303,7 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.startUpdate,"
       + " typeof window.clawnsole?.onUpdateEvent,"
       + " typeof window.clawnsole?.authorizeGoogleDrive,"
+      + " typeof window.clawnsole?.restoreGoogleDrive,"
       + " typeof window.clawnsole?.disconnectGoogleDrive,"
       + " typeof window.clawnsole?.settingsVault,"
       + " typeof window.clawnsole?.openExternalUrl,"
@@ -310,7 +311,7 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
     );
     if (
       shape
-      === "function,function,function,function,function,function,function,true"
+      === "function,function,function,function,function,function,function,function,true"
     ) {
       return;
     }
@@ -324,8 +325,18 @@ function installRendererBridge() {
   ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
-  ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
-  ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
+  const withAllowedDriveSender = (event, action) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
+      throw new Error("The Google Drive request was rejected.");
+    }
+    return action();
+  };
+  ipcMain.handle("clawnsole:drive:authorize", (event) =>
+    withAllowedDriveSender(event, () => googleDriveAuth.authorize()));
+  ipcMain.handle("clawnsole:drive:restore", (event) =>
+    withAllowedDriveSender(event, () => googleDriveAuth.restore()));
+  ipcMain.handle("clawnsole:drive:disconnect", (event) =>
+    withAllowedDriveSender(event, () => googleDriveAuth.disconnect()));
   ipcMain.handle(
     "clawnsole:vault:settings",
     (event, action, value) => {

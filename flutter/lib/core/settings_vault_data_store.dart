@@ -86,7 +86,7 @@ class SettingsVaultDataStore
       return;
     }
 
-    final changed = _captureChanges(state, data);
+    final changed = _captureChanges(state, data, current);
     if (changed) await _persistState(state);
     await _delegate.write(_withoutCredentials(data));
     if (changed && _remote.isConnected && state.hasCachedKey) {
@@ -132,6 +132,8 @@ class SettingsVaultDataStore
           state: SettingsVaultState.locked,
           vaultId: envelope.vaultId,
           message: 'Enter the sync passphrase once on this device.',
+          localCredentialCount: _localCredentialCount(state),
+          hasLocalPreferences: state.preferenceFields.isNotEmpty,
         );
         return;
       }
@@ -151,6 +153,8 @@ class SettingsVaultDataStore
           state: SettingsVaultState.locked,
           vaultId: envelope.vaultId,
           message: 'This device needs the sync passphrase again.',
+          localCredentialCount: _localCredentialCount(state),
+          hasLocalPreferences: state.preferenceFields.isNotEmpty,
         );
         return;
       }
@@ -182,7 +186,10 @@ class SettingsVaultDataStore
     );
   });
 
-  Future<String> setup(String passphrase) => _serialized(() async {
+  Future<String> setup(String passphrase) =>
+      _serialized(() => _setupInternal(passphrase));
+
+  Future<String> _setupInternal(String passphrase) async {
     final state = await _requireState();
     _requireRemote();
     final existing = await _remote.read();
@@ -192,6 +199,8 @@ class SettingsVaultDataStore
         state: SettingsVaultState.locked,
         vaultId: envelope.vaultId,
         message: 'An encrypted vault already exists. Unlock it instead.',
+        localCredentialCount: _localCredentialCount(state),
+        hasLocalPreferences: state.preferenceFields.isNotEmpty,
       );
       throw StateError('An encrypted settings vault already exists.');
     }
@@ -201,31 +210,74 @@ class SettingsVaultDataStore
     );
     final created = await _codec.create(passphrase, state.payload);
     try {
-      final uploaded = await _remote.write(
-        Uint8List.fromList(utf8.encode(created.envelope.encode())),
+      return await _writeCreatedVault(state, created);
+    } finally {
+      created.dataEncryptionKey.destroy();
+    }
+  }
+
+  /// Replaces only the encrypted Drive vault after explicit recovery consent.
+  /// Local provider keys, preferences, and the portable Drive library remain.
+  Future<String> reset(String passphrase) => _serialized(() async {
+    final state = await _requireState();
+    _requireRemote();
+    _status = SettingsVaultStatus(
+      state: SettingsVaultState.syncing,
+      vaultId: state.vaultId,
+      message: 'Preparing a replacement encrypted settings vault…',
+    );
+    final existing = await _remote.read();
+    // Derive and validate the replacement before atomically overwriting the
+    // old envelope with an ETag precondition.
+    final created = await _codec.create(passphrase, state.payload);
+    try {
+      return await _writeCreatedVault(
+        state,
+        created,
+        expectedEtag: existing?.etag,
       );
-      final verifiedDocument = await _remote.read() ?? uploaded;
-      final verified = _decodeDocument(verifiedDocument);
-      if (verified.vaultId != created.envelope.vaultId) {
-        throw StateError('Google Drive returned a different settings vault.');
-      }
-      await _codec.decrypt(verified, created.dataEncryptionKey);
-      state
-        ..vaultId = verified.vaultId
-        ..dataEncryptionKey = _encodeKey(created.dataEncryptionKey.bytes);
-      await _persistState(state);
-      _remoteDocument = verifiedDocument;
+    } on Object {
       _status = SettingsVaultStatus(
-        state: SettingsVaultState.ready,
-        vaultId: verified.vaultId,
-        lastSyncedAt: _now(),
-        message: 'Provider keys and settings are encrypted and synced.',
+        state: SettingsVaultState.pending,
+        vaultId: state.vaultId,
+        lastSyncedAt: _status.lastSyncedAt,
+        message:
+            'The replacement was not completed. Existing Drive data and local settings were kept.',
       );
-      return created.recoveryCode;
+      rethrow;
     } finally {
       created.dataEncryptionKey.destroy();
     }
   });
+
+  Future<String> _writeCreatedVault(
+    _DeviceVaultState state,
+    CreatedSettingsVault created, {
+    String? expectedEtag,
+  }) async {
+    final uploaded = await _remote.write(
+      Uint8List.fromList(utf8.encode(created.envelope.encode())),
+      expectedEtag: expectedEtag,
+    );
+    final verifiedDocument = await _remote.read() ?? uploaded;
+    final verified = _decodeDocument(verifiedDocument);
+    if (verified.vaultId != created.envelope.vaultId) {
+      throw StateError('Google Drive returned a different settings vault.');
+    }
+    await _codec.decrypt(verified, created.dataEncryptionKey);
+    state
+      ..vaultId = verified.vaultId
+      ..dataEncryptionKey = _encodeKey(created.dataEncryptionKey.bytes);
+    await _persistState(state);
+    _remoteDocument = verifiedDocument;
+    _status = SettingsVaultStatus(
+      state: SettingsVaultState.ready,
+      vaultId: verified.vaultId,
+      lastSyncedAt: _now(),
+      message: 'Provider keys and settings are encrypted and synced.',
+    );
+    return created.recoveryCode;
+  }
 
   Future<void> unlock(String passphrase) => _serialized(() async {
     final document = await _requireDocument();
@@ -238,6 +290,8 @@ class SettingsVaultDataStore
         state: SettingsVaultState.locked,
         vaultId: envelope.vaultId,
         message: 'The passphrase did not unlock this settings vault.',
+        localCredentialCount: _localCredentialCount(_state),
+        hasLocalPreferences: _state?.preferenceFields.isNotEmpty == true,
       );
       rethrow;
     }
@@ -264,6 +318,8 @@ class SettingsVaultDataStore
         state: SettingsVaultState.locked,
         vaultId: envelope.vaultId,
         message: 'The recovery code did not unlock this settings vault.',
+        localCredentialCount: _localCredentialCount(_state),
+        hasLocalPreferences: _state?.preferenceFields.isNotEmpty == true,
       );
       rethrow;
     }
@@ -289,6 +345,8 @@ class SettingsVaultDataStore
         state: SettingsVaultState.locked,
         vaultId: state.vaultId,
         message: 'Enter the sync passphrase once on this device.',
+        localCredentialCount: _localCredentialCount(state),
+        hasLocalPreferences: state.preferenceFields.isNotEmpty,
       );
       throw StateError('Unlock the encrypted settings vault first.');
     }
@@ -427,6 +485,8 @@ class SettingsVaultDataStore
       message: _remote.isConnected
           ? 'Cached unlock removed. Local provider keys were kept.'
           : 'Cached unlock removed. Local provider keys were kept.',
+      localCredentialCount: _localCredentialCount(state),
+      hasLocalPreferences: state.preferenceFields.isNotEmpty,
     );
   });
 
@@ -476,7 +536,9 @@ class SettingsVaultDataStore
       ..credentials = Map<String, VaultCredentialRecord>.from(
         payload.credentials,
       )
-      ..preferences = payload.preferences;
+      ..preferenceFields = Map<String, VaultPreferenceFieldRecord>.from(
+        payload.preferenceFields,
+      );
     await _persistState(state);
     final current = await _delegate.read();
     final preferences = payload.preferences;
@@ -501,7 +563,7 @@ class SettingsVaultDataStore
           _captureLegacyCredentials(state, data);
           changed = true;
         }
-        if (jsonEncode(state.preferences?.value) !=
+        if (jsonEncode(_resolvedPreferenceJson(state)) !=
             jsonEncode(data.preferences.toJson())) {
           final currentPreferences = state.preferences;
           final candidateUpdatedAt = data.preferencesUpdatedAt;
@@ -511,12 +573,13 @@ class SettingsVaultDataStore
           } else if (currentPreferences == null ||
               (candidateUpdatedAt != null &&
                   candidateUpdatedAt.isAfter(currentPreferences.updatedAt))) {
-            state.preferences = VaultPreferencesRecord(
-              value: data.preferences.toJson(),
+            _capturePreferenceChanges(
+              state,
+              data.preferences.toJson(),
+              base: _resolvedPreferenceJson(state),
               updatedAt:
                   candidateUpdatedAt ??
                   _nextTimestamp(currentPreferences?.updatedAt),
-              deviceId: state.deviceId,
             );
             changed = true;
           } else {
@@ -524,7 +587,7 @@ class SettingsVaultDataStore
               _withoutCredentials(
                 data.copyWith(
                   preferences: AppPreferences.fromJson(
-                    currentPreferences.value,
+                    _resolvedPreferenceJson(state),
                   ),
                   preferencesUpdatedAt: currentPreferences.updatedAt,
                 ),
@@ -552,10 +615,11 @@ class SettingsVaultDataStore
         changed = true;
       }
       if (state.preferences == null && _hasLocalPreferences(data)) {
-        state.preferences = VaultPreferencesRecord(
-          value: data.preferences.toJson(),
+        _capturePreferenceChanges(
+          state,
+          data.preferences.toJson(),
+          base: const AppPreferences().toJson(),
           updatedAt: data.preferencesUpdatedAt ?? _now(),
-          deviceId: state.deviceId,
         );
         changed = true;
       }
@@ -583,7 +647,11 @@ class SettingsVaultDataStore
     return state;
   }
 
-  bool _captureChanges(_DeviceVaultState state, StoredData data) {
+  bool _captureChanges(
+    _DeviceVaultState state,
+    StoredData data,
+    StoredData current,
+  ) {
     var changed = false;
     final nextKeys = _normalizedKeys(data);
     final providers = <String>{...state.credentials.keys, ...nextKeys.keys};
@@ -600,11 +668,15 @@ class SettingsVaultDataStore
     }
     final preferencesJson = data.preferences.toJson();
     if ((state.preferences != null || _hasLocalPreferences(data)) &&
-        jsonEncode(state.preferences?.value) != jsonEncode(preferencesJson)) {
-      state.preferences = VaultPreferencesRecord(
-        value: preferencesJson,
+        jsonEncode(_resolvedPreferenceJson(state)) !=
+            jsonEncode(preferencesJson)) {
+      _capturePreferenceChanges(
+        state,
+        preferencesJson,
+        base: state.preferences == null
+            ? current.preferences.toJson()
+            : _resolvedPreferenceJson(state),
         updatedAt: _nextTimestamp(state.preferences?.updatedAt),
-        deviceId: state.deviceId,
       );
       changed = true;
     }
@@ -618,6 +690,27 @@ class SettingsVaultDataStore
       state.credentials[entry.key] = VaultCredentialRecord(
         value: entry.value,
         updatedAt: now,
+        deviceId: state.deviceId,
+      );
+    }
+  }
+
+  void _capturePreferenceChanges(
+    _DeviceVaultState state,
+    Map<String, Object?> next, {
+    required Map<String, Object?> base,
+    required DateTime updatedAt,
+  }) {
+    final fields = <String>{...base.keys, ...next.keys};
+    for (final field in fields) {
+      final previous = state.preferenceFields[field];
+      final baseValue = base[field];
+      final nextValue = next[field];
+      if (jsonEncode(baseValue) == jsonEncode(nextValue)) continue;
+      if (jsonEncode(previous?.value) == jsonEncode(nextValue)) continue;
+      state.preferenceFields[field] = VaultPreferenceFieldRecord(
+        value: nextValue,
+        updatedAt: updatedAt,
         deviceId: state.deviceId,
       );
     }
@@ -707,6 +800,13 @@ class SettingsVaultDataStore
       jsonEncode(data.preferences.toJson()) !=
           jsonEncode(const AppPreferences().toJson());
 
+  Map<String, Object?> _resolvedPreferenceJson(_DeviceVaultState state) =>
+      AppPreferences.fromJson(state.preferences?.value ?? const {}).toJson();
+
+  int _localCredentialCount(_DeviceVaultState? state) =>
+      state?.credentials.values.where((record) => !record.isDeleted).length ??
+      0;
+
   DateTime _now() => _clock().toUtc();
 
   DateTime _nextTimestamp(DateTime? previous) {
@@ -716,7 +816,7 @@ class SettingsVaultDataStore
   }
 
   String _randomId() =>
-      _encodeKey(List<int>.generate(32, (_) => _random.nextInt(256)));
+      'device-${base64Url.encode(List<int>.generate(24, (_) => _random.nextInt(256))).replaceAll('=', '')}';
 
   String _safeMessage(Object error) {
     if (error is StateError) return error.message;
@@ -785,21 +885,32 @@ class _DeviceVaultState {
   _DeviceVaultState({
     required this.deviceId,
     Map<String, VaultCredentialRecord>? credentials,
-    this.preferences,
+    Map<String, VaultPreferenceFieldRecord>? preferenceFields,
+    VaultPreferencesRecord? preferences,
     this.vaultId = '',
     this.dataEncryptionKey = '',
-  }) : credentials = credentials ?? <String, VaultCredentialRecord>{};
+  }) : credentials = credentials ?? <String, VaultCredentialRecord>{},
+       preferenceFields = Map<String, VaultPreferenceFieldRecord>.from(
+         preferenceFields?.isNotEmpty == true
+             ? preferenceFields!
+             : VaultPayload(preferences: preferences).preferenceFields,
+       );
 
   final String deviceId;
   Map<String, VaultCredentialRecord> credentials;
-  VaultPreferencesRecord? preferences;
+  Map<String, VaultPreferenceFieldRecord> preferenceFields;
   String vaultId;
   String dataEncryptionKey;
 
   bool get hasCachedKey => vaultId.isNotEmpty && dataEncryptionKey.isNotEmpty;
 
-  VaultPayload get payload =>
-      VaultPayload(credentials: credentials, preferences: preferences);
+  VaultPreferencesRecord? get preferences =>
+      VaultPayload(preferenceFields: preferenceFields).preferences;
+
+  VaultPayload get payload => VaultPayload(
+    credentials: credentials,
+    preferenceFields: preferenceFields,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
     'version': _secureStateVersion,
@@ -809,6 +920,11 @@ class _DeviceVaultState {
         provider: credentials[provider]!.toJson(),
     },
     if (preferences != null) 'preferences': preferences!.toJson(),
+    if (preferenceFields.isNotEmpty)
+      'preferenceFields': <String, Object?>{
+        for (final field in (preferenceFields.keys.toList()..sort()))
+          field: preferenceFields[field]!.toJson(),
+      },
     if (vaultId.isNotEmpty) 'vaultId': vaultId,
     if (dataEncryptionKey.isNotEmpty) 'dataEncryptionKey': dataEncryptionKey,
   };
@@ -828,6 +944,11 @@ class _DeviceVaultState {
     if (rawCredentials is! Map<Object?, Object?>) {
       throw const FormatException('Secure credentials are invalid.');
     }
+    final rawPreferenceFields = json['preferenceFields'];
+    if (rawPreferenceFields != null &&
+        rawPreferenceFields is! Map<Object?, Object?>) {
+      throw const FormatException('Secure preference fields are invalid.');
+    }
     return _DeviceVaultState(
       deviceId: json['deviceId'] as String,
       credentials: <String, VaultCredentialRecord>{
@@ -844,6 +965,16 @@ class _DeviceVaultState {
                 (key, value) => MapEntry(key.toString(), value),
               ),
             )
+          : null,
+      preferenceFields: rawPreferenceFields is Map<Object?, Object?>
+          ? <String, VaultPreferenceFieldRecord>{
+              for (final entry in rawPreferenceFields.entries)
+                entry.key.toString(): VaultPreferenceFieldRecord.fromJson(
+                  (entry.value as Map<Object?, Object?>).map(
+                    (key, value) => MapEntry(key.toString(), value),
+                  ),
+                ),
+            }
           : null,
       vaultId: json['vaultId'] as String? ?? '',
       dataEncryptionKey: json['dataEncryptionKey'] as String? ?? '',

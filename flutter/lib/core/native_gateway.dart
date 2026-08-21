@@ -208,6 +208,19 @@ class NativeGateway extends DirectGateway
   }
 
   @override
+  Future<LocalSnapshot> resumeGoogleDrive() async {
+    if (!googleDriveConnection.autoReconnect ||
+        googleDriveConnection.folderName.isEmpty) {
+      return load();
+    }
+    final token = await _driveAuthorizer.restore();
+    if (token == null) return load();
+    await _hybrid.connect(token, googleDriveConnection.folderName);
+    await _vault.connectRemote(token, _hybrid.connection.folderId);
+    return load();
+  }
+
+  @override
   Future<SettingsVaultSetupResult> setupSettingsVault(String passphrase) async {
     final recoveryCode = await _vault.setup(passphrase);
     return SettingsVaultSetupResult(
@@ -240,6 +253,17 @@ class NativeGateway extends DirectGateway
   ) async {
     await _vault.changePassphrase(newPassphrase);
     return load();
+  }
+
+  @override
+  Future<SettingsVaultSetupResult> resetSettingsVault(
+    String newPassphrase,
+  ) async {
+    final recoveryCode = await _vault.reset(newPassphrase);
+    return SettingsVaultSetupResult(
+      snapshot: await load(),
+      recoveryCode: recoveryCode,
+    );
   }
 
   @override

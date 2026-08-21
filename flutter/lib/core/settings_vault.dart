@@ -135,7 +135,10 @@ class VaultCredentialRecord {
   }
 }
 
-/// A whole-preferences last-writer-wins register.
+/// A legacy whole-preferences last-writer-wins register.
+///
+/// Payloads written before per-field registers were introduced are expanded
+/// into [VaultPreferenceFieldRecord] values when decoded.
 class VaultPreferencesRecord {
   VaultPreferencesRecord({
     required Map<String, Object?> value,
@@ -171,18 +174,68 @@ class VaultPreferencesRecord {
   }
 }
 
+/// A last-writer-wins register for one preference field.
+///
+/// A null value is a tombstone for optional fields, which prevents a stale
+/// device from restoring a preference that was cleared elsewhere.
+class VaultPreferenceFieldRecord {
+  VaultPreferenceFieldRecord({
+    required Object? value,
+    required DateTime updatedAt,
+    required this.deviceId,
+  }) : value = _copyJsonValue(value, 0),
+       updatedAt = updatedAt.toUtc() {
+    _validateDeviceId(deviceId);
+  }
+
+  final Object? value;
+  final DateTime updatedAt;
+  final String deviceId;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'value': value,
+    'updatedAt': updatedAt.toIso8601String(),
+    'deviceId': deviceId,
+  };
+
+  factory VaultPreferenceFieldRecord.fromJson(Map<String, Object?> json) {
+    if (!json.containsKey('value')) {
+      throw const SettingsVaultFormatException(
+        'A preference field record has no value.',
+      );
+    }
+    return VaultPreferenceFieldRecord(
+      value: json['value'],
+      updatedAt: _requiredDate(json['updatedAt'], 'preference updatedAt'),
+      deviceId: _requiredString(json['deviceId'], 'preference deviceId'),
+    );
+  }
+}
+
 /// The encrypted contents of a settings vault.
 class VaultPayload {
   VaultPayload({
     Map<String, VaultCredentialRecord> credentials =
         const <String, VaultCredentialRecord>{},
-    this.preferences,
+    VaultPreferencesRecord? preferences,
+    Map<String, VaultPreferenceFieldRecord> preferenceFields =
+        const <String, VaultPreferenceFieldRecord>{},
   }) : credentials = Map<String, VaultCredentialRecord>.unmodifiable(
          _validatedCredentials(credentials),
+       ),
+       preferenceFields = Map<String, VaultPreferenceFieldRecord>.unmodifiable(
+         _validatedPreferenceFields(
+           preferenceFields.isNotEmpty
+               ? preferenceFields
+               : _expandLegacyPreferences(preferences),
+         ),
        );
 
   final Map<String, VaultCredentialRecord> credentials;
-  final VaultPreferencesRecord? preferences;
+  final Map<String, VaultPreferenceFieldRecord> preferenceFields;
+
+  VaultPreferencesRecord? get preferences =>
+      _aggregatePreferenceFields(preferenceFields);
 
   Map<String, Object?> toJson() {
     final providers = credentials.keys.toList()..sort();
@@ -193,6 +246,11 @@ class VaultPayload {
           provider: credentials[provider]!.toJson(),
       },
       if (preferences != null) 'preferences': preferences!.toJson(),
+      if (preferenceFields.isNotEmpty)
+        'preferenceFields': <String, Object?>{
+          for (final field in (preferenceFields.keys.toList()..sort()))
+            field: preferenceFields[field]!.toJson(),
+        },
     };
   }
 
@@ -257,6 +315,35 @@ class VaultPayload {
       );
     }
     final rawPreferences = json['preferences'];
+    final rawPreferenceFields = json['preferenceFields'];
+    final preferenceFields = <String, VaultPreferenceFieldRecord>{};
+    if (rawPreferenceFields != null) {
+      if (rawPreferenceFields is! Map<Object?, Object?>) {
+        throw const SettingsVaultFormatException(
+          'The settings vault preference fields are invalid.',
+        );
+      }
+      for (final entry in rawPreferenceFields.entries) {
+        final field = entry.key;
+        if (field is! String) {
+          throw const SettingsVaultFormatException(
+            'A settings vault preference field identifier is invalid.',
+          );
+        }
+        _validatePreferenceField(field);
+        if (entry.value is! Map<Object?, Object?>) {
+          throw const SettingsVaultFormatException(
+            'A settings vault preference field record is invalid.',
+          );
+        }
+        preferenceFields[field] = VaultPreferenceFieldRecord.fromJson(
+          _stringMap(
+            entry.value! as Map<Object?, Object?>,
+            'preference field record',
+          ),
+        );
+      }
+    }
     return VaultPayload(
       credentials: credentials,
       preferences: rawPreferences == null
@@ -268,6 +355,7 @@ class VaultPayload {
           : throw const SettingsVaultFormatException(
               'The settings vault preferences record is invalid.',
             ),
+      preferenceFields: preferenceFields,
     );
   }
 }
@@ -290,9 +378,28 @@ VaultPayload mergeVaultPayloads(VaultPayload left, VaultPayload right) {
       _ => throw StateError('A merged provider record is missing.'),
     };
   }
+  final preferenceNames = <String>{
+    ...left.preferenceFields.keys,
+    ...right.preferenceFields.keys,
+  };
+  final preferenceFields = <String, VaultPreferenceFieldRecord>{};
+  for (final field in preferenceNames) {
+    final leftRecord = left.preferenceFields[field];
+    final rightRecord = right.preferenceFields[field];
+    preferenceFields[field] = switch ((leftRecord, rightRecord)) {
+      (final VaultPreferenceFieldRecord value, null) => value,
+      (null, final VaultPreferenceFieldRecord value) => value,
+      (
+        final VaultPreferenceFieldRecord first,
+        final VaultPreferenceFieldRecord second,
+      ) =>
+        _newerPreferenceField(first, second),
+      _ => throw StateError('A merged preference field record is missing.'),
+    };
+  }
   return VaultPayload(
     credentials: credentials,
-    preferences: _newerPreferences(left.preferences, right.preferences),
+    preferenceFields: preferenceFields,
   );
 }
 
@@ -959,12 +1066,10 @@ VaultCredentialRecord _newerCredential(
   return (left.value ?? '').compareTo(right.value ?? '') >= 0 ? left : right;
 }
 
-VaultPreferencesRecord? _newerPreferences(
-  VaultPreferencesRecord? left,
-  VaultPreferencesRecord? right,
+VaultPreferenceFieldRecord _newerPreferenceField(
+  VaultPreferenceFieldRecord left,
+  VaultPreferenceFieldRecord right,
 ) {
-  if (left == null) return right;
-  if (right == null) return left;
   final metadata = _compareRegisterMetadata(
     left.updatedAt,
     left.deviceId,
@@ -998,12 +1103,67 @@ Map<String, VaultCredentialRecord> _validatedCredentials(
   return result;
 }
 
+Map<String, VaultPreferenceFieldRecord> _validatedPreferenceFields(
+  Map<String, VaultPreferenceFieldRecord> fields,
+) {
+  final result = <String, VaultPreferenceFieldRecord>{};
+  for (final entry in fields.entries) {
+    _validatePreferenceField(entry.key);
+    result[entry.key] = entry.value;
+  }
+  return result;
+}
+
+Map<String, VaultPreferenceFieldRecord> _expandLegacyPreferences(
+  VaultPreferencesRecord? preferences,
+) => preferences == null
+    ? <String, VaultPreferenceFieldRecord>{}
+    : <String, VaultPreferenceFieldRecord>{
+        for (final entry in preferences.value.entries)
+          entry.key: VaultPreferenceFieldRecord(
+            value: entry.value,
+            updatedAt: preferences.updatedAt,
+            deviceId: preferences.deviceId,
+          ),
+      };
+
+VaultPreferencesRecord? _aggregatePreferenceFields(
+  Map<String, VaultPreferenceFieldRecord> fields,
+) {
+  if (fields.isEmpty) return null;
+  VaultPreferenceFieldRecord? newest;
+  final value = <String, Object?>{};
+  for (final entry in fields.entries) {
+    if (entry.value.value != null) value[entry.key] = entry.value.value;
+    final current = newest;
+    if (current == null ||
+        identical(_newerPreferenceField(current, entry.value), entry.value)) {
+      newest = entry.value;
+    }
+  }
+  return VaultPreferencesRecord(
+    value: value,
+    updatedAt: newest!.updatedAt,
+    deviceId: newest.deviceId,
+  );
+}
+
 void _validateProviderId(String value) {
   if (value.isEmpty ||
       utf8.encode(value).length > _maximumProviderIdBytes ||
       !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]*$').hasMatch(value)) {
     throw const SettingsVaultFormatException(
       'A settings vault provider identifier is invalid.',
+    );
+  }
+}
+
+void _validatePreferenceField(String value) {
+  if (value.isEmpty ||
+      utf8.encode(value).length > 128 ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9._-]*$').hasMatch(value)) {
+    throw const SettingsVaultFormatException(
+      'A settings vault preference field identifier is invalid.',
     );
   }
 }

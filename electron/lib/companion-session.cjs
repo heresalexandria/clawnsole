@@ -6,6 +6,7 @@ const VAULT_ACTIONS = new Set([
   "unlock",
   "recover",
   "changePassphrase",
+  "reset",
   "forget",
   "sync",
 ]);
@@ -14,6 +15,7 @@ const VALUE_ACTIONS = new Set([
   "unlock",
   "recover",
   "changePassphrase",
+  "reset",
 ]);
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const MAX_VAULT_VALUE_BYTES = 4096;
@@ -94,7 +96,7 @@ function sanitizeVaultResponse(payload, { action, responseOk }) {
   if (message !== null) result.message = message;
   if (error !== null) result.error = error;
   if (syncedAt !== null) result.syncedAt = syncedAt;
-  if (action === "setup" && result.ok) {
+  if ((action === "setup" || action === "reset") && result.ok) {
     const recoveryCode = sanitizedString(payload.recoveryCode, 512);
     if (recoveryCode !== null) result.recoveryCode = recoveryCode;
   }

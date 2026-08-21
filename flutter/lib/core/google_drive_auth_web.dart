@@ -7,6 +7,7 @@ external _ClawnsoleShellJS? get _shell;
 
 extension type _ClawnsoleShellJS._(JSObject _) implements JSObject {
   external JSPromise<JSString> authorizeGoogleDrive();
+  external JSPromise<JSString?> restoreGoogleDrive();
   external JSPromise<JSAny?> disconnectGoogleDrive();
 }
 
@@ -30,6 +31,14 @@ class _WebGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
     final clean = token.trim();
     if (clean.isEmpty) throw StateError('Google Drive authorization failed.');
     return clean;
+  }
+
+  @override
+  Future<String?> restore() async {
+    if (!isAvailable) return null;
+    final value = await _shell!.restoreGoogleDrive().toDart;
+    final token = value?.toDart.trim() ?? '';
+    return token.isEmpty ? null : token;
   }
 
   @override

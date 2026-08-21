@@ -17,5 +17,8 @@ class _UnavailableGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
   Future<String> authorize() => throw UnsupportedError(unavailableMessage);
 
   @override
+  Future<String?> restore() async => null;
+
+  @override
   Future<void> disconnect() async {}
 }
