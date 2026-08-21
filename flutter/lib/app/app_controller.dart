@@ -4192,6 +4192,28 @@ class AppController extends ChangeNotifier {
     showNotice('Reference frame saved to $location');
   }
 
+  /// Reference twin of [generationMediaDelivery]: resolves the playable URI
+  /// while exposing byte progress for native Drive downloads.
+  GenerationMediaDelivery referenceMediaDelivery(SavedReference reference) {
+    final progress = ValueNotifier<double?>(null);
+    final asset = reference.asset;
+    final cacheGateway = _videoCacheGateway;
+    void Function()? detach;
+    if (asset.kind == 'drive' && cacheGateway != null) {
+      void listener(double? fraction) => progress.value = fraction;
+      cacheGateway.addVideoProgressListener(asset.value, listener);
+      detach = () =>
+          cacheGateway.removeVideoProgressListener(asset.value, listener);
+    }
+    final uri = referenceMediaUri(reference)
+        .then((value) {
+          progress.value = 1;
+          return value;
+        })
+        .whenComplete(() => detach?.call());
+    return GenerationMediaDelivery(uri: uri, progress: progress);
+  }
+
   Future<Uri?> referenceMediaUri(SavedReference reference) async {
     final asset = reference.asset;
     if (asset.isLocal) return gateway.assetUri(asset);

@@ -531,15 +531,17 @@ class _ReferenceCardState extends State<_ReferenceCard> {
   }
 
   Future<void> _play(BuildContext context) async {
-    final uri = await controller.referenceMediaUri(reference);
-    if (uri == null || !context.mounted) return;
+    // The player opens immediately and resolves the delivery inside it, so a
+    // cold Drive download animates the loading placeholder with progress.
+    final delivery = controller.referenceMediaDelivery(reference);
     // The hosting full-size card plays the film in place; narrow viewports
     // keep the fullscreen route.
     final inline = InlineVideoPlayback.of(context);
     if (inline != null) {
       inline(
         InlineVideoRequest(
-          uri: uri,
+          deferredUri: delivery.uri,
+          progress: delivery.progress,
           onDownload: _download,
           supportsPhotos: controller.supportsPhotoLibrarySave,
         ),
@@ -548,7 +550,8 @@ class _ReferenceCardState extends State<_ReferenceCard> {
     }
     await showVideoPlayerModal(
       context,
-      uri: uri,
+      deferredUri: delivery.uri,
+      progress: delivery.progress,
       supportsPhotos: controller.supportsPhotoLibrarySave,
       initialAspectRatio: _videoAspect ?? 16 / 9,
       onDownload: _download,

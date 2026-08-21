@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -12,18 +13,28 @@ import 'video_frame_loader.dart';
 /// player would have received.
 class InlineVideoRequest {
   const InlineVideoRequest({
-    required this.uri,
+    this.uri,
+    this.deferredUri,
     required this.onDownload,
     this.supportsPhotos = false,
     this.controllerFactory,
     this.frameLoader,
-  });
+    this.progress,
+  }) : assert(
+         (uri == null) != (deferredUri == null),
+         'Provide exactly one of uri or deferredUri.',
+       );
 
-  final Uri uri;
+  final Uri? uri;
+
+  /// A still-resolving delivery: the inline player appears immediately and
+  /// shows the loading placeholder (with [progress]) until the URI arrives.
+  final Future<Uri?>? deferredUri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool supportsPhotos;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
+  final ValueListenable<double?>? progress;
 }
 
 /// Tracks which card's embedded player is active on a screen, so starting
@@ -157,16 +168,29 @@ class _InlineVideoMediaBoxState extends State<InlineVideoMediaBox> {
           return SizedBox(
             key: ValueKey('inline-video-${widget.playbackId}'),
             height: mediaHeight + GenerationVideo.chromeHeight,
-            child: GenerationVideo(
-              uri: request.uri,
-              onDownload: request.onDownload,
-              supportsPhotos: request.supportsPhotos,
-              controllerFactory: request.controllerFactory,
-              frameLoader: request.frameLoader,
-              autoplay: true,
-              autofocus: false,
-              onClose: _stop,
-            ),
+            child: request.uri != null
+                ? GenerationVideo(
+                    uri: request.uri!,
+                    onDownload: request.onDownload,
+                    supportsPhotos: request.supportsPhotos,
+                    controllerFactory: request.controllerFactory,
+                    frameLoader: request.frameLoader,
+                    autoplay: true,
+                    autofocus: false,
+                    onClose: _stop,
+                    progress: request.progress,
+                  )
+                : DeferredGenerationVideo(
+                    uri: request.deferredUri!,
+                    onDownload: request.onDownload,
+                    supportsPhotos: request.supportsPhotos,
+                    controllerFactory: request.controllerFactory,
+                    frameLoader: request.frameLoader,
+                    autoplay: true,
+                    autofocus: false,
+                    onClose: _stop,
+                    progress: request.progress,
+                  ),
           );
         }
         return SizedBox(

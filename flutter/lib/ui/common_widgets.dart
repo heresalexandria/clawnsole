@@ -1645,15 +1645,18 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   }
 
   Future<void> _open() async {
-    final uri = await widget.uri;
-    if (!mounted || uri == null) return;
+    // The player surface opens immediately and resolves the delivery inside
+    // it, so a cold Drive download animates the loading placeholder (with
+    // byte progress) instead of leaving the tap apparently ignored.
+    final delivery = widget.controller.generationMediaDelivery(widget.item);
     // A hosting full-view card plays the film in place; previews without one
     // (mini and compact cards, narrow viewports) keep the shared modal.
     final inline = InlineVideoPlayback.of(context);
     if (inline != null) {
       inline(
         InlineVideoRequest(
-          uri: uri,
+          deferredUri: delivery.uri,
+          progress: delivery.progress,
           onDownload: _download,
           supportsPhotos: widget.controller.supportsPhotoLibrarySave,
         ),
@@ -1662,7 +1665,8 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
     }
     await showVideoPlayerModal(
       context,
-      uri: uri,
+      deferredUri: delivery.uri,
+      progress: delivery.progress,
       supportsPhotos: widget.controller.supportsPhotoLibrarySave,
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
       onDownload: _download,

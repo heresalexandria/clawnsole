@@ -22,7 +22,8 @@ import 'video_save_sheet.dart';
 /// closes the surface it was pressed on.
 Future<void> showVideoPlayerModal(
   BuildContext context, {
-  required Uri uri,
+  Uri? uri,
+  Future<Uri?>? deferredUri,
   required Future<void> Function(VideoSaveDestination destination) onDownload,
   bool supportsPhotos = false,
   double initialAspectRatio = 16 / 9,
@@ -30,6 +31,10 @@ Future<void> showVideoPlayerModal(
   VideoFrameLoader? frameLoader,
   ValueListenable<double?>? progress,
 }) {
+  assert(
+    (uri == null) != (deferredUri == null),
+    'Provide exactly one of uri or deferredUri.',
+  );
   if (MediaQuery.sizeOf(context).width < 700) {
     return Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -37,17 +42,29 @@ Future<void> showVideoPlayerModal(
         builder: (routeContext) => Scaffold(
           backgroundColor: Colors.black,
           body: SafeArea(
-            child: GenerationVideo(
-              uri: uri,
-              onDownload: onDownload,
-              fullscreen: true,
-              autoplay: true,
-              onClose: () => Navigator.of(routeContext).pop(),
-              supportsPhotos: supportsPhotos,
-              controllerFactory: controllerFactory,
-              frameLoader: frameLoader,
-              progress: progress,
-            ),
+            child: uri != null
+                ? GenerationVideo(
+                    uri: uri,
+                    onDownload: onDownload,
+                    fullscreen: true,
+                    autoplay: true,
+                    onClose: () => Navigator.of(routeContext).pop(),
+                    supportsPhotos: supportsPhotos,
+                    controllerFactory: controllerFactory,
+                    frameLoader: frameLoader,
+                    progress: progress,
+                  )
+                : DeferredGenerationVideo(
+                    uri: deferredUri!,
+                    onDownload: onDownload,
+                    fullscreen: true,
+                    autoplay: true,
+                    onClose: () => Navigator.of(routeContext).pop(),
+                    supportsPhotos: supportsPhotos,
+                    controllerFactory: controllerFactory,
+                    frameLoader: frameLoader,
+                    progress: progress,
+                  ),
           ),
         ),
       ),
@@ -57,6 +74,7 @@ Future<void> showVideoPlayerModal(
     context: context,
     builder: (dialogContext) => _VideoPlayerModal(
       uri: uri,
+      deferredUri: deferredUri,
       onDownload: onDownload,
       supportsPhotos: supportsPhotos,
       initialAspectRatio: initialAspectRatio,
@@ -67,18 +85,93 @@ Future<void> showVideoPlayerModal(
   );
 }
 
+/// Hosts [GenerationVideo] behind a still-resolving delivery, so the player
+/// surface appears the moment the viewer taps play and the animated loading
+/// placeholder (with byte progress when known) covers a slow retrieval, such
+/// as a cold Google Drive download. A null URI reads as delivery being
+/// unavailable rather than silently doing nothing.
+class DeferredGenerationVideo extends StatelessWidget {
+  const DeferredGenerationVideo({
+    super.key,
+    required this.uri,
+    required this.onDownload,
+    this.fullscreen = false,
+    this.autoplay = false,
+    this.autofocus = true,
+    this.onClose,
+    this.onAspectRatio,
+    this.controllerFactory,
+    this.frameLoader,
+    this.supportsPhotos = false,
+    this.progress,
+  });
+
+  final Future<Uri?> uri;
+  final Future<void> Function(VideoSaveDestination destination) onDownload;
+  final bool fullscreen;
+  final bool autoplay;
+  final bool autofocus;
+  final VoidCallback? onClose;
+  final ValueChanged<double>? onAspectRatio;
+  final VideoPlayerController Function(Uri uri)? controllerFactory;
+  final VideoFrameLoader? frameLoader;
+  final bool supportsPhotos;
+  final ValueListenable<double?>? progress;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uri?>(
+    future: uri,
+    builder: (context, snapshot) {
+      if (snapshot.hasError ||
+          (snapshot.connectionState == ConnectionState.done &&
+              snapshot.data == null)) {
+        return _VideoPlaceholder(
+          icon: Icons.link_off_rounded,
+          label: 'Delivery unavailable',
+          detail:
+              'The film could not be retrieved from its storage. '
+              'Use Save video to export the file.',
+          onClose: onClose,
+        );
+      }
+      final resolved = snapshot.data;
+      if (resolved == null) {
+        return _VideoLoadingPlaceholder(progress: progress, onClose: onClose);
+      }
+      return GenerationVideo(
+        uri: resolved,
+        onDownload: onDownload,
+        fullscreen: fullscreen,
+        autoplay: autoplay,
+        autofocus: autofocus,
+        onClose: onClose,
+        onAspectRatio: onAspectRatio,
+        controllerFactory: controllerFactory,
+        frameLoader: frameLoader,
+        supportsPhotos: supportsPhotos,
+        progress: progress,
+      );
+    },
+  );
+}
+
 class _VideoPlayerModal extends StatefulWidget {
   const _VideoPlayerModal({
     required this.uri,
+    required this.deferredUri,
     required this.onDownload,
     required this.supportsPhotos,
     required this.initialAspectRatio,
     this.controllerFactory,
     this.frameLoader,
     this.progress,
-  });
+  }) : assert(
+         (uri == null) != (deferredUri == null),
+         'Provide exactly one of uri or deferredUri.',
+       );
 
-  final Uri uri;
+  final Uri? uri;
+  final Future<Uri?>? deferredUri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool supportsPhotos;
   final double initialAspectRatio;
@@ -92,6 +185,12 @@ class _VideoPlayerModal extends StatefulWidget {
 
 class _VideoPlayerModalState extends State<_VideoPlayerModal> {
   late double _aspect = widget.initialAspectRatio.clamp(0.2, 5.0);
+
+  void _adoptAspect(double value) {
+    if ((value - _aspect).abs() > .001 && value > 0) {
+      setState(() => _aspect = value.clamp(0.2, 5.0));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -115,21 +214,29 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
           key: const ValueKey('video-modal-frame'),
           width: width,
           height: math.min(width / _aspect, maxVideoHeight) + chrome,
-          child: GenerationVideo(
-            uri: widget.uri,
-            onDownload: widget.onDownload,
-            autoplay: true,
-            onClose: () => Navigator.of(context).pop(),
-            onAspectRatio: (value) {
-              if ((value - _aspect).abs() > .001 && value > 0) {
-                setState(() => _aspect = value.clamp(0.2, 5.0));
-              }
-            },
-            supportsPhotos: widget.supportsPhotos,
-            controllerFactory: widget.controllerFactory,
-            frameLoader: widget.frameLoader,
-            progress: widget.progress,
-          ),
+          child: widget.uri != null
+              ? GenerationVideo(
+                  uri: widget.uri!,
+                  onDownload: widget.onDownload,
+                  autoplay: true,
+                  onClose: () => Navigator.of(context).pop(),
+                  onAspectRatio: _adoptAspect,
+                  supportsPhotos: widget.supportsPhotos,
+                  controllerFactory: widget.controllerFactory,
+                  frameLoader: widget.frameLoader,
+                  progress: widget.progress,
+                )
+              : DeferredGenerationVideo(
+                  uri: widget.deferredUri!,
+                  onDownload: widget.onDownload,
+                  autoplay: true,
+                  onClose: () => Navigator.of(context).pop(),
+                  onAspectRatio: _adoptAspect,
+                  supportsPhotos: widget.supportsPhotos,
+                  controllerFactory: widget.controllerFactory,
+                  frameLoader: widget.frameLoader,
+                  progress: widget.progress,
+                ),
         ),
       ),
     );
