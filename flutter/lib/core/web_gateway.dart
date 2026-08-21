@@ -224,6 +224,29 @@ class WebGateway
   }
 
   @override
+  Future<LocalSnapshot?> resumeGoogleDrive() async {
+    // The companion holds the Drive session in memory only, so a configured
+    // but disconnected library means the process restarted; reattach quietly
+    // when a stored grant still exists.
+    if (_driveConnection.isConnected || !_driveConnection.isConfigured) {
+      return null;
+    }
+    try {
+      final token = await _driveAuthorizer.authorizeSilently();
+      if (token == null || token.isEmpty) return null;
+      return await _snapshot(
+        await _client.post(
+          _url('/drive/refresh'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{'accessToken': token}),
+        ),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  @override
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},

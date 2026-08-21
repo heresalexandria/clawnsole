@@ -325,6 +325,7 @@ function installRendererBridge() {
     updater.summarize(await updater.check({ force: force === true })));
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
   ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
+  ipcMain.handle("clawnsole:drive:authorizeSilent", () => googleDriveAuth.authorizeSilently());
   ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
   ipcMain.handle(
     "clawnsole:vault:settings",

@@ -1,4 +1,5 @@
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 
 import 'google_drive_auth_base.dart';
 
@@ -7,6 +8,7 @@ external _ClawnsoleShellJS? get _shell;
 
 extension type _ClawnsoleShellJS._(JSObject _) implements JSObject {
   external JSPromise<JSString> authorizeGoogleDrive();
+  external JSPromise<JSString> authorizeGoogleDriveSilently();
   external JSPromise<JSAny?> disconnectGoogleDrive();
 }
 
@@ -30,6 +32,23 @@ class _WebGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
     final clean = token.trim();
     if (clean.isEmpty) throw StateError('Google Drive authorization failed.');
     return clean;
+  }
+
+  @override
+  Future<String?> authorizeSilently() async {
+    // Older desktop shells predate the silent bridge; the session simply
+    // stays disconnected until the user reconnects from Settings.
+    if (!isAvailable ||
+        !_shell!.hasProperty('authorizeGoogleDriveSilently'.toJS).toDart) {
+      return null;
+    }
+    try {
+      final token = (await _shell!.authorizeGoogleDriveSilently().toDart).toDart
+          .trim();
+      return token.isEmpty ? null : token;
+    } on Object {
+      return null;
+    }
   }
 
   @override

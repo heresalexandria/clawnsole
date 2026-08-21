@@ -208,6 +208,24 @@ class NativeGateway extends DirectGateway
   }
 
   @override
+  Future<LocalSnapshot?> resumeGoogleDrive() async {
+    try {
+      // A read populates the persisted folder name so a fresh process knows
+      // whether Drive was configured before deciding to reattach.
+      await _hybrid.read();
+      final connection = _hybrid.connection;
+      if (connection.isConnected || !connection.isConfigured) return null;
+      final token = await _driveAuthorizer.authorizeSilently();
+      if (token == null || token.isEmpty) return null;
+      await _hybrid.connect(token, connection.folderName);
+      await _vault.connectRemote(token, _hybrid.connection.folderId);
+      return await load();
+    } on Object {
+      return null;
+    }
+  }
+
+  @override
   Future<SettingsVaultSetupResult> setupSettingsVault(String passphrase) async {
     final recoveryCode = await _vault.setup(passphrase);
     return SettingsVaultSetupResult(

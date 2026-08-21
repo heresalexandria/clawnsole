@@ -139,10 +139,6 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
 
   bool get _references => widget.collection == LibraryCollection.references;
 
-  LibraryStorageFilter get _storage => _references
-      ? widget.controller.referenceStorageFilter
-      : widget.controller.libraryStorageFilter;
-
   FavoriteFilter get _favorite => _references
       ? widget.controller.referenceFavoriteFilter
       : widget.controller.libraryFavoriteFilter;
@@ -156,22 +152,14 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       : widget.controller.libraryTags;
 
   int get _activeCount =>
-      (_storage != LibraryStorageFilter.all ? 1 : 0) +
-      (_favorite != FavoriteFilter.all ? 1 : 0) +
-      (_tag != null ? 1 : 0);
+      (_favorite != FavoriteFilter.all ? 1 : 0) + (_tag != null ? 1 : 0);
 
   void _reset() {
     if (_references) {
-      unawaited(
-        widget.controller.setReferenceStorageFilter(LibraryStorageFilter.all),
-      );
       widget.controller
         ..setReferenceFavoriteFilter(FavoriteFilter.all)
         ..setReferenceTag(null);
     } else {
-      unawaited(
-        widget.controller.setLibraryStorageFilter(LibraryStorageFilter.all),
-      );
       widget.controller
         ..setLibraryFavoriteFilter(FavoriteFilter.all)
         ..setLibraryTag(null);
@@ -208,22 +196,6 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              if (widget.controller.supportsLocalLibrary) ...<Widget>[
-                _section(
-                  context,
-                  'Storage',
-                  StorageFilterChips(
-                    value: _storage,
-                    showLocal: true,
-                    onChanged: (value) => unawaited(
-                      _references
-                          ? widget.controller.setReferenceStorageFilter(value)
-                          : widget.controller.setLibraryStorageFilter(value),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ],
               _section(
                 context,
                 'Favorites',
@@ -361,6 +333,231 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The storage filter as sidebar rows, living beside the folder tree so
+/// Local and Google Drive stay one glance away. The Drive row also carries
+/// the connection state and a reconnect action, so a signed-out session can
+/// never silently look like missing work.
+class StorageSidebarSection extends StatelessWidget {
+  const StorageSidebarSection({
+    required this.controller,
+    required this.value,
+    required this.onChanged,
+    required this.counts,
+    super.key,
+    this.trailingDivider = true,
+  });
+
+  final AppController controller;
+  final LibraryStorageFilter value;
+  final ValueChanged<LibraryStorageFilter> onChanged;
+  final Map<LibraryStorageFilter, int> counts;
+  final bool trailingDivider;
+
+  bool get _driveSignedOut =>
+      controller.supportsGoogleDrive &&
+      controller.googleDriveConnection.isConfigured &&
+      !controller.googleDriveConnected;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+        child: Text('Storage', style: Theme.of(context).textTheme.titleMedium),
+      ),
+      _StorageRow(
+        icon: Icons.layers_outlined,
+        label: 'All storage',
+        count: counts[LibraryStorageFilter.all] ?? 0,
+        selected: value == LibraryStorageFilter.all,
+        onTap: () => onChanged(LibraryStorageFilter.all),
+      ),
+      if (controller.supportsLocalLibrary)
+        _StorageRow(
+          icon: Icons.devices_outlined,
+          label: 'On this device',
+          count: counts[LibraryStorageFilter.local] ?? 0,
+          selected: value == LibraryStorageFilter.local,
+          onTap: () => onChanged(LibraryStorageFilter.local),
+        ),
+      _StorageRow(
+        icon: _driveSignedOut ? Icons.cloud_off_rounded : Icons.cloud_outlined,
+        label: 'Google Drive',
+        count: counts[LibraryStorageFilter.drive] ?? 0,
+        selected: value == LibraryStorageFilter.drive,
+        onTap: () => onChanged(LibraryStorageFilter.drive),
+        trailing: controller.googleDriveBusy
+            ? const SizedBox.square(
+                dimension: 13,
+                child: CircularProgressIndicator(strokeWidth: 1.6),
+              )
+            : _driveSignedOut
+            ? InkWell(
+                key: const ValueKey('storage-drive-reconnect'),
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => unawaited(controller.refreshGoogleDrive()),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: Text(
+                    'Reconnect',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: context.tokens.brass,
+                    ),
+                  ),
+                ),
+              )
+            : null,
+      ),
+      if (trailingDivider)
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Divider(height: 1),
+        ),
+    ],
+  );
+}
+
+class _StorageRow extends StatelessWidget {
+  const _StorageRow({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.selected,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 3),
+    child: Material(
+      color: selected ? context.colors.primaryContainer : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(9, 9, 9, 9),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 18,
+                color: selected
+                    ? context.colors.primary
+                    : context.colors.onSurfaceVariant,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? context.colors.onPrimaryContainer
+                        : context.colors.onSurface,
+                  ),
+                ),
+              ),
+              if (trailing != null) ...<Widget>[
+                trailing!,
+                const SizedBox(width: 5),
+              ],
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// A quiet inline card shown when Drive was connected before but the current
+/// session is signed out, so hidden Drive work is explained instead of
+/// looking lost.
+class DriveReconnectNotice extends StatelessWidget {
+  const DriveReconnectNotice({
+    required this.controller,
+    required this.subject,
+    super.key,
+  });
+
+  final AppController controller;
+
+  /// What this screen hides while signed out, e.g. 'films' or 'references'.
+  final String subject;
+
+  /// Whether the notice applies right now.
+  static bool needed(AppController controller) =>
+      controller.supportsGoogleDrive &&
+      controller.googleDriveConnection.isConfigured &&
+      !controller.googleDriveConnected;
+
+  @override
+  Widget build(BuildContext context) {
+    final busy = controller.googleDriveBusy;
+    return SurfaceCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            busy ? Icons.cloud_sync_outlined : Icons.cloud_off_rounded,
+            size: 18,
+            color: context.tokens.brass,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              busy
+                  ? 'Reconnecting to Google Drive…'
+                  : 'Google Drive is signed out, so Drive $subject are hidden. They are safe in your Drive folder.',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (busy)
+            const SizedBox.square(
+              dimension: 15,
+              child: CircularProgressIndicator(strokeWidth: 1.8),
+            )
+          else
+            FilledButton.tonal(
+              key: ValueKey('drive-reconnect-$subject'),
+              onPressed: () => unawaited(controller.refreshGoogleDrive()),
+              child: const Text('Reconnect'),
+            ),
+        ],
       ),
     );
   }

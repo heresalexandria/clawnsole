@@ -10,6 +10,7 @@ import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/gateway.dart';
+import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/local_data_store.dart';
 import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
@@ -3321,6 +3322,113 @@ void main() {
     expect(find.text('Nothing in this view.'), findsNothing);
   });
 
+  test('startup quietly resumes a configured Drive connection', () async {
+    final driveFilm = _viewModeGeneration(
+      0,
+    ).copyWith(storage: LibraryStorage.drive);
+    final gateway = _ResumableDriveGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      configured: true,
+      resumed: LocalSnapshot(
+        generations: <Generation>[driveFilm],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gateway.resumeCalls, 1);
+    expect(controller.generations.single.storage, LibraryStorage.drive);
+  });
+
+  test('startup does not resume Drive for never-connected libraries', () async {
+    final gateway = _ResumableDriveGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      configured: false,
+      resumed: null,
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gateway.resumeCalls, 0);
+  });
+
+  testWidgets('library explains signed-out Drive work and reconnects', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final localFilm = _viewModeGeneration(0);
+    final driveFilm = Generation.fromJson(<String, Object?>{
+      ..._viewModeGeneration(1).toJson(),
+      'localId': 'drive-film',
+      'prompt': 'A film that lives in Drive.',
+      'storage': LibraryStorage.drive.name,
+    });
+    final gateway = _ResumableDriveGateway(
+      LocalSnapshot(
+        generations: <Generation>[localFilm],
+        preferences: const AppPreferences(activeSection: AppSection.library),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+      configured: true,
+      resumed: null,
+      refreshed: LocalSnapshot(
+        generations: <Generation>[localFilm, driveFilm],
+        preferences: const AppPreferences(activeSection: AppSection.library),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    // The sidebar carries the storage rows now.
+    expect(find.text('Storage'), findsOneWidget);
+    expect(find.text('All storage'), findsOneWidget);
+    expect(find.text('On this device'), findsOneWidget);
+    expect(find.text('Google Drive'), findsOneWidget);
+    // Signed-out Drive work is explained, never silently hidden.
+    expect(find.textContaining('Google Drive is signed out'), findsOneWidget);
+    expect(find.text('A film that lives in Drive.'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('drive-reconnect-films')));
+    await tester.pumpAndSettle();
+
+    expect(gateway.refreshCalls, 1);
+    expect(find.textContaining('Google Drive is signed out'), findsNothing);
+    expect(find.text('A film that lives in Drive.'), findsOneWidget);
+
+    await tester.tap(find.text('On this device'));
+    await tester.pumpAndSettle();
+    expect(find.text('A film that lives in Drive.'), findsNothing);
+
+    await tester.tap(find.text('All storage'));
+    await tester.pumpAndSettle();
+    expect(find.text('A film that lives in Drive.'), findsOneWidget);
+  });
+
   testWidgets('recent work dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -3696,6 +3804,70 @@ Generation _viewModeGeneration(int index) {
     createdAt: createdAt,
     updatedAt: createdAt,
   );
+}
+
+class _ResumableDriveGateway extends _MemoryGateway
+    implements GoogleDriveGateway {
+  _ResumableDriveGateway(
+    super.snapshot, {
+    required this.configured,
+    required this.resumed,
+    this.refreshed,
+  });
+
+  final bool configured;
+  final LocalSnapshot? resumed;
+  final LocalSnapshot? refreshed;
+  int resumeCalls = 0;
+  int refreshCalls = 0;
+  bool _connected = false;
+
+  @override
+  bool get supportsLocalLibrary => true;
+
+  @override
+  GoogleDriveConnection get googleDriveConnection => GoogleDriveConnection(
+    state: _connected
+        ? GoogleDriveConnectionState.connected
+        : GoogleDriveConnectionState.disconnected,
+    folderName: configured ? 'Clawnsole' : '',
+    folderId: configured ? 'folder-1' : '',
+  );
+
+  @override
+  Future<LocalSnapshot?> resumeGoogleDrive() async {
+    resumeCalls += 1;
+    final value = resumed;
+    if (value == null) return null;
+    _connected = true;
+    snapshot = value;
+    return value;
+  }
+
+  @override
+  Future<LocalSnapshot> refreshGoogleDrive() async {
+    refreshCalls += 1;
+    _connected = true;
+    snapshot = refreshed ?? snapshot;
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> connectGoogleDrive(String folderName) =>
+      refreshGoogleDrive();
+
+  @override
+  Future<LocalSnapshot> disconnectGoogleDrive() async {
+    _connected = false;
+    return snapshot;
+  }
+
+  @override
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 }
 
 class _MemoryGateway implements AppGateway {

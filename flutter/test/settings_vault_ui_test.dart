@@ -354,6 +354,9 @@ class _VaultGateway
   Future<LocalSnapshot> refreshGoogleDrive() async => _snapshot;
 
   @override
+  Future<LocalSnapshot?> resumeGoogleDrive() async => null;
+
+  @override
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
