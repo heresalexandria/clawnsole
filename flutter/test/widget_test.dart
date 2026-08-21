@@ -2476,6 +2476,7 @@ void main() {
       ),
     );
     await controller.initialize();
+    await controller.selectProviderModel('artcraft', 'seedance_2p5');
     await tester.pumpWidget(
       MaterialApp(
         theme: buildClawnsoleTheme(Brightness.light),
@@ -2490,8 +2491,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Model & Provider:'), findsNothing);
+    expect(find.text('Make it move.'), findsNothing);
+    expect(find.text('VIDEO STUDIO'), findsNothing);
     final plaque = find.byKey(const ValueKey('provider-plaque'));
     expect(tester.getTopRight(plaque).dx, closeTo(374, .1));
+
+    expect(find.text('REFERENCES'), findsOneWidget);
+    expect(find.textContaining('REQUIRED'), findsNothing);
+    expect(find.text('Or continue a video'), findsNothing);
+    expect(find.text('Or enhance a saved draft'), findsNothing);
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('add-image-reference'))).dy,
+      greaterThan(tester.getBottomLeft(find.text('REFERENCES')).dy),
+    );
 
     final panel = find.byKey(const ValueKey('estimated-charge-panel'));
     final rate = find.byKey(const ValueKey('estimate-rate'));
@@ -2500,6 +2512,52 @@ void main() {
     final creditsRight = tester.getTopRight(credits).dx;
     expect(rateRight, closeTo(creditsRight, .1));
     expect(tester.getTopRight(panel).dx - rateRight, inInclusiveRange(13, 16));
+    controller.dispose();
+  });
+
+  testWidgets('mobile Save To right-aligns the storage choices', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1400));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    const snapshot = LocalSnapshot(
+      generations: <Generation>[],
+      preferences: AppPreferences(),
+      hasApiKey: false,
+      storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+    );
+    final gateway = _ResumableDriveGateway(
+      snapshot,
+      configured: true,
+      resumed: snapshot,
+    );
+    await gateway.connectGoogleDrive('Clawnsole');
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final panel = find.byKey(const ValueKey('generation-destination-panel'));
+    final drive = find.widgetWithText(ChoiceChip, 'Drive');
+    expect(find.widgetWithText(ChoiceChip, 'Local'), findsOneWidget);
+    expect(drive, findsOneWidget);
+    expect(
+      tester.getTopRight(panel).dx - tester.getTopRight(drive).dx,
+      inInclusiveRange(11, 13),
+    );
     controller.dispose();
   });
 

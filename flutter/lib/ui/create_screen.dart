@@ -119,16 +119,10 @@ class _CreateHeading extends StatelessWidget {
           ),
         );
         // Wide layouts keep the quiet label and pin the plaque to the far
-        // right. Phones drop the redundant label and right-align the plaque.
+        // right. Phones drop the heading entirely and place the model selector
+        // at the top-right edge to keep the composer compact.
         if (constraints.maxWidth < 720) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              title,
-              SizedBox(height: short ? 10 : 16),
-              Align(alignment: Alignment.centerRight, child: plaque),
-            ],
-          );
+          return Align(alignment: Alignment.topRight, child: plaque);
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -597,26 +591,21 @@ class _ComposerState extends State<_Composer> {
     final short = _isShort(context);
     // "Or start from" alternates fold into the guidance sections instead of
     // occupying a row of their own.
-    final videoAction = _QuietAction(
-      icon: Icons.movie_filter_rounded,
-      label: 'Or continue a video',
-      onTap:
-          controller.selectedProvider.models.any(
-            (model) => model.modes.contains(VideoMode.v2v),
+    final videoAction = controller.selectedModel.modes.contains(VideoMode.v2v)
+        ? _QuietAction(
+            icon: Icons.movie_filter_rounded,
+            label: 'Or continue a video',
+            onTap: () => setState(() => _showVideoPanel = true),
           )
-          ? () => setState(() => _showVideoPanel = true)
-          : null,
-    );
-    final draftAction = _QuietAction(
-      icon: Icons.auto_fix_high_rounded,
-      label: 'Or enhance a saved draft',
-      onTap:
-          controller.selectedProvider.models.any(
-            (model) => model.modes.contains(VideoMode.draftEnhance),
+        : null;
+    final draftAction =
+        controller.selectedModel.modes.contains(VideoMode.draftEnhance)
+        ? _QuietAction(
+            icon: Icons.auto_fix_high_rounded,
+            label: 'Or enhance a saved draft',
+            onTap: () => setState(() => _showDraftPanel = true),
           )
-          ? () => setState(() => _showDraftPanel = true)
-          : null,
-    );
+        : null;
 
     return SurfaceCard(
       padding: EdgeInsets.all(short ? 12 : 18),
@@ -860,39 +849,46 @@ class _GenerationDestinationControls extends StatelessWidget {
         children: <Widget>[
           Tooltip(
             message: 'Save generation to',
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Icon(
-                      Icons.save_outlined,
-                      size: 16,
-                      color: context.tokens.brass,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      'SAVE TO',
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.3,
-                        fontWeight: FontWeight.w700,
-                        color: context.colors.onSurface.withValues(alpha: .82),
-                      ),
-                    ),
-                  ],
+                Icon(
+                  Icons.save_outlined,
+                  size: 16,
+                  color: context.tokens.brass,
                 ),
-                storageControl,
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 300),
-                  child: folderMenu,
+                const SizedBox(width: 7),
+                Text(
+                  'SAVE TO',
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1.3,
+                    fontWeight: FontWeight.w700,
+                    color: context.colors.onSurface.withValues(alpha: .82),
+                  ),
                 ),
-                newFolder,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: storageControl,
+                  ),
+                ),
               ],
             ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 300),
+                child: folderMenu,
+              ),
+              newFolder,
+            ],
           ),
           if (controller.supportsGoogleDrive &&
               !controller.googleDriveConnected) ...<Widget>[
@@ -1008,8 +1004,8 @@ class _GuidanceInputsSection extends StatelessWidget {
   });
 
   final AppController controller;
-  final Widget videoAction;
-  final Widget draftAction;
+  final Widget? videoAction;
+  final Widget? draftAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1038,8 +1034,16 @@ class _GuidanceInputsSection extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 6),
-          Wrap(spacing: 4, children: <Widget>[videoAction, draftAction]),
+          if (videoAction != null || draftAction != null) ...<Widget>[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              children: <Widget>[
+                if (videoAction != null) videoAction!,
+                if (draftAction != null) draftAction!,
+              ],
+            ),
+          ],
         ],
       );
     }
@@ -1051,8 +1055,8 @@ class _GuidanceInputsSection extends StatelessWidget {
                 controller: controller,
                 compact: compact,
                 startActions: <Widget>[
-                  videoAction,
-                  if (!showReferences) draftAction,
+                  if (videoAction != null) videoAction!,
+                  if (!showReferences && draftAction != null) draftAction!,
                 ],
               )
             : null;
@@ -1061,8 +1065,8 @@ class _GuidanceInputsSection extends StatelessWidget {
                 controller: controller,
                 compact: compact,
                 startActions: <Widget>[
-                  if (!showFrames) videoAction,
-                  draftAction,
+                  if (!showFrames && videoAction != null) videoAction!,
+                  if (draftAction != null) draftAction!,
                 ],
               )
             : null;
@@ -1101,7 +1105,7 @@ class _QuietAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => TextButton.icon(
@@ -1368,8 +1372,6 @@ class _ReferencesSection extends StatelessWidget {
     final limitSummary = model.maxTotalReferences == null
         ? limits
         : '$limits · ${model.maxTotalReferences} files total';
-    final required =
-        !model.modes.contains(VideoMode.t2v) && model.maxKeyframes == 0;
     final setAside = controller.referencesBlockedByFrames;
     final conflicted =
         model.framesExclusiveWithReferences &&
@@ -1447,20 +1449,20 @@ class _ReferencesSection extends StatelessWidget {
         key: const ValueKey('media-references-section'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              _SectionLabelChip(
-                icon: Icons.perm_media_rounded,
-                label: required ? 'References · required' : 'References',
-                hint: limitSummary,
-              ),
-              ...addButtons,
-              ...startActions,
-            ],
+          _SectionLabelChip(
+            icon: Icons.perm_media_rounded,
+            label: 'References',
+            hint: limitSummary,
           ),
+          if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 7),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[...addButtons, ...startActions],
+            ),
+          ],
           if (taskChips != null) ...<Widget>[
             const SizedBox(height: 6),
             taskChips,
@@ -1477,10 +1479,8 @@ class _ReferencesSection extends StatelessWidget {
       key: const ValueKey('media-references-section'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        FieldLabel(
-          required
-              ? 'Creative references · required'
-              : 'Creative references · optional',
+        const FieldLabel(
+          'Creative references · optional',
           icon: Icons.perm_media_rounded,
         ),
         const SizedBox(height: 7),
@@ -3540,19 +3540,24 @@ class _RecentWorkState extends State<_RecentWork> {
                 Row(
                   children: <Widget>[
                     Expanded(child: title),
+                    library,
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
                     if (controller.supportsGoogleDrive) ...<Widget>[
                       DriveRefreshButton(
                         controller: controller,
                         keyPrefix: 'recent-work',
                         compact: true,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 8),
                     ],
-                    library,
+                    toggle,
                   ],
                 ),
-                const SizedBox(height: 8),
-                Align(alignment: Alignment.centerRight, child: toggle),
               ],
             );
           },
