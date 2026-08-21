@@ -182,6 +182,9 @@ class GenerationFormState {
   double upscaleFactor = 2;
   int upscaleCreativity = 1;
 
+  /// Reproducible seed for models that accept one; null means random.
+  int? seed;
+
   /// The operation selected by the model or implied by what is attached.
   /// Upscale is a dedicated model; generation modes otherwise need no picker:
   /// a draft cache wins, then a starting video, then frames/references, then
@@ -805,6 +808,7 @@ class AppController extends ChangeNotifier {
           : null,
       upscaleFactor: form.upscaleFactor,
       upscaleCreativity: form.upscaleCreativity,
+      seed: selectedModel.supportsSeed ? form.seed : null,
     );
   }
 
@@ -2052,6 +2056,7 @@ class AppController extends ChangeNotifier {
     if (!model.referenceTasks.contains(form.referenceTask)) {
       form.referenceTask = MediaReferenceTask.reference;
     }
+    if (!model.supportsSeed) form.seed = null;
     if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     final resolutions = availableResolutions;
     if (!resolutions.any((item) => item.id == form.resolution)) {
@@ -2387,6 +2392,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setSeed(int? value) {
+    form.seed = value;
+    notifyListeners();
+  }
+
   List<KeyframeDraft> _orderedFrames() {
     final frames = List<KeyframeDraft>.from(form.keyframes);
     if (form.usesTimedKeyframes) {
@@ -2647,6 +2657,7 @@ class AppController extends ChangeNotifier {
       'safety_tolerance': form.safetyTolerance,
       'draft': form.draft,
       if (selectedModel.supportsFrameRate) 'frame_rate': form.frameRate,
+      if (selectedModel.supportsSeed && form.seed != null) 'seed': form.seed,
     };
     if (form.mode == VideoMode.i2v) {
       final frames = form.usesTimedKeyframes
@@ -3676,6 +3687,8 @@ class AppController extends ChangeNotifier {
       ..upscale = item.mode == VideoMode.upscale
       ..upscaleFactor = item.config.upscaleFactor
       ..upscaleCreativity = item.config.upscaleCreativity
+      // _normalizeFormForModel clears this when the model lacks seed support.
+      ..seed = item.config.seed
       ..exactTiming = item.config.exactTiming
       ..keyframes = retainedFrames
       ..references = retainedReferences

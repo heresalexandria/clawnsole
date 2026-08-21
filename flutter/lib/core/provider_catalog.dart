@@ -73,6 +73,7 @@ class VideoModelDefinition {
     this.supportsDraft = false,
     this.supportsTimedKeyframes = false,
     this.supportsFrameRate = false,
+    this.supportsSeed = false,
     this.outputKind = GenerationOutputKind.video,
   });
 
@@ -117,6 +118,9 @@ class VideoModelDefinition {
   final bool supportsDraft;
   final bool supportsTimedKeyframes;
   final bool supportsFrameRate;
+
+  /// The wire API accepts a reproducible random seed for this model.
+  final bool supportsSeed;
   final GenerationOutputKind outputKind;
 
   String get canonicalId => canonicalModelId ?? id;
@@ -898,6 +902,7 @@ class _AtlasRouteModel extends VideoModelDefinition {
     required super.usdPerSecond,
     super.durationStep = 1,
     super.supportsAudio = true,
+    super.supportsSeed = false,
     bool imageRoute = false,
     bool supportsEndFrame = false,
   }) : super(
@@ -1216,6 +1221,7 @@ const atlasProvider = VideoProviderDefinition(
       minDuration: 2,
       maxDuration: 15,
       usdPerSecond: .10,
+      supportsSeed: true,
     ),
     _AtlasRouteModel(
       id: 'alibaba/wan-2.7/image-to-video',
@@ -1227,6 +1233,7 @@ const atlasProvider = VideoProviderDefinition(
       minDuration: 2,
       maxDuration: 15,
       usdPerSecond: .10,
+      supportsSeed: true,
       imageRoute: true,
       supportsEndFrame: true,
     ),

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app/app_theme.dart';
 
@@ -781,60 +782,187 @@ class CounterReadout extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(7),
-        border: Border.all(
-          color: dark
-              ? Colors.black.withValues(alpha: .45)
-              : const Color(0xFFC5B79E),
-          width: .8,
-        ),
-        gradient: dark
-            ? const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: <Color>[Color(0xFF191317), Color(0xFF2E242C)],
-              )
-            : const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: <Color>[Color(0xFFE6DBC3), Color(0xFFF6F0E0)],
-              ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.white.withValues(alpha: dark ? .08 : .8),
-            offset: const Offset(0, 1),
-            blurRadius: 0,
-          ),
-        ],
-      ),
+      decoration: _readoutWindowDecoration(dark),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Text(
-            text,
-            style: TextStyle(
-              fontFamily: 'Fraunces',
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              letterSpacing: .4,
-              color: dark ? ClawnsoleColors.cream : context.colors.onSurface,
-            ),
-          ),
+          Text(text, style: _readoutNumeralStyle(context, dark)),
           if (unit != null) ...<Widget>[
             const SizedBox(width: 4),
-            Text(
-              unit!,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: dark
-                    ? ClawnsoleColors.creamMuted
-                    : context.colors.onSurfaceVariant,
-              ),
-            ),
+            Text(unit!, style: _readoutUnitStyle(context, dark)),
           ],
         ],
+      ),
+    );
+  }
+}
+
+BoxDecoration _readoutWindowDecoration(bool dark) => BoxDecoration(
+  borderRadius: BorderRadius.circular(7),
+  border: Border.all(
+    color: dark ? Colors.black.withValues(alpha: .45) : const Color(0xFFC5B79E),
+    width: .8,
+  ),
+  gradient: dark
+      ? const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[Color(0xFF191317), Color(0xFF2E242C)],
+        )
+      : const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[Color(0xFFE6DBC3), Color(0xFFF6F0E0)],
+        ),
+  boxShadow: <BoxShadow>[
+    BoxShadow(
+      color: Colors.white.withValues(alpha: dark ? .08 : .8),
+      offset: const Offset(0, 1),
+      blurRadius: 0,
+    ),
+  ],
+);
+
+TextStyle _readoutNumeralStyle(BuildContext context, bool dark) => TextStyle(
+  fontFamily: 'Fraunces',
+  fontSize: 13,
+  fontWeight: FontWeight.w600,
+  letterSpacing: .4,
+  color: dark ? ClawnsoleColors.cream : context.colors.onSurface,
+);
+
+TextStyle _readoutUnitStyle(BuildContext context, bool dark) => TextStyle(
+  fontSize: 10.5,
+  fontWeight: FontWeight.w700,
+  color: dark ? ClawnsoleColors.creamMuted : context.colors.onSurfaceVariant,
+);
+
+/// A [CounterReadout] whose numerals can be typed: the same recessed counter
+/// window, but the value is a digits-only text field that commits on submit
+/// or focus loss. Unparseable input snaps back to the last real value.
+class CounterReadoutField extends StatefulWidget {
+  const CounterReadoutField({
+    required this.value,
+    required this.onCommit,
+    super.key,
+    this.unit,
+    this.fieldKey,
+    this.enabled = true,
+    this.onEditingStarted,
+  });
+
+  /// The committed value to display while not editing (may be non-numeric,
+  /// like AUTO).
+  final String value;
+
+  /// Receives the typed number on submit or blur; the owner clamps it.
+  final ValueChanged<int> onCommit;
+  final String? unit;
+
+  /// Key applied to the inner text field so tests can type into it.
+  final Key? fieldKey;
+  final bool enabled;
+
+  /// Called when the field gains focus, before any digits arrive — the hook
+  /// that lets an AUTO readout drop to manual the moment it is touched.
+  final VoidCallback? onEditingStarted;
+
+  @override
+  State<CounterReadoutField> createState() => _CounterReadoutFieldState();
+}
+
+class _CounterReadoutFieldState extends State<CounterReadoutField> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.value,
+  );
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_handleFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant CounterReadoutField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focus.hasFocus && _text.text != widget.value) {
+      _text.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus
+      ..removeListener(_handleFocusChange)
+      ..dispose();
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (_focus.hasFocus) {
+      widget.onEditingStarted?.call();
+      // Select everything so typing replaces the shown value (which may be a
+      // non-numeric AUTO placeholder).
+      _text.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _text.text.length,
+      );
+    } else {
+      _commit();
+    }
+  }
+
+  void _commit() {
+    final parsed = int.tryParse(_text.text.trim());
+    if (parsed != null) {
+      widget.onCommit(parsed);
+      // Keep the parsed digits so a follow-up blur commit re-submits the
+      // same number; the owner's rebuild then syncs in the clamped value.
+      _text.text = '$parsed';
+    } else {
+      _text.text = widget.value;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Opacity(
+      opacity: widget.enabled ? 1 : .55,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: _readoutWindowDecoration(dark),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            SizedBox(
+              width: 46,
+              child: TextField(
+                key: widget.fieldKey,
+                controller: _text,
+                focusNode: _focus,
+                enabled: widget.enabled,
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                textAlign: TextAlign.right,
+                style: _readoutNumeralStyle(context, dark),
+                cursorColor: dark
+                    ? ClawnsoleColors.cream
+                    : context.colors.onSurface,
+                decoration: null,
+                onSubmitted: (_) => _commit(),
+              ),
+            ),
+            if (widget.unit != null) ...<Widget>[
+              const SizedBox(width: 4),
+              Text(widget.unit!, style: _readoutUnitStyle(context, dark)),
+            ],
+          ],
+        ),
       ),
     );
   }
