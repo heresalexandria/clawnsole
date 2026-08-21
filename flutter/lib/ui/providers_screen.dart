@@ -30,7 +30,8 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
       };
   final Set<String> _visibleKeys = <String>{};
   final Set<String> _busyProviders = <String>{};
-  final Map<String, String> _results = <String, String>{};
+  final Map<String, _ProviderKeyResult> _results =
+      <String, _ProviderKeyResult>{};
   final TextEditingController _search = TextEditingController();
   final ScrollController _costTableScroll = ScrollController();
   String _pricingProvider = 'all';
@@ -68,15 +69,19 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
             })()
           : await widget.controller.verifyProviderKey(providerId, candidate);
       if (save) _keys[providerId]!.clear();
-      _results[providerId] =
-          account?.balanceLabel ??
-          (account?.balance == null
-              ? 'Connected'
-              : account!.currency == 'credits'
-              ? '${_number(account.balance!)} credits available'
-              : '\$${account.balance!.toStringAsFixed(2)} available');
+      _results[providerId] = _ProviderKeyResult(
+        account?.balanceLabel ??
+            (account?.balance == null
+                ? 'Connected'
+                : account!.currency == 'credits'
+                ? '${_number(account.balance!)} credits available'
+                : '\$${account.balance!.toStringAsFixed(2)} available'),
+        // Providers without a balance endpoint answer with a "check the
+        // console" label; render that as a working link, not inert text.
+        opensConsole: account?.balance == null && account?.balanceLabel != null,
+      );
     } on Object catch (error) {
-      _results[providerId] = error.toString();
+      _results[providerId] = _ProviderKeyResult(error.toString());
     } finally {
       if (mounted) setState(() => _busyProviders.remove(providerId));
     }
@@ -194,7 +199,7 @@ class _ProviderCard extends StatelessWidget {
   final TextEditingController keyController;
   final bool keyVisible;
   final bool busy;
-  final String? result;
+  final _ProviderKeyResult? result;
   final VoidCallback onToggleKey;
   final Future<void> Function() onVerify;
   final Future<void> Function() onSave;
@@ -316,19 +321,25 @@ class _ProviderCard extends StatelessWidget {
             ),
             if (result != null) ...<Widget>[
               const SizedBox(height: 8),
-              Text(
-                result!,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color:
-                      result!.contains('rejected') ||
-                          result!.contains('Exception') ||
-                          result!.contains('invalid')
-                      ? context.colors.error
-                      : context.colors.primary,
+              if (result!.opensConsole && provider.consoleUrl.isNotEmpty)
+                _ExternalLink(
+                  result!.message.replaceFirst(RegExp(r'\s*↗\s*$'), ''),
+                  provider.consoleUrl,
+                )
+              else
+                Text(
+                  result!.message,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color:
+                        result!.message.contains('rejected') ||
+                            result!.message.contains('Exception') ||
+                            result!.message.contains('invalid')
+                        ? context.colors.error
+                        : context.colors.primary,
+                  ),
                 ),
-              ),
             ],
             const SizedBox(height: 11),
             Wrap(
@@ -399,6 +410,13 @@ String _connectedProviderLabel(AppController controller) =>
       SettingsVaultState.locked => 'Connected here · vault locked',
       _ => 'Connected securely on this device',
     };
+
+class _ProviderKeyResult {
+  const _ProviderKeyResult(this.message, {this.opensConsole = false});
+
+  final String message;
+  final bool opensConsole;
+}
 
 class _ExternalLink extends StatelessWidget {
   const _ExternalLink(this.label, this.url);

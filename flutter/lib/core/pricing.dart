@@ -141,6 +141,32 @@ double? recordedRealizedCostUsd(Generation generation) {
       : providerUnitsToUsd(generation.billingUnit, legacy);
 }
 
+/// Sources recorded only when a terminal poll confirmed the charge — either
+/// the provider reported it in the terminal payload or the balance stayed
+/// down after the run ended. Submit-time observations keep the legacy source
+/// names ('provider-reported', 'balance-delta', …), so persisted records from
+/// before this distinction parse unchanged and read as submit-time estimates.
+const String terminalReportedCostSource = 'terminal-provider-reported';
+const String terminalBalanceDeltaCostSource = 'terminal-balance-delta';
+
+bool isTerminalRealizedCostSource(String? source) =>
+    source == terminalReportedCostSource ||
+    source == terminalBalanceDeltaCostSource;
+
+/// Whether [generation]'s recorded cost reflects money actually spent.
+///
+/// Ready generations count. In-flight work is not settled yet. Failed
+/// generations count only when a terminal poll confirmed the charge —
+/// submit-time observations are estimates that providers commonly refund
+/// when a generation fails.
+bool countsTowardSpend(Generation generation) {
+  if (generation.isReady) return true;
+  if (generation.isFailed) {
+    return isTerminalRealizedCostSource(generation.realizedCostSource);
+  }
+  return false;
+}
+
 class ResolvedProviderCost {
   const ResolvedProviderCost({this.providerUnits, this.usd, this.source});
 
@@ -154,6 +180,7 @@ ResolvedProviderCost resolveProviderCost(
   Object? payload, {
   double? balanceAfter,
   bool allowDeterministicQuote = false,
+  bool terminal = false,
 }) {
   final reported = providerCostFromPayload(payload);
   final before = generation.creditsBefore;
@@ -163,6 +190,19 @@ ResolvedProviderCost resolveProviderCost(
   final measured = balanceDelta != null && balanceDelta > .0000001
       ? balanceDelta
       : null;
+  if (terminal && (reported != null || measured != null)) {
+    // Fresh terminal evidence supersedes the submit-time observation: it is
+    // what the provider actually settled, and its source marks the record as
+    // a confirmed charge even when the generation failed.
+    final units = reported ?? measured!;
+    return ResolvedProviderCost(
+      providerUnits: units,
+      usd: providerUnitsToUsd(generation.billingUnit, units),
+      source: reported != null
+          ? terminalReportedCostSource
+          : terminalBalanceDeltaCostSource,
+    );
+  }
   final providerUnits = reported ?? measured ?? generation.cost;
   final existingUsd = generation.realizedCostUsd;
   if (providerUnits != null) {

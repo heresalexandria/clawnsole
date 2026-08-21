@@ -27,6 +27,7 @@ import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
+import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/references_screen.dart';
@@ -463,6 +464,10 @@ void main() {
 
       expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
       expect(
+        controller.generationPlaceholderStyle,
+        GenerationPlaceholderStyle.broadcastStatic,
+      );
+      expect(
         find.byKey(const ValueKey('generation-loading-static-portrait-video')),
         findsOneWidget,
       );
@@ -475,6 +480,76 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('applies the Cyclone preference across dense render paths', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 20, 12);
+    final item = Generation(
+      localId: 'styled-video',
+      status: 'Pending',
+      progress: 18,
+      prompt: 'Ribbons take over the placeholder.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController()
+      ..generationPlaceholderStyle = GenerationPlaceholderStyle.cyclone;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 320,
+              child: ActivityCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-cyclone-styled-video')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-static-styled-video')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-cyclone-styled-video')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-static-styled-video')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
 
   testWidgets('keeps Cyclone available as a generation placeholder', (
     tester,

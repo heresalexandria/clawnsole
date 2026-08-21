@@ -60,6 +60,13 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
     isAllowedExternalUrl("https://storyteller-docs.netlify.app/"),
     true,
   );
+  assert.equal(
+    isAllowedExternalUrl(
+      "https://github.com/storytold/artcraft/blob/main/_docs/omni_api/artcraft_omni_api.md",
+    ),
+    true,
+  );
+  assert.equal(isAllowedExternalUrl("https://gist.github.com/example"), false);
   assert.equal(isAllowedExternalUrl("https://www.atlascloud.ai/console"), true);
   assert.equal(isAllowedExternalUrl("https://heresalexandria.com/"), true);
   assert.equal(
