@@ -29,7 +29,9 @@ import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
+import 'package:clawnsole/ui/inline_video.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
+import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -549,6 +551,146 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
+  });
+
+  testWidgets('full cards frame delivered media at its stored aspect ratio', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'aspect-thumb.png': frame,
+        'aspect-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    Widget card(String aspect) => MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: SizedBox(
+            width: 640,
+            child: ActivityCard(
+              controller: controller,
+              item: _deliveredGeneration('aspect-$aspect', aspect: aspect),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // A 16:9 film fills the card's width at its true ratio — never cropped
+    // into a strip.
+    await tester.pumpWidget(card('16:9'));
+    await tester.pumpAndSettle();
+    var box = tester.getSize(find.byType(InlineVideoMediaBox));
+    // The card border leaves 638 of the 640 for media.
+    expect(box.width, closeTo(638, .5));
+    expect(box.width / box.height, closeTo(16 / 9, .01));
+
+    // A 9:16 film would want 1138px of height at this width, so the box caps
+    // at 70% of the 600px viewport with the whole frame centered inside.
+    await tester.pumpWidget(card('9:16'));
+    await tester.pumpAndSettle();
+    box = tester.getSize(find.byType(InlineVideoMediaBox));
+    expect(box.height, closeTo(420, .1));
+    final film = tester.getSize(
+      find.descendant(
+        of: find.byType(InlineVideoMediaBox),
+        matching: find.byType(AspectRatio),
+      ),
+    );
+    expect(film.width / film.height, closeTo(9 / 16, .01));
+    expect(film.height, closeTo(420, .1));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('the filmstrip scales with its preview and hides when short', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'strip-thumb.png': frame,
+        'strip-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    final item = _deliveredGeneration(
+      'strip',
+      thumbnail: 'strip-thumb.png',
+      timeline: 'strip-strip.png',
+    );
+    const stripKey = ValueKey('generation-video-filmstrip');
+
+    // Compact rows stay a clean cover thumbnail: no band at 68px.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 420,
+            child: CompactGenerationRow(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(stripKey), findsNothing);
+
+    // Mini cards keep a slim band under their 118px preview.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(stripKey)).height, 24);
+
+    // Full cards keep the complete band under the aspect-true frame.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 640,
+              child: ActivityCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(stripKey)).height, 48);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 
   testWidgets('keeps Cyclone available as a generation placeholder', (
@@ -1822,8 +1964,10 @@ void main() {
       ValueKey<String>('generation-prompt-${controller.formRevision}'),
     );
     await tester.enterText(promptField(), 'Stale visible desktop prompt.');
-    await tester.ensureVisible(find.text('Reuse inputs'));
-    await tester.tap(find.text('Reuse inputs'));
+    // Recent work renders the Library's full cards, whose reuse button
+    // carries the shared 'Reuse' label.
+    await tester.ensureVisible(find.text('Reuse'));
+    await tester.tap(find.text('Reuse'));
     await tester.pumpAndSettle();
 
     final editable = tester.widget<EditableText>(
@@ -2191,9 +2335,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('console-only balances link to the provider console', (
-    tester,
-  ) async {
+  testWidgets('console-only balances stay off the cost panel', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2232,14 +2374,51 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Open ArtCraft to view balance ↗'), findsOneWidget);
-    final link = find.byTooltip('Open provider console');
-    expect(link, findsOneWidget);
-    final ink = tester.widget<InkWell>(
-      find.descendant(of: link, matching: find.byType(InkWell)),
-    );
-    expect(ink.onTap, isNotNull);
+    // The felt carries only the estimate; the top-right balance pill owns
+    // "open the provider console to view the balance".
+    expect(find.text('ESTIMATED CHARGE'), findsOneWidget);
+    expect(find.text('Rate card ↗'), findsOneWidget);
+    expect(find.text('Open ArtCraft to view balance ↗'), findsNothing);
+    expect(find.text('AVAILABLE NOW'), findsNothing);
+    expect(find.text('ESTIMATED AFTER'), findsNothing);
+    expect(find.byTooltip('Open provider console'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
     controller.dispose();
+
+    // A numeric balance keeps the estimated-after line.
+    final bflController = AppController(
+      gateway: _ProviderMemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: true,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        const ProviderAccountStatus(
+          provider: 'bfl',
+          balance: 125,
+          currency: 'credits',
+        ),
+      ),
+    );
+    await bflController.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: bflController,
+            builder: (context, _) => CreateScreen(controller: bflController),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('ESTIMATED AFTER'), findsOneWidget);
+    expect(find.text('AVAILABLE NOW'), findsNothing);
+    bflController.dispose();
   });
 
   testWidgets('provider picker collapses and expands provider models', (
@@ -2274,7 +2453,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('MODEL & PROVIDER'), findsOneWidget);
+    // The label sits beside the plaque card rather than inside it.
+    final plaqueLabel = find.text('Model & Provider:');
+    expect(plaqueLabel, findsOneWidget);
+    expect(
+      find.ancestor(of: plaqueLabel, matching: find.byType(TexturePanel)),
+      findsNothing,
+    );
     await tester.tap(find.byTooltip('Choose provider and model'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('provider-model-search')), findsOneWidget);
@@ -2301,6 +2486,78 @@ void main() {
     await tester.ensureVisible(find.byKey(artcraftOption));
     await tester.tap(find.byKey(artcraftOption));
     await tester.pumpAndSettle();
+    expect(controller.selectedProviderId, 'artcraft');
+    expect(controller.selectedModelId, 'seedance_2p0');
+    controller.dispose();
+  });
+
+  testWidgets('cross-provider model taps apply before the preference write', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final gateway = _DelayedPreferencesGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.selectedProviderId, 'bfl');
+
+    await tester.tap(find.byTooltip('Choose provider and model'));
+    await tester.pumpAndSettle();
+    const artcraftHeading = ValueKey('provider-model-heading-artcraft');
+    const artcraftOption = ValueKey(
+      'provider-model-option-artcraft-seedance_2p0',
+    );
+    await tester.ensureVisible(find.byKey(artcraftHeading));
+    await tester.tap(find.byKey(artcraftHeading));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(artcraftOption));
+    await tester.tap(find.byKey(artcraftOption));
+    await tester.pumpAndSettle();
+
+    // The tapped model is active immediately: the store write is still
+    // pending, and the form already offers that model's options.
+    expect(gateway.pendingPreferences, hasLength(1));
+    expect(controller.selectedProviderId, 'artcraft');
+    expect(controller.selectedModelId, 'seedance_2p0');
+    final tapped = modelById('artcraft', 'seedance_2p0');
+    expect(
+      controller.availableResolutions.map((item) => item.id).toList(),
+      tapped.resolutions.map((item) => item.id).toList(),
+    );
+    expect(
+      controller.availableAspectRatios,
+      tapped.aspectRatiosFor(controller.form.resolution, withFrames: false),
+    );
+
+    // The preference write still lands once the store catches up.
+    while (gateway.pendingPreferences.isNotEmpty) {
+      await gateway.completeNextPreference();
+    }
+    await tester.pumpAndSettle();
+    expect(gateway.snapshot.preferences.provider, 'artcraft');
+    expect(gateway.snapshot.preferences.model, 'seedance_2p0');
     expect(controller.selectedProviderId, 'artcraft');
     expect(controller.selectedModelId, 'seedance_2p0');
     controller.dispose();
@@ -4469,6 +4726,51 @@ Generation _viewModeGeneration(
     ),
     createdAt: createdAt,
     updatedAt: createdAt,
+  );
+}
+
+Generation _deliveredGeneration(
+  String id, {
+  String aspect = '16:9',
+  String thumbnail = 'aspect-thumb.png',
+  String? timeline,
+}) {
+  final createdAt = DateTime.utc(2026, 8, 21, 12);
+  return Generation(
+    localId: 'delivered-$id',
+    status: 'Ready',
+    prompt: 'A delivered film with a cached preview.',
+    mode: VideoMode.t2v,
+    config: GenerationConfig(
+      aspectRatio: aspect,
+      duration: 8,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    ),
+    createdAt: createdAt,
+    updatedAt: createdAt,
+    resultAsset: AssetReference(
+      kind: 'local',
+      value: 'film-$id.mp4',
+      label: 'film-$id.mp4',
+      contentType: 'video/mp4',
+    ),
+    thumbnailAsset: AssetReference(
+      kind: 'local',
+      value: thumbnail,
+      label: thumbnail,
+      contentType: 'image/png',
+    ),
+    timelineThumbnailAsset: timeline == null
+        ? null
+        : AssetReference(
+            kind: 'local',
+            value: timeline,
+            label: timeline,
+            contentType: 'image/png',
+          ),
   );
 }
 

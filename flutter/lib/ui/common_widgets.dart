@@ -13,6 +13,7 @@ import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'generation_view_widgets.dart';
+import 'inline_video.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
@@ -1416,7 +1417,13 @@ class _GenerationMediaState extends State<GenerationMedia> {
   Future<Uint8List>? _imageBytes;
 
   void _load() {
-    _uri = widget.controller.generationMediaUri(widget.item);
+    // Resolving a Drive-stored film downloads the whole file on native
+    // surfaces, so the URI future is deferred: work starts on the first
+    // await (a play tap), never at listing build for every visible card.
+    final item = widget.item;
+    _uri = _DeferredFuture<Uri?>(
+      () => widget.controller.generationMediaUri(item),
+    );
     _imageBytes = widget.item.isImage
         ? widget.item.resultAsset != null
               ? widget.controller.gateway.readAsset(widget.item.resultAsset!)
@@ -1572,7 +1579,13 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
 
   Future<_GeneratedVideoPreview?> _generateAndCache() async {
     try {
-      final uri = await widget.uri;
+      // Frame extraction must never force a full Drive download for a card
+      // that is merely visible: ask only for a cheap source (cached file,
+      // local file, or companion URL). A cold Drive film keeps its
+      // tap-to-play placeholder until the cache warms up.
+      final uri = await widget.controller.generationPreviewSourceUri(
+        widget.item,
+      );
       if (uri == null) return null;
       final configured = widget.item.config.duration;
       final seconds = configured is num ? configured.toDouble() : 8.0;
@@ -1623,24 +1636,40 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
     }
   }
 
+  Future<void> _download(VideoSaveDestination destination) async {
+    try {
+      await widget.controller.saveMedia(widget.item, destination: destination);
+    } on Object catch (error) {
+      widget.controller.showErrorNotice(error);
+    }
+  }
+
   Future<void> _open() async {
-    final uri = await widget.uri;
-    if (!mounted || uri == null) return;
+    // The player surface opens immediately and resolves the delivery inside
+    // it, so a cold Drive download animates the loading placeholder (with
+    // byte progress) instead of leaving the tap apparently ignored.
+    final delivery = widget.controller.generationMediaDelivery(widget.item);
+    // A hosting full-view card plays the film in place; previews without one
+    // (mini and compact cards, narrow viewports) keep the shared modal.
+    final inline = InlineVideoPlayback.of(context);
+    if (inline != null) {
+      inline(
+        InlineVideoRequest(
+          deferredUri: delivery.uri,
+          progress: delivery.progress,
+          onDownload: _download,
+          supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+        ),
+      );
+      return;
+    }
     await showVideoPlayerModal(
       context,
-      uri: uri,
+      deferredUri: delivery.uri,
+      progress: delivery.progress,
       supportsPhotos: widget.controller.supportsPhotoLibrarySave,
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
-      onDownload: (destination) async {
-        try {
-          await widget.controller.saveMedia(
-            widget.item,
-            destination: destination,
-          );
-        } on Object catch (error) {
-          widget.controller.showErrorNotice(error);
-        }
-      },
+      onDownload: _download,
     );
   }
 
@@ -1667,53 +1696,99 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
         label: 'Play generated video',
         child: InkWell(
           onTap: () => unawaited(_open()),
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              Image.memory(
-                preview.thumbnail,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-              ),
-              if (preview.timeline != null)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 48,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      border: Border(top: BorderSide(color: Colors.white30)),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // The filmstrip band scales with its box; short boxes (compact
+              // rows and other sub-110px thumbnails) read best as a clean
+              // cover frame, so the band disappears there.
+              final boxHeight = constraints.maxHeight;
+              final showTimeline =
+                  preview.timeline != null &&
+                  boxHeight.isFinite &&
+                  boxHeight >= 110;
+              return Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  Image.memory(
+                    preview.thumbnail,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                  if (showTimeline)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: (boxHeight * .18).clamp(24.0, 48.0),
+                      child: DecoratedBox(
+                        key: const ValueKey('generation-video-filmstrip'),
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: Colors.white30),
+                          ),
+                        ),
+                        child: Image.memory(
+                          preview.timeline!,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                        ),
+                      ),
                     ),
-                    child: Image.memory(
-                      preview.timeline!,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
+                  Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: .62),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              Center(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .62),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: Icon(
-                      Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 28,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
         ),
       );
     },
   );
+}
+
+/// A [Future] whose computation starts on the first await/then, not at
+/// construction. Lets listing cards hold a playable-URI future without
+/// triggering the Drive download it may represent until someone plays it.
+class _DeferredFuture<T> implements Future<T> {
+  _DeferredFuture(this._compute);
+
+  final Future<T> Function() _compute;
+  Future<T>? _started;
+
+  Future<T> get _future => _started ??= _compute();
+
+  @override
+  Stream<T> asStream() => _future.asStream();
+
+  @override
+  Future<T> catchError(Function onError, {bool Function(Object)? test}) =>
+      _future.catchError(onError, test: test);
+
+  @override
+  Future<R> then<R>(FutureOr<R> Function(T) onValue, {Function? onError}) =>
+      _future.then(onValue, onError: onError);
+
+  @override
+  Future<T> timeout(Duration timeLimit, {FutureOr<T> Function()? onTimeout}) =>
+      _future.timeout(timeLimit, onTimeout: onTimeout);
+
+  @override
+  Future<T> whenComplete(FutureOr<void> Function() action) =>
+      _future.whenComplete(action);
 }
 
 Future<Uint8List?> _composeTimelineStrip(List<Uint8List> frames) async {
@@ -2018,17 +2093,15 @@ class ActivityCard extends StatelessWidget {
     final preview = Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-          child: hasMedia
-              ? GenerationMedia(controller: controller, item: item)
-              : isGeneratingVideo
-              ? GenerationLoadingPlaceholder(
-                  item: item,
-                  style: controller.generationPlaceholderStyle,
-                )
-              : GenerationInputPreview(controller: controller, item: item),
-        ),
+        if (hasMedia)
+          GenerationMedia(controller: controller, item: item)
+        else if (isGeneratingVideo)
+          GenerationLoadingPlaceholder(
+            item: item,
+            style: controller.generationPlaceholderStyle,
+          )
+        else
+          GenerationInputPreview(controller: controller, item: item),
         Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
       ],
     );
@@ -2037,13 +2110,21 @@ class ActivityCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (isGeneratingVideo)
-            AspectRatio(
-              aspectRatio: generationAspectRatio(item.config.aspectRatio),
-              child: preview,
-            )
-          else
-            SizedBox(height: hasMedia ? 235 : 110, child: preview),
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+            child: isGeneratingVideo
+                ? AspectRatio(
+                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
+                    child: preview,
+                  )
+                : hasMedia
+                ? InlineVideoMediaBox(
+                    playbackId: item.localId,
+                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
+                    preview: preview,
+                  )
+                : SizedBox(height: 110, child: preview),
+          ),
           Padding(
             padding: const EdgeInsets.all(13),
             child: Column(

@@ -284,10 +284,66 @@ class GoogleDriveStore implements DurableDataStore {
     }
   }
 
+  /// Streams a Drive asset without buffering it in memory, for callers that
+  /// write large videos to disk (or to an HTTP response) as bytes arrive.
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async {
+    if (reference.kind != 'drive') {
+      throw StateError('The asset is not stored in Google Drive.');
+    }
+    _requireConnected();
+    try {
+      return await _api!.readFileStream(reference.value);
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error);
+      rethrow;
+    }
+  }
+
+  /// Reads one byte range of a Drive asset for HTTP Range serving.
+  Future<Uint8List> readAssetRange(
+    AssetReference reference,
+    int start,
+    int end,
+  ) async {
+    if (reference.kind != 'drive') {
+      throw StateError('The asset is not stored in Google Drive.');
+    }
+    _requireConnected();
+    try {
+      return await _api!.readFileRange(reference.value, start, end);
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error);
+      rethrow;
+    }
+  }
+
+  /// The already-materialized URI for [reference], or null when presenting it
+  /// would require a Drive download.
+  Future<Uri?> cachedAssetUri(AssetReference reference) async {
+    if (reference.kind != 'drive') return Uri.parse(reference.value);
+    return _presenter.lookup(reference);
+  }
+
   @override
   Future<Uri> assetUri(AssetReference reference) async {
     if (reference.kind != 'drive') return Uri.parse(reference.value);
-    return _presenter.present(reference, await readAsset(reference));
+    // A cached asset plays instantly, even while Drive is reconnecting.
+    final cached = await _presenter.lookup(reference);
+    if (cached != null) return cached;
+    _requireConnected();
+    try {
+      final download = await _api!.readFileStream(reference.value);
+      return await _presenter.present(
+        reference,
+        download.stream,
+        expectedLength: download.contentLength ?? reference.bytes,
+      );
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error);
+      rethrow;
+    }
   }
 
   @override

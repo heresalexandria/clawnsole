@@ -162,6 +162,26 @@ class HybridDataStore implements DurableDataStore {
       ? _drive.readAsset(reference)
       : _local.readAsset(reference);
 
+  /// Streams a Drive-kind asset without buffering it in memory. Local assets
+  /// are not streamed here; read them with [readAsset].
+  Future<GoogleDriveByteStream> readDriveAssetStream(
+    AssetReference reference,
+  ) => _drive.readAssetStream(reference);
+
+  /// Reads one byte range of a Drive-kind asset.
+  Future<Uint8List> readDriveAssetRange(
+    AssetReference reference,
+    int start,
+    int end,
+  ) => _drive.readAssetRange(reference, start, end);
+
+  /// The locally materialized URI for [reference] when one exists, without
+  /// triggering any Drive download.
+  Future<Uri?> cachedAssetUri(AssetReference reference) =>
+      reference.kind == 'drive'
+      ? _drive.cachedAssetUri(reference)
+      : _local.assetUri(reference);
+
   @override
   Future<Uri> assetUri(AssetReference reference) => reference.kind == 'drive'
       ? _drive.assetUri(reference)

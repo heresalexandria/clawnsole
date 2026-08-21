@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -21,13 +22,19 @@ import 'video_save_sheet.dart';
 /// closes the surface it was pressed on.
 Future<void> showVideoPlayerModal(
   BuildContext context, {
-  required Uri uri,
+  Uri? uri,
+  Future<Uri?>? deferredUri,
   required Future<void> Function(VideoSaveDestination destination) onDownload,
   bool supportsPhotos = false,
   double initialAspectRatio = 16 / 9,
   VideoPlayerController Function(Uri uri)? controllerFactory,
   VideoFrameLoader? frameLoader,
+  ValueListenable<double?>? progress,
 }) {
+  assert(
+    (uri == null) != (deferredUri == null),
+    'Provide exactly one of uri or deferredUri.',
+  );
   if (MediaQuery.sizeOf(context).width < 700) {
     return Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -35,16 +42,29 @@ Future<void> showVideoPlayerModal(
         builder: (routeContext) => Scaffold(
           backgroundColor: Colors.black,
           body: SafeArea(
-            child: GenerationVideo(
-              uri: uri,
-              onDownload: onDownload,
-              fullscreen: true,
-              autoplay: true,
-              onClose: () => Navigator.of(routeContext).pop(),
-              supportsPhotos: supportsPhotos,
-              controllerFactory: controllerFactory,
-              frameLoader: frameLoader,
-            ),
+            child: uri != null
+                ? GenerationVideo(
+                    uri: uri,
+                    onDownload: onDownload,
+                    fullscreen: true,
+                    autoplay: true,
+                    onClose: () => Navigator.of(routeContext).pop(),
+                    supportsPhotos: supportsPhotos,
+                    controllerFactory: controllerFactory,
+                    frameLoader: frameLoader,
+                    progress: progress,
+                  )
+                : DeferredGenerationVideo(
+                    uri: deferredUri!,
+                    onDownload: onDownload,
+                    fullscreen: true,
+                    autoplay: true,
+                    onClose: () => Navigator.of(routeContext).pop(),
+                    supportsPhotos: supportsPhotos,
+                    controllerFactory: controllerFactory,
+                    frameLoader: frameLoader,
+                    progress: progress,
+                  ),
           ),
         ),
       ),
@@ -54,31 +74,110 @@ Future<void> showVideoPlayerModal(
     context: context,
     builder: (dialogContext) => _VideoPlayerModal(
       uri: uri,
+      deferredUri: deferredUri,
       onDownload: onDownload,
       supportsPhotos: supportsPhotos,
       initialAspectRatio: initialAspectRatio,
       controllerFactory: controllerFactory,
       frameLoader: frameLoader,
+      progress: progress,
     ),
+  );
+}
+
+/// Hosts [GenerationVideo] behind a still-resolving delivery, so the player
+/// surface appears the moment the viewer taps play and the animated loading
+/// placeholder (with byte progress when known) covers a slow retrieval, such
+/// as a cold Google Drive download. A null URI reads as delivery being
+/// unavailable rather than silently doing nothing.
+class DeferredGenerationVideo extends StatelessWidget {
+  const DeferredGenerationVideo({
+    super.key,
+    required this.uri,
+    required this.onDownload,
+    this.fullscreen = false,
+    this.autoplay = false,
+    this.autofocus = true,
+    this.onClose,
+    this.onAspectRatio,
+    this.controllerFactory,
+    this.frameLoader,
+    this.supportsPhotos = false,
+    this.progress,
+  });
+
+  final Future<Uri?> uri;
+  final Future<void> Function(VideoSaveDestination destination) onDownload;
+  final bool fullscreen;
+  final bool autoplay;
+  final bool autofocus;
+  final VoidCallback? onClose;
+  final ValueChanged<double>? onAspectRatio;
+  final VideoPlayerController Function(Uri uri)? controllerFactory;
+  final VideoFrameLoader? frameLoader;
+  final bool supportsPhotos;
+  final ValueListenable<double?>? progress;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uri?>(
+    future: uri,
+    builder: (context, snapshot) {
+      if (snapshot.hasError ||
+          (snapshot.connectionState == ConnectionState.done &&
+              snapshot.data == null)) {
+        return _VideoPlaceholder(
+          icon: Icons.link_off_rounded,
+          label: 'Delivery unavailable',
+          detail:
+              'The film could not be retrieved from its storage. '
+              'Use Save video to export the file.',
+          onClose: onClose,
+        );
+      }
+      final resolved = snapshot.data;
+      if (resolved == null) {
+        return _VideoLoadingPlaceholder(progress: progress, onClose: onClose);
+      }
+      return GenerationVideo(
+        uri: resolved,
+        onDownload: onDownload,
+        fullscreen: fullscreen,
+        autoplay: autoplay,
+        autofocus: autofocus,
+        onClose: onClose,
+        onAspectRatio: onAspectRatio,
+        controllerFactory: controllerFactory,
+        frameLoader: frameLoader,
+        supportsPhotos: supportsPhotos,
+        progress: progress,
+      );
+    },
   );
 }
 
 class _VideoPlayerModal extends StatefulWidget {
   const _VideoPlayerModal({
     required this.uri,
+    required this.deferredUri,
     required this.onDownload,
     required this.supportsPhotos,
     required this.initialAspectRatio,
     this.controllerFactory,
     this.frameLoader,
-  });
+    this.progress,
+  }) : assert(
+         (uri == null) != (deferredUri == null),
+         'Provide exactly one of uri or deferredUri.',
+       );
 
-  final Uri uri;
+  final Uri? uri;
+  final Future<Uri?>? deferredUri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool supportsPhotos;
   final double initialAspectRatio;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
+  final ValueListenable<double?>? progress;
 
   @override
   State<_VideoPlayerModal> createState() => _VideoPlayerModalState();
@@ -87,11 +186,16 @@ class _VideoPlayerModal extends StatefulWidget {
 class _VideoPlayerModalState extends State<_VideoPlayerModal> {
   late double _aspect = widget.initialAspectRatio.clamp(0.2, 5.0);
 
+  void _adoptAspect(double value) {
+    if ((value - _aspect).abs() > .001 && value > 0) {
+      setState(() => _aspect = value.clamp(0.2, 5.0));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-    // Timeline strip plus the transport bar under the video.
-    const chrome = 46.0 + 48.0;
+    const chrome = GenerationVideo.chromeHeight;
     final maxWidth = math.min(screen.width - 96, 1080.0);
     final maxVideoHeight = math.max(180.0, screen.height * .86 - chrome);
     final width = math
@@ -110,20 +214,29 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
           key: const ValueKey('video-modal-frame'),
           width: width,
           height: math.min(width / _aspect, maxVideoHeight) + chrome,
-          child: GenerationVideo(
-            uri: widget.uri,
-            onDownload: widget.onDownload,
-            autoplay: true,
-            onClose: () => Navigator.of(context).pop(),
-            onAspectRatio: (value) {
-              if ((value - _aspect).abs() > .001 && value > 0) {
-                setState(() => _aspect = value.clamp(0.2, 5.0));
-              }
-            },
-            supportsPhotos: widget.supportsPhotos,
-            controllerFactory: widget.controllerFactory,
-            frameLoader: widget.frameLoader,
-          ),
+          child: widget.uri != null
+              ? GenerationVideo(
+                  uri: widget.uri!,
+                  onDownload: widget.onDownload,
+                  autoplay: true,
+                  onClose: () => Navigator.of(context).pop(),
+                  onAspectRatio: _adoptAspect,
+                  supportsPhotos: widget.supportsPhotos,
+                  controllerFactory: widget.controllerFactory,
+                  frameLoader: widget.frameLoader,
+                  progress: widget.progress,
+                )
+              : DeferredGenerationVideo(
+                  uri: widget.deferredUri!,
+                  onDownload: widget.onDownload,
+                  autoplay: true,
+                  onClose: () => Navigator.of(context).pop(),
+                  onAspectRatio: _adoptAspect,
+                  supportsPhotos: widget.supportsPhotos,
+                  controllerFactory: widget.controllerFactory,
+                  frameLoader: widget.frameLoader,
+                  progress: widget.progress,
+                ),
         ),
       ),
     );
@@ -138,18 +251,29 @@ class GenerationVideo extends StatefulWidget {
     this.fullscreen = false,
     this.initialPosition = Duration.zero,
     this.autoplay = false,
+    this.autofocus = true,
     this.onClose,
     this.onAspectRatio,
     this.controllerFactory,
     this.frameLoader,
     this.supportsPhotos = false,
+    this.progress,
   });
+
+  /// Height of the frame timeline plus the transport bar rendered under the
+  /// video surface, so hosts can size themselves around a known video height.
+  static const double chromeHeight = 46.0 + 48.0;
 
   final Uri uri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool fullscreen;
   final Duration initialPosition;
   final bool autoplay;
+
+  /// Whether the player claims keyboard focus as soon as it appears. Modal
+  /// and fullscreen hosts keep the default; players embedded in a card grid
+  /// pass false and gain focus when the viewer interacts with them.
+  final bool autofocus;
 
   /// Closes the surface hosting this player (modal dialog or a standalone
   /// fullscreen route). Escape triggers it and a close control is shown.
@@ -161,6 +285,10 @@ class GenerationVideo extends StatefulWidget {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final bool supportsPhotos;
+
+  /// Live delivery progress rendered while the film is still loading. A null
+  /// fraction (or a null listenable) keeps the loader indeterminate.
+  final ValueListenable<double?>? progress;
 
   @override
   State<GenerationVideo> createState() => _GenerationVideoState();
@@ -289,6 +417,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
               controllerFactory: widget.controllerFactory,
               frameLoader: widget.frameLoader,
               supportsPhotos: widget.supportsPhotos,
+              progress: widget.progress,
             ),
           ),
         ),
@@ -367,9 +496,8 @@ class _GenerationVideoState extends State<GenerationVideo> {
         );
       }
       if (snapshot.connectionState != ConnectionState.done) {
-        return _VideoPlaceholder(
-          icon: Icons.hourglass_bottom_rounded,
-          label: 'Loading film',
+        return _VideoLoadingPlaceholder(
+          progress: widget.progress,
           onClose: widget.onClose,
         );
       }
@@ -377,7 +505,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
       final value = _controller.value;
       return Focus(
         focusNode: _focusNode,
-        autofocus: true,
+        autofocus: widget.autofocus,
         onKeyEvent: _handleKeyEvent,
         child: ColoredBox(
           color: Colors.black,
@@ -549,6 +677,135 @@ class _VideoControls extends StatelessWidget {
             color: Colors.white,
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded),
+          ),
+      ],
+    ),
+  );
+}
+
+/// The loading surface shown while a film is fetched and initialized: a
+/// gently flipping hourglass over the plum panel, with a determinate progress
+/// bar whenever byte progress is known and a quiet indeterminate sweep
+/// otherwise. No spinner, no default blue.
+class _VideoLoadingPlaceholder extends StatefulWidget {
+  const _VideoLoadingPlaceholder({this.progress, this.onClose});
+
+  final ValueListenable<double?>? progress;
+  final VoidCallback? onClose;
+
+  @override
+  State<_VideoLoadingPlaceholder> createState() =>
+      _VideoLoadingPlaceholderState();
+}
+
+class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _flipper = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  )..repeat();
+
+  // Two half-turns per cycle with a rest between them, like an hourglass
+  // being turned over on a desk; each cycle ends upright so the loop never
+  // visibly snaps.
+  late final Animation<double> _turns = _flipper.drive(
+    TweenSequence<double>(<TweenSequenceItem<double>>[
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0,
+          end: .5,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 22,
+      ),
+      TweenSequenceItem<double>(tween: ConstantTween<double>(.5), weight: 28),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: .5,
+          end: 1,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 22,
+      ),
+      TweenSequenceItem<double>(tween: ConstantTween<double>(1), weight: 28),
+    ]),
+  );
+
+  @override
+  void dispose() {
+    _flipper.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: ClawnsoleColors.plumInk,
+    child: Stack(
+      children: <Widget>[
+        Center(
+          child: ValueListenableBuilder<double?>(
+            valueListenable:
+                widget.progress ?? const AlwaysStoppedAnimation<double?>(null),
+            builder: (context, fraction, _) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                RotationTransition(
+                  turns: _turns,
+                  child: const Icon(
+                    Icons.hourglass_bottom_rounded,
+                    color: ClawnsoleColors.creamMuted,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Loading film',
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: 190,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      key: const ValueKey('video-loading-progress'),
+                      value: fraction,
+                      minHeight: 4,
+                      backgroundColor: Colors.white12,
+                      color: ClawnsoleColors.creamMuted,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 22,
+                  child: fraction == null
+                      ? null
+                      : Center(
+                          child: Text(
+                            '${(fraction.clamp(0.0, 1.0) * 100).round()}%',
+                            key: const ValueKey('video-loading-percent'),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 10,
+                              fontFeatures: <FontFeature>[
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (widget.onClose != null)
+          Positioned(
+            top: 6,
+            right: 6,
+            child: IconButton(
+              tooltip: 'Close (Esc)',
+              color: Colors.white70,
+              onPressed: widget.onClose,
+              icon: const Icon(Icons.close_rounded),
+            ),
           ),
       ],
     ),

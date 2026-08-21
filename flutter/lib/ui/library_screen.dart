@@ -10,6 +10,7 @@ import 'filter_menu.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
+import 'inline_video.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatelessWidget {
@@ -73,9 +74,16 @@ class _LibraryResults extends StatefulWidget {
 
 class _LibraryResultsState extends State<_LibraryResults> {
   final Set<String> selectedIds = <String>{};
+  final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
   bool selecting = false;
 
   AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _inlinePlayback.dispose();
+    super.dispose();
+  }
 
   void _toggleSelection(String id) {
     setState(() {
@@ -120,89 +128,85 @@ class _LibraryResultsState extends State<_LibraryResults> {
       selected: selectedIds.contains(item.localId),
       onSelected: () => _toggleSelection(item.localId),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _LibraryToolbar(
-          controller: controller,
-          selecting: selecting,
-          selectedCount: selected.length,
-          onSelectingChanged: _setSelecting,
-        ),
-        if (DriveReconnectNotice.needed(controller)) ...<Widget>[
-          const SizedBox(height: 12),
-          DriveReconnectNotice(controller: controller, subject: 'films'),
-        ],
-        if (selecting) ...<Widget>[
-          const SizedBox(height: 10),
-          _BulkActionBar(
+    return InlineVideoRegistryScope(
+      registry: _inlinePlayback,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _LibraryToolbar(
+            controller: controller,
+            selecting: selecting,
             selectedCount: selected.length,
-            visibleCount: filtered.length,
-            allVisibleSelected:
-                filtered.isNotEmpty &&
-                filtered.every((item) => selectedIds.contains(item.localId)),
-            onSelectAll: () => setState(() {
-              final visibleIds = filtered.map((item) => item.localId).toSet();
-              if (visibleIds.every(selectedIds.contains)) {
-                selectedIds.removeAll(visibleIds);
-              } else {
-                selectedIds.addAll(visibleIds);
-              }
-            }),
-            onMove: selected.isEmpty
-                ? null
-                : () => unawaited(_moveSelected(context)),
-            onVisibility: selected.isEmpty
-                ? null
-                : () => unawaited(_setSelectedHidden(!selectedAreHidden)),
-            visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
-            onCancel: () => _setSelecting(false),
+            onSelectingChanged: _setSelecting,
           ),
+          if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+            const SizedBox(height: 12),
+            DriveReconnectNotice(controller: controller, subject: 'films'),
+          ],
+          if (selecting) ...<Widget>[
+            const SizedBox(height: 10),
+            _BulkActionBar(
+              selectedCount: selected.length,
+              visibleCount: filtered.length,
+              allVisibleSelected:
+                  filtered.isNotEmpty &&
+                  filtered.every((item) => selectedIds.contains(item.localId)),
+              onSelectAll: () => setState(() {
+                final visibleIds = filtered.map((item) => item.localId).toSet();
+                if (visibleIds.every(selectedIds.contains)) {
+                  selectedIds.removeAll(visibleIds);
+                } else {
+                  selectedIds.addAll(visibleIds);
+                }
+              }),
+              onMove: selected.isEmpty
+                  ? null
+                  : () => unawaited(_moveSelected(context)),
+              onVisibility: selected.isEmpty
+                  ? null
+                  : () => unawaited(_setSelectedHidden(!selectedAreHidden)),
+              visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
+              onCancel: () => _setSelecting(false),
+            ),
+          ],
+          const SizedBox(height: 18),
+          if (filtered.isEmpty)
+            _LibraryEmpty(controller: controller)
+          else if (controller.libraryViewMode == GenerationViewMode.compact)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: filtered
+                  .map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 9),
+                      child: selectable(item),
+                    ),
+                  )
+                  .toList(),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, grid) {
+                final layout = GenerationCardGrid.fit(
+                  grid.maxWidth,
+                  controller.libraryViewMode,
+                );
+                return Wrap(
+                  spacing: GenerationCardGrid.gap,
+                  runSpacing: GenerationCardGrid.gap,
+                  children: filtered
+                      .map(
+                        (item) => SizedBox(
+                          width: layout.tileWidth,
+                          child: selectable(item),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
         ],
-        const SizedBox(height: 18),
-        if (filtered.isEmpty)
-          _LibraryEmpty(controller: controller)
-        else if (controller.libraryViewMode == GenerationViewMode.compact)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: filtered
-                .map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 9),
-                    child: selectable(item),
-                  ),
-                )
-                .toList(),
-          )
-        else
-          LayoutBuilder(
-            builder: (context, grid) {
-              final fullColumns = grid.maxWidth >= 1120
-                  ? 3
-                  : grid.maxWidth >= 650
-                  ? 2
-                  : 1;
-              const gap = 16.0;
-              final columns =
-                  controller.libraryViewMode == GenerationViewMode.full
-                  ? fullColumns
-                  : ((grid.maxWidth + gap) / (160 + gap)).floor().clamp(
-                      1,
-                      fullColumns * 2,
-                    );
-              final width = (grid.maxWidth - gap * (columns - 1)) / columns;
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: filtered
-                    .map(
-                      (item) => SizedBox(width: width, child: selectable(item)),
-                    )
-                    .toList(),
-              );
-            },
-          ),
-      ],
+      ),
     );
   }
 }
@@ -991,6 +995,12 @@ class _GenerationCardState extends State<GenerationCard> {
                 ? AspectRatio(
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),
                     child: preview,
+                  )
+                : hasMedia
+                ? InlineVideoMediaBox(
+                    playbackId: item.localId,
+                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
+                    preview: preview,
                   )
                 : SizedBox(height: 280, child: preview),
           ),

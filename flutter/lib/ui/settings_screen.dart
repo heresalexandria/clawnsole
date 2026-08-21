@@ -425,6 +425,8 @@ class _StorageSectionState extends State<_StorageSection> {
           ),
         ],
         const SizedBox(height: 15),
+        _LocalVideoCacheControl(controller: controller),
+        const SizedBox(height: 15),
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -487,6 +489,121 @@ class _StorageSectionState extends State<_StorageSection> {
       ],
     ),
   );
+}
+
+/// The "Local video player cache" cap: how much finished film Clawnsole may
+/// keep on this device so Drive-stored videos start instantly.
+class _LocalVideoCacheControl extends StatefulWidget {
+  const _LocalVideoCacheControl({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_LocalVideoCacheControl> createState() =>
+      _LocalVideoCacheControlState();
+}
+
+class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
+  static const List<int> _caps = <int>[0, 50, 100, 250, 500, 1024];
+
+  Future<int>? _usage;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshUsage();
+  }
+
+  void _refreshUsage() {
+    _usage = controller.supportsVideoCache
+        ? controller.videoCacheUsedBytes()
+        : null;
+  }
+
+  String _capLabel(int megabytes) => switch (megabytes) {
+    0 => 'Off',
+    >= 1024 => '${megabytes ~/ 1024} GB',
+    _ => '$megabytes MB',
+  };
+
+  Future<void> _setCap(int megabytes) async {
+    await controller.setLocalVideoCacheMb(megabytes);
+    if (mounted) setState(_refreshUsage);
+  }
+
+  Future<void> _clear() async {
+    await controller.clearVideoCache();
+    if (mounted) setState(_refreshUsage);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = controller.localVideoCacheMb;
+    final caps = <int>[..._caps];
+    if (!caps.contains(current)) {
+      // A cap synced from another surface may not match a menu step; keep
+      // the stored value selectable instead of breaking the dropdown.
+      caps
+        ..add(current)
+        ..sort();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        DropdownButtonFormField<int>(
+          key: const ValueKey('local-video-cache-cap'),
+          initialValue: current,
+          decoration: const InputDecoration(
+            labelText: 'Local video player cache',
+            helperText:
+                'Keeps recent and listed Drive films on this device so '
+                'playback starts instantly. Off also stops prefetching and '
+                'clears the cache.',
+            helperMaxLines: 3,
+          ),
+          items: caps
+              .map(
+                (cap) => DropdownMenuItem<int>(
+                  value: cap,
+                  child: Text(_capLabel(cap)),
+                ),
+              )
+              .toList(),
+          onChanged: (cap) {
+            if (cap != null) unawaited(_setCap(cap));
+          },
+        ),
+        if (controller.supportsVideoCache) ...<Widget>[
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: FutureBuilder<int>(
+                  future: _usage,
+                  builder: (context, snapshot) => Text(
+                    'Cached now: ${formatBytes(snapshot.data ?? 0)}',
+                    key: const ValueKey('local-video-cache-usage'),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                key: const ValueKey('local-video-cache-clear'),
+                onPressed: () => unawaited(_clear()),
+                icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                label: const Text('Clear'),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class _GoogleDriveSection extends StatefulWidget {

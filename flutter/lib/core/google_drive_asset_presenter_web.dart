@@ -13,11 +13,25 @@ class _WebGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   final Map<String, String> _urls = <String, String>{};
 
   @override
-  Future<Uri> present(AssetReference reference, Uint8List bytes) async {
+  Future<Uri?> lookup(AssetReference reference) async {
+    final cached = _urls[reference.value];
+    return cached == null ? null : Uri.parse(cached);
+  }
+
+  @override
+  Future<Uri> present(
+    AssetReference reference,
+    Stream<List<int>> bytes, {
+    int? expectedLength,
+  }) async {
     final cached = _urls[reference.value];
     if (cached != null) return Uri.parse(cached);
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in bytes) {
+      builder.add(chunk);
+    }
     final blob = web.Blob(
-      <web.BlobPart>[bytes.toJS].toJS,
+      <web.BlobPart>[builder.takeBytes().toJS].toJS,
       web.BlobPropertyBag(
         type: reference.contentType ?? 'application/octet-stream',
       ),

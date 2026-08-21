@@ -15,6 +15,8 @@ import 'claw_mark.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
+import 'inline_video.dart';
+import 'library_screen.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
@@ -107,15 +109,31 @@ class _CreateHeading extends StatelessWidget {
           ),
         );
         final plaque = _ProviderPlaque(controller: controller);
+        final plaqueLabel = Text(
+          'Model & Provider:',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: .3,
+          ),
+        );
         // Wide layouts pin the plaque to the far right of the page; narrow ones
         // stack it under the title rather than squeezing both onto one line.
+        // The Wrap keeps the label beside the plaque where it fits and drops
+        // it onto its own line on phones.
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               title,
               SizedBox(height: short ? 10 : 16),
-              plaque,
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[plaqueLabel, plaque],
+              ),
             ],
           );
         }
@@ -126,6 +144,8 @@ class _CreateHeading extends StatelessWidget {
               child: Align(alignment: Alignment.centerLeft, child: title),
             ),
             const SizedBox(width: 22),
+            plaqueLabel,
+            const SizedBox(width: 10),
             plaque,
           ],
         );
@@ -163,10 +183,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     final provider = value.substring(0, divider);
     final model = value.substring(divider + 1);
     if (mounted) setState(() => _collapsedProviders.remove(provider));
-    if (controller.selectedProviderId != provider) {
-      await controller.selectProvider(provider);
-    }
-    await controller.selectModel(model);
+    await controller.selectProviderModel(provider, model);
   }
 
   @override
@@ -175,8 +192,10 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     return TexturePanel(
       surface: PanelSurface.navyLeather,
       stitched: true,
+      // Both paddings keep content at least 4px clear of the saddle stitch,
+      // whose thread sits about 9.6px inside the panel edge.
       padding: _isShort(context)
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 7)
+          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 14)
           : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
       child: PopupMenuButton<String>(
         tooltip: 'Choose provider and model',
@@ -221,32 +240,31 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
               ),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'MODEL & PROVIDER',
-                  style: TextStyle(
-                    color: ink.onMuted,
-                    fontSize: 8.5,
-                    letterSpacing: 1.6,
-                    fontWeight: FontWeight.w700,
+            // Flexible bounds the names on narrow layouts so long provider or
+            // model labels ellipsize instead of overflowing the card.
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    controller.selectedProvider.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: ink.on,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  controller.selectedProvider.name,
-                  style: TextStyle(
-                    color: ink.on,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                  Text(
+                    controller.selectedModel.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: ink.onMuted, fontSize: 10.5),
                   ),
-                ),
-                Text(
-                  controller.selectedModel.label,
-                  style: TextStyle(color: ink.onMuted, fontSize: 10.5),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(width: 12),
             Icon(Icons.unfold_more_rounded, size: 17, color: ink.accent),
@@ -2969,7 +2987,9 @@ class _CostPreview extends StatelessWidget {
       return TexturePanel(
         surface: PanelSurface.hunterFelt,
         stitched: true,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        // Clears the saddle stitch (thread about 9.6px inside the panel edge)
+        // by roughly 4px on every side.
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Row(
           children: <Widget>[
             Icon(Icons.memory_rounded, color: context.tokens.moneyAccent),
@@ -3114,25 +3134,10 @@ class _CostPreview extends StatelessWidget {
             ),
           )
         : null;
-    final availableValue = controller.credits == null
-        ? (controller.hasApiKey
-              ? account?.balanceLabel ?? 'Connected'
-              : 'Add API key')
-        : balanceUsesCredits
-        ? '${formatCredits(controller.credits!)} credits'
-        : formatUsdAmount(controller.credits!);
-    // A provider that only shows its balance in its own console gets a real
-    // link instead of an inert caption.
-    final availableTap =
-        controller.credits == null &&
-            controller.hasApiKey &&
-            account?.balanceLabel != null
-        ? () => unawaited(
-            launchUrl(Uri.parse(controller.selectedProvider.consoleUrl)),
-          )
-        : null;
+    // Providers without a numeric balance (console-only) skip the line
+    // entirely; the top-right balance pill already links to the console.
     final afterValue = afterMin == null || afterMax == null
-        ? '—'
+        ? null
         : balanceUsesCredits
         ? '${formatCreditRange(afterMin, afterMax)} credits'
         : formatUsdAmountRange(afterMin, afterMax);
@@ -3158,7 +3163,9 @@ class _CostPreview extends StatelessWidget {
     return TexturePanel(
       surface: PanelSurface.hunterFelt,
       stitched: true,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      // Clears the saddle stitch (thread about 9.6px inside the panel edge)
+      // by roughly 4px on every side.
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       child: Builder(
         builder: (context) {
           // One console row when the felt is wide enough; the tight column
@@ -3203,26 +3210,16 @@ class _CostPreview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 300),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        _BalanceLine(
-                          label: 'Available now',
-                          value: availableValue,
-                          onTap: availableTap,
-                        ),
-                        const SizedBox(height: 2),
-                        _BalanceLine(
-                          label: 'Estimated after',
-                          value: afterValue,
-                        ),
-                      ],
+                  if (afterValue != null) ...<Widget>[
+                    const SizedBox(width: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      child: _BalanceLine(
+                        label: 'Estimated after',
+                        value: afterValue,
+                      ),
                     ),
-                  ),
+                  ],
                   const SizedBox(width: 6),
                   rateCard,
                 ],
@@ -3265,35 +3262,49 @@ class _CostPreview extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 7),
-              Divider(height: 1, color: tokens.onMoney.withValues(alpha: .14)),
-              const SizedBox(height: 7),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: _BalanceLine(
-                      label: 'Available now',
-                      value: availableValue,
-                      onTap: availableTap,
-                      vertical: true,
+              // Without a numeric balance the divider row has nothing to
+              // carry, so the Rate card joins the basis caption instead.
+              if (afterValue != null) ...<Widget>[
+                const SizedBox(height: 7),
+                Divider(
+                  height: 1,
+                  color: tokens.onMoney.withValues(alpha: .14),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _BalanceLine(
+                        label: 'Estimated after',
+                        value: afterValue,
+                        vertical: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _BalanceLine(
-                      label: 'Estimated after',
-                      value: afterValue,
-                      vertical: true,
+                    rateCard,
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  basis,
+                  style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
+                ),
+              ] else ...<Widget>[
+                const SizedBox(height: 4),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        basis,
+                        style: TextStyle(
+                          color: tokens.onMoneyMuted,
+                          fontSize: 9.5,
+                        ),
+                      ),
                     ),
-                  ),
-                  rateCard,
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                basis,
-                style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
-              ),
+                    rateCard,
+                  ],
+                ),
+              ],
             ],
           );
         },
@@ -3306,16 +3317,11 @@ class _BalanceLine extends StatelessWidget {
   const _BalanceLine({
     required this.label,
     required this.value,
-    this.onTap,
     this.vertical = false,
   });
 
   final String label;
   final String value;
-
-  /// Present when the value is a provider caption that should open the
-  /// provider console rather than sit inert.
-  final VoidCallback? onTap;
 
   /// Stacks the label above the value for narrow layouts. Horizontal lines
   /// need a bounded width so the flexible value can shrink.
@@ -3340,11 +3346,9 @@ class _BalanceLine extends StatelessWidget {
         color: context.tokens.onMoney,
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
-        decoration: onTap == null ? null : TextDecoration.underline,
-        decorationColor: context.tokens.onMoneyMuted,
       ),
     );
-    final line = vertical
+    return vertical
         ? Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3358,15 +3362,6 @@ class _BalanceLine extends StatelessWidget {
               Flexible(child: valueText),
             ],
           );
-    if (onTap == null) return line;
-    return Tooltip(
-      message: 'Open provider console',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
-        child: line,
-      ),
-    );
   }
 }
 
@@ -3469,157 +3464,172 @@ class _ComposerFooter extends StatelessWidget {
   }
 }
 
-class _RecentWork extends StatelessWidget {
+class _RecentWork extends StatefulWidget {
   const _RecentWork({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      LayoutBuilder(
-        builder: (context, constraints) {
-          final title = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Eyebrow('On the branch'),
-              const SizedBox(height: 6),
-              Text(
-                'Recent work',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-            ],
-          );
-          final toggle = GenerationViewToggle(
-            keyPrefix: 'recent-work-view',
-            value: controller.recentWorkViewMode,
-            onChanged: (value) =>
-                unawaited(controller.setRecentWorkViewMode(value)),
-          );
-          final library = TextButton(
-            onPressed: () => unawaited(controller.navigate(AppSection.library)),
-            child: const Text('View library'),
-          );
-          // Wide headers carry the view toggle inline so the first card
-          // starts a row sooner; narrow ones keep it on its own line.
-          if (constraints.maxWidth >= 520) {
-            return Row(
-              children: <Widget>[
-                Expanded(child: title),
-                toggle,
-                const SizedBox(width: 10),
-                library,
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(child: title),
-                  library,
-                ],
-              ),
-              const SizedBox(height: 8),
-              Align(alignment: Alignment.centerRight, child: toggle),
-            ],
-          );
-        },
-      ),
-      const SizedBox(height: 12),
-      if (controller.visibleGenerations.isEmpty)
-        SurfaceCard(
-          child: Column(
-            children: <Widget>[
-              const SizedBox(height: 10),
-              ClawMark(size: 40, color: context.tokens.brass),
-              const SizedBox(height: 13),
-              Text(
-                'A quiet branch.',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Your generations will gather here with live progress and playback.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.colors.onSurfaceVariant),
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        )
-      else if (controller.recentWorkViewMode == GenerationViewMode.mini)
+  State<_RecentWork> createState() => _RecentWorkState();
+}
+
+class _RecentWorkState extends State<_RecentWork> {
+  final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
+
+  AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _inlinePlayback.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => InlineVideoRegistryScope(
+    registry: _inlinePlayback,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
         LayoutBuilder(
           builder: (context, constraints) {
-            const gap = 10.0;
-            final columns = constraints.maxWidth >= 320 ? 2 : 1;
-            final width =
-                (constraints.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: controller.visibleGenerations
-                  .take(5)
-                  .map(
-                    (item) => SizedBox(
-                      width: width,
-                      child: MiniGenerationCard(
-                        controller: controller,
-                        item: item,
-                      ),
-                    ),
-                  )
-                  .toList(),
+            final title = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Eyebrow('On the branch'),
+                const SizedBox(height: 6),
+                Text(
+                  'Recent work',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ],
+            );
+            final toggle = GenerationViewToggle(
+              keyPrefix: 'recent-work-view',
+              value: controller.recentWorkViewMode,
+              onChanged: (value) =>
+                  unawaited(controller.setRecentWorkViewMode(value)),
+            );
+            final library = TextButton(
+              onPressed: () =>
+                  unawaited(controller.navigate(AppSection.library)),
+              child: const Text('View library'),
+            );
+            // Wide headers carry the view toggle inline so the first card
+            // starts a row sooner; narrow ones keep it on its own line.
+            if (constraints.maxWidth >= 520) {
+              return Row(
+                children: <Widget>[
+                  Expanded(child: title),
+                  toggle,
+                  const SizedBox(width: 10),
+                  library,
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(child: title),
+                    library,
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerRight, child: toggle),
+              ],
             );
           },
-        )
-      else if (controller.recentWorkViewMode == GenerationViewMode.compact)
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.visibleGenerations
-              .take(5)
-              .map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: CompactGenerationRow(
-                    controller: controller,
-                    item: item,
+        ),
+        const SizedBox(height: 12),
+        if (controller.visibleGenerations.isEmpty)
+          SurfaceCard(
+            child: Column(
+              children: <Widget>[
+                const SizedBox(height: 10),
+                ClawMark(size: 40, color: context.tokens.brass),
+                const SizedBox(height: 13),
+                Text(
+                  'A quiet branch.',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Your generations will gather here with live progress and playback.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          )
+        else if (controller.recentWorkViewMode == GenerationViewMode.compact)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: controller.visibleGenerations
+                .take(5)
+                .map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 9),
+                    child: CompactGenerationRow(
+                      controller: controller,
+                      item: item,
+                    ),
                   ),
-                ),
-              )
-              .toList(),
-        )
-      else
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.visibleGenerations
-              .take(5)
-              .map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: ActivityCard(controller: controller, item: item),
-                ),
-              )
-              .toList(),
+                )
+                .toList(),
+          )
+        else
+          // Mini and full modes lay out the same cards, at the same widths,
+          // as the Library, so recent films read identically on both screens.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final layout = GenerationCardGrid.fit(
+                constraints.maxWidth,
+                controller.recentWorkViewMode,
+              );
+              return Wrap(
+                spacing: GenerationCardGrid.gap,
+                runSpacing: GenerationCardGrid.gap,
+                children: controller.visibleGenerations
+                    .take(5)
+                    .map(
+                      (item) => SizedBox(
+                        width: layout.tileWidth,
+                        child:
+                            controller.recentWorkViewMode ==
+                                GenerationViewMode.mini
+                            ? MiniGenerationCard(
+                                controller: controller,
+                                item: item,
+                              )
+                            : GenerationCard(
+                                controller: controller,
+                                item: item,
+                              ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+        const SizedBox(height: 2),
+        SurfaceCard(
+          color: context.colors.surfaceContainer,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Wrap(
+            spacing: 18,
+            runSpacing: 8,
+            children: <Widget>[
+              _Summary('${controller.generations.length}', 'in library'),
+              _Summary('${controller.readyCount}', 'complete'),
+              _Summary('${controller.workingCount}', 'moving'),
+              _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),
+            ],
+          ),
         ),
-      const SizedBox(height: 2),
-      SurfaceCard(
-        color: context.colors.surfaceContainer,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        child: Wrap(
-          spacing: 18,
-          runSpacing: 8,
-          children: <Widget>[
-            _Summary('${controller.generations.length}', 'in library'),
-            _Summary('${controller.readyCount}', 'complete'),
-            _Summary('${controller.workingCount}', 'moving'),
-            _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),
-          ],
-        ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 
