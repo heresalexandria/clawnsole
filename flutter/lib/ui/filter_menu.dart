@@ -112,10 +112,8 @@ class ConsoleSegmentStrip extends StatelessWidget {
   );
 }
 
-/// One "Filters" console key that gathers the secondary library filters —
-/// storage, favorites, and tags — into an anchored panel so the toolbar
-/// stays a single quiet row. Lights up with a count while filters narrow
-/// the view.
+/// One "Filters" console key that gathers library filters into an anchored
+/// panel so the toolbar stays a single quiet row.
 class LibraryFilterButton extends StatefulWidget {
   const LibraryFilterButton({
     required this.controller,
@@ -143,6 +141,10 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       ? widget.controller.referenceFavoriteFilter
       : widget.controller.libraryFavoriteFilter;
 
+  VisibilityFilter get _visibility => _references
+      ? widget.controller.referenceVisibilityFilter
+      : widget.controller.libraryVisibilityFilter;
+
   String? get _tag => _references
       ? widget.controller.referenceTag
       : widget.controller.libraryTag;
@@ -152,17 +154,39 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       : widget.controller.libraryTags;
 
   int get _activeCount =>
-      (_favorite != FavoriteFilter.all ? 1 : 0) + (_tag != null ? 1 : 0);
+      (!_references && widget.controller.libraryFilter != LibraryFilter.all
+          ? 1
+          : 0) +
+      (_favorite != FavoriteFilter.all ? 1 : 0) +
+      (_visibility != VisibilityFilter.visible ? 1 : 0) +
+      (_tag != null ? 1 : 0);
+
+  int _statusCount(LibraryFilter filter) => widget.controller.generations
+      .where(
+        (item) =>
+            widget.controller.libraryStorageFilter.matches(item.storage) &&
+            widget.controller.libraryVisibilityFilter.matches(item.hidden) &&
+            switch (filter) {
+              LibraryFilter.all => true,
+              LibraryFilter.working => item.isWorking,
+              LibraryFilter.ready => item.isReady,
+              LibraryFilter.failed => item.isFailed,
+            },
+      )
+      .length;
 
   void _reset() {
     if (_references) {
       widget.controller
         ..setReferenceFavoriteFilter(FavoriteFilter.all)
+        ..setReferenceVisibilityFilter(VisibilityFilter.visible)
         ..setReferenceTag(null);
     } else {
       widget.controller
         ..setLibraryFavoriteFilter(FavoriteFilter.all)
+        ..setLibraryVisibilityFilter(VisibilityFilter.visible)
         ..setLibraryTag(null);
+      unawaited(widget.controller.setLibraryFilter(LibraryFilter.all));
     }
   }
 
@@ -196,6 +220,57 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              if (_activeCount > 0) ...<Widget>[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: ValueKey('${_keyPrefix()}-filter-reset'),
+                    onPressed: _reset,
+                    icon: const Icon(Icons.restart_alt_rounded, size: 16),
+                    label: const Text('Reset filters'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (!_references) ...<Widget>[
+                _section(
+                  context,
+                  'Status',
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: LibraryFilter.values
+                        .map(
+                          (filter) => FilterChip(
+                            key: ValueKey('library-status-${filter.name}'),
+                            avatar: Icon(switch (filter) {
+                              LibraryFilter.all => Icons.grid_view_rounded,
+                              LibraryFilter.working => Icons.autorenew_rounded,
+                              LibraryFilter.ready =>
+                                Icons.check_circle_outline_rounded,
+                              LibraryFilter.failed =>
+                                Icons.error_outline_rounded,
+                            }, size: 16),
+                            label: Text(
+                              '${switch (filter) {
+                                LibraryFilter.all => 'All',
+                                LibraryFilter.working => 'In progress',
+                                LibraryFilter.ready => 'Ready',
+                                LibraryFilter.failed => 'Needs attention',
+                              }} · ${_statusCount(filter)}',
+                            ),
+                            selected: widget.controller.libraryFilter == filter,
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) => unawaited(
+                              widget.controller.setLibraryFilter(filter),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               _section(
                 context,
                 'Favorites',
@@ -204,6 +279,38 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
                   onChanged: (value) => _references
                       ? widget.controller.setReferenceFavoriteFilter(value)
                       : widget.controller.setLibraryFavoriteFilter(value),
+                ),
+              ),
+              const SizedBox(height: 14),
+              _section(
+                context,
+                'Visibility',
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: VisibilityFilter.values
+                      .map(
+                        (filter) => FilterChip(
+                          avatar: Icon(switch (filter) {
+                            VisibilityFilter.visible =>
+                              Icons.visibility_outlined,
+                            VisibilityFilter.hidden =>
+                              Icons.visibility_off_outlined,
+                            VisibilityFilter.all => Icons.layers_outlined,
+                          }, size: 16),
+                          label: Text(filter.label),
+                          selected: _visibility == filter,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => _references
+                              ? widget.controller.setReferenceVisibilityFilter(
+                                  filter,
+                                )
+                              : widget.controller.setLibraryVisibilityFilter(
+                                  filter,
+                                ),
+                        ),
+                      )
+                      .toList(),
                 ),
               ),
               if (tags.isNotEmpty) ...<Widget>[
@@ -239,18 +346,6 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
                   ),
                 ),
               ],
-              if (_activeCount > 0) ...<Widget>[
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    key: ValueKey('${_keyPrefix()}-filter-reset'),
-                    onPressed: _reset,
-                    icon: const Icon(Icons.restart_alt_rounded, size: 16),
-                    label: const Text('Reset filters'),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -280,7 +375,7 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       ),
       menuChildren: <Widget>[_panel(context)],
       builder: (context, menu, _) => Tooltip(
-        message: 'Storage, favorites, and tags',
+        message: 'Status, visibility, storage, favorites, and tags',
         child: InkWell(
           key: ValueKey('${_keyPrefix()}-filter-button'),
           borderRadius: BorderRadius.circular(10),

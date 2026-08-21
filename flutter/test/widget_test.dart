@@ -700,8 +700,70 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 17);
+    expect(decoded.toJson()['schemaVersion'], 18);
   });
+
+  test(
+    'favorites update optimistically and hidden items filter explicitly',
+    () async {
+      final now = DateTime.utc(2026, 8, 21, 12);
+      Generation generation(String id, {bool hidden = false}) => Generation(
+        localId: id,
+        status: 'Ready',
+        prompt: '$id film',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        hidden: hidden,
+      );
+
+      final initial = StoredData(
+        generations: <Generation>[
+          generation('visible'),
+          generation('hidden', hidden: true),
+        ],
+      );
+      final store = _MemoryLocalDataStore(initial);
+      final gateway = NativeGateway(store: store, isIos: false);
+      final controller = AppController(gateway: gateway)
+        ..snapshot = LocalSnapshot(
+          generations: initial.generations,
+          preferences: const AppPreferences(),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+        );
+
+      final write = controller.toggleGenerationFavorite(
+        controller.generations.first,
+      );
+      expect(controller.generations.first.favorite, isTrue);
+      await write;
+      expect((await gateway.load()).generations.first.favorite, isTrue);
+      expect(
+        StoredData.decode(store.data.encode()).generations.last.hidden,
+        isTrue,
+      );
+
+      expect(
+        controller.filteredGenerations.map((item) => item.localId),
+        <String>['visible'],
+      );
+      controller.setLibraryVisibilityFilter(VisibilityFilter.hidden);
+      expect(
+        controller.filteredGenerations.map((item) => item.localId),
+        <String>['hidden'],
+      );
+      controller.dispose();
+    },
+  );
 
   test('persists folders and tags while removing a folder safely', () async {
     final now = DateTime.utc(2026, 8, 17, 12);
@@ -834,7 +896,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 17);
+      expect(decoded.toJson()['schemaVersion'], 18);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -3353,12 +3415,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Delivered work no longer wears a Ready chip; the only "Ready" text
-    // left is the toolbar's status segment.
-    expect(find.text('Ready'), findsOneWidget);
+    // Status controls live inside the Filters popover rather than consuming
+    // permanent toolbar space.
+    expect(find.textContaining('Ready'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('library-filter-button')));
     await tester.pumpAndSettle();
+    expect(find.text('STATUS'), findsOneWidget);
+    expect(find.textContaining('Ready'), findsOneWidget);
     expect(find.text('FAVORITES'), findsOneWidget);
 
     await tester.tap(find.text('Starred'));

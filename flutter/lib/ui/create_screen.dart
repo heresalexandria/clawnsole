@@ -3014,7 +3014,7 @@ class _RecentWork extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 12),
-      if (controller.generations.isEmpty)
+      if (controller.visibleGenerations.isEmpty)
         SurfaceCard(
           child: Column(
             children: <Widget>[
@@ -3045,7 +3045,7 @@ class _RecentWork extends StatelessWidget {
             return Wrap(
               spacing: gap,
               runSpacing: gap,
-              children: controller.generations
+              children: controller.visibleGenerations
                   .take(5)
                   .map(
                     (item) => SizedBox(
@@ -3063,7 +3063,7 @@ class _RecentWork extends StatelessWidget {
       else if (controller.recentWorkViewMode == GenerationViewMode.compact)
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.generations
+          children: controller.visibleGenerations
               .take(5)
               .map(
                 (item) => Padding(
@@ -3079,7 +3079,7 @@ class _RecentWork extends StatelessWidget {
       else
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.generations
+          children: controller.visibleGenerations
               .take(5)
               .map(
                 (item) => Padding(

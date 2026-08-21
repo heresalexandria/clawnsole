@@ -156,60 +156,170 @@ class FilledButtonIconVisual extends StatelessWidget {
   );
 }
 
-class _ReferenceResults extends StatelessWidget {
+class _ReferenceResults extends StatefulWidget {
   const _ReferenceResults({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      _ReferenceToolbar(controller: controller),
-      if (DriveReconnectNotice.needed(controller)) ...<Widget>[
-        const SizedBox(height: 12),
-        DriveReconnectNotice(controller: controller, subject: 'references'),
-      ],
-      const SizedBox(height: 18),
-      if (controller.filteredSavedReferences.isEmpty)
-        _ReferenceEmpty(controller: controller)
-      else
-        LayoutBuilder(
-          builder: (context, grid) {
-            final columns = grid.maxWidth >= 1120
-                ? 4
-                : grid.maxWidth >= 760
-                ? 3
-                : grid.maxWidth >= 480
-                ? 2
-                : 1;
-            const gap = 16.0;
-            final width = (grid.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: controller.filteredSavedReferences
-                  .map(
-                    (item) => SizedBox(
-                      width: width,
-                      child: _ReferenceCard(
-                        controller: controller,
-                        reference: item,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            );
-          },
+  State<_ReferenceResults> createState() => _ReferenceResultsState();
+}
+
+class _ReferenceResultsState extends State<_ReferenceResults> {
+  final Set<String> selectedIds = <String>{};
+  bool selecting = false;
+
+  AppController get controller => widget.controller;
+
+  void _setSelecting(bool value) => setState(() {
+    selecting = value;
+    if (!value) selectedIds.clear();
+  });
+
+  void _toggle(String id) => setState(() {
+    if (!selectedIds.add(id)) selectedIds.remove(id);
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = controller.filteredSavedReferences;
+    final selected = controller.savedReferences
+        .where((item) => selectedIds.contains(item.id))
+        .toList();
+    final selectedAreHidden =
+        selected.isNotEmpty && selected.every((item) => item.hidden);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _ReferenceToolbar(
+          controller: controller,
+          selecting: selecting,
+          selectedCount: selected.length,
+          onSelectingChanged: _setSelecting,
         ),
-    ],
-  );
+        if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+          const SizedBox(height: 12),
+          DriveReconnectNotice(controller: controller, subject: 'references'),
+        ],
+        if (selecting) ...<Widget>[
+          const SizedBox(height: 10),
+          _ReferenceBulkActions(
+            selectedCount: selected.length,
+            allVisibleSelected:
+                filtered.isNotEmpty &&
+                filtered.every((item) => selectedIds.contains(item.id)),
+            onSelectAll: () => setState(() {
+              final ids = filtered.map((item) => item.id).toSet();
+              if (ids.every(selectedIds.contains)) {
+                selectedIds.removeAll(ids);
+              } else {
+                selectedIds.addAll(ids);
+              }
+            }),
+            onMove: selected.isEmpty
+                ? null
+                : () async {
+                    final moved = await _showReferenceMoveDialog(
+                      context,
+                      controller,
+                      selectedIds,
+                    );
+                    if (moved && mounted) _setSelecting(false);
+                  },
+            onVisibility: selected.isEmpty
+                ? null
+                : () async {
+                    final saved = await controller.setReferencesHidden(
+                      selectedIds,
+                      !selectedAreHidden,
+                    );
+                    if (saved && mounted) _setSelecting(false);
+                  },
+            visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
+            onDone: () => _setSelecting(false),
+          ),
+        ],
+        const SizedBox(height: 18),
+        if (filtered.isEmpty)
+          _ReferenceEmpty(controller: controller)
+        else
+          LayoutBuilder(
+            builder: (context, grid) {
+              final columns = grid.maxWidth >= 1120
+                  ? 4
+                  : grid.maxWidth >= 760
+                  ? 3
+                  : grid.maxWidth >= 480
+                  ? 2
+                  : 1;
+              const gap = 16.0;
+              final width = (grid.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: filtered
+                    .map(
+                      (item) => SizedBox(
+                        width: width,
+                        child: Stack(
+                          children: <Widget>[
+                            _ReferenceCard(
+                              controller: controller,
+                              reference: item,
+                            ),
+                            if (selecting)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: Material(
+                                  elevation: 7,
+                                  color: context.colors.surface,
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: IconButton(
+                                    key: ValueKey(
+                                      'select-reference-${item.id}',
+                                    ),
+                                    tooltip: selectedIds.contains(item.id)
+                                        ? 'Deselect ${item.name}'
+                                        : 'Select ${item.name}',
+                                    onPressed: () => _toggle(item.id),
+                                    icon: Icon(
+                                      selectedIds.contains(item.id)
+                                          ? Icons.check_box_rounded
+                                          : Icons
+                                                .check_box_outline_blank_rounded,
+                                      color: selectedIds.contains(item.id)
+                                          ? context.tokens.brass
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+      ],
+    );
+  }
 }
 
 class _ReferenceToolbar extends StatelessWidget {
-  const _ReferenceToolbar({required this.controller});
+  const _ReferenceToolbar({
+    required this.controller,
+    required this.selecting,
+    required this.selectedCount,
+    required this.onSelectingChanged,
+  });
 
   final AppController controller;
+  final bool selecting;
+  final int selectedCount;
+  final ValueChanged<bool> onSelectingChanged;
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
@@ -256,6 +366,19 @@ class _ReferenceToolbar extends StatelessWidget {
           collection: LibraryCollection.references,
           compact: !wide,
         );
+        final selectButton = OutlinedButton.icon(
+          key: const ValueKey('reference-select-button'),
+          onPressed: () => onSelectingChanged(!selecting),
+          icon: Icon(
+            selecting ? Icons.close_rounded : Icons.check_box_outlined,
+            size: 17,
+          ),
+          label: Text(
+            selecting && selectedCount > 0
+                ? '$selectedCount selected'
+                : 'Select',
+          ),
+        );
         if (wide) {
           return Row(
             children: <Widget>[
@@ -266,6 +389,8 @@ class _ReferenceToolbar extends StatelessWidget {
               sortButton,
               const SizedBox(width: 8),
               filterButton,
+              const SizedBox(width: 8),
+              selectButton,
             ],
           );
         }
@@ -281,11 +406,88 @@ class _ReferenceToolbar extends StatelessWidget {
                 sortButton,
                 const SizedBox(width: 8),
                 filterButton,
+                const SizedBox(width: 8),
+                selectButton,
               ],
             ),
           ],
         );
       },
+    ),
+  );
+}
+
+class _ReferenceBulkActions extends StatelessWidget {
+  const _ReferenceBulkActions({
+    required this.selectedCount,
+    required this.allVisibleSelected,
+    required this.onSelectAll,
+    required this.onMove,
+    required this.onVisibility,
+    required this.visibilityLabel,
+    required this.onDone,
+  });
+
+  final int selectedCount;
+  final bool allVisibleSelected;
+  final VoidCallback onSelectAll;
+  final VoidCallback? onMove;
+  final VoidCallback? onVisibility;
+  final String visibilityLabel;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: context.colors.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$selectedCount selected',
+            style: TextStyle(
+              color: context.colors.onPrimaryContainer,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        TextButton.icon(
+          onPressed: onSelectAll,
+          icon: Icon(
+            allVisibleSelected
+                ? Icons.deselect_rounded
+                : Icons.select_all_rounded,
+            size: 18,
+          ),
+          label: Text(
+            allVisibleSelected ? 'Deselect visible' : 'Select visible',
+          ),
+        ),
+        FilledButton.tonalIcon(
+          key: const ValueKey('reference-bulk-move'),
+          onPressed: onMove,
+          icon: const Icon(Icons.drive_file_move_outline, size: 18),
+          label: const Text('Move'),
+        ),
+        OutlinedButton.icon(
+          onPressed: onVisibility,
+          icon: Icon(
+            visibilityLabel == 'Hide'
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            size: 18,
+          ),
+          label: Text(visibilityLabel),
+        ),
+        TextButton(onPressed: onDone, child: const Text('Done')),
+      ],
     ),
   );
 }
@@ -416,6 +618,22 @@ class _ReferenceCard extends StatelessWidget {
                           reference: reference,
                         ),
                       );
+                    } else if (value == 'move') {
+                      unawaited(
+                        _showReferenceMoveDialog(context, controller, <String>{
+                          reference.id,
+                        }),
+                      );
+                    } else if (value == 'tag') {
+                      unawaited(
+                        _showReferenceTagDialog(context, controller, reference),
+                      );
+                    } else if (value == 'visibility') {
+                      unawaited(
+                        controller.setReferencesHidden(<String>{
+                          reference.id,
+                        }, !reference.hidden),
+                      );
                     } else if (value == 'copy') {
                       unawaited(
                         controller.copyLocalLibraryToGoogleDrive(
@@ -431,7 +649,13 @@ class _ReferenceCard extends StatelessWidget {
                   itemBuilder: (context) => <PopupMenuEntry<String>>[
                     const PopupMenuItem(
                       value: 'edit',
-                      child: Text('Rename and file'),
+                      child: Text('Edit details'),
+                    ),
+                    const PopupMenuItem(value: 'move', child: Text('Move')),
+                    const PopupMenuItem(value: 'tag', child: Text('Tag')),
+                    PopupMenuItem(
+                      value: 'visibility',
+                      child: Text(reference.hidden ? 'Unhide' : 'Hide'),
                     ),
                     if (reference.storage == LibraryStorage.local &&
                         controller.googleDriveConnected)
@@ -759,6 +983,425 @@ class _ReferenceFolderPicker extends StatelessWidget {
   );
 }
 
+Future<bool> _showReferenceMoveDialog(
+  BuildContext context,
+  AppController controller,
+  Iterable<String> referenceIds,
+) async {
+  final ids = referenceIds.toSet();
+  final items = controller.savedReferences
+      .where((item) => ids.contains(item.id))
+      .toList();
+  if (items.isEmpty) return false;
+  final storages = items.map((item) => item.storage).toSet();
+  if (storages.length != 1) {
+    controller.showNotice(
+      'Bulk moves require items from the same storage. Filter by Local or Drive, then select again.',
+    );
+    return false;
+  }
+  final storage = storages.single;
+  final currentFolders = items.map((item) => item.folderId).toSet();
+  String? folderId = currentFolders.length == 1 ? currentFolders.single : null;
+  var moving = false;
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: Text(
+          items.length == 1
+              ? 'Move reference'
+              : 'Move ${items.length} references',
+        ),
+        content: SizedBox(
+          width: 470,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  StorageBadge(storage: storage),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: moving
+                        ? null
+                        : () async {
+                            await _showReferenceFolderEditor(
+                              dialogContext,
+                              controller,
+                              parentId: folderId,
+                            );
+                            if (dialogContext.mounted) setState(() {});
+                          },
+                    icon: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 18,
+                    ),
+                    label: const Text('New folder'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) => DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: context.colors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: context.colors.outlineVariant),
+                    ),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(7),
+                      children: <Widget>[
+                        _ReferenceMoveTile(
+                          label: 'Unfiled',
+                          icon: Icons.inbox_outlined,
+                          selected: folderId == null,
+                          onTap: moving
+                              ? null
+                              : () => setState(() => folderId = null),
+                        ),
+                        ...controller.referenceFolderTree
+                            .where((folder) => folder.storage == storage)
+                            .map(
+                              (folder) => _ReferenceMoveTile(
+                                label: folder.name,
+                                icon: Icons.folder_outlined,
+                                depth: controller.folderDepth(
+                                  folder.id,
+                                  collection: LibraryCollection.references,
+                                ),
+                                selected: folderId == folder.id,
+                                onTap: moving
+                                    ? null
+                                    : () =>
+                                          setState(() => folderId = folder.id),
+                                trailing: PopupMenuButton<String>(
+                                  tooltip: '${folder.name} folder actions',
+                                  onSelected: (value) async {
+                                    await _showReferenceFolderEditor(
+                                      dialogContext,
+                                      controller,
+                                      folder: value == 'edit' ? folder : null,
+                                      parentId: value == 'subfolder'
+                                          ? folder.id
+                                          : null,
+                                    );
+                                    if (dialogContext.mounted) setState(() {});
+                                  },
+                                  itemBuilder: (context) =>
+                                      const <PopupMenuEntry<String>>[
+                                        PopupMenuItem(
+                                          value: 'subfolder',
+                                          child: Text('New subfolder'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'edit',
+                                          child: Text('Rename or move folder'),
+                                        ),
+                                      ],
+                                ),
+                              ),
+                            ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: moving
+                ? null
+                : () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: moving
+                ? null
+                : () async {
+                    setState(() => moving = true);
+                    final saved = await controller.moveReferences(
+                      ids,
+                      folderId: folderId,
+                    );
+                    if (saved && dialogContext.mounted) {
+                      Navigator.pop(dialogContext, true);
+                    } else if (dialogContext.mounted) {
+                      setState(() => moving = false);
+                    }
+                  },
+            icon: moving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.drive_file_move_outline, size: 18),
+            label: const Text('Move'),
+          ),
+        ],
+      ),
+    ),
+  );
+  return result == true;
+}
+
+class _ReferenceMoveTile extends StatelessWidget {
+  const _ReferenceMoveTile({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.depth = 0,
+    this.trailing,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
+  final int depth;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.only(left: 10 + depth * 20, right: 4),
+      selected: selected,
+      selectedTileColor: context.colors.primaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      leading: Icon(icon, size: 20),
+      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing:
+          trailing ??
+          (selected
+              ? Icon(Icons.check_circle_rounded, color: context.colors.primary)
+              : null),
+      onTap: onTap,
+    ),
+  );
+}
+
+Future<void> _showReferenceTagDialog(
+  BuildContext context,
+  AppController controller,
+  SavedReference reference,
+) => showDialog<void>(
+  context: context,
+  builder: (context) => Dialog(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: _ReferenceTagEditor(
+          controller: controller,
+          reference: reference,
+        ),
+      ),
+    ),
+  ),
+);
+
+class _ReferenceTagEditor extends StatefulWidget {
+  const _ReferenceTagEditor({
+    required this.controller,
+    required this.reference,
+  });
+
+  final AppController controller;
+  final SavedReference reference;
+
+  @override
+  State<_ReferenceTagEditor> createState() => _ReferenceTagEditorState();
+}
+
+class _ReferenceTagEditorState extends State<_ReferenceTagEditor> {
+  late final List<String> tags = List<String>.from(widget.reference.tags);
+  final tagController = TextEditingController();
+  final tagFocusNode = FocusNode();
+  String? error;
+  bool saving = false;
+
+  bool _hasTag(String value) =>
+      tags.any((tag) => tag.toLowerCase() == value.toLowerCase());
+
+  void _add([String? value]) {
+    final clean = (value ?? tagController.text)
+        .trim()
+        .replaceFirst(RegExp(r'^#+'), '')
+        .trim();
+    if (clean.isEmpty) return;
+    if (clean.length > 28 || (tags.length >= 12 && !_hasTag(clean))) {
+      setState(
+        () => error = clean.length > 28
+            ? 'Keep tags to 28 characters or fewer.'
+            : 'A reference can have up to 12 tags.',
+      );
+      return;
+    }
+    setState(() {
+      if (!_hasTag(clean)) tags.add(clean);
+      tagController.clear();
+      error = null;
+    });
+  }
+
+  @override
+  void dispose() {
+    tagController.dispose();
+    tagFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      Text('Tag reference', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 6),
+      Text(
+        widget.reference.name,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: context.colors.onSurfaceVariant),
+      ),
+      const SizedBox(height: 18),
+      if (tags.isNotEmpty) ...<Widget>[
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 145),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: context.colors.outlineVariant),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(10),
+              child: Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: tags
+                    .map(
+                      (tag) => InputChip(
+                        label: Text('#$tag'),
+                        onDeleted: saving
+                            ? null
+                            : () => setState(() => tags.remove(tag)),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+      ],
+      RawAutocomplete<String>(
+        textEditingController: tagController,
+        focusNode: tagFocusNode,
+        optionsBuilder: (value) {
+          final query = value.text.trim().toLowerCase();
+          return widget.controller.referenceTags.where(
+            (tag) =>
+                !_hasTag(tag) &&
+                (query.isEmpty || tag.toLowerCase().contains(query)),
+          );
+        },
+        onSelected: _add,
+        fieldViewBuilder: (context, fieldController, focusNode, onSubmit) =>
+            TextField(
+              controller: fieldController,
+              focusNode: focusNode,
+              enabled: !saving,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Add tags',
+                hintText: 'Type to find or create a tag',
+                prefixIcon: const Icon(Icons.sell_outlined),
+                suffixIcon: IconButton(
+                  onPressed: saving ? null : _add,
+                  icon: const Icon(Icons.add_rounded),
+                ),
+                errorText: error,
+                helperText:
+                    'Choose an existing tag or press Enter to create it.',
+              ),
+              onSubmitted: saving ? null : _add,
+            ),
+        optionsViewBuilder: (context, onSelected, options) => Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 10,
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 470, maxHeight: 210),
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                children: options
+                    .map(
+                      (tag) => ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.sell_outlined, size: 18),
+                        title: Text('#$tag'),
+                        onTap: () => onSelected(tag),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 22),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: <Widget>[
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: saving
+                ? null
+                : () async {
+                    if (tagController.text.trim().isNotEmpty) _add();
+                    if (error != null) return;
+                    setState(() => saving = true);
+                    final saved = await widget.controller.tagReference(
+                      widget.reference.id,
+                      tags,
+                    );
+                    if (saved && context.mounted) {
+                      Navigator.pop(context);
+                    } else if (mounted) {
+                      setState(() => saving = false);
+                    }
+                  },
+            icon: saving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.check_rounded, size: 18),
+            label: const Text('Save tags'),
+          ),
+        ],
+      ),
+    ],
+  );
+}
+
 Future<bool> showReferenceMetadataDialog(
   BuildContext context,
   AppController controller, {
@@ -934,7 +1577,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
     final values = generated
         ? widget.controller.generatedReferenceCandidates(widget.kind)
         : widget.controller.savedReferences
-              .where((item) => item.kind == widget.kind)
+              .where((item) => !item.hidden && item.kind == widget.kind)
               .map(
                 (item) => ReferenceCandidate(
                   id: item.id,

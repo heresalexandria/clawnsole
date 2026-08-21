@@ -42,6 +42,7 @@ class DirectGateway
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         FavoriteGateway,
+        VisibilityGateway,
         GenerationPreviewGateway,
         MediaPreviewGateway {
   DirectGateway({
@@ -160,20 +161,30 @@ class DirectGateway
     );
   }
 
-  Future<StoredData> _replaceGeneration(Generation generation) async {
+  Future<Generation> _replaceGeneration(Generation generation) async {
     final current = await _store.read();
     final generations = List<Generation>.from(current.generations);
     final index = generations.indexWhere(
       (item) => item.localId == generation.localId,
     );
+    var persisted = generation;
     if (index >= 0) {
-      generations[index] = generation;
+      final existing = generations[index];
+      persisted = generation.copyWith(
+        folderId: existing.folderId,
+        clearFolder: existing.folderId == null,
+        tags: existing.tags,
+        favorite: existing.favorite,
+        hidden: existing.hidden,
+        storage: existing.storage,
+      );
+      generations[index] = persisted;
     } else {
-      generations.insert(0, generation);
+      generations.insert(0, persisted);
     }
     final next = current.copyWith(generations: generations);
     await _store.write(next);
-    return next;
+    return persisted;
   }
 
   @override
@@ -434,6 +445,7 @@ class DirectGateway
       folderId: reference.folderId,
       tags: _cleanLibraryTags(reference.tags),
       favorite: reference.favorite,
+      hidden: reference.hidden,
       storage: reference.storage,
     );
     final references = List<SavedReference>.from(current.savedReferences);
@@ -500,6 +512,53 @@ class DirectGateway
                     favorite: favorite,
                     updatedAt: DateTime.now().toUtc(),
                   )
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> setGenerationsHidden(
+    List<String> localIds,
+    bool hidden,
+  ) async {
+    final ids = localIds.toSet();
+    final current = await _store.read();
+    if (!ids.every(current.generations.map((item) => item.localId).contains)) {
+      throw StateError('One or more generations no longer exist.');
+    }
+    final next = current.copyWith(
+      generations: current.generations
+          .map(
+            (item) => ids.contains(item.localId)
+                ? item.copyWith(hidden: hidden)
+                : item,
+          )
+          .toList(),
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> setReferencesHidden(
+    List<String> referenceIds,
+    bool hidden,
+  ) async {
+    final ids = referenceIds.toSet();
+    final current = await _store.read();
+    if (!ids.every(current.savedReferences.map((item) => item.id).contains)) {
+      throw StateError('One or more references no longer exist.');
+    }
+    final now = DateTime.now().toUtc();
+    final next = current.copyWith(
+      savedReferences: current.savedReferences
+          .map(
+            (item) => ids.contains(item.id)
+                ? item.copyWith(hidden: hidden, updatedAt: now)
                 : item,
           )
           .toList(),
@@ -1011,8 +1070,7 @@ class DirectGateway
         );
       }
     }
-    await _replaceGeneration(next);
-    return next;
+    return _replaceGeneration(next);
   }
 
   @override

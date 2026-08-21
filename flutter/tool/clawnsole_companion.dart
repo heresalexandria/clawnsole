@@ -1128,6 +1128,48 @@ class CompanionApp {
               )
               .toList(),
         );
+      } else if (action == 'setGenerationsHidden') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final ids = (map['localIds'] as List<Object?>? ?? const <Object?>[])
+            .whereType<String>()
+            .toSet();
+        if (!ids.every(
+          current.generations.map((item) => item.localId).contains,
+        )) {
+          throw StateError('One or more generations no longer exist.');
+        }
+        next = current.copyWith(
+          generations: current.generations
+              .map(
+                (item) => ids.contains(item.localId)
+                    ? item.copyWith(hidden: map['hidden'] == true)
+                    : item,
+              )
+              .toList(),
+        );
+      } else if (action == 'setReferencesHidden') {
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final ids = (map['referenceIds'] as List<Object?>? ?? const <Object?>[])
+            .whereType<String>()
+            .toSet();
+        if (!ids.every(
+          current.savedReferences.map((item) => item.id).contains,
+        )) {
+          throw StateError('One or more references no longer exist.');
+        }
+        final now = DateTime.now().toUtc();
+        next = current.copyWith(
+          savedReferences: current.savedReferences
+              .map(
+                (item) => ids.contains(item.id)
+                    ? item.copyWith(
+                        hidden: map['hidden'] == true,
+                        updatedAt: now,
+                      )
+                    : item,
+              )
+              .toList(),
+        );
       } else if (action == 'saveGenerationPreviews') {
         final map = value is Map<Object?, Object?> ? value : const {};
         final localId = map['localId']?.toString() ?? '';
@@ -1303,6 +1345,7 @@ class CompanionApp {
           folderId: reference.folderId,
           tags: _cleanLibraryTags(reference.tags),
           favorite: reference.favorite,
+          hidden: reference.hidden,
           storage: reference.storage,
         );
         final references = List<SavedReference>.from(current.savedReferences);
@@ -1407,20 +1450,30 @@ class CompanionApp {
     'driveConnection': _store.connection.toJson(),
   };
 
-  Future<void> _upsert(Generation generation) async {
-    await _store.mutate<void>((current) {
+  Future<Generation> _upsert(Generation generation) async {
+    return _store.mutate<Generation>((current) {
       final generations = List<Generation>.from(current.generations);
       final index = generations.indexWhere(
         (item) => item.localId == generation.localId,
       );
+      var persisted = generation;
       if (index >= 0) {
-        generations[index] = generation;
+        final existing = generations[index];
+        persisted = generation.copyWith(
+          folderId: existing.folderId,
+          clearFolder: existing.folderId == null,
+          tags: existing.tags,
+          favorite: existing.favorite,
+          hidden: existing.hidden,
+          storage: existing.storage,
+        );
+        generations[index] = persisted;
       } else {
-        generations.insert(0, generation);
+        generations.insert(0, persisted);
       }
-      return StoreChange<void>(
+      return StoreChange<Generation>(
         current.copyWith(generations: generations),
-        null,
+        persisted,
       );
     });
   }
@@ -1609,12 +1662,12 @@ class CompanionApp {
       quotedCostUsdMax: generation.quotedCostUsdMax ?? estimate.maximumUsd,
       updatedAt: DateTime.now().toUtc(),
     );
-    await _upsert(generation);
+    generation = await _upsert(generation);
     try {
       final creditsBefore = await _balanceSafely(provider, key);
       if (creditsBefore != null) {
         generation = generation.copyWith(creditsBefore: creditsBefore);
-        await _upsert(generation);
+        generation = await _upsert(generation);
       }
       final receipt = await _providers.submit(
         provider,
@@ -1657,7 +1710,7 @@ class CompanionApp {
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
-      await _upsert(generation);
+      generation = await _upsert(generation);
       return generation;
     } on Object catch (error) {
       generation = generation.copyWith(
@@ -1668,7 +1721,7 @@ class CompanionApp {
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
-      await _upsert(generation);
+      generation = await _upsert(generation);
       rethrow;
     }
   }
@@ -1810,8 +1863,7 @@ class CompanionApp {
         );
       }
     }
-    await _upsert(next);
-    return next;
+    return _upsert(next);
   }
 
   AssetReference? _findAsset(

@@ -27,6 +27,7 @@ class WebGateway
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         FavoriteGateway,
+        VisibilityGateway,
         GenerationPreviewGateway,
         MediaPreviewGateway,
         GoogleDriveGateway,
@@ -441,6 +442,24 @@ class WebGateway
   ) => _action('setReferenceFavorite', <String, Object?>{
     'referenceId': referenceId,
     'favorite': favorite,
+  });
+
+  @override
+  Future<LocalSnapshot> setGenerationsHidden(
+    List<String> localIds,
+    bool hidden,
+  ) => _action('setGenerationsHidden', <String, Object?>{
+    'localIds': localIds,
+    'hidden': hidden,
+  });
+
+  @override
+  Future<LocalSnapshot> setReferencesHidden(
+    List<String> referenceIds,
+    bool hidden,
+  ) => _action('setReferencesHidden', <String, Object?>{
+    'referenceIds': referenceIds,
+    'hidden': hidden,
   });
 
   @override
