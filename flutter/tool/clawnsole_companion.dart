@@ -917,7 +917,7 @@ class CompanionApp {
           await vault.sync();
       }
       final status = vault.settingsVaultStatus;
-      return _json(request.response, 200, <String, Object?>{
+      return await _json(request.response, 200, <String, Object?>{
         'ok': true,
         'state': status.state.name,
         if (status.message.isNotEmpty) 'message': status.message,
