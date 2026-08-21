@@ -297,6 +297,7 @@ class AppController extends ChangeNotifier {
   bool _polling = false;
   Timer? _prefetchDebounce;
   int _prefetchRevision = 0;
+  int _videoPreviewSourceRevision = 0;
   Future<void> _prefetchQueue = Future<void>.value();
   final Set<String> _prefetchedVideoAssets = <String>{};
   final Set<String> _retentionAttempts = <String>{};
@@ -309,9 +310,15 @@ class AppController extends ChangeNotifier {
   final Map<String, int> _referenceFavoriteRevisions = <String, int>{};
   final Map<String, int> _generationVisibilityRevisions = <String, int>{};
   final Map<String, int> _referenceVisibilityRevisions = <String, int>{};
+  bool _disposed = false;
 
   static const String libraryFolderAll = 'all';
   static const String libraryFolderUnfiled = 'unfiled';
+
+  /// Changes whenever a Drive video becomes locally materialized. Preview
+  /// widgets use this to retry frame extraction after background prefetching
+  /// completes instead of remaining on their initial cold-cache placeholder.
+  int get videoPreviewSourceRevision => _videoPreviewSourceRevision;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
   List<Generation> get visibleGenerations =>
@@ -1179,12 +1186,19 @@ class AppController extends ChangeNotifier {
       }
       try {
         await cacheGateway.prefetchVideoAsset(asset);
+        _markVideoPreviewSourceAvailable();
       } on Object {
         // A failed prefetch (offline, Drive expired) may retry on the next
         // listing pass; playback itself still downloads on demand.
         _prefetchedVideoAssets.remove(asset.value);
       }
     });
+  }
+
+  void _markVideoPreviewSourceAvailable() {
+    if (_disposed) return;
+    _videoPreviewSourceRevision += 1;
+    notifyListeners();
   }
 
   String? get selectedGenerationFolderId =>
@@ -4147,6 +4161,7 @@ class AppController extends ChangeNotifier {
     final uri = generationMediaUri(item)
         .then((value) {
           progress.value = 1;
+          if (asset?.kind == 'drive') _markVideoPreviewSourceAvailable();
           return value;
         })
         .whenComplete(() => detach?.call());
@@ -4265,6 +4280,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _pollTimer?.cancel();
     _creditTimer?.cancel();
     _estimateTimer?.cancel();

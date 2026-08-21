@@ -1566,6 +1566,7 @@ class _CachedVideoPreview extends StatefulWidget {
 
 class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   Future<_GeneratedVideoPreview?>? _preview;
+  late int _sourceRevision;
 
   String get _jobKey =>
       '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
@@ -1602,6 +1603,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   }
 
   void _load() {
+    _sourceRevision = widget.controller.videoPreviewSourceRevision;
     final thumbnail = widget.item.thumbnailAsset;
     if (thumbnail != null) {
       _preview = Future<_GeneratedVideoPreview?>(() async {
@@ -1678,7 +1680,10 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   @override
   void didUpdateWidget(covariant _CachedVideoPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.item.thumbnailAsset?.value !=
+    final sourceBecameAvailable =
+        _sourceRevision != widget.controller.videoPreviewSourceRevision;
+    if (sourceBecameAvailable ||
+        oldWidget.item.thumbnailAsset?.value !=
             widget.item.thumbnailAsset?.value ||
         oldWidget.item.timelineThumbnailAsset?.value !=
             widget.item.timelineThumbnailAsset?.value ||

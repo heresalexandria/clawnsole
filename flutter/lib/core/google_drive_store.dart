@@ -221,13 +221,30 @@ class GoogleDriveStore implements DurableDataStore {
         contentType: contentType,
         appProperties: const <String, String>{'clawnsoleAsset': 'true'},
       );
-      return AssetReference(
+      final reference = AssetReference(
         kind: 'drive',
         value: file.id,
         label: label,
         contentType: contentType,
         bytes: bytes.length,
       );
+      if (contentType.toLowerCase().startsWith('video/')) {
+        try {
+          // The uploaded bytes are already in hand. Materialize them through
+          // the platform presenter now so the originating device can extract
+          // and sync its thumbnail and timeline strip without downloading the
+          // same film back from Drive first.
+          await _presenter.present(
+            reference,
+            Stream<List<int>>.value(bytes),
+            expectedLength: bytes.length,
+          );
+        } on Object {
+          // Retaining the film is the durable operation. A cache that is off,
+          // full, or temporarily unavailable must never make the upload fail.
+        }
+      }
+      return reference;
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
