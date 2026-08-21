@@ -41,6 +41,22 @@ enum LibraryStorageFilter { all, local, drive }
 
 enum FavoriteFilter { all, starred, unstarred }
 
+enum VisibilityFilter { visible, hidden, all }
+
+extension VisibilityFilterValue on VisibilityFilter {
+  bool matches(bool hidden) => switch (this) {
+    VisibilityFilter.visible => !hidden,
+    VisibilityFilter.hidden => hidden,
+    VisibilityFilter.all => true,
+  };
+
+  String get label => switch (this) {
+    VisibilityFilter.visible => 'Visible',
+    VisibilityFilter.hidden => 'Hidden',
+    VisibilityFilter.all => 'All',
+  };
+}
+
 extension FavoriteFilterValue on FavoriteFilter {
   bool matches(bool favorite) => switch (this) {
     FavoriteFilter.all => true,
@@ -522,6 +538,7 @@ class SavedReference {
     this.folderId,
     this.tags = const <String>[],
     this.favorite = false,
+    this.hidden = false,
     this.storage = LibraryStorage.local,
   });
 
@@ -535,6 +552,7 @@ class SavedReference {
   final String? folderId;
   final List<String> tags;
   final bool favorite;
+  final bool hidden;
   final LibraryStorage storage;
 
   SavedReference copyWith({
@@ -546,6 +564,7 @@ class SavedReference {
     bool clearFolder = false,
     List<String>? tags,
     bool? favorite,
+    bool? hidden,
     LibraryStorage? storage,
   }) => SavedReference(
     id: id,
@@ -558,6 +577,7 @@ class SavedReference {
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
     favorite: favorite ?? this.favorite,
+    hidden: hidden ?? this.hidden,
     storage: storage ?? this.storage,
   );
 
@@ -572,6 +592,7 @@ class SavedReference {
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
     if (favorite) 'favorite': true,
+    if (hidden) 'hidden': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
@@ -605,6 +626,7 @@ class SavedReference {
           .where((tag) => tag.trim().isNotEmpty)
           .toList(),
       favorite: json['favorite'] == true,
+      hidden: json['hidden'] == true,
       storage: LibraryStorage.values.firstWhere(
         (value) => value.name == json['storage'],
         orElse: () => LibraryStorage.local,
@@ -658,6 +680,7 @@ class Generation {
     this.folderId,
     this.tags = const <String>[],
     this.favorite = false,
+    this.hidden = false,
     this.storage = LibraryStorage.local,
   });
 
@@ -704,6 +727,7 @@ class Generation {
   final String? folderId;
   final List<String> tags;
   final bool favorite;
+  final bool hidden;
   final LibraryStorage storage;
 
   bool get canCheckStatus => pollingUrl?.trim().isNotEmpty == true;
@@ -797,6 +821,7 @@ class Generation {
     bool clearFolder = false,
     List<String>? tags,
     bool? favorite,
+    bool? hidden,
     LibraryStorage? storage,
   }) => Generation(
     localId: localId,
@@ -848,6 +873,7 @@ class Generation {
     folderId: clearFolder ? null : folderId ?? this.folderId,
     tags: tags ?? this.tags,
     favorite: favorite ?? this.favorite,
+    hidden: hidden ?? this.hidden,
     storage: storage ?? this.storage,
   );
 
@@ -904,6 +930,7 @@ class Generation {
     if (folderId != null) 'folderId': folderId,
     if (tags.isNotEmpty) 'tags': tags,
     if (favorite) 'favorite': true,
+    if (hidden) 'hidden': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
   };
 
@@ -988,6 +1015,7 @@ class Generation {
         .where((tag) => tag.trim().isNotEmpty)
         .toList(),
     favorite: json['favorite'] == true,
+    hidden: json['hidden'] == true,
     storage: LibraryStorage.values.firstWhere(
       (value) => value.name == json['storage'],
       orElse: () => LibraryStorage.local,
@@ -1211,7 +1239,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 17,
+    'schemaVersion': 18,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1415,6 +1443,28 @@ class LocalSnapshot {
   final List<LibraryFolder> folders;
   final List<SavedReference> savedReferences;
   final SettingsVaultStatus settingsVault;
+
+  LocalSnapshot copyWith({
+    List<Generation>? generations,
+    AppPreferences? preferences,
+    bool? hasApiKey,
+    StorageStats? storage,
+    Set<String>? connectedProviders,
+    Set<String>? availableProviders,
+    List<LibraryFolder>? folders,
+    List<SavedReference>? savedReferences,
+    SettingsVaultStatus? settingsVault,
+  }) => LocalSnapshot(
+    generations: generations ?? this.generations,
+    preferences: preferences ?? this.preferences,
+    hasApiKey: hasApiKey ?? this.hasApiKey,
+    storage: storage ?? this.storage,
+    connectedProviders: connectedProviders ?? this.connectedProviders,
+    availableProviders: availableProviders ?? this.availableProviders,
+    folders: folders ?? this.folders,
+    savedReferences: savedReferences ?? this.savedReferences,
+    settingsVault: settingsVault ?? this.settingsVault,
+  );
 
   bool hasApiKeyFor(String provider) =>
       connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);

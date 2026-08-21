@@ -75,6 +75,17 @@ abstract interface class FavoriteGateway {
   Future<LocalSnapshot> setReferenceFavorite(String referenceId, bool favorite);
 }
 
+abstract interface class VisibilityGateway {
+  Future<LocalSnapshot> setGenerationsHidden(
+    List<String> localIds,
+    bool hidden,
+  );
+  Future<LocalSnapshot> setReferencesHidden(
+    List<String> referenceIds,
+    bool hidden,
+  );
+}
+
 abstract interface class GenerationPreviewGateway {
   Future<LocalSnapshot> saveGenerationPreviews(
     String localId, {

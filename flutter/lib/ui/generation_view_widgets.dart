@@ -90,14 +90,18 @@ class MiniGenerationCard extends StatelessWidget {
     required this.controller,
     required this.item,
     super.key,
-    this.onOrganize,
+    this.onMove,
+    this.onTag,
+    this.onVisibility,
     this.onDelete,
     this.onCopyToDrive,
   });
 
   final AppController controller;
   final Generation item;
-  final VoidCallback? onOrganize;
+  final VoidCallback? onMove;
+  final VoidCallback? onTag;
+  final VoidCallback? onVisibility;
   final VoidCallback? onDelete;
   final VoidCallback? onCopyToDrive;
 
@@ -127,16 +131,7 @@ class MiniGenerationCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 7),
-              Text(
-                _denseGenerationSummary(item),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  height: 1.35,
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
+              _DenseGenerationMetadata(item: item),
               const SizedBox(height: 7),
               Row(
                 children: <Widget>[
@@ -174,7 +169,9 @@ class MiniGenerationCard extends StatelessWidget {
                   GenerationActionsMenu(
                     controller: controller,
                     item: item,
-                    onOrganize: onOrganize,
+                    onMove: onMove,
+                    onTag: onTag,
+                    onVisibility: onVisibility,
                     onDelete: onDelete,
                     onCopyToDrive: onCopyToDrive,
                   ),
@@ -193,14 +190,18 @@ class CompactGenerationRow extends StatelessWidget {
     required this.controller,
     required this.item,
     super.key,
-    this.onOrganize,
+    this.onMove,
+    this.onTag,
+    this.onVisibility,
     this.onDelete,
     this.onCopyToDrive,
   });
 
   final AppController controller;
   final Generation item;
-  final VoidCallback? onOrganize;
+  final VoidCallback? onMove;
+  final VoidCallback? onTag;
+  final VoidCallback? onVisibility;
   final VoidCallback? onDelete;
   final VoidCallback? onCopyToDrive;
 
@@ -231,15 +232,7 @@ class CompactGenerationRow extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 5),
-              Text(
-                _denseGenerationSummary(item),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
+              _DenseGenerationMetadata(item: item),
               const SizedBox(height: 5),
               Row(
                 children: <Widget>[
@@ -280,7 +273,9 @@ class CompactGenerationRow extends StatelessWidget {
         GenerationActionsMenu(
           controller: controller,
           item: item,
-          onOrganize: onOrganize,
+          onMove: onMove,
+          onTag: onTag,
+          onVisibility: onVisibility,
           onDelete: onDelete,
           onCopyToDrive: onCopyToDrive,
         ),
@@ -326,7 +321,9 @@ class _DenseGenerationPreview extends StatelessWidget {
 }
 
 enum _DenseGenerationAction {
-  organize,
+  move,
+  tag,
+  visibility,
   save,
   enhance,
   reuse,
@@ -341,7 +338,9 @@ class GenerationActionsMenu extends StatelessWidget {
     required this.controller,
     required this.item,
     super.key,
-    this.onOrganize,
+    this.onMove,
+    this.onTag,
+    this.onVisibility,
     this.onDelete,
     this.onCopyToDrive,
     this.includeSave = true,
@@ -351,7 +350,9 @@ class GenerationActionsMenu extends StatelessWidget {
 
   final AppController controller;
   final Generation item;
-  final VoidCallback? onOrganize;
+  final VoidCallback? onMove;
+  final VoidCallback? onTag;
+  final VoidCallback? onVisibility;
   final VoidCallback? onDelete;
   final VoidCallback? onCopyToDrive;
   final bool includeSave;
@@ -359,7 +360,9 @@ class GenerationActionsMenu extends StatelessWidget {
   final bool includeCheckStatus;
 
   List<_DenseGenerationAction> get _actions => <_DenseGenerationAction>[
-    if (onOrganize != null) _DenseGenerationAction.organize,
+    if (onMove != null) _DenseGenerationAction.move,
+    if (onTag != null) _DenseGenerationAction.tag,
+    if (onVisibility != null) _DenseGenerationAction.visibility,
     if (includeSave && (item.resultAsset != null || item.resultUrl != null))
       _DenseGenerationAction.save,
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
@@ -383,8 +386,12 @@ class GenerationActionsMenu extends StatelessWidget {
         iconSize: 19,
         onSelected: (action) {
           switch (action) {
-            case _DenseGenerationAction.organize:
-              onOrganize?.call();
+            case _DenseGenerationAction.move:
+              onMove?.call();
+            case _DenseGenerationAction.tag:
+              onTag?.call();
+            case _DenseGenerationAction.visibility:
+              onVisibility?.call();
             case _DenseGenerationAction.save:
               unawaited(saveGenerationVideo(context, controller, item));
             case _DenseGenerationAction.enhance:
@@ -428,7 +435,9 @@ class GenerationActionsMenu extends StatelessWidget {
 
 IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
     switch (action) {
-      _DenseGenerationAction.organize => Icons.drive_file_move_outline,
+      _DenseGenerationAction.move => Icons.drive_file_move_outline,
+      _DenseGenerationAction.tag => Icons.sell_outlined,
+      _DenseGenerationAction.visibility => Icons.visibility_off_outlined,
       _DenseGenerationAction.save => Icons.download_rounded,
       _DenseGenerationAction.enhance => Icons.auto_fix_high_rounded,
       _DenseGenerationAction.reuse => Icons.replay_rounded,
@@ -442,7 +451,9 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction action,
   Generation item,
 ) => switch (action) {
-  _DenseGenerationAction.organize => 'Organize',
+  _DenseGenerationAction.move => 'Move',
+  _DenseGenerationAction.tag => 'Tag',
+  _DenseGenerationAction.visibility => item.hidden ? 'Unhide' : 'Hide',
   _DenseGenerationAction.save => item.isImage ? 'Save image' : 'Save video',
   _DenseGenerationAction.enhance => 'Enhance',
   _DenseGenerationAction.reuse => item.isFailed ? 'Retry generation' : 'Reuse',
@@ -452,7 +463,38 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.delete => 'Delete history record',
 };
 
-String _denseGenerationSummary(Generation item) {
+class _DenseGenerationMetadata extends StatelessWidget {
+  const _DenseGenerationMetadata({required this.item});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = _denseGenerationMetadata(item);
+    final style = TextStyle(
+      height: 1.35,
+      fontSize: 10.5,
+      color: context.colors.onSurfaceVariant,
+    );
+    return Wrap(
+      spacing: 5,
+      runSpacing: 1,
+      children: <Widget>[
+        for (final entry in parts.indexed) ...<Widget>[
+          if (entry.$1 > 0) Text('·', style: style),
+          Text(
+            entry.$2,
+            style: entry.$1 == 0
+                ? style.copyWith(fontWeight: FontWeight.w700)
+                : style,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+List<String> _denseGenerationMetadata(Generation item) {
   final duration = item.config.duration == 'auto'
       ? 'Auto duration'
       : '${item.config.duration}s';
@@ -461,6 +503,10 @@ String _denseGenerationSummary(Generation item) {
       : item.provider == 'apple-local'
       ? 'Frame animation'
       : item.mode.shortLabel;
-  return '${providerShortNameForHistory(item.provider)} · $kind · '
-      '${item.config.aspectRatio} · $duration';
+  return <String>[
+    providerNameForHistory(item.provider),
+    kind,
+    item.config.aspectRatio,
+    duration,
+  ];
 }

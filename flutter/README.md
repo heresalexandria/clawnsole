@@ -21,7 +21,7 @@ only macOS desktop lifecycle, packaging, and self-update.
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
-- Live Atlas video catalog and schema-aware routes for Seedance, Grok, Veo,
+- Live Atlas Cloud video catalog and schema-aware routes for Seedance, Grok, Veo,
   Wan, Kling, Vidu, PixVerse, Hailuo, and FLUX 3
 - Canonical model identities for cross-provider route and cost comparison
 - Exact Atlas route preflight where available, plus quoted-versus-realized

@@ -62,76 +62,149 @@ class LibraryScreen extends StatelessWidget {
   );
 }
 
-class _LibraryResults extends StatelessWidget {
+class _LibraryResults extends StatefulWidget {
   const _LibraryResults({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      _LibraryToolbar(controller: controller),
-      if (DriveReconnectNotice.needed(controller)) ...<Widget>[
-        const SizedBox(height: 12),
-        DriveReconnectNotice(controller: controller, subject: 'films'),
-      ],
-      const SizedBox(height: 18),
-      if (controller.filteredGenerations.isEmpty)
-        _LibraryEmpty(controller: controller)
-      else if (controller.libraryViewMode == GenerationViewMode.compact)
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.filteredGenerations
-              .map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 9),
-                  child: GenerationCard(
-                    controller: controller,
-                    item: item,
-                    viewMode: GenerationViewMode.compact,
-                  ),
-                ),
-              )
-              .toList(),
-        )
-      else
-        LayoutBuilder(
-          builder: (context, grid) {
-            final fullColumns = grid.maxWidth >= 1120
-                ? 3
-                : grid.maxWidth >= 650
-                ? 2
-                : 1;
-            const gap = 16.0;
-            final columns =
-                controller.libraryViewMode == GenerationViewMode.full
-                ? fullColumns
-                : ((grid.maxWidth + gap) / (160 + gap)).floor().clamp(
-                    1,
-                    fullColumns * 2,
-                  );
-            final width = (grid.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: controller.filteredGenerations
-                  .map(
-                    (item) => SizedBox(
-                      width: width,
-                      child: GenerationCard(
-                        controller: controller,
-                        item: item,
-                        viewMode: controller.libraryViewMode,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            );
-          },
+  State<_LibraryResults> createState() => _LibraryResultsState();
+}
+
+class _LibraryResultsState extends State<_LibraryResults> {
+  final Set<String> selectedIds = <String>{};
+  bool selecting = false;
+
+  AppController get controller => widget.controller;
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!selectedIds.add(id)) selectedIds.remove(id);
+    });
+  }
+
+  void _setSelecting(bool value) {
+    setState(() {
+      selecting = value;
+      if (!value) selectedIds.clear();
+    });
+  }
+
+  Future<void> _moveSelected(BuildContext context) async {
+    final moved = await _showGenerationMoveDialog(
+      context,
+      controller: controller,
+      localIds: selectedIds,
+    );
+    if (moved && mounted) _setSelecting(false);
+  }
+
+  Future<void> _setSelectedHidden(bool hidden) async {
+    final saved = await controller.setGenerationsHidden(selectedIds, hidden);
+    if (saved && mounted) _setSelecting(false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = controller.filteredGenerations;
+    final selected = controller.generations
+        .where((item) => selectedIds.contains(item.localId))
+        .toList();
+    final selectedAreHidden =
+        selected.isNotEmpty && selected.every((item) => item.hidden);
+    Widget selectable(Generation item) => _SelectableGenerationCard(
+      controller: controller,
+      item: item,
+      viewMode: controller.libraryViewMode,
+      selecting: selecting,
+      selected: selectedIds.contains(item.localId),
+      onSelected: () => _toggleSelection(item.localId),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _LibraryToolbar(
+          controller: controller,
+          selecting: selecting,
+          selectedCount: selected.length,
+          onSelectingChanged: _setSelecting,
         ),
-    ],
-  );
+        if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+          const SizedBox(height: 12),
+          DriveReconnectNotice(controller: controller, subject: 'films'),
+        ],
+        if (selecting) ...<Widget>[
+          const SizedBox(height: 10),
+          _BulkActionBar(
+            selectedCount: selected.length,
+            visibleCount: filtered.length,
+            allVisibleSelected:
+                filtered.isNotEmpty &&
+                filtered.every((item) => selectedIds.contains(item.localId)),
+            onSelectAll: () => setState(() {
+              final visibleIds = filtered.map((item) => item.localId).toSet();
+              if (visibleIds.every(selectedIds.contains)) {
+                selectedIds.removeAll(visibleIds);
+              } else {
+                selectedIds.addAll(visibleIds);
+              }
+            }),
+            onMove: selected.isEmpty
+                ? null
+                : () => unawaited(_moveSelected(context)),
+            onVisibility: selected.isEmpty
+                ? null
+                : () => unawaited(_setSelectedHidden(!selectedAreHidden)),
+            visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
+            onCancel: () => _setSelecting(false),
+          ),
+        ],
+        const SizedBox(height: 18),
+        if (filtered.isEmpty)
+          _LibraryEmpty(controller: controller)
+        else if (controller.libraryViewMode == GenerationViewMode.compact)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: filtered
+                .map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 9),
+                    child: selectable(item),
+                  ),
+                )
+                .toList(),
+          )
+        else
+          LayoutBuilder(
+            builder: (context, grid) {
+              final fullColumns = grid.maxWidth >= 1120
+                  ? 3
+                  : grid.maxWidth >= 650
+                  ? 2
+                  : 1;
+              const gap = 16.0;
+              final columns =
+                  controller.libraryViewMode == GenerationViewMode.full
+                  ? fullColumns
+                  : ((grid.maxWidth + gap) / (160 + gap)).floor().clamp(
+                      1,
+                      fullColumns * 2,
+                    );
+              final width = (grid.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: filtered
+                    .map(
+                      (item) => SizedBox(width: width, child: selectable(item)),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+      ],
+    );
+  }
 }
 
 class _FolderSidebar extends StatelessWidget {
@@ -466,42 +539,17 @@ class _LibraryHeading extends StatelessWidget {
 }
 
 class _LibraryToolbar extends StatelessWidget {
-  const _LibraryToolbar({required this.controller});
+  const _LibraryToolbar({
+    required this.controller,
+    required this.selecting,
+    required this.selectedCount,
+    required this.onSelectingChanged,
+  });
 
   final AppController controller;
-
-  int _count(LibraryFilter filter) => switch (filter) {
-    LibraryFilter.all =>
-      controller.generations
-          .where(
-            (item) => controller.libraryStorageFilter.matches(item.storage),
-          )
-          .length,
-    LibraryFilter.working =>
-      controller.generations
-          .where(
-            (item) =>
-                controller.libraryStorageFilter.matches(item.storage) &&
-                item.isWorking,
-          )
-          .length,
-    LibraryFilter.ready =>
-      controller.generations
-          .where(
-            (item) =>
-                controller.libraryStorageFilter.matches(item.storage) &&
-                item.isReady,
-          )
-          .length,
-    LibraryFilter.failed =>
-      controller.generations
-          .where(
-            (item) =>
-                controller.libraryStorageFilter.matches(item.storage) &&
-                item.isFailed,
-          )
-          .length,
-  };
+  final bool selecting;
+  final int selectedCount;
+  final ValueChanged<bool> onSelectingChanged;
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
@@ -509,20 +557,6 @@ class _LibraryToolbar extends StatelessWidget {
     child: LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 760;
-        final keys = LibraryFilter.values
-            .map(
-              (filter) => ConsoleFilterSegment(
-                label: _filterLabel(filter),
-                icon: _filterIcons[filter],
-                count: _count(filter),
-                selected: controller.libraryFilter == filter,
-                onTap: () => unawaited(controller.setLibraryFilter(filter)),
-              ),
-            )
-            .toList();
-        final segments = wide
-            ? Wrap(spacing: 5, runSpacing: 5, children: keys)
-            : ConsoleSegmentStrip(children: keys);
         final search = TextField(
           key: const ValueKey('generation-library-search'),
           onChanged: controller.setSearch,
@@ -544,17 +578,30 @@ class _LibraryToolbar extends StatelessWidget {
           value: controller.libraryViewMode,
           onChanged: (value) => unawaited(controller.setLibraryViewMode(value)),
         );
+        final selectButton = OutlinedButton.icon(
+          key: const ValueKey('library-select-button'),
+          onPressed: () => onSelectingChanged(!selecting),
+          icon: Icon(
+            selecting ? Icons.close_rounded : Icons.check_box_outlined,
+            size: 17,
+          ),
+          label: Text(
+            selecting && selectedCount > 0
+                ? '$selectedCount selected'
+                : 'Select',
+          ),
+        );
 
         if (wide) {
           return Row(
             children: <Widget>[
-              Expanded(child: segments),
-              const SizedBox(width: 16),
-              SizedBox(width: 320, child: search),
+              Expanded(child: search),
               const SizedBox(width: 8),
               filterButton,
               const SizedBox(width: 8),
               viewToggle,
+              const SizedBox(width: 8),
+              selectButton,
             ],
           );
         }
@@ -563,35 +610,19 @@ class _LibraryToolbar extends StatelessWidget {
           children: <Widget>[
             search,
             const SizedBox(height: 10),
-            Row(
-              children: <Widget>[
-                Expanded(child: segments),
-                const SizedBox(width: 8),
-                filterButton,
-                const SizedBox(width: 8),
-                viewToggle,
-              ],
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[filterButton, viewToggle, selectButton],
             ),
           ],
         );
       },
     ),
   );
-
-  static const _filterIcons = <LibraryFilter, IconData>{
-    LibraryFilter.all: Icons.grid_view_rounded,
-    LibraryFilter.working: Icons.autorenew_rounded,
-    LibraryFilter.ready: Icons.check_circle_outline_rounded,
-    LibraryFilter.failed: Icons.error_outline_rounded,
-  };
 }
-
-String _filterLabel(LibraryFilter filter) => switch (filter) {
-  LibraryFilter.all => 'All',
-  LibraryFilter.working => 'In progress',
-  LibraryFilter.ready => 'Ready',
-  LibraryFilter.failed => 'Needs attention',
-};
 
 class _LibraryEmpty extends StatelessWidget {
   const _LibraryEmpty({required this.controller});
@@ -636,6 +667,165 @@ class _LibraryEmpty extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _BulkActionBar extends StatelessWidget {
+  const _BulkActionBar({
+    required this.selectedCount,
+    required this.visibleCount,
+    required this.allVisibleSelected,
+    required this.onSelectAll,
+    required this.onMove,
+    required this.onVisibility,
+    required this.visibilityLabel,
+    required this.onCancel,
+  });
+
+  final int selectedCount;
+  final int visibleCount;
+  final bool allVisibleSelected;
+  final VoidCallback onSelectAll;
+  final VoidCallback? onMove;
+  final VoidCallback? onVisibility;
+  final String visibilityLabel;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: context.colors.primaryContainer,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            '$selectedCount selected',
+            style: TextStyle(
+              color: context.colors.onPrimaryContainer,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        TextButton.icon(
+          onPressed: visibleCount == 0 ? null : onSelectAll,
+          icon: Icon(
+            allVisibleSelected
+                ? Icons.deselect_rounded
+                : Icons.select_all_rounded,
+            size: 18,
+          ),
+          label: Text(
+            allVisibleSelected ? 'Deselect visible' : 'Select visible',
+          ),
+        ),
+        FilledButton.tonalIcon(
+          key: const ValueKey('library-bulk-move'),
+          onPressed: onMove,
+          icon: const Icon(Icons.drive_file_move_outline, size: 18),
+          label: const Text('Move'),
+        ),
+        OutlinedButton.icon(
+          onPressed: onVisibility,
+          icon: Icon(
+            visibilityLabel == 'Hide'
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            size: 18,
+          ),
+          label: Text(visibilityLabel),
+        ),
+        TextButton(onPressed: onCancel, child: const Text('Done')),
+      ],
+    ),
+  );
+}
+
+class _SelectableGenerationCard extends StatelessWidget {
+  const _SelectableGenerationCard({
+    required this.controller,
+    required this.item,
+    required this.viewMode,
+    required this.selecting,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final AppController controller;
+  final Generation item;
+  final GenerationViewMode viewMode;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: <Widget>[
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: selected ? context.tokens.brass : Colors.transparent,
+            width: 2,
+          ),
+          boxShadow: selected
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: context.tokens.brass.withValues(alpha: .22),
+                    blurRadius: 14,
+                  ),
+                ]
+              : const <BoxShadow>[],
+        ),
+        child: GenerationCard(
+          controller: controller,
+          item: item,
+          viewMode: viewMode,
+        ),
+      ),
+      if (selecting)
+        Positioned(
+          top: 7,
+          left: 7,
+          child: Material(
+            elevation: 7,
+            color: context.colors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(9),
+              side: BorderSide(
+                color: selected
+                    ? context.tokens.brass
+                    : context.colors.outlineVariant,
+              ),
+            ),
+            child: InkWell(
+              key: ValueKey('select-generation-${item.localId}'),
+              onTap: onSelected,
+              borderRadius: BorderRadius.circular(9),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  selected
+                      ? Icons.check_box_rounded
+                      : Icons.check_box_outline_blank_rounded,
+                  color: selected
+                      ? context.tokens.brass
+                      : context.colors.onSurfaceVariant,
+                  size: 24,
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
   );
 }
 
@@ -695,12 +885,24 @@ class _GenerationCardState extends State<GenerationCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    void organize() => unawaited(
-      _showGenerationOrganizer(
+    void move() => unawaited(
+      _showGenerationMoveDialog(
+        context,
+        controller: widget.controller,
+        localIds: <String>{item.localId},
+      ),
+    );
+    void tag() => unawaited(
+      _showGenerationTagDialog(
         context,
         controller: widget.controller,
         item: item,
       ),
+    );
+    void visibility() => unawaited(
+      widget.controller.setGenerationsHidden(<String>{
+        item.localId,
+      }, !item.hidden),
     );
     final copyToDrive =
         item.storage == LibraryStorage.local &&
@@ -715,7 +917,9 @@ class _GenerationCardState extends State<GenerationCard> {
       return CompactGenerationRow(
         controller: widget.controller,
         item: item,
-        onOrganize: organize,
+        onMove: move,
+        onTag: tag,
+        onVisibility: visibility,
         onDelete: () => unawaited(_remove()),
         onCopyToDrive: copyToDrive,
       );
@@ -724,7 +928,9 @@ class _GenerationCardState extends State<GenerationCard> {
       return MiniGenerationCard(
         controller: widget.controller,
         item: item,
-        onOrganize: organize,
+        onMove: move,
+        onTag: tag,
+        onVisibility: visibility,
         onDelete: () => unawaited(_remove()),
         onCopyToDrive: copyToDrive,
       );
@@ -891,6 +1097,12 @@ class _GenerationCardState extends State<GenerationCard> {
                           if (item.resultAsset != null ||
                               item.resultUrl != null)
                             FilledButton.tonalIcon(
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(128, 40),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                              ),
                               onPressed: saving
                                   ? null
                                   : () => unawaited(_save()),
@@ -905,10 +1117,18 @@ class _GenerationCardState extends State<GenerationCard> {
                                       Icons.download_rounded,
                                       size: 16,
                                     ),
-                              label: const Text('Save video'),
+                              label: Text(
+                                item.isImage ? 'Save image' : 'Save video',
+                              ),
                             ),
                           if (widget.controller.canReuse(item))
                             OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(128, 40),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                              ),
                               onPressed: () =>
                                   unawaited(widget.controller.reuse(item)),
                               icon: const Icon(Icons.replay_rounded, size: 16),
@@ -929,7 +1149,9 @@ class _GenerationCardState extends State<GenerationCard> {
                       includeSave: false,
                       includeReuse: false,
                       includeCheckStatus: false,
-                      onOrganize: organize,
+                      onMove: move,
+                      onTag: tag,
+                      onVisibility: visibility,
                       onDelete: () => unawaited(_remove()),
                       onCopyToDrive: copyToDrive,
                     ),
@@ -1341,12 +1563,225 @@ Future<void> _confirmFolderDelete(
   if (confirmed == true) await controller.deleteLibraryFolder(folder.id);
 }
 
-Future<void> _showGenerationOrganizer(
+Future<bool> _showGenerationMoveDialog(
+  BuildContext context, {
+  required AppController controller,
+  required Iterable<String> localIds,
+}) async {
+  final ids = localIds.toSet();
+  final items = controller.generations
+      .where((item) => ids.contains(item.localId))
+      .toList();
+  if (items.isEmpty) return false;
+  final storages = items.map((item) => item.storage).toSet();
+  if (storages.length != 1) {
+    controller.showNotice(
+      'Bulk moves require items from the same storage. Filter by Local or Drive, then select again.',
+    );
+    return false;
+  }
+  final storage = storages.single;
+  final currentFolders = items.map((item) => item.folderId).toSet();
+  String? folderId = currentFolders.length == 1 ? currentFolders.single : null;
+  var moving = false;
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: Text(
+          items.length == 1 ? 'Move film' : 'Move ${items.length} films',
+        ),
+        content: SizedBox(
+          width: 470,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  StorageBadge(storage: storage),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: moving
+                        ? null
+                        : () async {
+                            await _showFolderEditor(
+                              dialogContext,
+                              controller: controller,
+                              parentId: folderId,
+                            );
+                            if (dialogContext.mounted) setState(() {});
+                          },
+                    icon: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 18,
+                    ),
+                    label: const Text('New folder'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Choose a destination',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, _) => DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: context.colors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: context.colors.outlineVariant),
+                    ),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(7),
+                      children: <Widget>[
+                        _MoveDestinationTile(
+                          label: 'Unfiled',
+                          icon: Icons.inbox_outlined,
+                          selected: folderId == null,
+                          onTap: moving
+                              ? null
+                              : () => setState(() => folderId = null),
+                        ),
+                        ...controller.folderTree
+                            .where((folder) => folder.storage == storage)
+                            .map(
+                              (folder) => _MoveDestinationTile(
+                                label: folder.name,
+                                icon: Icons.folder_outlined,
+                                depth: controller.folderDepth(folder.id),
+                                selected: folderId == folder.id,
+                                onTap: moving
+                                    ? null
+                                    : () =>
+                                          setState(() => folderId = folder.id),
+                                trailing: PopupMenuButton<String>(
+                                  tooltip: '${folder.name} folder actions',
+                                  onSelected: (value) async {
+                                    if (value == 'subfolder') {
+                                      await _showFolderEditor(
+                                        dialogContext,
+                                        controller: controller,
+                                        parentId: folder.id,
+                                      );
+                                    } else {
+                                      await _showFolderEditor(
+                                        dialogContext,
+                                        controller: controller,
+                                        folder: folder,
+                                      );
+                                    }
+                                    if (dialogContext.mounted) setState(() {});
+                                  },
+                                  itemBuilder: (context) =>
+                                      const <PopupMenuEntry<String>>[
+                                        PopupMenuItem(
+                                          value: 'subfolder',
+                                          child: Text('New subfolder'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'edit',
+                                          child: Text('Rename or move folder'),
+                                        ),
+                                      ],
+                                ),
+                              ),
+                            ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: moving
+                ? null
+                : () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('confirm-generation-move'),
+            onPressed: moving
+                ? null
+                : () async {
+                    setState(() => moving = true);
+                    final moved = await controller.moveGenerations(
+                      ids,
+                      folderId: folderId,
+                    );
+                    if (dialogContext.mounted && moved) {
+                      Navigator.pop(dialogContext, true);
+                    } else if (dialogContext.mounted) {
+                      setState(() => moving = false);
+                    }
+                  },
+            icon: moving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.drive_file_move_outline, size: 18),
+            label: const Text('Move'),
+          ),
+        ],
+      ),
+    ),
+  );
+  return result == true;
+}
+
+class _MoveDestinationTile extends StatelessWidget {
+  const _MoveDestinationTile({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.depth = 0,
+    this.trailing,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback? onTap;
+  final int depth;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 2),
+    child: ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.only(left: 10 + depth * 20, right: 4),
+      selected: selected,
+      selectedTileColor: context.colors.primaryContainer,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      leading: Icon(icon, size: 20),
+      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing:
+          trailing ??
+          (selected
+              ? Icon(Icons.check_circle_rounded, color: context.colors.primary)
+              : null),
+      onTap: onTap,
+    ),
+  );
+}
+
+Future<void> _showGenerationTagDialog(
   BuildContext context, {
   required AppController controller,
   required Generation item,
 }) async {
-  final editor = _GenerationOrganizer(controller: controller, item: item);
+  final editor = _GenerationTagEditor(controller: controller, item: item);
   if (MediaQuery.sizeOf(context).width < 700) {
     await showModalBottomSheet<void>(
       context: context,
@@ -1374,33 +1809,33 @@ Future<void> _showGenerationOrganizer(
   }
 }
 
-class _GenerationOrganizer extends StatefulWidget {
-  const _GenerationOrganizer({required this.controller, required this.item});
+class _GenerationTagEditor extends StatefulWidget {
+  const _GenerationTagEditor({required this.controller, required this.item});
 
   final AppController controller;
   final Generation item;
 
   @override
-  State<_GenerationOrganizer> createState() => _GenerationOrganizerState();
+  State<_GenerationTagEditor> createState() => _GenerationTagEditorState();
 }
 
-class _GenerationOrganizerState extends State<_GenerationOrganizer> {
-  late String? folderId;
+class _GenerationTagEditorState extends State<_GenerationTagEditor> {
   late List<String> tags;
   final tagController = TextEditingController();
+  final tagFocusNode = FocusNode();
   bool saving = false;
   String? tagError;
 
   @override
   void initState() {
     super.initState();
-    folderId = widget.controller.folderById(widget.item.folderId)?.id;
     tags = List<String>.from(widget.item.tags);
   }
 
   @override
   void dispose() {
     tagController.dispose();
+    tagFocusNode.dispose();
     super.dispose();
   }
 
@@ -1432,10 +1867,9 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
     if (tagController.text.trim().isNotEmpty) _addTag();
     if (tagError != null) return;
     setState(() => saving = true);
-    final saved = await widget.controller.organizeGeneration(
+    final saved = await widget.controller.tagGeneration(
       widget.item.localId,
-      folderId: folderId,
-      tags: tags,
+      tags,
     );
     if (!mounted) return;
     if (saved) {
@@ -1447,19 +1881,12 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
 
   @override
   Widget build(BuildContext context) {
-    final suggestions = widget.controller.libraryTags
-        .where((tag) => !_hasTag(tag))
-        .take(8)
-        .toList();
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            'Organize film',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
+          Text('Tag film', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 6),
           Text(
             widget.item.displayPrompt,
@@ -1473,95 +1900,101 @@ class _GenerationOrganizerState extends State<_GenerationOrganizer> {
             child: StorageBadge(storage: widget.item.storage),
           ),
           const SizedBox(height: 22),
-          DropdownButtonFormField<String>(
-            initialValue: folderId ?? '',
-            decoration: const InputDecoration(
-              labelText: 'Folder',
-              prefixIcon: Icon(Icons.folder_outlined),
-            ),
-            items: <DropdownMenuItem<String>>[
-              const DropdownMenuItem(value: '', child: Text('Unfiled')),
-              ...widget.controller.folderTree
-                  .where((folder) => folder.storage == widget.item.storage)
-                  .map(
-                    (folder) => DropdownMenuItem(
-                      value: folder.id,
-                      child: Text(
-                        widget.controller.folderPath(folder.id),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-            ],
-            onChanged: saving
-                ? null
-                : (value) => setState(
-                    () => folderId = value?.isEmpty == true ? null : value,
-                  ),
-          ),
-          const SizedBox(height: 22),
           Text('Tags', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 9),
           if (tags.isNotEmpty) ...<Widget>[
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: tags
-                  .map(
-                    (tag) => InputChip(
-                      label: Text('#$tag'),
-                      onDeleted: saving
-                          ? null
-                          : () => setState(() => tags.remove(tag)),
-                    ),
-                  )
-                  .toList(),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 145),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: context.colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: context.colors.outlineVariant),
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(10),
+                  child: Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: tags
+                        .map(
+                          (tag) => InputChip(
+                            label: Text('#$tag'),
+                            onDeleted: saving
+                                ? null
+                                : () => setState(() => tags.remove(tag)),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 10),
           ],
-          TextField(
-            controller: tagController,
-            enabled: !saving,
-            textInputAction: TextInputAction.done,
-            decoration: InputDecoration(
-              hintText: 'Add a tag',
-              prefixIcon: const Icon(Icons.sell_outlined),
-              suffixIcon: IconButton(
-                tooltip: 'Add tag',
-                onPressed: saving ? null : _addTag,
-                icon: const Icon(Icons.add_rounded),
-              ),
-              errorText: tagError,
-              helperText:
-                  'Use short labels like client, favorite, or vertical.',
-            ),
-            onSubmitted: saving ? null : _addTag,
-          ),
-          if (suggestions.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 12),
-            Text(
-              'Used elsewhere',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: context.colors.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 7),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: suggestions
-                  .map(
-                    (tag) => ActionChip(
-                      avatar: const Icon(Icons.add_rounded, size: 14),
-                      label: Text('#$tag'),
-                      onPressed: saving ? null : () => _addTag(tag),
+          RawAutocomplete<String>(
+            textEditingController: tagController,
+            focusNode: tagFocusNode,
+            displayStringForOption: (option) => option,
+            optionsBuilder: (value) {
+              final query = value.text.trim().toLowerCase();
+              return widget.controller.libraryTags.where(
+                (tag) =>
+                    !_hasTag(tag) &&
+                    (query.isEmpty || tag.toLowerCase().contains(query)),
+              );
+            },
+            onSelected: _addTag,
+            fieldViewBuilder: (context, fieldController, focusNode, onSubmit) =>
+                TextField(
+                  controller: fieldController,
+                  focusNode: focusNode,
+                  enabled: !saving,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(
+                    labelText: 'Add tags',
+                    hintText: 'Type to find or create a tag',
+                    prefixIcon: const Icon(Icons.sell_outlined),
+                    suffixIcon: IconButton(
+                      tooltip: 'Add tag',
+                      onPressed: saving ? null : _addTag,
+                      icon: const Icon(Icons.add_rounded),
                     ),
-                  )
-                  .toList(),
+                    errorText: tagError,
+                    helperText:
+                        'Choose an existing tag or press Enter to create it.',
+                  ),
+                  onSubmitted: saving ? null : _addTag,
+                ),
+            optionsViewBuilder: (context, onSelected, options) => Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 10,
+                borderRadius: BorderRadius.circular(12),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 300,
+                    maxWidth: 470,
+                    maxHeight: 210,
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    children: options
+                        .map(
+                          (tag) => ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.sell_outlined, size: 18),
+                            title: Text('#$tag'),
+                            onTap: () => onSelected(tag),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+              ),
             ),
-          ],
+          ),
           const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,

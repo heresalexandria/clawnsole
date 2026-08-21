@@ -235,6 +235,8 @@ class AppController extends ChangeNotifier {
   LibraryStorageFilter referenceStorageFilter = LibraryStorageFilter.all;
   FavoriteFilter libraryFavoriteFilter = FavoriteFilter.all;
   FavoriteFilter referenceFavoriteFilter = FavoriteFilter.all;
+  VisibilityFilter libraryVisibilityFilter = VisibilityFilter.visible;
+  VisibilityFilter referenceVisibilityFilter = VisibilityFilter.visible;
   LibraryStorage defaultStorage = LibraryStorage.local;
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
@@ -282,11 +284,18 @@ class AppController extends ChangeNotifier {
   final Set<String> _referencePreviewWrites = <String>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
   int _idCounter = 0;
+  int _libraryMutationRevision = 0;
+  final Map<String, int> _generationFavoriteRevisions = <String, int>{};
+  final Map<String, int> _referenceFavoriteRevisions = <String, int>{};
+  final Map<String, int> _generationVisibilityRevisions = <String, int>{};
+  final Map<String, int> _referenceVisibilityRevisions = <String, int>{};
 
   static const String libraryFolderAll = 'all';
   static const String libraryFolderUnfiled = 'unfiled';
 
   List<Generation> get generations => snapshot?.generations ?? const [];
+  List<Generation> get visibleGenerations =>
+      generations.where((item) => !item.hidden).toList();
   List<SavedReference> get savedReferences =>
       snapshot?.savedReferences ?? const <SavedReference>[];
   List<VideoProviderDefinition> get providers {
@@ -471,13 +480,18 @@ class AppController extends ChangeNotifier {
   int folderCount(String folderView) => switch (folderView) {
     libraryFolderAll =>
       generations
-          .where((item) => libraryStorageFilter.matches(item.storage))
+          .where(
+            (item) =>
+                libraryStorageFilter.matches(item.storage) &&
+                libraryVisibilityFilter.matches(item.hidden),
+          )
           .length,
     libraryFolderUnfiled =>
       generations
           .where(
             (item) =>
                 libraryStorageFilter.matches(item.storage) &&
+                libraryVisibilityFilter.matches(item.hidden) &&
                 folderById(item.folderId) == null,
           )
           .length,
@@ -486,6 +500,7 @@ class AppController extends ChangeNotifier {
           .where(
             (item) =>
                 libraryStorageFilter.matches(item.storage) &&
+                libraryVisibilityFilter.matches(item.hidden) &&
                 folderBranch(folderView).contains(item.folderId),
           )
           .length,
@@ -520,6 +535,7 @@ class AppController extends ChangeNotifier {
     return generations.where((item) {
       if (!libraryStorageFilter.matches(item.storage)) return false;
       if (!libraryFavoriteFilter.matches(item.favorite)) return false;
+      if (!libraryVisibilityFilter.matches(item.hidden)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(item.folderId!).toLowerCase();
@@ -572,13 +588,18 @@ class AppController extends ChangeNotifier {
   int referenceFolderCount(String folderView) => switch (folderView) {
     libraryFolderAll =>
       savedReferences
-          .where((item) => referenceStorageFilter.matches(item.storage))
+          .where(
+            (item) =>
+                referenceStorageFilter.matches(item.storage) &&
+                referenceVisibilityFilter.matches(item.hidden),
+          )
           .length,
     libraryFolderUnfiled =>
       savedReferences
           .where(
             (item) =>
                 referenceStorageFilter.matches(item.storage) &&
+                referenceVisibilityFilter.matches(item.hidden) &&
                 folderById(
                       item.folderId,
                       collection: LibraryCollection.references,
@@ -591,6 +612,7 @@ class AppController extends ChangeNotifier {
           .where(
             (item) =>
                 referenceStorageFilter.matches(item.storage) &&
+                referenceVisibilityFilter.matches(item.hidden) &&
                 folderBranch(
                   folderView,
                   collection: LibraryCollection.references,
@@ -631,6 +653,7 @@ class AppController extends ChangeNotifier {
     final values = savedReferences.where((item) {
       if (!referenceStorageFilter.matches(item.storage)) return false;
       if (!referenceFavoriteFilter.matches(item.favorite)) return false;
+      if (!referenceVisibilityFilter.matches(item.hidden)) return false;
       final folderName = item.folderId == null
           ? ''
           : folderPath(
@@ -1060,31 +1083,222 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setLibraryVisibilityFilter(VisibilityFilter value) {
+    libraryVisibilityFilter = value;
+    notifyListeners();
+  }
+
+  void setReferenceVisibilityFilter(VisibilityFilter value) {
+    referenceVisibilityFilter = value;
+    notifyListeners();
+  }
+
   Future<void> toggleGenerationFavorite(Generation item) async {
     if (gateway is! FavoriteGateway) return;
+    final current = generations
+        .where((candidate) => candidate.localId == item.localId)
+        .firstOrNull;
+    if (current == null || snapshot == null) return;
+    final favorite = !current.favorite;
+    final revision = ++_libraryMutationRevision;
+    _generationFavoriteRevisions[item.localId] = revision;
+    snapshot = snapshot!.copyWith(
+      generations: generations
+          .map(
+            (candidate) => candidate.localId == item.localId
+                ? candidate.copyWith(favorite: favorite)
+                : candidate,
+          )
+          .toList(),
+    );
+    notifyListeners();
     try {
-      _apply(
-        await (gateway as FavoriteGateway).setGenerationFavorite(
-          item.localId,
-          !item.favorite,
-        ),
+      await (gateway as FavoriteGateway).setGenerationFavorite(
+        item.localId,
+        favorite,
       );
     } on Object catch (error) {
+      if (_generationFavoriteRevisions[item.localId] == revision &&
+          snapshot != null) {
+        snapshot = snapshot!.copyWith(
+          generations: generations
+              .map(
+                (candidate) => candidate.localId == item.localId
+                    ? candidate.copyWith(favorite: current.favorite)
+                    : candidate,
+              )
+              .toList(),
+        );
+        notifyListeners();
+      }
       showNotice(_message(error));
+    } finally {
+      if (_generationFavoriteRevisions[item.localId] == revision) {
+        _generationFavoriteRevisions.remove(item.localId);
+      }
     }
   }
 
   Future<void> toggleReferenceFavorite(SavedReference item) async {
     if (gateway is! FavoriteGateway) return;
+    final current = savedReferences
+        .where((candidate) => candidate.id == item.id)
+        .firstOrNull;
+    if (current == null || snapshot == null) return;
+    final favorite = !current.favorite;
+    final revision = ++_libraryMutationRevision;
+    _referenceFavoriteRevisions[item.id] = revision;
+    snapshot = snapshot!.copyWith(
+      savedReferences: savedReferences
+          .map(
+            (candidate) => candidate.id == item.id
+                ? candidate.copyWith(favorite: favorite)
+                : candidate,
+          )
+          .toList(),
+    );
+    notifyListeners();
     try {
-      _apply(
-        await (gateway as FavoriteGateway).setReferenceFavorite(
-          item.id,
-          !item.favorite,
-        ),
+      await (gateway as FavoriteGateway).setReferenceFavorite(
+        item.id,
+        favorite,
       );
     } on Object catch (error) {
+      if (_referenceFavoriteRevisions[item.id] == revision &&
+          snapshot != null) {
+        snapshot = snapshot!.copyWith(
+          savedReferences: savedReferences
+              .map(
+                (candidate) => candidate.id == item.id
+                    ? candidate.copyWith(favorite: current.favorite)
+                    : candidate,
+              )
+              .toList(),
+        );
+        notifyListeners();
+      }
       showNotice(_message(error));
+    } finally {
+      if (_referenceFavoriteRevisions[item.id] == revision) {
+        _referenceFavoriteRevisions.remove(item.id);
+      }
+    }
+  }
+
+  Future<bool> setGenerationsHidden(
+    Iterable<String> localIds,
+    bool hidden,
+  ) async {
+    if (gateway is! VisibilityGateway || snapshot == null) return false;
+    final ids = localIds.toSet();
+    if (ids.isEmpty) return true;
+    final previous = <String, bool>{
+      for (final item in generations.where(
+        (item) => ids.contains(item.localId),
+      ))
+        item.localId: item.hidden,
+    };
+    if (previous.length != ids.length) {
+      showNotice('One or more generations are no longer available.');
+      return false;
+    }
+    final revision = ++_libraryMutationRevision;
+    for (final id in ids) {
+      _generationVisibilityRevisions[id] = revision;
+    }
+    snapshot = snapshot!.copyWith(
+      generations: generations
+          .map(
+            (item) => ids.contains(item.localId)
+                ? item.copyWith(hidden: hidden)
+                : item,
+          )
+          .toList(),
+    );
+    notifyListeners();
+    try {
+      await (gateway as VisibilityGateway).setGenerationsHidden(
+        ids.toList(),
+        hidden,
+      );
+      showNotice(hidden ? 'Moved to Hidden.' : 'Restored from Hidden.');
+      return true;
+    } on Object catch (error) {
+      if (snapshot != null) {
+        snapshot = snapshot!.copyWith(
+          generations: generations.map((item) {
+            if (_generationVisibilityRevisions[item.localId] != revision) {
+              return item;
+            }
+            return item.copyWith(hidden: previous[item.localId]);
+          }).toList(),
+        );
+        notifyListeners();
+      }
+      showNotice(_message(error));
+      return false;
+    } finally {
+      for (final id in ids) {
+        if (_generationVisibilityRevisions[id] == revision) {
+          _generationVisibilityRevisions.remove(id);
+        }
+      }
+    }
+  }
+
+  Future<bool> setReferencesHidden(
+    Iterable<String> referenceIds,
+    bool hidden,
+  ) async {
+    if (gateway is! VisibilityGateway || snapshot == null) return false;
+    final ids = referenceIds.toSet();
+    if (ids.isEmpty) return true;
+    final previous = <String, bool>{
+      for (final item in savedReferences.where((item) => ids.contains(item.id)))
+        item.id: item.hidden,
+    };
+    if (previous.length != ids.length) {
+      showNotice('One or more references are no longer available.');
+      return false;
+    }
+    final revision = ++_libraryMutationRevision;
+    for (final id in ids) {
+      _referenceVisibilityRevisions[id] = revision;
+    }
+    snapshot = snapshot!.copyWith(
+      savedReferences: savedReferences
+          .map(
+            (item) =>
+                ids.contains(item.id) ? item.copyWith(hidden: hidden) : item,
+          )
+          .toList(),
+    );
+    notifyListeners();
+    try {
+      await (gateway as VisibilityGateway).setReferencesHidden(
+        ids.toList(),
+        hidden,
+      );
+      showNotice(hidden ? 'Moved to Hidden.' : 'Restored from Hidden.');
+      return true;
+    } on Object catch (error) {
+      if (snapshot != null) {
+        snapshot = snapshot!.copyWith(
+          savedReferences: savedReferences.map((item) {
+            if (_referenceVisibilityRevisions[item.id] != revision) return item;
+            return item.copyWith(hidden: previous[item.id]);
+          }).toList(),
+        );
+        notifyListeners();
+      }
+      showNotice(_message(error));
+      return false;
+    } finally {
+      for (final id in ids) {
+        if (_referenceVisibilityRevisions[id] == revision) {
+          _referenceVisibilityRevisions.remove(id);
+        }
+      }
     }
   }
 
@@ -1252,6 +1466,120 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
       return false;
     }
+  }
+
+  Future<bool> moveGenerations(
+    Iterable<String> localIds, {
+    String? folderId,
+  }) async {
+    if (gateway is! LibraryOrganizationGateway) return false;
+    final ids = localIds.toSet();
+    final targets = generations
+        .where((item) => ids.contains(item.localId))
+        .toList();
+    if (targets.length != ids.length) {
+      showNotice('One or more generations are no longer available.');
+      return false;
+    }
+    final folder = folderById(folderId);
+    if (folderId != null &&
+        (folder == null ||
+            targets.any((item) => item.storage != folder.storage))) {
+      showNotice('Choose a folder in the same storage as the selected items.');
+      return false;
+    }
+    try {
+      final organization = gateway as LibraryOrganizationGateway;
+      for (final item in targets) {
+        _apply(
+          await organization.setGenerationOrganization(
+            item.localId,
+            folderId: folderId,
+            tags: item.tags,
+          ),
+        );
+      }
+      showNotice(
+        '${targets.length == 1 ? 'Generation' : '${targets.length} generations'} moved.',
+      );
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
+  }
+
+  Future<bool> tagGeneration(String localId, Iterable<String> tags) async {
+    final item = generations
+        .where((candidate) => candidate.localId == localId)
+        .firstOrNull;
+    if (item == null) return false;
+    final saved = await organizeGeneration(
+      localId,
+      folderId: item.folderId,
+      tags: tags,
+    );
+    if (saved) showNotice('Tags saved.');
+    return saved;
+  }
+
+  Future<bool> moveReferences(
+    Iterable<String> referenceIds, {
+    String? folderId,
+  }) async {
+    if (gateway is! ReferenceLibraryGateway) return false;
+    final ids = referenceIds.toSet();
+    final targets = savedReferences
+        .where((item) => ids.contains(item.id))
+        .toList();
+    if (targets.length != ids.length) {
+      showNotice('One or more references are no longer available.');
+      return false;
+    }
+    final folder = folderById(
+      folderId,
+      collection: LibraryCollection.references,
+    );
+    if (folderId != null &&
+        (folder == null ||
+            targets.any((item) => item.storage != folder.storage))) {
+      showNotice('Choose a folder in the same storage as the selected items.');
+      return false;
+    }
+    try {
+      final library = gateway as ReferenceLibraryGateway;
+      for (final item in targets) {
+        _apply(
+          await library.saveReference(
+            item.copyWith(
+              folderId: folderId,
+              clearFolder: folderId == null,
+              updatedAt: DateTime.now().toUtc(),
+            ),
+          ),
+        );
+      }
+      showNotice(
+        '${targets.length == 1 ? 'Reference' : '${targets.length} references'} moved.',
+      );
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
+  }
+
+  Future<bool> tagReference(String referenceId, Iterable<String> tags) async {
+    final item = savedReferences
+        .where((candidate) => candidate.id == referenceId)
+        .firstOrNull;
+    if (item == null) return false;
+    return updateSavedReference(
+      item,
+      name: item.name,
+      folderId: item.folderId,
+      tags: tags,
+    );
   }
 
   Future<SavedReference?> saveDraftReference(
@@ -1477,6 +1805,7 @@ class AppController extends ChangeNotifier {
     return generations
         .where(
           (item) =>
+              !item.hidden &&
               item.isReady &&
               (item.resultAsset != null || item.resultUrl != null) &&
               (kind == MediaReferenceKind.image ? item.isImage : !item.isImage),
@@ -2494,7 +2823,15 @@ class AppController extends ChangeNotifier {
       (item) => item.localId == generation.localId,
     );
     if (index >= 0) {
-      items[index] = generation;
+      final existing = items[index];
+      items[index] = generation.copyWith(
+        folderId: existing.folderId,
+        clearFolder: existing.folderId == null,
+        tags: existing.tags,
+        favorite: existing.favorite,
+        hidden: existing.hidden,
+        storage: existing.storage,
+      );
     } else {
       items.insert(0, generation);
     }
@@ -2596,16 +2933,16 @@ class AppController extends ChangeNotifier {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
         showNotice(
-          '${providerShortNameForHistory(item.provider)} reports that this film is ready.',
+          '${providerNameForHistory(item.provider)} reports that this film is ready.',
         );
       } else if (updated.isFailed) {
         showNotice(
           updated.error ??
-              '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel}.',
+              '${providerNameForHistory(item.provider)} reports ${updated.statusLabel}.',
         );
       } else {
         showNotice(
-          '${providerShortNameForHistory(item.provider)} reports ${updated.statusLabel.toLowerCase()}.',
+          '${providerNameForHistory(item.provider)} reports ${updated.statusLabel.toLowerCase()}.',
         );
       }
     } on Object catch (error) {
@@ -2756,7 +3093,7 @@ class AppController extends ChangeNotifier {
     }
     creditError = null;
     showNotice(
-      '${providerById(provider).shortName} key verified and saved locally.',
+      '${providerById(provider).name} key verified and saved locally.',
     );
   }
 
@@ -2776,7 +3113,7 @@ class AppController extends ChangeNotifier {
     providerAccounts.remove(provider);
     if (provider == selectedProviderId) credits = null;
     showNotice(
-      '${providerById(provider).shortName} access removed from this device.',
+      '${providerById(provider).name} access removed from this device.',
     );
   }
 

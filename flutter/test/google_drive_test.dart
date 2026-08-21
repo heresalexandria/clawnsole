@@ -212,7 +212,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 17);
+      expect(migrated.toJson()['schemaVersion'], 18);
     },
   );
 

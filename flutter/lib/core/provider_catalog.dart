@@ -203,7 +203,6 @@ class VideoProviderDefinition {
   const VideoProviderDefinition({
     required this.id,
     required this.name,
-    required this.shortName,
     required this.description,
     required this.consoleUrl,
     required this.docsUrl,
@@ -216,7 +215,6 @@ class VideoProviderDefinition {
 
   final String id;
   final String name;
-  final String shortName;
   final String description;
   final String consoleUrl;
   final String docsUrl;
@@ -323,7 +321,6 @@ const _artCraftViduRatios = <String>['16:9', '9:16', '4:3', '3:4', '1:1'];
 const bflProvider = VideoProviderDefinition(
   id: 'bfl',
   name: 'Black Forest Labs',
-  shortName: 'BFL',
   description:
       'Multimodal video generation plus precise and creative finishing tools.',
   consoleUrl: 'https://dashboard.bfl.ai',
@@ -384,7 +381,6 @@ const bflProvider = VideoProviderDefinition(
 const ltxProvider = VideoProviderDefinition(
   id: 'ltx',
   name: 'LTX Studio',
-  shortName: 'LTX',
   description: 'Production-focused video generation with native audio.',
   consoleUrl: 'https://console.ltx.io/',
   docsUrl: 'https://docs.ltx.io',
@@ -432,7 +428,6 @@ const ltxProvider = VideoProviderDefinition(
 const artCraftProvider = VideoProviderDefinition(
   id: 'artcraft',
   name: 'ArtCraft',
-  shortName: 'Art',
   description:
       'A broad, live video model catalog behind ArtCraft’s API-key Omni API.',
   consoleUrl: 'https://app.getartcraft.com/',
@@ -919,13 +914,12 @@ class _AtlasRouteModel extends VideoModelDefinition {
 const atlasProvider = VideoProviderDefinition(
   id: 'atlas',
   name: 'Atlas Cloud',
-  shortName: 'Atlas',
   description: 'A broad model marketplace with live, preflight pricing.',
   consoleUrl: 'https://www.atlascloud.ai/console',
   docsUrl: 'https://www.atlascloud.ai/docs/models/video',
   pricingUrl: 'https://www.atlascloud.ai/pricing/models?sort=new',
   pricingSource:
-      'Live Atlas 720p cost preflight, with published starting-rate fallback',
+      'Live Atlas Cloud 720p cost preflight, with published starting-rate fallback',
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/text-to-video',
@@ -1371,8 +1365,8 @@ VideoProviderDefinition providerById(String id) => videoProviders.firstWhere(
   orElse: () => bflProvider,
 );
 
-String providerShortNameForHistory(String id) =>
-    id == 'apple-local' ? 'Apple Local · Retired' : providerById(id).shortName;
+String providerNameForHistory(String id) =>
+    id == 'apple-local' ? 'Apple Local · Retired' : providerById(id).name;
 
 VideoModelDefinition modelById(String providerId, String modelId) {
   final provider = providerById(providerId);

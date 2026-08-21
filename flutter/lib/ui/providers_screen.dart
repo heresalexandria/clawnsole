@@ -198,7 +198,7 @@ class _ProviderCard extends StatelessWidget {
                     ? context.colors.primary
                     : context.colors.secondaryContainer,
                 child: Text(
-                  provider.shortName.characters.first,
+                  provider.name.characters.first,
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     color: selected
@@ -282,7 +282,7 @@ class _ProviderCard extends StatelessWidget {
               enableSuggestions: false,
               onChanged: (_) {},
               decoration: InputDecoration(
-                labelText: '${provider.shortName} API key',
+                labelText: '${provider.name} API key',
                 hintText: connected
                     ? 'Connected — paste a replacement'
                     : 'Paste key',
@@ -529,7 +529,7 @@ class _PricingTable extends StatelessWidget {
                   );
                   return DataRow(
                     cells: <DataCell>[
-                      DataCell(Text(providerById(model.provider).shortName)),
+                      DataCell(Text(providerById(model.provider).name)),
                       DataCell(
                         SizedBox(
                           width: 285,
@@ -647,7 +647,7 @@ class _PricingFilters extends StatelessWidget {
                 .map(
                   (item) => ButtonSegment<String>(
                     value: item.id,
-                    label: Text(item.shortName),
+                    label: Text(item.name),
                   ),
                 ),
           ],

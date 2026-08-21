@@ -700,8 +700,70 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 17);
+    expect(decoded.toJson()['schemaVersion'], 18);
   });
+
+  test(
+    'favorites update optimistically and hidden items filter explicitly',
+    () async {
+      final now = DateTime.utc(2026, 8, 21, 12);
+      Generation generation(String id, {bool hidden = false}) => Generation(
+        localId: id,
+        status: 'Ready',
+        prompt: '$id film',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        hidden: hidden,
+      );
+
+      final initial = StoredData(
+        generations: <Generation>[
+          generation('visible'),
+          generation('hidden', hidden: true),
+        ],
+      );
+      final store = _MemoryLocalDataStore(initial);
+      final gateway = NativeGateway(store: store, isIos: false);
+      final controller = AppController(gateway: gateway)
+        ..snapshot = LocalSnapshot(
+          generations: initial.generations,
+          preferences: const AppPreferences(),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+        );
+
+      final write = controller.toggleGenerationFavorite(
+        controller.generations.first,
+      );
+      expect(controller.generations.first.favorite, isTrue);
+      await write;
+      expect((await gateway.load()).generations.first.favorite, isTrue);
+      expect(
+        StoredData.decode(store.data.encode()).generations.last.hidden,
+        isTrue,
+      );
+
+      expect(
+        controller.filteredGenerations.map((item) => item.localId),
+        <String>['visible'],
+      );
+      controller.setLibraryVisibilityFilter(VisibilityFilter.hidden);
+      expect(
+        controller.filteredGenerations.map((item) => item.localId),
+        <String>['hidden'],
+      );
+      controller.dispose();
+    },
+  );
 
   test('persists folders and tags while removing a folder safely', () async {
     final now = DateTime.utc(2026, 8, 17, 12);
@@ -834,7 +896,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 17);
+      expect(decoded.toJson()['schemaVersion'], 18);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -2977,7 +3039,7 @@ void main() {
       const ValueKey<String>('selected-provider-balance'),
     );
     expect(artcraftBalance, findsOneWidget);
-    expect(tester.widget<Text>(artcraftBalance).data, 'Art balance ↗');
+    expect(tester.widget<Text>(artcraftBalance).data, 'ArtCraft ↗');
     expect(find.byTooltip('Open ArtCraft to view the balance'), findsOneWidget);
 
     final bflGateway = _ProviderMemoryGateway(
@@ -3005,6 +3067,51 @@ void main() {
       find.byTooltip('Refresh the Black Forest Labs balance'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('complete provider names fit compact chrome and Create', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final provider in videoProviders) {
+      final gateway = _ProviderMemoryGateway(
+        LocalSnapshot(
+          generations: const <Generation>[],
+          preferences: AppPreferences(
+            provider: provider.id,
+            model: provider.defaultModel.id,
+          ),
+          hasApiKey: false,
+          connectedProviders: <String>{provider.id},
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        ProviderAccountStatus(
+          provider: provider.id,
+          currency: 'credits',
+          balanceLabel: 'Open ${provider.name} to view balance ↗',
+        ),
+      );
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+
+      final balance = find.byKey(
+        const ValueKey<String>('selected-provider-balance'),
+      );
+      expect(tester.widget<Text>(balance).data, '${provider.name} ↗');
+      expect(find.text(provider.name), findsAtLeastNWidgets(1));
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '${provider.name} should fit compact app chrome',
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
   });
 
   testWidgets('renders the Clawnsole Flutter shell', (tester) async {
@@ -3250,6 +3357,38 @@ void main() {
     }
   });
 
+  testWidgets('dense library metadata keeps the complete provider name', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: <Generation>[
+          _viewModeGeneration(
+            0,
+            provider: atlasProvider.id,
+            model: atlasProvider.defaultModel.id,
+          ),
+        ],
+        preferences: const AppPreferences(
+          activeSection: AppSection.library,
+          libraryViewMode: GenerationViewMode.compact,
+        ),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('library dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -3353,12 +3492,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Delivered work no longer wears a Ready chip; the only "Ready" text
-    // left is the toolbar's status segment.
-    expect(find.text('Ready'), findsOneWidget);
+    // Status controls live inside the Filters popover rather than consuming
+    // permanent toolbar space.
+    expect(find.textContaining('Ready'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('library-filter-button')));
     await tester.pumpAndSettle();
+    expect(find.text('STATUS'), findsOneWidget);
+    expect(find.textContaining('Ready'), findsOneWidget);
     expect(find.text('FAVORITES'), findsOneWidget);
 
     await tester.tap(find.text('Starred'));
@@ -3829,7 +3970,11 @@ void main() {
   });
 }
 
-Generation _viewModeGeneration(int index) {
+Generation _viewModeGeneration(
+  int index, {
+  String provider = 'bfl',
+  String model = 'flux-3-video',
+}) {
   final createdAt = DateTime.utc(
     2026,
     8,
@@ -3838,6 +3983,8 @@ Generation _viewModeGeneration(int index) {
   ).subtract(Duration(minutes: index));
   return Generation(
     localId: 'view-generation-$index',
+    provider: provider,
+    model: model,
     status: 'Ready',
     prompt: 'A compact generation preview number $index.',
     mode: VideoMode.t2v,

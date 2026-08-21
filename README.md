@@ -56,7 +56,7 @@ and optional Google Drive sync keep work organized wherever you create.
 - Optional Google Drive history/media sync across macOS, Windows, iOS, and
   Android, plus passphrase-encrypted provider-key and preference sync with a
   one-time recovery code
-- A Providers desk for per-provider keys, console/docs links, live Atlas model
+- A Providers desk for per-provider keys, console/docs links, live Atlas Cloud model
   discovery, canonical cross-provider model matching, observed quote variance,
   and route-aware 10/15/20/30-second USD comparisons
 
@@ -182,6 +182,6 @@ Provider contracts and fallback rates follow the official
 [BFL Video Upscale documentation](https://docs.bfl.ai/flux_tools/flux_video_upscale),
 [LTX documentation](https://docs.ltx.io), and
 [Atlas Cloud video documentation](https://www.atlascloud.ai/docs/models/video).
-Atlas models are refreshed from its public catalog and Create-ready costs use
+Atlas Cloud models are refreshed from its public catalog and Create-ready costs use
 schema-aware, no-charge request preflight when available. Equivalent model
 routes retain provider-specific IDs while sharing a canonical comparison ID.

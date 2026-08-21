@@ -331,6 +331,7 @@ class HybridDataStore implements DurableDataStore {
               : folderMap[reference.folderId],
           tags: reference.tags,
           favorite: reference.favorite,
+          hidden: reference.hidden,
           storage: LibraryStorage.drive,
         ),
       );

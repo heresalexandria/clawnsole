@@ -842,7 +842,7 @@ void main() {
     },
   );
 
-  test('schema 17 strips provider keys while legacy files still decode', () {
+  test('schema 18 strips provider keys while legacy files still decode', () {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
@@ -853,7 +853,7 @@ void main() {
 
     expect(encoded, isNot(contains('secret')));
     expect(decoded.apiKeys, isEmpty);
-    expect(decoded.toJson()['schemaVersion'], 17);
+    expect(decoded.toJson()['schemaVersion'], 18);
     final legacy = StoredData.decode(
       '{"schemaVersion":16,"apiKeys":{"bfl":"old-bfl","ltx":"old-ltx"},"generations":[]}',
     );
