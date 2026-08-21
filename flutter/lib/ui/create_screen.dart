@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
@@ -18,6 +20,10 @@ import 'panels.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
 
+/// Below this window height the Create screen switches to its dense spacing
+/// so the whole composer lands above the fold on a 900px-tall display.
+bool _isShort(BuildContext context) => MediaQuery.sizeOf(context).height < 950;
+
 class CreateScreen extends StatelessWidget {
   const CreateScreen({required this.controller, super.key});
 
@@ -26,9 +32,10 @@ class CreateScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final split = constraints.maxWidth >= 1160;
+      final short = _isShort(context);
+      final pad = constraints.maxWidth < 620 ? 16.0 : (short ? 20.0 : 28.0);
       return SingleChildScrollView(
-        padding: EdgeInsets.all(constraints.maxWidth < 620 ? 16 : 28),
+        padding: EdgeInsets.fromLTRB(pad, short ? 10 : pad, pad, pad),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1440),
@@ -36,27 +43,10 @@ class CreateScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 _CreateHeading(controller: controller),
-                const SizedBox(height: 26),
-                if (split)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(
-                        flex: 7,
-                        child: _Composer(controller: controller),
-                      ),
-                      const SizedBox(width: 22),
-                      Expanded(
-                        flex: 4,
-                        child: _RecentWork(controller: controller),
-                      ),
-                    ],
-                  )
-                else ...<Widget>[
-                  _Composer(controller: controller),
-                  const SizedBox(height: 24),
-                  _RecentWork(controller: controller),
-                ],
+                SizedBox(height: short ? 8 : 18),
+                _Composer(controller: controller),
+                SizedBox(height: short ? 12 : 24),
+                _RecentWork(controller: controller),
               ],
             ),
           ),
@@ -74,6 +64,7 @@ class _CreateHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final upscaling = controller.selectedModel.isUpscaler;
+    final short = _isShort(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final title = ConstrainedBox(
@@ -88,24 +79,30 @@ class _CreateHeading extends StatelessWidget {
                     ? 'Video finishing studio'
                     : 'Video studio',
               ),
-              const SizedBox(height: 10),
+              SizedBox(height: short ? 5 : 10),
               Text(
                 controller.selectedProvider.isLocal
                     ? 'Make it local.'
                     : upscaling
                     ? 'Make it sharper.'
                     : 'Make it move.',
-                style: Theme.of(context).textTheme.displayLarge,
+                style: short
+                    ? Theme.of(context).textTheme.headlineLarge
+                    : Theme.of(context).textTheme.displayLarge,
               ),
-              const SizedBox(height: 10),
-              Text(
-                controller.selectedProvider.isLocal
-                    ? 'Create private still images on this Apple device, with no account or API key.'
-                    : upscaling
-                    ? 'Remaster a finished clip with source-faithful or creative detail, up to 4K.'
-                    : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
-                style: TextStyle(color: context.colors.onSurfaceVariant),
-              ),
+              // Short viewports drop the description so the composer itself
+              // stays above the fold.
+              if (!short) ...<Widget>[
+                const SizedBox(height: 10),
+                Text(
+                  controller.selectedProvider.isLocal
+                      ? 'Create private still images on this Apple device, with no account or API key.'
+                      : upscaling
+                      ? 'Remaster a finished clip with source-faithful or creative detail, up to 4K.'
+                      : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+              ],
             ],
           ),
         );
@@ -115,7 +112,11 @@ class _CreateHeading extends StatelessWidget {
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[title, const SizedBox(height: 16), plaque],
+            children: <Widget>[
+              title,
+              SizedBox(height: short ? 10 : 16),
+              plaque,
+            ],
           );
         }
         return Row(
@@ -174,7 +175,9 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     return TexturePanel(
       surface: PanelSurface.navyLeather,
       stitched: true,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+      padding: _isShort(context)
+          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 7)
+          : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
       child: PopupMenuButton<String>(
         tooltip: 'Choose provider and model',
         onSelected: (value) => unawaited(_select(value)),
@@ -579,9 +582,32 @@ class _ComposerState extends State<_Composer> {
             form.videoUrl.trim().isNotEmpty ||
             _showVideoPanel);
     final enhancing = form.mode == VideoMode.draftEnhance;
+    final short = _isShort(context);
+    // "Or start from" alternates fold into the guidance sections instead of
+    // occupying a row of their own.
+    final videoAction = _QuietAction(
+      icon: Icons.movie_filter_rounded,
+      label: 'Or continue a video',
+      onTap:
+          controller.selectedProvider.models.any(
+            (model) => model.modes.contains(VideoMode.v2v),
+          )
+          ? () => setState(() => _showVideoPanel = true)
+          : null,
+    );
+    final draftAction = _QuietAction(
+      icon: Icons.auto_fix_high_rounded,
+      label: 'Or enhance a saved draft',
+      onTap:
+          controller.selectedProvider.models.any(
+            (model) => model.modes.contains(VideoMode.draftEnhance),
+          )
+          ? () => setState(() => _showDraftPanel = true)
+          : null,
+    );
 
     return SurfaceCard(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(short ? 12 : 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -590,7 +616,7 @@ class _ComposerState extends State<_Composer> {
               upscaling ? 'Detail guidance · optional' : 'Direction',
               icon: Icons.edit_note_rounded,
             ),
-            const SizedBox(height: 9),
+            const SizedBox(height: 7),
             ReferencePromptField(
               key: ValueKey('generation-prompt-${controller.formRevision}'),
               prompt: form.prompt,
@@ -599,7 +625,7 @@ class _ComposerState extends State<_Composer> {
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: short ? 10 : 16),
           ],
           if (draftActive)
             _SourceEditor(
@@ -661,58 +687,60 @@ class _ComposerState extends State<_Composer> {
               ),
             ],
           ] else
-            _GuidanceInputsSection(controller: controller),
-          if (!draftActive && !videoActive) ...<Widget>[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                Text(
-                  'Or start from',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                ),
-                _QuietAction(
-                  icon: Icons.movie_filter_rounded,
-                  label: 'a video to continue',
-                  onTap:
-                      controller.selectedProvider.models.any(
-                        (model) => model.modes.contains(VideoMode.v2v),
-                      )
-                      ? () => setState(() => _showVideoPanel = true)
-                      : null,
-                ),
-                _QuietAction(
-                  icon: Icons.auto_fix_high_rounded,
-                  label: 'a saved draft to enhance',
-                  onTap:
-                      controller.selectedProvider.models.any(
-                        (model) => model.modes.contains(VideoMode.draftEnhance),
-                      )
-                      ? () => setState(() => _showDraftPanel = true)
-                      : null,
-                ),
-              ],
+            _GuidanceInputsSection(
+              controller: controller,
+              videoAction: videoAction,
+              draftAction: draftAction,
             ),
-          ],
-          const SizedBox(height: 20),
-          Divider(color: context.colors.outlineVariant),
-          const SizedBox(height: 20),
+          SizedBox(height: short ? 8 : 14),
+          Divider(height: 1, color: context.colors.outlineVariant),
+          SizedBox(height: short ? 8 : 14),
           if (upscaling)
             _UpscaleSettings(controller: controller)
           else if (enhancing)
             _EnhanceSettings(controller: controller)
           else
             _SettingsGrid(controller: controller),
-          const SizedBox(height: 20),
-          _CostPreview(controller: controller),
-          const SizedBox(height: 18),
-          _GenerationDestinationControls(controller: controller),
-          const SizedBox(height: 12),
+          SizedBox(height: short ? 10 : 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final sideBySide = constraints.maxWidth >= 880;
+              final costWidth = sideBySide
+                  ? (constraints.maxWidth - 14) * 3 / 5
+                  : constraints.maxWidth;
+              final cost = _CostPreview(
+                controller: controller,
+                wide: costWidth >= 700,
+              );
+              final destination = _GenerationDestinationControls(
+                controller: controller,
+              );
+              if (!sideBySide) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    cost,
+                    SizedBox(height: short ? 10 : 14),
+                    destination,
+                  ],
+                );
+              }
+              // IntrinsicHeight lets the two panels share one row height
+              // inside the scroll view's unbounded column.
+              return IntrinsicHeight(
+                child: Row(
+                  key: const ValueKey('cost-destination-row'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Expanded(flex: 3, child: cost),
+                    const SizedBox(width: 14),
+                    Expanded(flex: 2, child: destination),
+                  ],
+                ),
+              );
+            },
+          ),
+          SizedBox(height: short ? 8 : 12),
           _ComposerFooter(controller: controller),
         ],
       ),
@@ -728,124 +756,136 @@ class _GenerationDestinationControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final storage = controller.effectiveStorage;
-    final folders = controller.foldersFor(
-      LibraryCollection.generated,
-      storage: storage,
-    );
     final selected = controller.selectedGenerationFolderId;
+    final storageControl =
+        controller.supportsLocalLibrary && controller.googleDriveConnected
+        ? Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: LibraryStorage.values
+                .map(
+                  (value) => ChoiceChip(
+                    avatar: Icon(
+                      value == LibraryStorage.drive
+                          ? Icons.cloud_outlined
+                          : Icons.devices_outlined,
+                      size: 15,
+                    ),
+                    label: Text(value.shortLabel),
+                    selected: storage == value,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (_) =>
+                        unawaited(controller.setDefaultStorage(value)),
+                  ),
+                )
+                .toList(),
+          )
+        : StorageBadge(storage: storage);
+    final folderMenu = PopupMenuButton<String>(
+      key: ValueKey('generation-folder-${storage.name}'),
+      tooltip: 'Choose generation folder',
+      onSelected: (value) => unawaited(
+        controller.setGenerationFolder(value.isEmpty ? null : value),
+      ),
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        const PopupMenuItem(value: '', child: Text('Library (top level)')),
+        ...controller.folderTree
+            .where((folder) => folder.storage == storage)
+            .map(
+              (folder) => PopupMenuItem(
+                value: folder.id,
+                child: Text(controller.folderPath(folder.id)),
+              ),
+            ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: context.colors.outlineVariant),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.folder_outlined, size: 17),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                selected == null
+                    ? 'Library (top level)'
+                    : controller.folderPath(selected),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more_rounded, size: 17),
+          ],
+        ),
+      ),
+    );
+    final newFolder = IconButton(
+      tooltip: 'New folder',
+      visualDensity: VisualDensity.compact,
+      onPressed: () => unawaited(
+        _showGenerationFolderDialog(context, controller, parentId: selected),
+      ),
+      icon: const Icon(Icons.create_new_folder_outlined, size: 18),
+    );
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
         color: context.colors.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: context.colors.outlineVariant),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          const FieldLabel('Save generation to', icon: Icons.save_outlined),
-          const SizedBox(height: 10),
-          if (controller.supportsLocalLibrary &&
-              controller.googleDriveConnected)
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: LibraryStorage.values
-                  .map(
-                    (value) => ChoiceChip(
-                      avatar: Icon(
-                        value == LibraryStorage.drive
-                            ? Icons.cloud_outlined
-                            : Icons.devices_outlined,
-                        size: 15,
-                      ),
-                      label: Text(value.shortLabel),
-                      selected: storage == value,
-                      onSelected: (_) =>
-                          unawaited(controller.setDefaultStorage(value)),
+          Tooltip(
+            message: 'Save generation to',
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      Icons.save_outlined,
+                      size: 16,
+                      color: context.tokens.brass,
                     ),
-                  )
-                  .toList(),
-            )
-          else
-            Align(
-              alignment: Alignment.centerLeft,
-              child: StorageBadge(storage: storage),
+                    const SizedBox(width: 7),
+                    Text(
+                      'SAVE TO',
+                      style: TextStyle(
+                        fontSize: 11,
+                        letterSpacing: 1.3,
+                        fontWeight: FontWeight.w700,
+                        color: context.colors.onSurface.withValues(alpha: .82),
+                      ),
+                    ),
+                  ],
+                ),
+                storageControl,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  child: folderMenu,
+                ),
+                newFolder,
+              ],
             ),
+          ),
           if (controller.supportsGoogleDrive &&
               !controller.googleDriveConnected) ...<Widget>[
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Text(
               'Connect Google Drive in Settings to generate directly into your Drive library.',
-              style: TextStyle(
-                fontSize: 11,
-                color: context.colors.onSurfaceVariant,
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          PopupMenuButton<String>(
-            key: ValueKey('generation-folder-${storage.name}'),
-            tooltip: 'Choose generation folder',
-            onSelected: (value) => unawaited(
-              controller.setGenerationFolder(value.isEmpty ? null : value),
-            ),
-            itemBuilder: (context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem(
-                value: '',
-                child: Text('Library (top level)'),
-              ),
-              ...controller.folderTree
-                  .where((folder) => folder.storage == storage)
-                  .map(
-                    (folder) => PopupMenuItem(
-                      value: folder.id,
-                      child: Text(controller.folderPath(folder.id)),
-                    ),
-                  ),
-            ],
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-              decoration: BoxDecoration(
-                border: Border.all(color: context.colors.outlineVariant),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: <Widget>[
-                  const Icon(Icons.folder_outlined, size: 18),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      selected == null
-                          ? 'Library (top level)'
-                          : controller.folderPath(selected),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const Icon(Icons.expand_more_rounded, size: 18),
-                ],
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => unawaited(
-                _showGenerationFolderDialog(
-                  context,
-                  controller,
-                  parentId: selected,
-                ),
-              ),
-              icon: const Icon(Icons.create_new_folder_outlined, size: 17),
-              label: Text(selected == null ? 'New folder' : 'New subfolder'),
-            ),
-          ),
-          if (folders.isEmpty) ...<Widget>[
-            const SizedBox(height: 7),
-            Text(
-              'No ${storage.shortLabel.toLowerCase()} folders yet. You can generate at the top level or create one now.',
               style: TextStyle(
                 fontSize: 10.5,
                 color: context.colors.onSurfaceVariant,
@@ -948,9 +988,15 @@ List<PromptReferenceOption> _promptReferenceOptions(
 }
 
 class _GuidanceInputsSection extends StatelessWidget {
-  const _GuidanceInputsSection({required this.controller});
+  const _GuidanceInputsSection({
+    required this.controller,
+    required this.videoAction,
+    required this.draftAction,
+  });
 
   final AppController controller;
+  final Widget videoAction;
+  final Widget draftAction;
 
   @override
   Widget build(BuildContext context) {
@@ -960,30 +1006,75 @@ class _GuidanceInputsSection extends StatelessWidget {
     final showReferences =
         model.supportsMediaReferences || controller.form.references.isNotEmpty;
     if (!showFrames && !showReferences) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: context.colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: context.colors.outlineVariant),
-        ),
-        child: Text(
-          '${model.label} is a text-only endpoint. Choose a Frames or References model to attach media.',
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 11.5,
-            height: 1.4,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: context.colors.outlineVariant),
+            ),
+            child: Text(
+              '${model.label} is a text-only endpoint. Choose a Frames or References model to attach media.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 11.5,
+                height: 1.4,
+              ),
+            ),
           ),
-        ),
+          const SizedBox(height: 6),
+          Wrap(spacing: 4, children: <Widget>[videoAction, draftAction]),
+        ],
       );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (showFrames) _FramesSection(controller: controller),
-        if (showFrames && showReferences) const SizedBox(height: 22),
-        if (showReferences) _ReferencesSection(controller: controller),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 560;
+        final frames = showFrames
+            ? _FramesSection(
+                controller: controller,
+                compact: compact,
+                startActions: <Widget>[
+                  videoAction,
+                  if (!showReferences) draftAction,
+                ],
+              )
+            : null;
+        final references = showReferences
+            ? _ReferencesSection(
+                controller: controller,
+                compact: compact,
+                startActions: <Widget>[
+                  if (!showFrames) videoAction,
+                  draftAction,
+                ],
+              )
+            : null;
+        if (frames != null &&
+            references != null &&
+            constraints.maxWidth >= 880) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(child: frames),
+              const SizedBox(width: 22),
+              Expanded(child: references),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (frames != null) frames,
+            if (frames != null && references != null)
+              SizedBox(height: compact ? 12 : 16),
+            if (references != null) references,
+          ],
+        );
+      },
     );
   }
 }
@@ -1041,9 +1132,20 @@ class FieldLabel extends StatelessWidget {
 }
 
 class _FramesSection extends StatelessWidget {
-  const _FramesSection({required this.controller});
+  const _FramesSection({
+    required this.controller,
+    this.compact = false,
+    this.startActions = const <Widget>[],
+  });
 
   final AppController controller;
+
+  /// Narrow layouts collapse the section to a single header row with inline
+  /// add buttons and drop the informational caption.
+  final bool compact;
+
+  /// "Or start from" alternates folded into this section's action row.
+  final List<Widget> startActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1069,38 +1171,32 @@ class _FramesSection extends StatelessWidget {
         : model.framesExclusiveWithReferences
         ? '$frameLimit. ${model.label}: use $exclusiveInputs, not both.'
         : frameLimit;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        FieldLabel(
-          'Keyframes · optional',
-          icon: Icons.collections_rounded,
-          trailing: form.keyframes.isEmpty
-              ? null
-              : !model.supportsTimedKeyframes
-              ? null
-              : TogglePill(
-                  label: 'Custom timing',
-                  selected: form.usesTimedKeyframes,
-                  onChanged: form.requiresTimedKeyframes
-                      ? null
-                      : controller.setExactTiming,
-                ),
-        ),
-        const SizedBox(height: 9),
-        Text(
-          caption,
-          style: TextStyle(
-            color: conflicted
-                ? context.colors.error
-                : context.colors.onSurfaceVariant,
-            fontSize: 11.5,
-            height: 1.4,
-          ),
-        ),
-        if (form.keyframes.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 12),
-          Wrap(
+    final timingPill = form.keyframes.isNotEmpty && model.supportsTimedKeyframes
+        ? TogglePill(
+            label: 'Custom timing',
+            selected: form.usesTimedKeyframes,
+            onChanged: form.requiresTimedKeyframes
+                ? null
+                : controller.setExactTiming,
+          )
+        : null;
+    final addButtons = setAside
+        ? const <Widget>[]
+        : KeyframeRole.values
+              .where(
+                (role) => switch (role) {
+                  KeyframeRole.start => model.supportsStartFrame,
+                  KeyframeRole.middle => model.supportsTimedKeyframes,
+                  KeyframeRole.end => model.supportsEndFrame,
+                },
+              )
+              .map(
+                (role) => _AddFrameButton(controller: controller, role: role),
+              )
+              .toList();
+    final tiles = form.keyframes.isEmpty
+        ? null
+        : Wrap(
             spacing: 10,
             runSpacing: 10,
             children: form.keyframes
@@ -1114,25 +1210,70 @@ class _FramesSection extends StatelessWidget {
                   ),
                 )
                 .toList(),
+          );
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              _SectionLabelChip(
+                icon: Icons.collections_rounded,
+                label: 'Keyframes',
+                hint: caption,
+              ),
+              if (timingPill != null) timingPill,
+              ...addButtons,
+              ...startActions,
+            ],
           ),
+          if (conflicted || setAside) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              caption,
+              style: TextStyle(
+                color: conflicted
+                    ? context.colors.error
+                    : context.colors.onSurfaceVariant,
+                fontSize: 10.5,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
         ],
-        if (!setAside) ...<Widget>[
-          const SizedBox(height: 12),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          'Keyframes · optional',
+          icon: Icons.collections_rounded,
+          trailing: timingPill,
+        ),
+        const SizedBox(height: 7),
+        Text(
+          caption,
+          style: TextStyle(
+            color: conflicted
+                ? context.colors.error
+                : context.colors.onSurfaceVariant,
+            fontSize: 11.5,
+            height: 1.4,
+          ),
+        ),
+        if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+        if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: KeyframeRole.values
-                .where(
-                  (role) => switch (role) {
-                    KeyframeRole.start => model.supportsStartFrame,
-                    KeyframeRole.middle => model.supportsTimedKeyframes,
-                    KeyframeRole.end => model.supportsEndFrame,
-                  },
-                )
-                .map(
-                  (role) => _AddFrameButton(controller: controller, role: role),
-                )
-                .toList(),
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[...addButtons, ...startActions],
           ),
         ],
       ],
@@ -1140,10 +1281,52 @@ class _FramesSection extends StatelessWidget {
   }
 }
 
+/// A compact inline section label for narrow layouts, standing in for the
+/// full-width [FieldLabel] row inside a [Wrap].
+class _SectionLabelChip extends StatelessWidget {
+  const _SectionLabelChip({required this.icon, required this.label, this.hint});
+
+  final IconData icon;
+  final String label;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Icon(icon, size: 15, color: context.tokens.brass),
+        const SizedBox(width: 6),
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontSize: 10.5,
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w700,
+            color: context.colors.onSurface.withValues(alpha: .82),
+          ),
+        ),
+      ],
+    );
+    return hint == null ? row : Tooltip(message: hint!, child: row);
+  }
+}
+
 class _ReferencesSection extends StatelessWidget {
-  const _ReferencesSection({required this.controller});
+  const _ReferencesSection({
+    required this.controller,
+    this.compact = false,
+    this.startActions = const <Widget>[],
+  });
 
   final AppController controller;
+
+  /// Narrow layouts collapse the section to a single header row with inline
+  /// add buttons and drop the limit summary.
+  final bool compact;
+
+  /// "Or start from" alternates folded into this section's action row.
+  final List<Widget> startActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1179,21 +1362,9 @@ class _ReferencesSection extends StatelessWidget {
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
-    return Column(
-      key: const ValueKey('media-references-section'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        FieldLabel(
-          required
-              ? 'Creative references · required'
-              : 'Creative references · optional',
-          icon: Icons.perm_media_rounded,
-        ),
-        const SizedBox(height: 9),
-        if (!setAside &&
-            !conflicted &&
-            model.referenceTasks.length > 1) ...<Widget>[
-          Wrap(
+    final taskChips =
+        !setAside && !conflicted && model.referenceTasks.length > 1
+        ? Wrap(
             spacing: 7,
             runSpacing: 7,
             children: model.referenceTasks
@@ -1202,59 +1373,27 @@ class _ReferencesSection extends StatelessWidget {
                     key: ValueKey('reference-task-${task.name}'),
                     label: Text(task.label),
                     selected: form.referenceTask == task,
+                    visualDensity: VisualDensity.compact,
                     onSelected: (_) => controller.setReferenceTask(task),
                     showCheckmark: false,
                   ),
                 )
                 .toList(),
-          ),
-          const SizedBox(height: 9),
-        ],
-        Text(
-          limitSummary,
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 11.5,
-            height: 1.4,
-          ),
-        ),
-        if (setAside && !conflicted) ...<Widget>[
-          const SizedBox(height: 5),
-          Text(
-            'Frames attached — remove them to add creative references.',
-            style: TextStyle(
-              color: context.colors.onSurfaceVariant,
-              fontSize: 10.5,
-            ),
-          ),
-        ],
-        if (!setAside &&
-            form.referenceTask != MediaReferenceTask.reference) ...<Widget>[
-          const SizedBox(height: 5),
-          Text(
-            form.referenceTask == MediaReferenceTask.edit
-                ? 'Edit uses exactly 1 video · Auto duration · source aspect ratio'
-                : 'Extend uses exactly 1 video · source aspect ratio',
-            style: TextStyle(
-              color: context.colors.onSurfaceVariant,
-              fontSize: 10.5,
-            ),
-          ),
-        ],
-        if (!setAside && model.requiresVisualReferenceForAudio) ...<Widget>[
-          const SizedBox(height: 5),
-          Text(
-            'Audio guidance requires at least one image or video reference for this model.',
-            style: TextStyle(
-              color: context.colors.onSurfaceVariant,
-              fontSize: 10.5,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-        if (form.references.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 12),
-          Wrap(
+          )
+        : null;
+    final notes = <String>[
+      if (setAside && !conflicted)
+        'Frames attached — remove them to add creative references.',
+      if (!setAside && form.referenceTask != MediaReferenceTask.reference)
+        form.referenceTask == MediaReferenceTask.edit
+            ? 'Edit uses exactly 1 video · Auto duration · source aspect ratio'
+            : 'Extend uses exactly 1 video · source aspect ratio',
+      if (!setAside && model.requiresVisualReferenceForAudio)
+        'Audio guidance requires at least one image or video reference for this model.',
+    ];
+    final tiles = form.references.isEmpty
+        ? null
+        : Wrap(
             spacing: 10,
             runSpacing: 10,
             children: form.references
@@ -1271,24 +1410,91 @@ class _ReferencesSection extends StatelessWidget {
                   ),
                 )
                 .toList(),
+          );
+    final addButtons = setAside
+        ? const <Widget>[]
+        : MediaReferenceKind.values
+              .where(
+                (kind) =>
+                    model.maxReferences(kind) > 0 ||
+                    form.referenceCount(kind) > 0,
+              )
+              .map(
+                (kind) =>
+                    _AddReferenceButton(controller: controller, kind: kind),
+              )
+              .toList();
+    final noteStyle = TextStyle(
+      color: context.colors.onSurfaceVariant,
+      fontSize: 10.5,
+      height: 1.35,
+    );
+    if (compact) {
+      return Column(
+        key: const ValueKey('media-references-section'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              _SectionLabelChip(
+                icon: Icons.perm_media_rounded,
+                label: required ? 'References · required' : 'References',
+                hint: limitSummary,
+              ),
+              ...addButtons,
+              ...startActions,
+            ],
           ),
+          if (taskChips != null) ...<Widget>[
+            const SizedBox(height: 6),
+            taskChips,
+          ],
+          for (final note in notes) ...<Widget>[
+            const SizedBox(height: 5),
+            Text(note, style: noteStyle),
+          ],
+          if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
         ],
-        if (!setAside) ...<Widget>[
-          const SizedBox(height: 12),
+      );
+    }
+    return Column(
+      key: const ValueKey('media-references-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        FieldLabel(
+          required
+              ? 'Creative references · required'
+              : 'Creative references · optional',
+          icon: Icons.perm_media_rounded,
+        ),
+        const SizedBox(height: 7),
+        if (taskChips != null) ...<Widget>[
+          taskChips,
+          const SizedBox(height: 7),
+        ],
+        Text(
+          limitSummary,
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11.5,
+            height: 1.4,
+          ),
+        ),
+        for (final note in notes) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(note, style: noteStyle),
+        ],
+        if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+        if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: MediaReferenceKind.values
-                .where(
-                  (kind) =>
-                      model.maxReferences(kind) > 0 ||
-                      form.referenceCount(kind) > 0,
-                )
-                .map(
-                  (kind) =>
-                      _AddReferenceButton(controller: controller, kind: kind),
-                )
-                .toList(),
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[...addButtons, ...startActions],
           ),
         ],
       ],
@@ -2008,23 +2214,23 @@ class _SettingsGrid extends StatelessWidget {
       final columns = constraints.maxWidth > 640;
       final first = <Widget>[
         const FieldLabel('Frame', icon: Icons.crop_rounded),
-        const SizedBox(height: 10),
-        _RatioStrip(controller: controller),
-        const SizedBox(height: 20),
+        const SizedBox(height: 6),
+        _RatioDropdown(controller: controller),
         if (controller.selectedModel.outputKind ==
             GenerationOutputKind.video) ...<Widget>[
+          const SizedBox(height: 10),
           _DurationControl(controller: controller),
           if (controller.selectedModel.supportsFrameRate) ...<Widget>[
-            const SizedBox(height: 18),
+            const SizedBox(height: 10),
             _FrameRateControl(controller: controller),
           ],
         ],
       ];
       final second = <Widget>[
         const FieldLabel('Finish', icon: Icons.high_quality_rounded),
-        const SizedBox(height: 10),
-        _ResolutionRow(controller: controller),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+        _ResolutionDropdown(controller: controller),
+        const SizedBox(height: 4),
         if (controller.selectedModel.supportsAudio)
           HardwareSwitchTile(
             title: 'Synchronized audio',
@@ -2045,14 +2251,20 @@ class _SettingsGrid extends StatelessWidget {
                 controller.updateForm((form) => form.draft = value),
           ),
         if (controller.selectedProviderId == 'bfl') ...<Widget>[
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _SafetyControl(controller: controller),
+        ],
+        if (controller.selectedModel.supportsSeed) ...<Widget>[
+          const SizedBox(height: 8),
+          const FieldLabel('Seed', icon: Icons.tag_rounded),
+          const SizedBox(height: 6),
+          _SeedControl(controller: controller),
         ],
       ];
       if (!columns) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[...first, const SizedBox(height: 22), ...second],
+          children: <Widget>[...first, const SizedBox(height: 16), ...second],
         );
       }
       return Row(
@@ -2075,6 +2287,78 @@ class _SettingsGrid extends StatelessWidget {
       );
     },
   );
+}
+
+/// A row of digits for models that accept a reproducible seed. Empty means
+/// the provider picks a random one; the dice rolls a fresh explicit seed.
+class _SeedControl extends StatefulWidget {
+  const _SeedControl({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_SeedControl> createState() => _SeedControlState();
+}
+
+class _SeedControlState extends State<_SeedControl> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.controller.form.seed?.toString() ?? '',
+  );
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _text.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seedText = widget.controller.form.seed?.toString() ?? '';
+    if (!_focus.hasFocus && _text.text != seedText) {
+      _text.text = seedText;
+    }
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: TextField(
+            key: const ValueKey('seed-input'),
+            controller: _text,
+            focusNode: _focus,
+            keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+            ],
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+            ),
+            decoration: const InputDecoration(
+              hintText: 'Random',
+              helperText: 'Same seed + settings repeats a take',
+              helperStyle: TextStyle(fontSize: 9.5),
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            ),
+            onChanged: (value) =>
+                widget.controller.setSeed(int.tryParse(value)),
+          ),
+        ),
+        const SizedBox(width: 6),
+        IconButton(
+          tooltip: 'New random seed',
+          visualDensity: VisualDensity.compact,
+          onPressed: () {
+            final seed = math.Random().nextInt(1 << 31);
+            widget.controller.setSeed(seed);
+            _text.text = '$seed';
+          },
+          icon: const Icon(Icons.casino_rounded, size: 19),
+        ),
+      ],
+    );
+  }
 }
 
 class _UpscaleSettings extends StatelessWidget {
@@ -2184,8 +2468,8 @@ class _EnhanceSettings extends StatelessWidget {
       final columns = constraints.maxWidth > 640;
       final finish = <Widget>[
         const FieldLabel('Finish', icon: Icons.high_quality_rounded),
-        const SizedBox(height: 10),
-        _ResolutionRow(controller: controller),
+        const SizedBox(height: 6),
+        _ResolutionDropdown(controller: controller),
       ];
       final safety = <Widget>[_SafetyControl(controller: controller)];
       if (!columns) {
@@ -2216,8 +2500,11 @@ class _EnhanceSettings extends StatelessWidget {
   );
 }
 
-class _RatioStrip extends StatelessWidget {
-  const _RatioStrip({required this.controller});
+/// The aspect ratio as a console-key dropdown: the trigger wears the current
+/// ratio's drawn glyph, and each menu entry pairs its glyph with the label
+/// and a plain-words hint.
+class _RatioDropdown extends StatelessWidget {
+  const _RatioDropdown({required this.controller});
 
   final AppController controller;
 
@@ -2232,55 +2519,99 @@ class _RatioStrip extends StatelessWidget {
     '9:16': 'Vertical',
   };
 
+  static String _label(String ratio) => ratio == 'auto' ? 'Auto' : ratio;
+
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 7,
-    runSpacing: 7,
-    children: controller.availableAspectRatios.map((ratio) {
-      final selected = controller.form.aspectRatio == ratio;
-      return Tooltip(
-        message: _hints[ratio] ?? ratio,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(11),
-          onTap: () =>
-              controller.updateForm((form) => form.aspectRatio = ratio),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            width: 58,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: consoleKeyDecoration(context, selected: selected),
-            child: Column(
-              children: <Widget>[
-                SizedBox(
-                  width: 30,
-                  height: 20,
-                  child: Center(
-                    child: _RatioGlyph(
-                      ratio: ratio,
-                      color: selected
-                          ? context.colors.onPrimary
-                          : context.colors.onSurfaceVariant,
+  Widget build(BuildContext context) {
+    final current = controller.form.aspectRatio;
+    return PopupMenuButton<String>(
+      key: const ValueKey('ratio-dropdown'),
+      tooltip: 'Aspect ratio · ${_hints[current] ?? current}',
+      initialValue: current,
+      onSelected: (ratio) =>
+          controller.updateForm((form) => form.aspectRatio = ratio),
+      itemBuilder: (context) => controller.availableAspectRatios
+          .map(
+            (ratio) => PopupMenuItem<String>(
+              key: ValueKey('ratio-$ratio'),
+              value: ratio,
+              height: 40,
+              child: Row(
+                children: <Widget>[
+                  Icon(ratio == current ? Icons.check_rounded : null, size: 16),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 30,
+                    height: 20,
+                    child: Center(
+                      child: _RatioGlyph(
+                        ratio: ratio,
+                        color: context.colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  ratio == 'auto' ? 'Auto' : ratio,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: selected
-                        ? context.colors.onPrimary
-                        : context.colors.onSurface,
+                  const SizedBox(width: 10),
+                  Text(
+                    _label(ratio),
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      _hints[ratio] ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
+          )
+          .toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        decoration: consoleKeyDecoration(context, selected: false, radius: 10),
+        child: Row(
+          children: <Widget>[
+            SizedBox(
+              width: 30,
+              height: 20,
+              child: Center(
+                child: _RatioGlyph(
+                  ratio: current,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                _label(current),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.expand_more_rounded,
+              size: 17,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ],
         ),
-      );
-    }).toList(),
-  );
+      ),
+    );
+  }
 }
 
 class _RatioGlyph extends StatelessWidget {
@@ -2325,106 +2656,136 @@ class _DurationControl extends StatelessWidget {
     final rangeText = range.minimumSeconds == range.maximumSeconds
         ? '${range.minimumSeconds} seconds'
         : '${range.minimumSeconds}–${range.maximumSeconds} seconds';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        FieldLabel(
-          'Duration',
-          icon: Icons.timelapse_rounded,
-          trailing: CounterReadout(
-            form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
-            unit: form.autoDuration ? null : 's',
-          ),
-        ),
-        if (model.supportsAutoDuration)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: HardwareChoiceSwitch(
-                key: const ValueKey('duration-mode-switch'),
-                firstKey: const ValueKey('duration-mode-auto'),
-                secondKey: const ValueKey('duration-mode-manual'),
-                firstLabel: 'AUTO',
-                secondLabel: 'MANUAL',
-                firstSelected: form.autoDuration,
-                onChanged: autoLocked ? null : controller.setAutoDuration,
-              ),
+    final readout = CounterReadoutField(
+      fieldKey: const ValueKey('duration-input'),
+      value: form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
+      unit: form.autoDuration ? null : 's',
+      enabled: !(form.autoDuration && autoLocked),
+      // Starting to type is the keyboard's version of touching the slider:
+      // it drops Auto and takes manual control.
+      onEditingStarted: form.autoDuration && !autoLocked
+          ? () => controller.setAutoDuration(false)
+          : null,
+      onCommit: controller.setDurationSeconds,
+    );
+    final modeSwitch = model.supportsAutoDuration
+        ? HardwareChoiceSwitch(
+            key: const ValueKey('duration-mode-switch'),
+            firstKey: const ValueKey('duration-mode-auto'),
+            secondKey: const ValueKey('duration-mode-manual'),
+            firstLabel: 'AUTO',
+            secondLabel: 'MANUAL',
+            firstSelected: form.autoDuration,
+            onChanged: autoLocked ? null : controller.setAutoDuration,
+          )
+        : null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final inlineSwitch = modeSwitch != null && constraints.maxWidth >= 430;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            FieldLabel(
+              'Duration',
+              icon: Icons.timelapse_rounded,
+              trailing: inlineSwitch
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        modeSwitch,
+                        const SizedBox(width: 10),
+                        readout,
+                      ],
+                    )
+                  : readout,
             ),
-          ),
-        if (form.autoDuration)
-          Container(
-            key: const ValueKey('auto-duration-range'),
-            margin: const EdgeInsets.only(top: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-            decoration: BoxDecoration(
-              color: context.colors.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(11),
-              border: Border.all(color: context.colors.outlineVariant),
-            ),
-            child: Row(
-              children: <Widget>[
-                Icon(
-                  Icons.auto_awesome_rounded,
-                  size: 17,
-                  color: context.tokens.brass,
+            if (modeSwitch != null && !inlineSwitch)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: modeSwitch,
                 ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    '${model.label} can choose $rangeText at the current resolution.',
+              ),
+            if (form.autoDuration)
+              Container(
+                key: const ValueKey('auto-duration-range'),
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: context.colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: context.colors.outlineVariant),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.auto_awesome_rounded,
+                      size: 17,
+                      color: context.tokens.brass,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        '${model.label} can choose $rangeText at the current resolution.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else ...<Widget>[
+              HardwareSlider(
+                key: const ValueKey('duration-slider'),
+                min: range.minimumSeconds.toDouble(),
+                max: range.maximumSeconds.toDouble(),
+                divisions: range.divisions,
+                label: '${form.durationSeconds} s',
+                value: form.durationSeconds.toDouble(),
+                onChanged: (value) =>
+                    controller.setDurationSeconds(value.round()),
+              ),
+              Row(
+                children: <Widget>[
+                  Text(
+                    '${range.minimumSeconds} s',
                     style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 10.5,
                       color: context.colors.onSurfaceVariant,
                     ),
                   ),
-                ),
-              ],
-            ),
-          )
-        else ...<Widget>[
-          HardwareSlider(
-            key: const ValueKey('duration-slider'),
-            min: range.minimumSeconds.toDouble(),
-            max: range.maximumSeconds.toDouble(),
-            divisions: range.divisions,
-            label: '${form.durationSeconds} s',
-            value: form.durationSeconds.toDouble(),
-            onChanged: (value) => controller.setDurationSeconds(value.round()),
-          ),
-          Row(
-            children: <Widget>[
-              Text(
-                '${range.minimumSeconds} s',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${range.maximumSeconds} s',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
+                  const Spacer(),
+                  Text(
+                    '${range.maximumSeconds} s',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
-        if (form.requiresFixedDuration)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'This keyframe layout needs a fixed duration.',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: context.colors.onSurfaceVariant,
+            if (form.requiresFixedDuration)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'This keyframe layout needs a fixed duration.',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -2465,95 +2826,97 @@ class _FrameRateControl extends StatelessWidget {
   }
 }
 
-class _ResolutionRow extends StatelessWidget {
-  const _ResolutionRow({required this.controller});
+/// The output resolution as a console-key dropdown; draft mode dims every
+/// choice but the provider's HD draft tier.
+class _ResolutionDropdown extends StatelessWidget {
+  const _ResolutionDropdown({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final resolutions = controller.availableResolutions;
-      final width = resolutions.length <= 2
-          ? (constraints.maxWidth - 8) / resolutions.length
-          : (constraints.maxWidth - 8) / 2;
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: resolutions
-            .map(
-              (resolution) => SizedBox(
-                width: width,
-                child: _ResolutionButton(
-                  label: resolution.label,
-                  detail: resolution.detail,
-                  active: controller.form.resolution == resolution.id,
-                  enabled: !controller.form.draft || resolution.id == 'hd',
-                  onTap: () => controller.updateForm(
-                    (form) => form.resolution = resolution.id,
-                  ),
+  Widget build(BuildContext context) {
+    final resolutions = controller.availableResolutions;
+    final current = resolutions.firstWhere(
+      (item) => item.id == controller.form.resolution,
+      orElse: () => resolutions.first,
+    );
+    return PopupMenuButton<String>(
+      key: const ValueKey('resolution-dropdown'),
+      tooltip: 'Resolution',
+      initialValue: current.id,
+      onSelected: (id) => controller.updateForm((form) => form.resolution = id),
+      itemBuilder: (context) => resolutions.map((resolution) {
+        final enabled = !controller.form.draft || resolution.id == 'hd';
+        return PopupMenuItem<String>(
+          key: ValueKey('resolution-${resolution.id}'),
+          value: resolution.id,
+          enabled: enabled,
+          height: 44,
+          child: Opacity(
+            opacity: enabled ? 1 : .45,
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  resolution.id == current.id ? Icons.check_rounded : null,
+                  size: 16,
                 ),
-              ),
-            )
-            .toList(),
-      );
-    },
-  );
-}
-
-class _ResolutionButton extends StatelessWidget {
-  const _ResolutionButton({
-    required this.label,
-    required this.detail,
-    required this.active,
-    required this.onTap,
-    this.enabled = true,
-  });
-
-  final String label;
-  final String detail;
-  final bool active;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => Opacity(
-    opacity: enabled ? 1 : .45,
-    child: InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(11),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-        decoration: consoleKeyDecoration(context, selected: active),
-        child: Column(
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      resolution.label,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      resolution.detail,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+        decoration: consoleKeyDecoration(context, selected: false, radius: 10),
+        child: Row(
           children: <Widget>[
             Text(
-              label,
-              style: TextStyle(
-                color: active
-                    ? context.colors.onPrimary
-                    : context.colors.onSurface,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+              current.label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                current.detail,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: context.colors.onSurfaceVariant,
+                ),
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              detail,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: active
-                    ? context.colors.onPrimary.withValues(alpha: .78)
-                    : context.colors.onSurfaceVariant,
-                fontSize: 10,
-              ),
+            Icon(
+              Icons.expand_more_rounded,
+              size: 17,
+              color: context.colors.onSurfaceVariant,
             ),
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SafetyControl extends StatelessWidget {
@@ -2588,9 +2951,14 @@ class _SafetyControl extends StatelessWidget {
 }
 
 class _CostPreview extends StatelessWidget {
-  const _CostPreview({required this.controller});
+  const _CostPreview({required this.controller, this.wide = false});
 
   final AppController controller;
+
+  /// Wide layouts render the whole estimate as one console row; narrow ones
+  /// stack it. Passed in rather than measured so the panel stays usable
+  /// inside an [IntrinsicHeight] row.
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
@@ -2601,7 +2969,7 @@ class _CostPreview extends StatelessWidget {
       return TexturePanel(
         surface: PanelSurface.hunterFelt,
         stitched: true,
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: Row(
           children: <Widget>[
             Icon(Icons.memory_rounded, color: context.tokens.moneyAccent),
@@ -2619,7 +2987,7 @@ class _CostPreview extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
                     controller.selectedModel.outputKind ==
                             GenerationOutputKind.image
@@ -2628,11 +2996,11 @@ class _CostPreview extends StatelessWidget {
                     style: TextStyle(
                       color: context.tokens.onMoney,
                       fontFamily: 'Fraunces',
-                      fontSize: 19,
+                      fontSize: 17,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
                     'Uses Apple Image Playground with no provider key. On Mac, keep its generation window in front.',
                     style: TextStyle(
@@ -2680,202 +3048,326 @@ class _CostPreview extends StatelessWidget {
                       : estimate.minimumUsd))
               .clamp(0, double.infinity)
               .toDouble();
+    final basis =
+        '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
+        '${estimate.basis == 'artcraft-live-quote'
+            ? 'Live quote calculated from the current prompt and settings.'
+            : estimate.basis == 'input-derived-published-rate'
+            ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
+            : 'Calculated from the current pricing settings at the provider’s published or live rate.'}';
+    final badge = Container(
+      width: 30,
+      height: 30,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: tokens.moneyAccent),
+        color: tokens.onMoney.withValues(alpha: .05),
+      ),
+      child: Icon(Icons.toll_rounded, color: tokens.moneyAccent, size: 15),
+    );
+    final charge = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'ESTIMATED CHARGE',
+          style: TextStyle(
+            color: tokens.onMoneyMuted,
+            fontSize: 8.5,
+            letterSpacing: 1.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          formatUsdAmountRange(estimate.minimumUsd, estimate.maximumUsd),
+          style: TextStyle(
+            fontFamily: 'Fraunces',
+            color: tokens.onMoney,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+    final rate = Text(
+      rateLabel ?? controller.selectedModel.label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontFamily: 'Fraunces',
+        color: tokens.moneyAccent,
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    final credits = providerUnits
+        ? Text(
+            '${formatCreditRange(estimate.providerUnitsMinimum!, estimate.providerUnitsMaximum!)} credits',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: tokens.onMoneyMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          )
+        : null;
+    final availableValue = controller.credits == null
+        ? (controller.hasApiKey
+              ? account?.balanceLabel ?? 'Connected'
+              : 'Add API key')
+        : balanceUsesCredits
+        ? '${formatCredits(controller.credits!)} credits'
+        : formatUsdAmount(controller.credits!);
+    // A provider that only shows its balance in its own console gets a real
+    // link instead of an inert caption.
+    final availableTap =
+        controller.credits == null &&
+            controller.hasApiKey &&
+            account?.balanceLabel != null
+        ? () => unawaited(
+            launchUrl(Uri.parse(controller.selectedProvider.consoleUrl)),
+          )
+        : null;
+    final afterValue = afterMin == null || afterMax == null
+        ? '—'
+        : balanceUsesCredits
+        ? '${formatCreditRange(afterMin, afterMax)} credits'
+        : formatUsdAmountRange(afterMin, afterMax);
+    final rateCard = Tooltip(
+      message: basis,
+      child: TextButton(
+        onPressed: () => unawaited(
+          launchUrl(Uri.parse(controller.selectedProvider.pricingUrl)),
+        ),
+        style: TextButton.styleFrom(
+          foregroundColor: tokens.moneyAccent,
+          minimumSize: const Size(0, 26),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        child: const Text('Rate card ↗'),
+      ),
+    );
     return TexturePanel(
       surface: PanelSurface.hunterFelt,
       stitched: true,
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Wrap(
-            spacing: 20,
-            runSpacing: 10,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Row(
-                mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Builder(
+        builder: (context) {
+          // One console row when the felt is wide enough; the tight column
+          // otherwise. Align keeps the content vertically centered when the
+          // save-destination panel beside it is taller.
+          if (wide) {
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
                 children: <Widget>[
-                  Container(
-                    width: 38,
-                    height: 38,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: tokens.moneyAccent),
-                      color: tokens.onMoney.withValues(alpha: .05),
-                    ),
-                    child: Icon(
-                      Icons.toll_rounded,
-                      color: tokens.moneyAccent,
-                      size: 17,
+                  badge,
+                  const SizedBox(width: 10),
+                  charge,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Flexible(child: rate),
+                            if (credits != null) ...<Widget>[
+                              const SizedBox(width: 8),
+                              Flexible(child: credits),
+                            ],
+                          ],
+                        ),
+                        if (calculation != null) ...<Widget>[
+                          const SizedBox(height: 2),
+                          Text(
+                            calculation,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: tokens.onMoneyMuted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   const SizedBox(width: 12),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 230),
+                    constraints: const BoxConstraints(maxWidth: 300),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: <Widget>[
-                        Text(
-                          'ESTIMATED CHARGE',
-                          style: TextStyle(
-                            color: tokens.onMoneyMuted,
-                            fontSize: 9,
-                            letterSpacing: 1.6,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        _BalanceLine(
+                          label: 'Available now',
+                          value: availableValue,
+                          onTap: availableTap,
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          formatUsdAmountRange(
-                            estimate.minimumUsd,
-                            estimate.maximumUsd,
-                          ),
-                          style: TextStyle(
-                            fontFamily: 'Fraunces',
-                            color: tokens.onMoney,
-                            fontSize: 21,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        _BalanceLine(
+                          label: 'Estimated after',
+                          value: afterValue,
                         ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  rateCard,
+                ],
+              ),
+            );
+          }
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  badge,
+                  const SizedBox(width: 10),
+                  Expanded(child: charge),
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: <Widget>[
+                        rate,
+                        if (credits != null) ...<Widget>[
+                          const SizedBox(height: 1),
+                          credits,
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              if (calculation != null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  calculation,
+                  style: TextStyle(
+                    color: tokens.onMoneyMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 7),
+              Divider(height: 1, color: tokens.onMoney.withValues(alpha: .14)),
+              const SizedBox(height: 7),
+              Row(
                 children: <Widget>[
-                  Text(
-                    rateLabel ?? controller.selectedModel.label,
-                    style: TextStyle(
-                      fontFamily: 'Fraunces',
-                      color: tokens.moneyAccent,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: _BalanceLine(
+                      label: 'Available now',
+                      value: availableValue,
+                      onTap: availableTap,
+                      vertical: true,
                     ),
                   ),
-                  if (providerUnits) ...<Widget>[
-                    const SizedBox(height: 2),
-                    Text(
-                      '${formatCreditRange(estimate.providerUnitsMinimum!, estimate.providerUnitsMaximum!)} credits',
-                      style: TextStyle(
-                        color: tokens.onMoneyMuted,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _BalanceLine(
+                      label: 'Estimated after',
+                      value: afterValue,
+                      vertical: true,
                     ),
-                  ],
+                  ),
+                  rateCard,
                 ],
               ),
-            ],
-          ),
-          if (calculation != null) ...<Widget>[
-            const SizedBox(height: 10),
-            Text(
-              calculation,
-              style: TextStyle(
-                color: tokens.onMoneyMuted,
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          Divider(color: tokens.onMoney.withValues(alpha: .14)),
-          const SizedBox(height: 11),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: _BalanceLine(
-                  label: 'Available now',
-                  value: controller.credits == null
-                      ? (controller.hasApiKey
-                            ? account?.balanceLabel ?? 'Connected'
-                            : 'Add API key')
-                      : balanceUsesCredits
-                      ? '${formatCredits(controller.credits!)} credits'
-                      : formatUsdAmount(controller.credits!),
-                ),
-              ),
-              Expanded(
-                child: _BalanceLine(
-                  label: 'Estimated after',
-                  value: afterMin == null || afterMax == null
-                      ? '—'
-                      : balanceUsesCredits
-                      ? '${formatCreditRange(afterMin, afterMax)} credits'
-                      : formatUsdAmountRange(afterMin, afterMax),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 11),
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
+              const SizedBox(height: 4),
               Text(
-                '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
-                '${estimate.basis == 'artcraft-live-quote'
-                    ? 'Live quote calculated from the current prompt and settings.'
-                    : estimate.basis == 'input-derived-published-rate'
-                    ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
-                    : 'Calculated from the current pricing settings at the provider’s published or live rate.'}',
-                style: TextStyle(color: tokens.onMoneyMuted, fontSize: 10.5),
-              ),
-              TextButton(
-                onPressed: () => unawaited(
-                  launchUrl(Uri.parse(controller.selectedProvider.pricingUrl)),
-                ),
-                style: TextButton.styleFrom(
-                  foregroundColor: tokens.moneyAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  textStyle: const TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                child: const Text('Rate card ↗'),
+                basis,
+                style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
               ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
 }
 
 class _BalanceLine extends StatelessWidget {
-  const _BalanceLine({required this.label, required this.value});
+  const _BalanceLine({
+    required this.label,
+    required this.value,
+    this.onTap,
+    this.vertical = false,
+  });
 
   final String label;
   final String value;
 
+  /// Present when the value is a provider caption that should open the
+  /// provider console rather than sit inert.
+  final VoidCallback? onTap;
+
+  /// Stacks the label above the value for narrow layouts. Horizontal lines
+  /// need a bounded width so the flexible value can shrink.
+  final bool vertical;
+
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      Text(
-        label.toUpperCase(),
-        style: TextStyle(
-          color: context.tokens.onMoneyMuted,
-          fontSize: 8.5,
-          letterSpacing: 1.2,
-          fontWeight: FontWeight.w700,
-        ),
+  Widget build(BuildContext context) {
+    final labelText = Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        color: context.tokens.onMoneyMuted,
+        fontSize: 8.5,
+        letterSpacing: 1.2,
+        fontWeight: FontWeight.w700,
       ),
-      const SizedBox(height: 3),
-      Text(
-        value,
-        style: TextStyle(
-          color: context.tokens.onMoney,
-          fontSize: 12.5,
-          fontWeight: FontWeight.w700,
-        ),
+    );
+    final valueText = Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: context.tokens.onMoney,
+        fontSize: 11.5,
+        fontWeight: FontWeight.w700,
+        decoration: onTap == null ? null : TextDecoration.underline,
+        decorationColor: context.tokens.onMoneyMuted,
       ),
-    ],
-  );
+    );
+    final line = vertical
+        ? Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[labelText, const SizedBox(height: 2), valueText],
+          )
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              labelText,
+              const SizedBox(width: 6),
+              Flexible(child: valueText),
+            ],
+          );
+    if (onTap == null) return line;
+    return Tooltip(
+      message: 'Open provider console',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: onTap,
+        child: line,
+      ),
+    );
+  }
 }
 
 class _ComposerFooter extends StatelessWidget {
@@ -2986,36 +3478,55 @@ class _RecentWork extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      Row(
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                const Eyebrow('On the branch'),
-                const SizedBox(height: 6),
-                Text(
-                  'Recent work',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-              ],
-            ),
-          ),
-          TextButton(
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final title = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Eyebrow('On the branch'),
+              const SizedBox(height: 6),
+              Text(
+                'Recent work',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+            ],
+          );
+          final toggle = GenerationViewToggle(
+            keyPrefix: 'recent-work-view',
+            value: controller.recentWorkViewMode,
+            onChanged: (value) =>
+                unawaited(controller.setRecentWorkViewMode(value)),
+          );
+          final library = TextButton(
             onPressed: () => unawaited(controller.navigate(AppSection.library)),
             child: const Text('View library'),
-          ),
-        ],
-      ),
-      const SizedBox(height: 8),
-      Align(
-        alignment: Alignment.centerRight,
-        child: GenerationViewToggle(
-          keyPrefix: 'recent-work-view',
-          value: controller.recentWorkViewMode,
-          onChanged: (value) =>
-              unawaited(controller.setRecentWorkViewMode(value)),
-        ),
+          );
+          // Wide headers carry the view toggle inline so the first card
+          // starts a row sooner; narrow ones keep it on its own line.
+          if (constraints.maxWidth >= 520) {
+            return Row(
+              children: <Widget>[
+                Expanded(child: title),
+                toggle,
+                const SizedBox(width: 10),
+                library,
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(child: title),
+                  library,
+                ],
+              ),
+              const SizedBox(height: 8),
+              Align(alignment: Alignment.centerRight, child: toggle),
+            ],
+          );
+        },
       ),
       const SizedBox(height: 12),
       if (controller.visibleGenerations.isEmpty)

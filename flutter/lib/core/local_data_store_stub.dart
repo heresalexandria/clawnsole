@@ -8,6 +8,15 @@ class LocalDataStore implements DurableDataStore {
     'Browser builds use the Clawnsole local companion service.',
   );
 
+  Future<String> dataDirectoryPath() =>
+      throw UnsupportedError('Browser builds use the local companion.');
+
+  Future<bool> hasLibraryAt(String directory) =>
+      throw UnsupportedError('Browser builds use the local companion.');
+
+  Future<void> relocate(String directory, {bool useExistingLibrary = false}) =>
+      throw UnsupportedError('Browser builds use the local companion.');
+
   @override
   Future<StoredData> read() => throw UnsupportedError(
     'Browser builds use the Clawnsole local companion service.',

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/atlas_cloud_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
@@ -1165,7 +1166,14 @@ void main() {
       );
       expect(wan['resolution'], '1080P');
       expect(wan['ratio'], '9:16');
+      expect(wan['seed'], -1);
       expect(wan, isNot(contains('generate_audio')));
+
+      final seededWan = api.generationPayload(
+        'alibaba/wan-2.7/text-to-video',
+        <String, Object?>{...common, 'seed': 424242},
+      );
+      expect(seededWan['seed'], 424242);
 
       final veo = api.generationPayload(
         'google/veo3.1-fast/image-to-video',
@@ -1258,5 +1266,175 @@ void main() {
     expect(observation?.realizedUsd, 1.75);
     expect(observation?.quotedUsd, 1.70);
     expect(observation?.variancePercent, closeTo(2.941, .001));
+  });
+
+  test('recorded spend counts settled charges only', () {
+    final now = DateTime.utc(2026, 8, 20);
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 10,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    );
+    Generation build({
+      required String status,
+      double? realizedCostUsd,
+      String? realizedCostSource,
+      double? cost,
+    }) => Generation(
+      localId: 'spend-$status-${realizedCostSource ?? 'none'}',
+      provider: 'atlas',
+      billingUnit: 'usd',
+      status: status,
+      prompt: 'Spend accounting',
+      mode: VideoMode.t2v,
+      config: config,
+      createdAt: now,
+      updatedAt: now,
+      realizedCostUsd: realizedCostUsd,
+      realizedCostSource: realizedCostSource,
+      cost: cost,
+    );
+
+    // In-flight work is not settled, even with a submit-time observation.
+    expect(
+      countsTowardSpend(
+        build(
+          status: 'Pending',
+          realizedCostUsd: 1.2,
+          realizedCostSource: 'balance-delta',
+          cost: 1.2,
+        ),
+      ),
+      isFalse,
+    );
+    expect(countsTowardSpend(build(status: 'submitting')), isFalse);
+    expect(countsTowardSpend(build(status: 'Unknown')), isFalse);
+
+    // Delivered generations always count, whatever recorded the cost.
+    expect(
+      countsTowardSpend(
+        build(
+          status: 'Ready',
+          realizedCostUsd: 1.2,
+          realizedCostSource: 'balance-delta',
+        ),
+      ),
+      isTrue,
+    );
+    expect(countsTowardSpend(build(status: 'Ready', cost: 1.2)), isTrue);
+
+    // Failures with only a submit-time observation are commonly refunded.
+    for (final status in generationFailureStatuses) {
+      expect(
+        countsTowardSpend(
+          build(
+            status: status,
+            realizedCostUsd: 1.2,
+            realizedCostSource: 'balance-delta',
+            cost: 1.2,
+          ),
+        ),
+        isFalse,
+        reason: '$status with a submit-time cost must not count',
+      );
+    }
+    expect(
+      countsTowardSpend(
+        build(
+          status: 'Error',
+          realizedCostUsd: 1.2,
+          realizedCostSource: 'provider-reported',
+          cost: 1.2,
+        ),
+      ),
+      isFalse,
+    );
+
+    // Failures whose terminal poll confirmed the charge count.
+    expect(
+      countsTowardSpend(
+        build(
+          status: 'Failed',
+          realizedCostUsd: 1.2,
+          realizedCostSource: terminalReportedCostSource,
+          cost: 1.2,
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      countsTowardSpend(
+        build(
+          status: 'Error',
+          realizedCostUsd: 1.2,
+          realizedCostSource: terminalBalanceDeltaCostSource,
+          cost: 1.2,
+        ),
+      ),
+      isTrue,
+    );
+  });
+
+  test('terminal polls settle the realized cost and mark its source', () {
+    final now = DateTime.utc(2026, 8, 20);
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 10,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    );
+    final submitted = Generation(
+      localId: 'terminal-settle',
+      provider: 'atlas',
+      billingUnit: 'usd',
+      status: 'Pending',
+      prompt: 'Terminal settlement',
+      mode: VideoMode.t2v,
+      config: config,
+      createdAt: now,
+      updatedAt: now,
+      creditsBefore: 10,
+      cost: 1.5,
+      realizedCostUsd: 1.5,
+      realizedCostSource: 'balance-delta',
+    );
+
+    final reported = resolveProviderCost(submitted, <String, Object?>{
+      'status': 'Failed',
+      'actual_cost': .8,
+    }, terminal: true);
+    expect(reported.usd, .8);
+    expect(reported.source, terminalReportedCostSource);
+
+    final measured = resolveProviderCost(
+      submitted,
+      <String, Object?>{'status': 'Failed'},
+      balanceAfter: 8.5,
+      terminal: true,
+    );
+    expect(measured.usd, 1.5);
+    expect(measured.source, terminalBalanceDeltaCostSource);
+
+    // A refunded failure leaves only the submit-time observation, which the
+    // spend accounting then excludes.
+    final refunded = resolveProviderCost(
+      submitted,
+      <String, Object?>{'status': 'Failed'},
+      balanceAfter: 10,
+      terminal: true,
+    );
+    expect(refunded.usd, 1.5);
+    expect(refunded.source, 'balance-delta');
+
+    // Non-terminal polls keep the submit-time source untouched.
+    final pending = resolveProviderCost(submitted, <String, Object?>{
+      'status': 'Pending',
+    });
+    expect(pending.source, 'balance-delta');
   });
 }

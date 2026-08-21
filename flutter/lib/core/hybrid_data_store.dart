@@ -172,21 +172,14 @@ class HybridDataStore implements DurableDataStore {
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
   ]) async {
-    final localGenerations = generations
-        .where((item) => item.storage == LibraryStorage.local)
-        .toList();
-    final driveGenerations = generations
-        .where((item) => item.storage == LibraryStorage.drive)
-        .toList();
-    final localReferences = savedReferences
-        .where((item) => item.storage == LibraryStorage.local)
-        .toList();
-    final driveReferences = savedReferences
-        .where((item) => item.storage == LibraryStorage.drive)
-        .toList();
-    await _local.pruneAssets(localGenerations, localReferences);
+    // Both stores compute their retention sets from AssetReference.kind, so
+    // hand each of them the ENTIRE dataset. Partitioning by the record's
+    // storage tag would let a storage/kind mismatch (a Drive-tagged record
+    // still holding a local-kind asset, or the reverse) delete a file that is
+    // still referenced.
+    await _local.pruneAssets(generations, savedReferences);
     if (isDriveConnected) {
-      await _drive.pruneAssets(driveGenerations, driveReferences);
+      await _drive.pruneAssets(generations, savedReferences);
     }
   }
 
@@ -355,6 +348,42 @@ class HybridDataStore implements DurableDataStore {
       generations: copiedGenerations,
       references: copiedReferences,
     );
+  }
+
+  /// Copies everything local into Drive and, only after verifying that every
+  /// local record now has a Drive counterpart, removes the local originals.
+  /// The Drive folder linkage in the local file survives so the connection
+  /// resumes on the next launch. A partial copy aborts before any deletion.
+  Future<GoogleDriveCopyCounts> moveLocalToDrive() async {
+    final copied = await copyLocalToDrive();
+    final current = await read();
+    final driveGenerationIds = current.generations
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.localId)
+        .toSet();
+    final driveReferenceIds = current.savedReferences
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.id)
+        .toSet();
+    final unverified =
+        current.generations.any(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              !driveGenerationIds.contains('drive-${item.localId}'),
+        ) ||
+        current.savedReferences.any(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              !driveReferenceIds.contains('drive-${item.id}'),
+        );
+    if (unverified) {
+      throw StateError(
+        'Some local items were not confirmed in Google Drive, so the local '
+        'library was kept.',
+      );
+    }
+    await deleteLocalLibrary();
+    return copied;
   }
 
   Future<Generation> _copyGeneration(

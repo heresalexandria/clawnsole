@@ -59,7 +59,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   Timer? _periodicUpdateCheck;
   bool _requiredUpdateDialogOpen = false;
   String? _lastNotifiedUpdateVersion;
-  String? _lastNotice;
+  int _lastNoticeSequence = 0;
   ThemeMode _themeMode = ThemeMode.system;
 
   @override
@@ -212,8 +212,11 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     home: AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        if (controller.notice != null && controller.notice != _lastNotice) {
-          _lastNotice = controller.notice;
+        // Compare on the notice sequence, not the text: an identical message
+        // shown twice in a row (a repeated failure) must surface both times.
+        if (controller.notice != null &&
+            controller.noticeSequence != _lastNoticeSequence) {
+          _lastNoticeSequence = controller.noticeSequence;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!context.mounted || controller.notice == null) return;
             ScaffoldMessenger.of(context)

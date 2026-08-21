@@ -1,3 +1,18 @@
+/// A human-readable notice for a retained asset whose file is gone from disk.
+/// Raw paths and exception details belong in logs, not in this message.
+String missingLocalAssetMessage(String? contentType) {
+  final normalized = contentType?.split(';').first.trim().toLowerCase() ?? '';
+  final noun = normalized.startsWith('video/')
+      ? 'video'
+      : normalized.startsWith('image/')
+      ? 'image'
+      : normalized.startsWith('audio/')
+      ? 'audio'
+      : 'media';
+  return "The saved $noun file is missing from this device's library storage. "
+      'Check the library storage settings and your Google Drive connection.';
+}
+
 String retainedAssetExtension(String? contentType, String label) {
   final normalized = contentType?.split(';').first.trim().toLowerCase();
   return switch (normalized) {

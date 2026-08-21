@@ -107,6 +107,8 @@ contextBridge.exposeInMainWorld("clawnsole", {
     ipcRenderer.invoke("clawnsole:vault:settings", action, value),
   openExternalUrl: (url, purpose) =>
     ipcRenderer.invoke("clawnsole:external:open", url, purpose),
+  revealDataFolder: () => ipcRenderer.invoke("clawnsole:data:reveal"),
+  chooseDataDirectory: () => ipcRenderer.invoke("clawnsole:data:choose"),
   onUpdateEvent: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);

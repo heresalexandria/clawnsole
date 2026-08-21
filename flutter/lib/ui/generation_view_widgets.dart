@@ -300,7 +300,10 @@ class _DenseGenerationPreview extends StatelessWidget {
         if (hasMedia)
           GenerationMedia(controller: controller, item: item)
         else if (generatingVideo)
-          GenerationLoadingPlaceholder(item: item)
+          GenerationLoadingPlaceholder(
+            item: item,
+            style: controller.generationPlaceholderStyle,
+          )
         else
           GenerationInputPreview(controller: controller, item: item),
         if (item.isWorking && !item.isStatusUnavailable)

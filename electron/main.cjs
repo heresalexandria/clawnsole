@@ -30,6 +30,7 @@ const {
   proxySettingsVault,
 } = require("./lib/companion-session.cjs");
 const updater = require("./lib/updater.cjs");
+const dataLocation = require("./lib/data-location.cjs");
 const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
 const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
@@ -71,7 +72,7 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
     "--port",
     String(port),
     "--data-file",
-    path.join(app.getPath("userData"), "clawnsole.json"),
+    dataLocation.dataFile(app.getPath("userData")),
     "--web-root",
     rendererDirectory,
     "--secure-bootstrap",
@@ -291,6 +292,75 @@ async function startUpdateFromRenderer() {
   }
 }
 
+// Moving the companion's data directory must happen here: the companion
+// reads --data-file once at startup, so after the files are migrated the app
+// records the choice and relaunches against the new location. Confirmation
+// dialogs are native so the flow survives even a wedged renderer.
+async function chooseDataDirectory() {
+  const userData = app.getPath("userData");
+  const current = dataLocation.dataDirectory(userData);
+  const openOptions = {
+    title: "Choose a Clawnsole Data Folder",
+    buttonLabel: "Use This Folder",
+    defaultPath: current,
+    properties: ["openDirectory", "createDirectory"],
+  };
+  const selection = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, openOptions)
+    : await dialog.showOpenDialog(openOptions);
+  const target = selection.canceled ? null : selection.filePaths[0];
+  if (!target) return { ok: true, canceled: true };
+  const inspection = dataLocation.inspectRelocationTarget(current, target);
+  if (!inspection.ok) return { ok: false, error: inspection.error };
+  if (inspection.hasExistingLibrary) {
+    const choice = await showMessage({
+      type: "question",
+      title: "Use the Existing Library?",
+      message: "That folder already contains a Clawnsole library.",
+      detail: "Clawnsole can reopen using the library in that folder. "
+        + "The library currently in use stays where it is.",
+      buttons: ["Use Existing Library", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice.response !== 0) return { ok: true, canceled: true };
+  } else {
+    const choice = await showMessage({
+      type: "question",
+      title: "Move Clawnsole Data?",
+      message: "Move Clawnsole's data to the selected folder?",
+      detail: `Clawnsole will copy its library and assets to ${target}, then `
+        + `reopen from there. The current copy stays in ${current} until you `
+        + "delete it.",
+      buttons: ["Move and Reopen", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice.response !== 0) return { ok: true, canceled: true };
+    try {
+      dataLocation.copyLibrary(current, target);
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  try {
+    dataLocation.rememberDataDirectory(userData, target);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  isQuitting = true;
+  app.relaunch();
+  // Let the reply reach the renderer before the app exits.
+  setTimeout(() => app.quit(), 150).unref();
+  return { ok: true, moved: true };
+}
+
 // The in-app update dialog only appears when the preload reaches the renderer
 // and the Flutter app binds to it, so the smoke test treats either half being
 // absent as a packaging failure. Flutter boots asynchronously, so poll.
@@ -306,11 +376,14 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.disconnectGoogleDrive,"
       + " typeof window.clawnsole?.settingsVault,"
       + " typeof window.clawnsole?.openExternalUrl,"
+      + " typeof window.clawnsole?.revealDataFolder,"
+      + " typeof window.clawnsole?.chooseDataDirectory,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
     if (
       shape
-      === "function,function,function,function,function,function,function,true"
+      === "function,function,function,function,function,function,function,"
+        + "function,function,true"
     ) {
       return;
     }
@@ -346,6 +419,21 @@ function installRendererBridge() {
     if (!isAllowedExplicitExternalUrl(url, purpose)) return false;
     await shell.openExternal(url);
     return true;
+  });
+  ipcMain.handle("clawnsole:data:reveal", async (event) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
+      return { ok: false, error: "The data-folder request was rejected." };
+    }
+    const failure = await shell.openPath(
+      dataLocation.dataDirectory(app.getPath("userData")),
+    );
+    return failure ? { ok: false, error: failure } : { ok: true };
+  });
+  ipcMain.handle("clawnsole:data:choose", (event) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
+      return { ok: false, error: "The data-folder request was rejected." };
+    }
+    return chooseDataDirectory();
   });
 }
 

@@ -145,6 +145,11 @@ abstract interface class GoogleDriveGateway {
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
   });
+
+  /// Moves the whole local library into Drive: copies every local record and
+  /// retained asset, verifies each copy exists, then removes the local
+  /// originals. The Drive folder linkage stays in the local data file.
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive();
 }
 
 class GoogleDriveCopyResult {

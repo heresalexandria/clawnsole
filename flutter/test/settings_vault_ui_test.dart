@@ -171,6 +171,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(gateway.values.last, ('sync', ''));
 
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('settings-vault-change-passphrase')),
+      );
       await tester.tap(
         find.byKey(const ValueKey('settings-vault-change-passphrase')),
       );
@@ -190,6 +193,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(gateway.values.last, ('changePassphrase', changed));
 
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('settings-vault-forget')),
+      );
       await tester.tap(find.byKey(const ValueKey('settings-vault-forget')));
       await tester.pumpAndSettle();
       await tester.tap(
@@ -361,6 +367,10 @@ class _VaultGateway
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
   }) async =>
+      GoogleDriveCopyResult(snapshot: _snapshot, generations: 0, references: 0);
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async =>
       GoogleDriveCopyResult(snapshot: _snapshot, generations: 0, references: 0);
 
   @override

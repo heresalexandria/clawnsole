@@ -505,10 +505,11 @@ class AtlasCloudApi {
     }
 
     if (model.startsWith('alibaba/wan-2.7')) {
+      final seed = input['seed'];
       payload.addAll(<String, Object?>{
         'resolution': _upperResolution(resolution, superResolution: true),
         'prompt_extend': true,
-        'seed': -1,
+        'seed': seed is int ? seed : -1,
       });
       if (model.contains('/text-to-video')) {
         payload['ratio'] = aspectRatio == 'auto' ? '16:9' : aspectRatio;

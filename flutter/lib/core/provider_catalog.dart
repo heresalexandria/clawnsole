@@ -73,6 +73,7 @@ class VideoModelDefinition {
     this.supportsDraft = false,
     this.supportsTimedKeyframes = false,
     this.supportsFrameRate = false,
+    this.supportsSeed = false,
     this.outputKind = GenerationOutputKind.video,
   });
 
@@ -117,6 +118,9 @@ class VideoModelDefinition {
   final bool supportsDraft;
   final bool supportsTimedKeyframes;
   final bool supportsFrameRate;
+
+  /// The wire API accepts a reproducible random seed for this model.
+  final bool supportsSeed;
   final GenerationOutputKind outputKind;
 
   String get canonicalId => canonicalModelId ?? id;
@@ -431,7 +435,10 @@ const artCraftProvider = VideoProviderDefinition(
   description:
       'A broad, live video model catalog behind ArtCraft’s API-key Omni API.',
   consoleUrl: 'https://app.getartcraft.com/',
-  docsUrl: 'https://storyteller-docs.netlify.app/',
+  // ArtCraft's branded Omni API doc; it links onward to the unbranded
+  // storyteller-docs.netlify.app reference, which stays allowlisted.
+  docsUrl:
+      'https://github.com/storytold/artcraft/blob/main/_docs/omni_api/artcraft_omni_api.md',
   pricingUrl: 'https://app.getartcraft.com/pricing',
   pricingSource:
       'Live configuration quotes with published defaults · \$0.01/credit',
@@ -898,6 +905,7 @@ class _AtlasRouteModel extends VideoModelDefinition {
     required super.usdPerSecond,
     super.durationStep = 1,
     super.supportsAudio = true,
+    super.supportsSeed = false,
     bool imageRoute = false,
     bool supportsEndFrame = false,
   }) : super(
@@ -1216,6 +1224,7 @@ const atlasProvider = VideoProviderDefinition(
       minDuration: 2,
       maxDuration: 15,
       usdPerSecond: .10,
+      supportsSeed: true,
     ),
     _AtlasRouteModel(
       id: 'alibaba/wan-2.7/image-to-video',
@@ -1227,6 +1236,7 @@ const atlasProvider = VideoProviderDefinition(
       minDuration: 2,
       maxDuration: 15,
       usdPerSecond: .10,
+      supportsSeed: true,
       imageRoute: true,
       supportsEndFrame: true,
     ),

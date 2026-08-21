@@ -27,6 +27,7 @@ import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
+import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/references_screen.dart';
@@ -463,6 +464,10 @@ void main() {
 
       expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
       expect(
+        controller.generationPlaceholderStyle,
+        GenerationPlaceholderStyle.broadcastStatic,
+      );
+      expect(
         find.byKey(const ValueKey('generation-loading-static-portrait-video')),
         findsOneWidget,
       );
@@ -475,6 +480,76 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('applies the Cyclone preference across dense render paths', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 20, 12);
+    final item = Generation(
+      localId: 'styled-video',
+      status: 'Pending',
+      progress: 18,
+      prompt: 'Ribbons take over the placeholder.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController()
+      ..generationPlaceholderStyle = GenerationPlaceholderStyle.cyclone;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 320,
+              child: ActivityCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-cyclone-styled-video')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-static-styled-video')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-cyclone-styled-video')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-loading-static-styled-video')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
 
   testWidgets('keeps Cyclone available as a generation placeholder', (
     tester,
@@ -1820,6 +1895,350 @@ void main() {
       find.byKey(const ValueKey('duration-slider')),
     );
     expect((slider.min, slider.max, slider.divisions), (6, 10, 2));
+    controller.dispose();
+  });
+
+  testWidgets('duration readout accepts typed seconds and clamps to range', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final input = find.byKey(const ValueKey('duration-input'));
+    expect(input, findsOneWidget);
+
+    // Typing commits on submit and snaps into the model's range.
+    await tester.enterText(input, '999');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 20);
+
+    await tester.enterText(input, '2');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 5);
+
+    // Starting to type while AUTO is active takes manual control, exactly
+    // like touching the slider.
+    await tester.tap(find.byKey(const ValueKey('duration-mode-auto')));
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isTrue);
+    await tester.enterText(input, '7');
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isFalse);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 7);
+    expect(find.byKey(const ValueKey('duration-slider')), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('frame and finish dropdowns choose ratio and resolution', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The trigger wears the drawn glyph for the current ratio.
+    final ratioTrigger = find.byKey(const ValueKey('ratio-dropdown'));
+    await tester.ensureVisible(ratioTrigger);
+    await tester.tap(ratioTrigger);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ratio-21:9')));
+    await tester.pumpAndSettle();
+    expect(controller.form.aspectRatio, '21:9');
+
+    final resolutionTrigger = find.byKey(const ValueKey('resolution-dropdown'));
+    await tester.ensureVisible(resolutionTrigger);
+    await tester.tap(resolutionTrigger);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('resolution-fhd')));
+    await tester.pumpAndSettle();
+    expect(controller.form.resolution, 'fhd');
+
+    // Draft mode dims every choice but the provider's HD draft tier.
+    controller.updateForm((form) => form.draft = true);
+    await tester.pumpAndSettle();
+    await tester.tap(resolutionTrigger);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const ValueKey('resolution-fhd')),
+          )
+          .enabled,
+      isFalse,
+    );
+    expect(
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const ValueKey('resolution-hd')),
+          )
+          .enabled,
+      isTrue,
+    );
+    controller.dispose();
+  });
+
+  testWidgets('seed control appears only for Wan and survives reuse', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1600));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'atlas',
+            model: 'alibaba/wan-2.7/text-to-video',
+          ),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final seedInput = find.byKey(const ValueKey('seed-input'));
+    expect(seedInput, findsOneWidget);
+    await tester.ensureVisible(seedInput);
+    await tester.enterText(seedInput, '424242');
+    await tester.pump();
+    expect(controller.form.seed, 424242);
+    expect(controller.buildInputForTesting()['seed'], 424242);
+
+    // The dice rolls a fresh explicit seed; clearing returns to random.
+    await tester.ensureVisible(find.byTooltip('New random seed'));
+    await tester.tap(find.byTooltip('New random seed'));
+    await tester.pump();
+    expect(controller.form.seed, isNotNull);
+    await tester.enterText(seedInput, '');
+    await tester.pump();
+    expect(controller.form.seed, isNull);
+    expect(controller.buildInputForTesting(), isNot(contains('seed')));
+
+    // Reuse restores a stored seed with the rest of the request.
+    final now = DateTime.utc(2026, 8, 20);
+    await controller.reuse(
+      Generation(
+        localId: 'wan-seeded',
+        provider: 'atlas',
+        model: 'alibaba/wan-2.7/text-to-video',
+        status: 'Ready',
+        prompt: 'Same take again.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+          seed: 90210,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.selectedModelId, 'alibaba/wan-2.7/text-to-video');
+    expect(controller.form.seed, 90210);
+    expect(controller.buildInputForTesting()['seed'], 90210);
+
+    // A model without seed support hides the control and clears the value.
+    await controller.selectModel('google/veo3.1-fast/text-to-video');
+    await tester.pumpAndSettle();
+    expect(controller.form.seed, isNull);
+    expect(find.byKey(const ValueKey('seed-input')), findsNothing);
+
+    // The stored config round-trips seed through JSON, tolerating absence.
+    const seeded = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 8,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+      seed: 90210,
+    );
+    expect(GenerationConfig.fromJson(seeded.toJson()).seed, 90210);
+    expect(
+      GenerationConfig.fromJson(
+        const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ).toJson(),
+      ).seed,
+      isNull,
+    );
+    controller.dispose();
+  });
+
+  testWidgets('create screen fits above the fold at 1440x900', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Short viewports drop the heading description and tighten spacing.
+    expect(find.textContaining('Direct one continuous moment'), findsNothing);
+
+    // Cost and save-destination share one row at desktop widths.
+    expect(find.byKey(const ValueKey('cost-destination-row')), findsOneWidget);
+
+    // Every generation option through Generate sits above the fold, with
+    // the Recent work header peeking in below — all without scrolling.
+    final generate = find.text('Generate video');
+    expect(generate, findsOneWidget);
+    expect(tester.getBottomLeft(generate).dy, lessThan(900));
+    final recentHeader = find.text('Recent work');
+    expect(recentHeader, findsOneWidget);
+    expect(tester.getTopLeft(recentHeader).dy, lessThan(900));
+    controller.dispose();
+  });
+
+  testWidgets('console-only balances link to the provider console', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _ProviderMemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'artcraft',
+            model: 'seedance_2p0',
+          ),
+          hasApiKey: true,
+          connectedProviders: <String>{'artcraft'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        const ProviderAccountStatus(
+          provider: 'artcraft',
+          currency: 'credits',
+          balanceLabel: 'Open ArtCraft to view balance ↗',
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open ArtCraft to view balance ↗'), findsOneWidget);
+    final link = find.byTooltip('Open provider console');
+    expect(link, findsOneWidget);
+    final ink = tester.widget<InkWell>(
+      find.descendant(of: link, matching: find.byType(InkWell)),
+    );
+    expect(ink.onTap, isNotNull);
     controller.dispose();
   });
 
@@ -3636,6 +4055,9 @@ void main() {
 
     expect(find.byType(StatusBadge), findsNWidgets(4));
 
+    // Recent work sits below the full-width composer, so bring its view
+    // toggle on screen before tapping.
+    await tester.ensureVisible(find.byTooltip('Mini'));
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
 
@@ -3661,6 +4083,7 @@ void main() {
       GenerationViewMode.mini,
     );
 
+    await tester.ensureVisible(find.byTooltip('Compact'));
     await tester.tap(find.byTooltip('Compact'));
     await tester.pumpAndSettle();
 
@@ -3674,6 +4097,7 @@ void main() {
       GenerationViewMode.compact,
     );
 
+    await tester.ensureVisible(find.byTooltip('Full'));
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
@@ -3968,6 +4392,53 @@ void main() {
     expect(controller.notice, 'Video saved to Photos.');
     controller.dispose();
   });
+
+  testWidgets('an identical repeated notice surfaces both times', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+    final controller =
+        // ignore: avoid_dynamic_calls
+        (tester.state(find.byType(ClawnsoleApp)) as dynamic).controller
+            as AppController;
+    const message = 'The saved video file is missing.';
+
+    controller.showNotice(message);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(message), findsOneWidget);
+
+    // The notice auto-clears after four seconds. The snack bar's own display
+    // timer only starts once its entrance animation completes, so finish the
+    // entrance, let both timers fire, then settle the exit animation.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsNothing);
+
+    // A second identical failure must surface again, not be deduplicated.
+    controller.showNotice(message);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(message), findsOneWidget);
+    expect(controller.noticeSequence, 2);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 Generation _viewModeGeneration(
@@ -4062,6 +4533,10 @@ class _ResumableDriveGateway extends _MemoryGateway
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
   }) async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async =>
       GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 }
 

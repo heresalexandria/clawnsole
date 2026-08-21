@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
 import '../core/bfl_api.dart';
+import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/google_drive.dart';
 import '../core/models.dart';
@@ -182,6 +183,9 @@ class GenerationFormState {
   double upscaleFactor = 2;
   int upscaleCreativity = 1;
 
+  /// Reproducible seed for models that accept one; null means random.
+  int? seed;
+
   /// The operation selected by the model or implied by what is attached.
   /// Upscale is a dedicated model; generation modes otherwise need no picker:
   /// a draft cache wins, then a starting video, then frames/references, then
@@ -240,6 +244,9 @@ class AppController extends ChangeNotifier {
   LibraryStorage defaultStorage = LibraryStorage.local;
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
+
+  /// Visible cost-desk column ids in display order; null keeps the defaults.
+  List<String>? costDeskColumns;
   String? lastLocalGenerationFolderId;
   String? lastDriveGenerationFolderId;
   String librarySearch = '';
@@ -267,6 +274,10 @@ class AppController extends ChangeNotifier {
   String? loadError;
   String? creditError;
   String? notice;
+
+  /// Increments with every [showNotice] call so listeners can surface a
+  /// repeated identical message instead of deduplicating it forever.
+  int noticeSequence = 0;
 
   Timer? _pollTimer;
   Timer? _creditTimer;
@@ -360,6 +371,15 @@ class AppController extends ChangeNotifier {
   bool get supportsSettingsVault => gateway is SettingsVaultGateway;
   SettingsVaultStatus get settingsVaultStatus =>
       snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
+  DataLocationGateway? get _dataLocation =>
+      gateway is DataLocationGateway ? gateway as DataLocationGateway : null;
+  bool get supportsRevealDataFolder =>
+      _dataLocation?.supportsRevealDataFolder ?? false;
+  bool get supportsDataRelocation =>
+      _dataLocation?.supportsDataRelocation ?? false;
+  bool get shellManagesDataRelocation =>
+      _dataLocation?.shellManagesDataRelocation ?? false;
+  bool dataRelocationBusy = false;
   bool googleDriveBusy = false;
   bool settingsVaultBusy = false;
   final Set<String> copyingGenerationIds = <String>{};
@@ -368,12 +388,11 @@ class AppController extends ChangeNotifier {
   int get workingCount => generations.where((item) => item.isWorking).length;
   int get readyCount => generations.where((item) => item.isReady).length;
   double get spentCredits => generations
-      .where((item) => item.billingUnit == 'credits')
+      .where((item) => item.billingUnit == 'credits' && countsTowardSpend(item))
       .fold(0, (total, item) => total + (item.cost ?? 0));
-  double get spentUsd => generations.fold(
-    0,
-    (total, item) => total + (recordedRealizedCostUsd(item) ?? 0),
-  );
+  double get spentUsd => generations
+      .where(countsTowardSpend)
+      .fold(0, (total, item) => total + (recordedRealizedCostUsd(item) ?? 0));
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
   bool isCopyingGeneration(String localId) =>
       copyingGenerationIds.contains(localId);
@@ -805,6 +824,7 @@ class AppController extends ChangeNotifier {
           : null,
       upscaleFactor: form.upscaleFactor,
       upscaleCreativity: form.upscaleCreativity,
+      seed: selectedModel.supportsSeed ? form.seed : null,
     );
   }
 
@@ -878,6 +898,7 @@ class AppController extends ChangeNotifier {
       libraryStorageFilter = value.preferences.libraryStorageFilter;
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
+      costDeskColumns = value.preferences.costDeskColumns;
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
           : LibraryStorage.drive;
@@ -929,12 +950,20 @@ class AppController extends ChangeNotifier {
 
   void showNotice(String message) {
     notice = message;
+    noticeSequence += 1;
     _noticeTimer?.cancel();
     _noticeTimer = Timer(const Duration(seconds: 4), () {
       notice = null;
       notifyListeners();
     });
     notifyListeners();
+  }
+
+  /// Surfaces [error] as a cleaned human notice while keeping the raw details
+  /// in the debug log.
+  void showErrorNotice(Object error) {
+    debugPrint('Clawnsole notice for error: $error');
+    showNotice(_message(error));
   }
 
   String _message(Object error) => error
@@ -1006,6 +1035,20 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences(referenceStorageFilter: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setCostDeskColumns(List<String>? value) async {
+    costDeskColumns = value == null ? null : List<String>.of(value);
+    notifyListeners();
+    try {
+      await _savePreferences(
+        value == null
+            ? _preferences(clearCostDeskColumns: true)
+            : _preferences(costDeskColumns: costDeskColumns),
+      );
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -1936,6 +1979,8 @@ class AppController extends ChangeNotifier {
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
     bool clearLastDriveGenerationFolder = false,
+    List<String>? costDeskColumns,
+    bool clearCostDeskColumns = false,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1954,6 +1999,9 @@ class AppController extends ChangeNotifier {
     lastDriveGenerationFolderId: clearLastDriveGenerationFolder
         ? null
         : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
+    costDeskColumns: clearCostDeskColumns
+        ? null
+        : costDeskColumns ?? this.costDeskColumns,
   );
 
   int _validDuration(int value) {
@@ -2052,6 +2100,7 @@ class AppController extends ChangeNotifier {
     if (!model.referenceTasks.contains(form.referenceTask)) {
       form.referenceTask = MediaReferenceTask.reference;
     }
+    if (!model.supportsSeed) form.seed = null;
     if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     final resolutions = availableResolutions;
     if (!resolutions.any((item) => item.id == form.resolution)) {
@@ -2387,6 +2436,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setSeed(int? value) {
+    form.seed = value;
+    notifyListeners();
+  }
+
   List<KeyframeDraft> _orderedFrames() {
     final frames = List<KeyframeDraft>.from(form.keyframes);
     if (form.usesTimedKeyframes) {
@@ -2647,6 +2701,7 @@ class AppController extends ChangeNotifier {
       'safety_tolerance': form.safetyTolerance,
       'draft': form.draft,
       if (selectedModel.supportsFrameRate) 'frame_rate': form.frameRate,
+      if (selectedModel.supportsSeed && form.seed != null) 'seed': form.seed,
     };
     if (form.mode == VideoMode.i2v) {
       final frames = form.usesTimedKeyframes
@@ -3255,6 +3310,108 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  Future<void> revealDataFolder() async {
+    final location = _dataLocation;
+    if (location == null || !location.supportsRevealDataFolder) return;
+    try {
+      await location.revealDataFolder();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  /// Whether [directory] already holds a Clawnsole library, or null when the
+  /// check itself failed (a notice explains the failure).
+  Future<bool?> dataDirectoryHasLibrary(String directory) async {
+    final location = _dataLocation;
+    if (location == null) return null;
+    try {
+      return await location.dataDirectoryHasLibrary(directory);
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    }
+  }
+
+  // Relocation swaps the live data directory, so it must never race an
+  // in-flight submission, poll retention, or Drive transfer.
+  bool get _dataRelocationBlocked =>
+      submitting ||
+      workingCount > 0 ||
+      googleDriveBusy ||
+      copyingGenerationIds.isNotEmpty ||
+      copyingReferenceIds.isNotEmpty;
+
+  Future<void> relocateDataDirectory(
+    String directory, {
+    bool useExistingLibrary = false,
+  }) async {
+    final location = _dataLocation;
+    if (location == null ||
+        !location.supportsDataRelocation ||
+        dataRelocationBusy) {
+      return;
+    }
+    if (_dataRelocationBlocked) {
+      showNotice(
+        'Wait for active generations and Drive transfers to finish before '
+        'moving the library.',
+      );
+      return;
+    }
+    dataRelocationBusy = true;
+    notifyListeners();
+    try {
+      _apply(
+        await location.relocateDataDirectory(
+          directory,
+          useExistingLibrary: useExistingLibrary,
+        ),
+        restorePreferences: true,
+      );
+      showNotice(
+        useExistingLibrary
+            ? 'Clawnsole is now using the library in $directory.'
+            : 'Clawnsole data now lives in $directory. The previous copy '
+                  'stays in the old folder until you delete it.',
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      dataRelocationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> relocateDataDirectoryViaShell() async {
+    final location = _dataLocation;
+    if (location == null ||
+        !location.shellManagesDataRelocation ||
+        dataRelocationBusy) {
+      return;
+    }
+    if (_dataRelocationBlocked) {
+      showNotice(
+        'Wait for active generations and Drive transfers to finish before '
+        'moving the library.',
+      );
+      return;
+    }
+    dataRelocationBusy = true;
+    notifyListeners();
+    try {
+      final result = await location.relocateDataDirectoryViaShell();
+      if (result.moved) {
+        showNotice('Clawnsole is reopening from the new data folder.');
+      }
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      dataRelocationBusy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> connectGoogleDrive(String folderName) async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
@@ -3445,6 +3602,39 @@ class AppController extends ChangeNotifier {
       if (bulk) googleDriveBusy = false;
       copyingGenerationIds.removeAll(generationIds);
       copyingReferenceIds.removeAll(referenceIds);
+      notifyListeners();
+    }
+  }
+
+  Future<void> moveLocalLibraryToGoogleDrive() async {
+    if (gateway is! GoogleDriveGateway) return;
+    if (!googleDriveConnected) {
+      showNotice('Connect Google Drive before moving local items.');
+      return;
+    }
+    if (googleDriveBusy) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      late GoogleDriveCopyResult moved;
+      final operation = _driveCopyQueue.then((_) async {
+        moved = await (gateway as GoogleDriveGateway)
+            .moveLocalLibraryToGoogleDrive();
+      });
+      _driveCopyQueue = operation.then<void>((_) {}, onError: (_) {});
+      await operation;
+      _apply(moved.snapshot);
+      final total = moved.generations + moved.references;
+      showNotice(
+        total == 0
+            ? 'The local library was removed. Every item already lives in '
+                  'Google Drive.'
+            : 'Moved ${moved.generations} generation${moved.generations == 1 ? '' : 's'} and ${moved.references} reference${moved.references == 1 ? '' : 's'} to Drive. The local copies were removed.',
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
       notifyListeners();
     }
   }
@@ -3676,6 +3866,8 @@ class AppController extends ChangeNotifier {
       ..upscale = item.mode == VideoMode.upscale
       ..upscaleFactor = item.config.upscaleFactor
       ..upscaleCreativity = item.config.upscaleCreativity
+      // _normalizeFormForModel clears this when the model lacks seed support.
+      ..seed = item.config.seed
       ..exactTiming = item.config.exactTiming
       ..keyframes = retainedFrames
       ..references = retainedReferences

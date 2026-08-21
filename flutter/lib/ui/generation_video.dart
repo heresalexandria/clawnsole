@@ -360,6 +360,9 @@ class _GenerationVideoState extends State<GenerationVideo> {
         return _VideoPlaceholder(
           icon: Icons.link_off_rounded,
           label: 'Delivery unavailable',
+          detail:
+              'Playback failed on this device. '
+              'Use Save video to export the file.',
           onClose: widget.onClose,
         );
       }
@@ -556,11 +559,13 @@ class _VideoPlaceholder extends StatelessWidget {
   const _VideoPlaceholder({
     required this.icon,
     required this.label,
+    this.detail,
     this.onClose,
   });
 
   final IconData icon;
   final String label;
+  final String? detail;
   final VoidCallback? onClose;
 
   @override
@@ -578,6 +583,21 @@ class _VideoPlaceholder extends StatelessWidget {
                 label,
                 style: const TextStyle(color: Colors.white70, fontSize: 11),
               ),
+              if (detail != null) ...<Widget>[
+                const SizedBox(height: 5),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Text(
+                    detail!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 10.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
@@ -247,11 +248,39 @@ class CompanionStore implements DurableDataStore {
     return '$timestamp-$suffix';
   }
 
-  File assetFile(String id) {
+  File assetFile(String id, [String extension = '.asset']) {
     if (!RegExp(r'^[a-f0-9-]{16,80}$').hasMatch(id)) {
       throw StateError('The local asset id is invalid.');
     }
-    return File('${assets.path}${Platform.pathSeparator}$id.asset');
+    return File('${assets.path}${Platform.pathSeparator}$id$extension');
+  }
+
+  /// Mirrors the native store's resolution order: the typed name derived from
+  /// the reference, then the legacy `<id>.asset` name, then any file whose
+  /// basename-without-extension equals the id. The scan only runs on a miss.
+  Future<File> resolveAssetFile(AssetReference reference) async {
+    final extension = retainedAssetExtension(
+      reference.contentType,
+      reference.label,
+    );
+    final preferred = assetFile(reference.value, extension);
+    if (await preferred.exists()) return preferred;
+    final legacy = assetFile(reference.value);
+    if (await legacy.exists()) return legacy;
+    final match = await _assetFileByStem(reference.value);
+    return match ?? legacy;
+  }
+
+  Future<File?> _assetFileByStem(String id) async {
+    if (!await assets.exists()) return null;
+    await for (final entry in assets.list()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      final dot = name.lastIndexOf('.');
+      final stem = dot > 0 ? name.substring(0, dot) : name;
+      if (stem == id) return entry;
+    }
+    return null;
   }
 
   @override
@@ -263,7 +292,10 @@ class CompanionStore implements DurableDataStore {
   }) async {
     final id = _assetId();
     await assets.create(recursive: true);
-    await assetFile(id).writeAsBytes(bytes, flush: true);
+    await assetFile(
+      id,
+      retainedAssetExtension(contentType, label),
+    ).writeAsBytes(bytes, flush: true);
     return AssetReference(
       kind: 'local',
       value: id,
@@ -281,7 +313,7 @@ class CompanionStore implements DurableDataStore {
     LibraryStorage storage = LibraryStorage.local,
   }) async {
     if (retained?.kind == 'local') {
-      final existing = assetFile(retained!.value);
+      final existing = await resolveAssetFile(retained!);
       if (await existing.exists()) {
         return AssetReference(
           kind: 'local',
@@ -354,9 +386,8 @@ class CompanionStore implements DurableDataStore {
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
-      final id = name.endsWith('.asset')
-          ? name.substring(0, name.length - 6)
-          : '';
+      final dot = name.lastIndexOf('.');
+      final id = dot > 0 ? name.substring(0, dot) : '';
       if (!retained.contains(id)) await entry.delete();
     }
   }
@@ -428,7 +459,7 @@ class CompanionStore implements DurableDataStore {
     var assetCount = 0;
     if (await assets.exists()) {
       await for (final entry in assets.list()) {
-        if (entry is! File || !entry.path.endsWith('.asset')) continue;
+        if (entry is! File) continue;
         assetBytes += await entry.length();
         assetCount += 1;
       }
@@ -458,12 +489,20 @@ class CompanionStore implements DurableDataStore {
     if (reference.kind != 'local') {
       throw StateError('The asset is not stored by the local companion.');
     }
-    return assetFile(reference.value).readAsBytes();
+    final file = await resolveAssetFile(reference);
+    if (!await file.exists()) {
+      stderr.writeln(
+        'Missing local asset file ${file.path} '
+        '(id ${reference.value}, contentType ${reference.contentType}).',
+      );
+      throw StateError(missingLocalAssetMessage(reference.contentType));
+    }
+    return file.readAsBytes();
   }
 
   @override
   Future<Uri> assetUri(AssetReference reference) async =>
-      assetFile(reference.value).uri;
+      (await resolveAssetFile(reference)).uri;
 }
 
 class StoreChange<T> {
@@ -569,6 +608,8 @@ class CompanionHybridStore {
     generationIds: generationIds,
     referenceIds: referenceIds,
   );
+
+  Future<GoogleDriveCopyCounts> moveLocalToDrive() => hybrid.moveLocalToDrive();
 }
 
 List<String> _cleanLibraryTags(Iterable<Object?> input) {
@@ -702,6 +743,14 @@ class CompanionApp {
           'snapshot': await _snapshotPayload(),
           'generations': copied.generations,
           'references': copied.references,
+        });
+      }
+      if (request.method == 'POST' && path == '/drive/migrate') {
+        final moved = await _store.moveLocalToDrive();
+        return await _json(request.response, 200, <String, Object?>{
+          'snapshot': await _snapshotPayload(),
+          'generations': moved.generations,
+          'references': moved.references,
         });
       }
       if (request.method == 'POST' &&
@@ -1799,6 +1848,7 @@ class CompanionApp {
         payload,
         balanceAfter: balanceAfter,
         allowDeterministicQuote: status == 'Ready',
+        terminal: terminal,
       );
       next = current.copyWith(
         status: status,

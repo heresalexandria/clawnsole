@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -10,13 +11,53 @@ import 'durable_data_store.dart';
 import 'models.dart';
 
 class LocalDataStore implements DurableDataStore {
+  LocalDataStore({Directory? documentsDirectory})
+    : _documentsOverride = documentsDirectory;
+
+  /// Name of the pointer file that always stays in the default data root and
+  /// records a user-chosen data directory for portable installs.
+  static const String locationFileName = 'data-location.json';
+  static const String dataFileName = 'clawnsole.json';
+
+  final Directory? _documentsOverride;
   File? _cachedFile;
+
+  Future<Directory> _defaultRoot() async {
+    final documents =
+        _documentsOverride ?? await getApplicationDocumentsDirectory();
+    return Directory('${documents.path}${Platform.pathSeparator}Clawnsole');
+  }
+
+  /// Resolves the active data directory: the pointer file's target when it
+  /// names an existing directory, otherwise the default root. A missing or
+  /// unreadable pointer must never block startup.
+  Future<String> _resolveDataDirectory(Directory root) async {
+    final pointer = File(
+      '${root.path}${Platform.pathSeparator}$locationFileName',
+    );
+    try {
+      if (await pointer.exists()) {
+        final decoded = jsonDecode(await pointer.readAsString());
+        final value = decoded is Map<Object?, Object?>
+            ? decoded['dataDirectory']
+            : null;
+        if (value is String &&
+            value.trim().isNotEmpty &&
+            await Directory(value.trim()).exists()) {
+          return Directory(value.trim()).absolute.path;
+        }
+      }
+    } on Object {
+      // Fall through to the default location below.
+    }
+    return root.path;
+  }
 
   Future<File> _file() async {
     if (_cachedFile != null) return _cachedFile!;
-    final documents = await getApplicationDocumentsDirectory();
+    final root = await _defaultRoot();
     _cachedFile = File(
-      '${documents.path}${Platform.pathSeparator}Clawnsole${Platform.pathSeparator}clawnsole.json',
+      '${await _resolveDataDirectory(root)}${Platform.pathSeparator}$dataFileName',
     );
     return _cachedFile!;
   }
@@ -26,6 +67,84 @@ class LocalDataStore implements DurableDataStore {
   );
 
   Future<bool> exists() async => (await _file()).exists();
+
+  /// The directory currently holding the data file and its assets.
+  Future<String> dataDirectoryPath() async => (await _file()).parent.path;
+
+  /// Whether [directory] already holds a Clawnsole data file.
+  Future<bool> hasLibraryAt(String directory) => File(
+    '${Directory(directory).absolute.path}${Platform.pathSeparator}$dataFileName',
+  ).exists();
+
+  /// Moves the library to [directory] for portable installs: copies the data
+  /// file and assets there (or, with [useExistingLibrary], adopts a library
+  /// already present), records the choice in the default root's pointer
+  /// file, and serves all further reads and writes from the new location.
+  /// The files at the previous location are intentionally kept.
+  Future<void> relocate(
+    String directory, {
+    bool useExistingLibrary = false,
+  }) async {
+    final separator = Platform.pathSeparator;
+    if (directory.trim().isEmpty) {
+      throw StateError('Choose a folder for Clawnsole data.');
+    }
+    final current = await _file();
+    final assets = await _assets();
+    final targetPath = Directory(directory.trim()).absolute.path;
+    String contained(String path) =>
+        path.endsWith(separator) ? path : '$path$separator';
+    if (targetPath == current.parent.absolute.path) {
+      throw StateError('Clawnsole already stores its data in that folder.');
+    }
+    if (contained(targetPath).startsWith(contained(assets.absolute.path))) {
+      throw StateError('Choose a folder outside the current assets folder.');
+    }
+    try {
+      await Directory(targetPath).create(recursive: true);
+      final probe = File(
+        '$targetPath$separator.clawnsole-write-probe.${DateTime.now().microsecondsSinceEpoch}.tmp',
+      );
+      await probe.writeAsString('clawnsole', flush: true);
+      await probe.delete();
+    } on FileSystemException catch (error) {
+      throw StateError(
+        'Clawnsole cannot write to $targetPath. '
+        '${error.osError?.message ?? error.message}',
+      );
+    }
+    final targetFile = File('$targetPath$separator$dataFileName');
+    final adopt = useExistingLibrary && await targetFile.exists();
+    if (!adopt) {
+      if (await targetFile.exists()) {
+        throw StateError('That folder already contains a Clawnsole library.');
+      }
+      if (await current.exists()) await current.copy(targetFile.path);
+      if (await assets.exists()) {
+        final targetAssets = Directory('$targetPath${separator}assets');
+        await targetAssets.create(recursive: true);
+        await for (final entry in assets.list()) {
+          if (entry is! File) continue;
+          await entry.copy(
+            '${targetAssets.path}$separator${entry.uri.pathSegments.last}',
+          );
+        }
+      }
+    }
+    final root = await _defaultRoot();
+    await root.create(recursive: true);
+    final pointer = File('${root.path}$separator$locationFileName');
+    final temporary = File(
+      '${pointer.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
+    );
+    await temporary.writeAsString(
+      jsonEncode(<String, String>{'dataDirectory': targetPath}),
+      flush: true,
+    );
+    if (await pointer.exists()) await pointer.delete();
+    await temporary.rename(pointer.path);
+    _cachedFile = targetFile;
+  }
 
   String _assetId() {
     final random = Random.secure();
@@ -57,9 +176,32 @@ class LocalDataStore implements DurableDataStore {
     final preferred = await _assetFile(reference.value, extension);
     if (await preferred.exists()) return preferred;
     final legacy = await _assetFile(reference.value);
-    if (!await legacy.exists() || extension == '.asset') return legacy;
-    if (!migrateGenericName) return legacy;
-    return legacy.rename(preferred.path);
+    if (await legacy.exists()) {
+      if (extension == '.asset' || !migrateGenericName) return legacy;
+      return legacy.rename(preferred.path);
+    }
+    // Neither expected name exists. Another Clawnsole build may have retained
+    // the file under a different extension, so scan for a matching stem before
+    // giving up. The scan only runs on a miss, keeping the hot path untouched.
+    final match = await _assetFileByStem(reference.value);
+    if (match == null) return legacy;
+    if (extension == '.asset' || !migrateGenericName) return match;
+    return match.rename(preferred.path);
+  }
+
+  /// Finds an asset file whose basename-without-extension equals [id].
+  /// The id charset is validated by [_assetFile], so a stem match is safe.
+  Future<File?> _assetFileByStem(String id) async {
+    final assets = await _assets();
+    if (!await assets.exists()) return null;
+    await for (final entry in assets.list()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      final dot = name.lastIndexOf('.');
+      final stem = dot > 0 ? name.substring(0, dot) : name;
+      if (stem == id) return entry;
+    }
+    return null;
   }
 
   @override
@@ -127,7 +269,16 @@ class LocalDataStore implements DurableDataStore {
     if (reference.kind != 'local') {
       throw StateError('The asset is not stored locally.');
     }
-    return (await _resolveAssetFile(reference)).readAsBytes();
+    final file = await _resolveAssetFile(reference);
+    if (!await file.exists()) {
+      developer.log(
+        'Missing local asset file ${file.path} '
+        '(id ${reference.value}, contentType ${reference.contentType}).',
+        name: 'clawnsole.store',
+      );
+      throw StateError(missingLocalAssetMessage(reference.contentType));
+    }
+    return file.readAsBytes();
   }
 
   @override
