@@ -16,6 +16,9 @@ These instructions apply to the whole repository.
 - Open pull requests with `./use-heresalexandria.sh --pr ...`. Run all other
   GitHub CLI operations with `./use-heresalexandria.sh --gh ...`; do not invoke
   the globally authenticated `gh` session directly for this repository.
+- Open normal, ready-for-review pull requests. Never open a draft pull request.
+- Label every pull request with exactly one release-impact label: `patch`,
+  `minor`, or `major`.
 - Do not add forks or remotes owned by another account as a workaround for an
   authentication or permission failure. Stop and repair the
   `heresalexandria` authentication path instead.
