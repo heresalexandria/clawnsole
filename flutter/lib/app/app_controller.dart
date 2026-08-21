@@ -866,7 +866,10 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _apply(await gateway.load(), restorePreferences: true);
-      unawaited(resumeGoogleDrive());
+      // Finish the silent Drive reattachment before making the app
+      // interactive. Otherwise an early tab change can persist preferences
+      // against the local-only startup snapshot while Drive is reconnecting.
+      await resumeGoogleDrive();
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
@@ -995,7 +998,16 @@ class AppController extends ChangeNotifier {
 
   Future<void> _savePreferences(AppPreferences preferences) {
     final operation = _preferenceWrites.then((_) async {
-      _apply(await gateway.setPreferences(preferences));
+      try {
+        _apply(await gateway.setPreferences(preferences));
+      } on Object {
+        // Mobile and companion Drive tokens are short-lived. The client can
+        // still look connected when a preference write (tab selection is one)
+        // is the first request to discover expiration. Silently replace the
+        // session and retry the idempotent preference write once.
+        if (!await resumeGoogleDrive(force: true)) rethrow;
+        _apply(await gateway.setPreferences(preferences));
+      }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
     return operation;
@@ -3612,17 +3624,25 @@ class AppController extends ChangeNotifier {
   /// startup: the companion and shell hold Drive sessions per process, so
   /// without this every launch would hide Drive work until a manual refresh.
   /// Failures stay silent — Settings still offers the interactive refresh.
-  Future<void> resumeGoogleDrive() async {
-    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
-    if (googleDriveConnected || !googleDriveConnection.isConfigured) return;
+  Future<bool> resumeGoogleDrive({bool force = false}) async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return false;
+    if ((!force && googleDriveConnected) ||
+        !googleDriveConnection.isConfigured) {
+      return false;
+    }
     googleDriveBusy = true;
     notifyListeners();
     try {
-      final value = await (gateway as GoogleDriveGateway).resumeGoogleDrive();
-      if (value != null) _apply(value);
+      final value = await (gateway as GoogleDriveGateway).resumeGoogleDrive(
+        force: force,
+      );
+      if (value == null) return false;
+      _apply(value);
+      return true;
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
       // an unexpected error without surfacing a notice.
+      return false;
     } finally {
       googleDriveBusy = false;
       notifyListeners();

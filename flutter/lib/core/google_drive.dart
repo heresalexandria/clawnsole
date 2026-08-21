@@ -134,10 +134,12 @@ abstract interface class GoogleDriveGateway {
   Future<LocalSnapshot> refreshGoogleDrive();
 
   /// Reattaches a previously configured Drive connection without any user
-  /// interaction, for example at app startup. Returns the refreshed snapshot
-  /// when a silent grant succeeded, or null when none was possible; never
-  /// throws and never opens a sign-in surface.
-  Future<LocalSnapshot?> resumeGoogleDrive();
+  /// interaction, for example at app startup. [force] also replaces a session
+  /// that still looks connected locally, which is necessary after a mobile
+  /// access token expires while the app is suspended. Returns the refreshed
+  /// snapshot when a silent grant succeeded, or null when none was possible;
+  /// never throws and never opens a sign-in surface.
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false});
 
   /// Copies local records and retained assets into Drive without deleting the
   /// local originals. Stable `drive-` ids make the operation idempotent.

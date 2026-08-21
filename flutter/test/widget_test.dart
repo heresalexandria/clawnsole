@@ -4421,6 +4421,30 @@ void main() {
     expect(gateway.resumeCalls, 0);
   });
 
+  test(
+    'tab preference writes silently renew an expired Drive session',
+    () async {
+      final gateway = _ExpiringPreferenceDriveGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.navigate(AppSection.library);
+
+      expect(gateway.preferenceCalls, 2);
+      expect(gateway.forcedResumeCalls, 1);
+      expect(controller.section, AppSection.library);
+      expect(controller.notice, isNull);
+    },
+  );
+
   testWidgets('library explains signed-out Drive work and reconnects', (
     tester,
   ) async {
@@ -5068,7 +5092,7 @@ class _ResumableDriveGateway extends _MemoryGateway
   );
 
   @override
-  Future<LocalSnapshot?> resumeGoogleDrive() async {
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async {
     resumeCalls += 1;
     final value = resumed;
     if (value == null) return null;
@@ -5094,6 +5118,63 @@ class _ResumableDriveGateway extends _MemoryGateway
     _connected = false;
     return snapshot;
   }
+
+  @override
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
+}
+
+class _ExpiringPreferenceDriveGateway extends _MemoryGateway
+    implements GoogleDriveGateway {
+  _ExpiringPreferenceDriveGateway(super.snapshot);
+
+  int preferenceCalls = 0;
+  int forcedResumeCalls = 0;
+
+  @override
+  bool get supportsLocalLibrary => true;
+
+  @override
+  GoogleDriveConnection get googleDriveConnection =>
+      const GoogleDriveConnection(
+        state: GoogleDriveConnectionState.connected,
+        folderName: 'Clawnsole',
+        folderId: 'folder-1',
+      );
+
+  @override
+  Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
+    preferenceCalls += 1;
+    if (preferenceCalls == 1) {
+      throw StateError(
+        'Connect Google Drive before changing Drive generations, folders, or references.',
+      );
+    }
+    return super.setPreferences(preferences);
+  }
+
+  @override
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async {
+    if (!force) return null;
+    forcedResumeCalls += 1;
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> connectGoogleDrive(String folderName) async => snapshot;
+
+  @override
+  Future<LocalSnapshot> disconnectGoogleDrive() async => snapshot;
+
+  @override
+  Future<LocalSnapshot> refreshGoogleDrive() async => snapshot;
 
   @override
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
