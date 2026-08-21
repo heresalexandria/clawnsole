@@ -195,6 +195,20 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
     theme: buildClawnsoleTheme(Brightness.light),
     darkTheme: buildClawnsoleTheme(Brightness.dark),
     themeMode: _themeMode,
+    // Native mobile Flutter keeps focus on touch taps outside text fields.
+    // Override that once so multiline fields never trap the software keyboard.
+    builder: (context, child) => Actions(
+      actions: <Type, Action<Intent>>{
+        EditableTextTapOutsideIntent:
+            CallbackAction<EditableTextTapOutsideIntent>(
+              onInvoke: (intent) {
+                intent.focusNode.unfocus();
+                return null;
+              },
+            ),
+      },
+      child: child ?? const SizedBox.shrink(),
+    ),
     home: AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
