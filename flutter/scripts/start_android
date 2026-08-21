@@ -37,7 +37,7 @@ if [[ -z "$ANDROID_DEVICE" ]]; then
     exit 1
   fi
 
-  echo "Launching Android emulator $ANDROID_AVD…"
+  echo "Launching Android emulator ${ANDROID_AVD}…"
   flutter emulators --launch "$ANDROID_AVD"
 
   for _attempt in {1..90}; do
@@ -54,7 +54,7 @@ if [[ -z "$ANDROID_DEVICE" ]]; then
   exit 1
 fi
 
-echo "Launching Clawnsole on Android emulator $ANDROID_DEVICE…"
+echo "Launching Clawnsole on Android emulator ${ANDROID_DEVICE}…"
 OAUTH_BUILD_ARGUMENTS=()
 if [[ -n "${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID:-}" ]]; then
   OAUTH_BUILD_ARGUMENTS+=(
