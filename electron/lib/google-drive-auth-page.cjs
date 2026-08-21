@@ -198,8 +198,8 @@ function oauthResultPage(success) {
         stroke-width: 2.2;
       }
 
-      .status strong,
-      .status span { display: block; }
+      .status > div > strong,
+      .status > div > span { display: block; }
 
       .status strong {
         margin-bottom: 2px;

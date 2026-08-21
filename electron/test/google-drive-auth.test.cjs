@@ -27,6 +27,11 @@ test("OAuth result pages carry the Clawnsole site identity", () => {
   assert.match(success, /--paper: light-dark\(#f8f3e8, #171116\)/);
   assert.match(success, /--plum: light-dark\(#5a2856, #d2a0ca\)/);
   assert.match(success, /font-family: Georgia/);
+  assert.match(
+    success,
+    /\.status-icon\s*{[\s\S]*?display: grid;[\s\S]*?place-items: center;/,
+  );
+  assert.doesNotMatch(success, /\.status span\s*{\s*display: block;/);
 
   assert.match(failure, /<title>Clawnsole connection not completed<\/title>/);
   assert.match(failure, /Connection not completed\./);
