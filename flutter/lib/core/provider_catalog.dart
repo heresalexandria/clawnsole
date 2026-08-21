@@ -432,7 +432,7 @@ const ltxProvider = VideoProviderDefinition(
 const artCraftProvider = VideoProviderDefinition(
   id: 'artcraft',
   name: 'ArtCraft',
-  shortName: 'Art',
+  shortName: 'ArtCraft',
   description:
       'A broad, live video model catalog behind ArtCraft’s API-key Omni API.',
   consoleUrl: 'https://app.getartcraft.com/',
@@ -919,13 +919,13 @@ class _AtlasRouteModel extends VideoModelDefinition {
 const atlasProvider = VideoProviderDefinition(
   id: 'atlas',
   name: 'Atlas Cloud',
-  shortName: 'Atlas',
+  shortName: 'Atlas Cloud',
   description: 'A broad model marketplace with live, preflight pricing.',
   consoleUrl: 'https://www.atlascloud.ai/console',
   docsUrl: 'https://www.atlascloud.ai/docs/models/video',
   pricingUrl: 'https://www.atlascloud.ai/pricing/models?sort=new',
   pricingSource:
-      'Live Atlas 720p cost preflight, with published starting-rate fallback',
+      'Live Atlas Cloud 720p cost preflight, with published starting-rate fallback',
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/text-to-video',

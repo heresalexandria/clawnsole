@@ -3039,7 +3039,7 @@ void main() {
       const ValueKey<String>('selected-provider-balance'),
     );
     expect(artcraftBalance, findsOneWidget);
-    expect(tester.widget<Text>(artcraftBalance).data, 'Art balance ↗');
+    expect(tester.widget<Text>(artcraftBalance).data, 'ArtCraft balance ↗');
     expect(find.byTooltip('Open ArtCraft to view the balance'), findsOneWidget);
 
     final bflGateway = _ProviderMemoryGateway(
