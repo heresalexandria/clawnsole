@@ -192,10 +192,10 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     return TexturePanel(
       surface: PanelSurface.navyLeather,
       stitched: true,
-      // Both paddings keep content clear of the saddle stitch, whose thread
-      // sits about 9.6px inside the panel edge.
+      // Both paddings keep content at least 4px clear of the saddle stitch,
+      // whose thread sits about 9.6px inside the panel edge.
       padding: _isShort(context)
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 14)
           : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
       child: PopupMenuButton<String>(
         tooltip: 'Choose provider and model',
