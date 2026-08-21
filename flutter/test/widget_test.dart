@@ -789,6 +789,25 @@ void main() {
     );
   });
 
+  test('reference video fixes default on and round-trip tolerantly', () {
+    expect(
+      AppPreferences.fromJson(const <String, Object?>{}).autoFixReferenceVideos,
+      isTrue,
+    );
+    expect(
+      AppPreferences.fromJson(const <String, Object?>{
+        'autoFixReferenceVideos': 'not-a-bool',
+      }).autoFixReferenceVideos,
+      isTrue,
+    );
+
+    final restored = AppPreferences.fromJson(
+      const AppPreferences(autoFixReferenceVideos: false).toJson(),
+    );
+    expect(restored.autoFixReferenceVideos, isFalse);
+    expect(restored.toJson()['autoFixReferenceVideos'], isFalse);
+  });
+
   test(
     'round-trips compact history, billing, and durable asset references',
     () {
@@ -4721,6 +4740,53 @@ void main() {
       GenerationPlaceholderStyle.cyclone,
     );
   });
+
+  testWidgets(
+    'settings restores and persists automatic reference video fixes',
+    (tester) async {
+      final gateway = _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(autoFixReferenceVideos: false),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await tester.binding.setSurfaceSize(const Size(850, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => SettingsScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      expect(controller.autoFixReferenceVideos, isFalse);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+
+      expect(controller.autoFixReferenceVideos, isTrue);
+      expect(gateway.snapshot.preferences.autoFixReferenceVideos, isTrue);
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
 
   test('form infers every FLUX 3 generation mode from its inputs', () {
     expect(VideoMode.values, hasLength(5));

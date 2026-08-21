@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ELECTRON_DIRECTORY="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+REPOSITORY_ROOT="$(cd "$ELECTRON_DIRECTORY/.." && pwd)"
+DESTINATION="$ELECTRON_DIRECTORY/dist/media-tools"
+FFMPEG_VERSION="8.1.2"
+FFMPEG_SHA256="464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+ZIMG_VERSION="3.0.6"
+ZIMG_SHA256="be89390f13a5c9b2388ce0f44a5e89364a20c1c57ce46d382b1fcc3967057577"
+BUILD_PROFILE="4"
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The packaged reference-video tools are built on macOS." >&2
+  exit 1
+fi
+
+verify_tools() {
+  local directory="$1"
+  local build_configuration
+  local filters
+  local encoders
+  build_configuration="$("$directory/ffmpeg" -hide_banner -buildconf 2>&1)"
+  filters="$("$directory/ffmpeg" -hide_banner -filters 2>&1)"
+  encoders="$("$directory/ffmpeg" -hide_banner -encoders 2>&1)"
+  grep -q -- '--disable-gpl' <<<"$build_configuration"
+  grep -q -- '--disable-nonfree' <<<"$build_configuration"
+  if grep -q -- '--enable-gpl' <<<"$build_configuration"; then
+    echo "Refusing to package a GPL-enabled FFmpeg build." >&2
+    exit 1
+  fi
+  grep -q '[[:space:]]zscale[[:space:]]' <<<"$filters"
+  grep -q '[[:space:]]tonemap[[:space:]]' <<<"$filters"
+  grep -q '[[:space:]]h264_videotoolbox[[:space:]]' <<<"$encoders"
+  "$directory/ffprobe" -hide_banner -version >/dev/null
+  if otool -L "$directory/ffmpeg" "$directory/ffprobe" | \
+      grep -Eq '(/opt/homebrew|/usr/local|@rpath)'; then
+    echo "Refusing media tools with unpackaged dynamic dependencies." >&2
+    exit 1
+  fi
+}
+
+mkdir -p "$DESTINATION"
+if [[ -n "${CLAWNSOLE_MEDIA_TOOLS_DIR:-}" ]]; then
+  SOURCE_DIRECTORY="$(cd "$CLAWNSOLE_MEDIA_TOOLS_DIR" && pwd)"
+  verify_tools "$SOURCE_DIRECTORY"
+  cp "$SOURCE_DIRECTORY/ffmpeg" "$SOURCE_DIRECTORY/ffprobe" "$DESTINATION/"
+  cp "$SOURCE_DIRECTORY/FFMPEG-LGPL-3.0.txt" \
+    "$SOURCE_DIRECTORY/ZIMG-WTFPL.txt" "$DESTINATION/"
+else
+  ARCHITECTURE="${CLAWNSOLE_MEDIA_TOOLS_ARCH:-$(uname -m)}"
+  case "$ARCHITECTURE" in
+    arm64) ARCHITECTURES=(arm64) ;;
+    x64|x86_64) ARCHITECTURES=(x86_64) ;;
+    universal) ARCHITECTURES=(arm64 x86_64) ;;
+    *)
+      echo "CLAWNSOLE_MEDIA_TOOLS_ARCH must be arm64, x64, or universal." >&2
+      exit 1
+      ;;
+  esac
+
+  CACHE_ROOT="${TMPDIR:-/tmp}/clawnsole-media-tools-$FFMPEG_VERSION-$ZIMG_VERSION-$BUILD_PROFILE"
+  DOWNLOADS="$CACHE_ROOT/downloads"
+  mkdir -p "$DOWNLOADS"
+  if [[ ! -f "$DOWNLOADS/ffmpeg.tar.xz" ]]; then
+    curl --fail --location --retry 3 \
+      "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" \
+      --output "$DOWNLOADS/ffmpeg.tar.xz"
+  fi
+  if [[ ! -f "$DOWNLOADS/zimg.tar.gz" ]]; then
+    curl --fail --location --retry 3 \
+      "https://github.com/sekrit-twc/zimg/archive/refs/tags/release-$ZIMG_VERSION.tar.gz" \
+      --output "$DOWNLOADS/zimg.tar.gz"
+  fi
+  echo "$FFMPEG_SHA256  $DOWNLOADS/ffmpeg.tar.xz" | shasum -a 256 --check
+  echo "$ZIMG_SHA256  $DOWNLOADS/zimg.tar.gz" | shasum -a 256 --check
+
+  build_architecture() {
+    local architecture="$1"
+    local ffmpeg_architecture="$architecture"
+    if [[ "$architecture" == "arm64" ]]; then
+      ffmpeg_architecture="aarch64"
+    fi
+    local build_root="$CACHE_ROOT/build-$architecture"
+    local prefix="$CACHE_ROOT/prefix-$architecture"
+    if [[ -x "$prefix/bin/ffmpeg" && -x "$prefix/bin/ffprobe" ]]; then
+      return
+    fi
+    if [[ "$build_root" != "$CACHE_ROOT"/build-* ||
+          "$prefix" != "$CACHE_ROOT"/prefix-* ]]; then
+      echo "Refusing to clean an unexpected media-tool build directory." >&2
+      exit 1
+    fi
+    rm -rf "$build_root" "$prefix"
+    mkdir -p "$build_root" "$prefix"
+
+    tar -xzf "$DOWNLOADS/zimg.tar.gz" -C "$build_root"
+    local zimg_source="$build_root/zimg-release-$ZIMG_VERSION"
+    (
+      cd "$zimg_source"
+      ./autogen.sh
+      CFLAGS="-arch $architecture -mmacosx-version-min=12.0" \
+      CXXFLAGS="-arch $architecture -mmacosx-version-min=12.0" \
+      LDFLAGS="-arch $architecture -mmacosx-version-min=12.0" \
+        ./configure --prefix="$prefix" --disable-shared --enable-static
+      make -j"$(sysctl -n hw.logicalcpu)"
+      make install
+    )
+
+    tar -xJf "$DOWNLOADS/ffmpeg.tar.xz" -C "$build_root"
+    local ffmpeg_source="$build_root/ffmpeg-$FFMPEG_VERSION"
+    (
+      cd "$ffmpeg_source"
+      PKG_CONFIG_PATH="$prefix/lib/pkgconfig" ./configure \
+        --prefix="$prefix" \
+        --arch="$ffmpeg_architecture" \
+        --target-os=darwin \
+        --cc=clang \
+        --cxx=clang++ \
+        --disable-gpl \
+        --disable-nonfree \
+        --disable-doc \
+        --disable-debug \
+        --disable-ffplay \
+        --disable-network \
+        --disable-autodetect \
+        --disable-shared \
+        --enable-static \
+        --enable-bzlib \
+        --disable-iconv \
+        --enable-libzimg \
+        --enable-zlib \
+        --enable-videotoolbox \
+        --enable-audiotoolbox \
+        --pkg-config-flags=--static \
+        --extra-cflags="-I$prefix/include -arch $architecture -mmacosx-version-min=12.0" \
+        --extra-ldflags="-L$prefix/lib -arch $architecture -mmacosx-version-min=12.0"
+      make -j"$(sysctl -n hw.logicalcpu)" ffmpeg ffprobe
+      make install
+    )
+  }
+
+  for architecture in "${ARCHITECTURES[@]}"; do
+    build_architecture "$architecture"
+  done
+
+  if [[ "${#ARCHITECTURES[@]}" -eq 1 ]]; then
+    cp "$CACHE_ROOT/prefix-${ARCHITECTURES[0]}/bin/ffmpeg" "$DESTINATION/ffmpeg"
+    cp "$CACHE_ROOT/prefix-${ARCHITECTURES[0]}/bin/ffprobe" "$DESTINATION/ffprobe"
+  else
+    lipo -create \
+      "$CACHE_ROOT/prefix-arm64/bin/ffmpeg" \
+      "$CACHE_ROOT/prefix-x86_64/bin/ffmpeg" \
+      -output "$DESTINATION/ffmpeg"
+    lipo -create \
+      "$CACHE_ROOT/prefix-arm64/bin/ffprobe" \
+      "$CACHE_ROOT/prefix-x86_64/bin/ffprobe" \
+      -output "$DESTINATION/ffprobe"
+  fi
+
+  cp "$CACHE_ROOT/build-${ARCHITECTURES[0]}/ffmpeg-$FFMPEG_VERSION/COPYING.LGPLv3" \
+    "$DESTINATION/FFMPEG-LGPL-3.0.txt"
+  cp "$CACHE_ROOT/build-${ARCHITECTURES[0]}/ffmpeg-$FFMPEG_VERSION/COPYING.GPLv3" \
+    "$DESTINATION/FFMPEG-GPL-3.0.txt"
+  cp "$CACHE_ROOT/build-${ARCHITECTURES[0]}/zimg-release-$ZIMG_VERSION/COPYING" \
+    "$DESTINATION/ZIMG-WTFPL.txt"
+fi
+
+chmod 755 "$DESTINATION/ffmpeg" "$DESTINATION/ffprobe"
+verify_tools "$DESTINATION"
+cp "$REPOSITORY_ROOT/flutter/packages/reference_video_tools/LICENSE" \
+  "$DESTINATION/OPEN-SOURCE-LICENSES.txt"
+cat > "$DESTINATION/README.txt" <<EOF
+Clawnsole media compatibility tools
+
+FFmpeg $FFMPEG_VERSION (LGPL configuration; GPL and nonfree components disabled)
+zimg $ZIMG_VERSION
+
+Corresponding source and reproducible build instructions:
+https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
+https://github.com/sekrit-twc/zimg/releases/tag/release-$ZIMG_VERSION
+https://github.com/heresalexandria/clawnsole/blob/main/electron/scripts/prepare-media-tools
+EOF
+
+echo "Prepared pinned LGPL reference-video tools at $DESTINATION."

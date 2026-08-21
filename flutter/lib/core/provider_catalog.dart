@@ -1,5 +1,7 @@
 import 'models.dart';
 
+enum ReferenceVideoCompatibilityProfile { seedance }
+
 class VideoResolutionDefinition {
   const VideoResolutionDefinition(this.id, this.label, this.detail);
 
@@ -135,6 +137,12 @@ class VideoModelDefinition {
       maxImageReferences > 0 ||
       maxVideoReferences > 0 ||
       maxAudioReferences > 0;
+
+  ReferenceVideoCompatibilityProfile? get referenceVideoCompatibilityProfile =>
+      maxVideoReferences > 0 &&
+          (canonicalId.startsWith('seedance-') || id.startsWith('seedance_'))
+      ? ReferenceVideoCompatibilityProfile.seedance
+      : null;
 
   bool get isUpscaler => modes.length == 1 && modes.single == VideoMode.upscale;
 

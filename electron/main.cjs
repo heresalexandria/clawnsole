@@ -34,6 +34,7 @@ const dataLocation = require("./lib/data-location.cjs");
 const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
 const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
+const { bundledCompanionArguments } = require("./lib/companion-launch.cjs");
 
 const APP_NAME = "Clawnsole";
 const DEVELOPMENT_URL = process.env.CLAWNSOLE_RENDERER_URL || "http://127.0.0.1:7357";
@@ -68,15 +69,12 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
   const port = await findOpenPort();
   const localUrl = `http://127.0.0.1:${port}`;
 
-  const companionArguments = [
-    "--port",
-    String(port),
-    "--data-file",
-    dataLocation.dataFile(app.getPath("userData")),
-    "--web-root",
+  const companionArguments = bundledCompanionArguments({
+    port,
+    dataFile: dataLocation.dataFile(app.getPath("userData")),
     rendererDirectory,
-    "--secure-bootstrap",
-  ];
+    resourcesPath: process.resourcesPath,
+  });
   const companionEnvironment = { ...process.env };
   delete companionEnvironment.CLAWNSOLE_COMPANION_TOKEN;
   const child = spawn(companionExecutable, companionArguments, {

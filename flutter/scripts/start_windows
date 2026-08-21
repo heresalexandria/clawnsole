@@ -22,6 +22,7 @@ esac
 
 print_heading "Windows desktop"
 prepare_flutter
+"$FLUTTER_DIRECTORY/scripts/prepare_windows_media_tools"
 
 OAUTH_RUN_ARGUMENTS=()
 if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]]; then

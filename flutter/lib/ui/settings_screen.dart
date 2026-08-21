@@ -55,6 +55,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: <Widget>[
           _GenerationAppearanceCard(controller: widget.controller),
           const SizedBox(height: 18),
+          _ReferenceVideoCompatibilityCard(controller: widget.controller),
+          const SizedBox(height: 18),
           _ProviderAccessCard(controller: widget.controller),
           if (widget.controller.supportsGoogleDrive) ...<Widget>[
             const SizedBox(height: 18),
@@ -161,6 +163,58 @@ class _GenerationAppearanceCard extends StatelessWidget {
                     unawaited(controller.setGenerationPlaceholderStyle(style));
                   }
                 },
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ReferenceVideoCompatibilityCard extends StatelessWidget {
+  const _ReferenceVideoCompatibilityCard({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        CircleAvatar(
+          backgroundColor: context.colors.primaryContainer,
+          child: Icon(
+            Icons.video_settings_rounded,
+            color: context.colors.onPrimaryContainer,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Reference video compatibility',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Prepare reference videos for reliable Seedance uploads.',
+                style: TextStyle(color: context.colors.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile.adaptive(
+                key: const ValueKey('auto-fix-reference-videos'),
+                contentPadding: EdgeInsets.zero,
+                value: controller.autoFixReferenceVideos,
+                onChanged: (value) =>
+                    unawaited(controller.setAutoFixReferenceVideos(value)),
+                title: const Text('Automatically fix reference videos'),
+                subtitle: const Text(
+                  'Checks Seedance compatibility before upload and repairs '
+                  'only when needed. Original files remain unchanged.',
+                ),
               ),
             ],
           ),
@@ -1550,6 +1604,13 @@ class _SettingsSide extends StatelessWidget {
               unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
           icon: const Icon(Icons.privacy_tip_outlined, size: 16),
           label: const Text('Privacy policy'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () =>
+              showLicensePage(context: context, applicationName: 'Clawnsole'),
+          icon: const Icon(Icons.article_outlined, size: 16),
+          label: const Text('Open source licenses'),
         ),
         const SizedBox(height: 15),
         const _CreatorCard(),

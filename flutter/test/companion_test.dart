@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
@@ -27,10 +30,13 @@ void main() {
       'data.json',
       '--web-root',
       'build/web',
+      '--media-tools-dir',
+      'build/media-tools',
     ], const <String, String>{});
     expect(config.port, 0);
     expect(config.dataFile, endsWith('data.json'));
     expect(config.webRoot, endsWith('build/web'));
+    expect(config.mediaToolsDir, endsWith('build/media-tools'));
   });
 
   test(
@@ -769,6 +775,99 @@ void main() {
     },
   );
 
+  test(
+    'companion Seedance submit uploads and persists a repaired derivative',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-reference-normalization-test.',
+      );
+      final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      final originalBytes = Uint8List.fromList(<int>[1, 2, 3]);
+      final derivativeBytes = Uint8List.fromList(<int>[9, 8, 7]);
+      final originalSource =
+          'data:video/mp4;base64,${base64Encode(originalBytes)}';
+      final derivativeSource =
+          'data:video/mp4;base64,${base64Encode(derivativeBytes)}';
+      final retainedOriginal = await store.writeAsset(
+        originalBytes,
+        label: 'original.mp4',
+        contentType: 'video/mp4',
+      );
+      await store.replace(
+        const StoredData(
+          preferences: AppPreferences(autoFixReferenceVideos: true),
+        ),
+      );
+      final api = _CapturingArtCraftApi();
+      final normalizer = _ChangedReferenceVideoNormalizer(derivativeSource);
+      final application = CompanionApp(
+        store: store,
+        api: BflApi(),
+        providerRouter: ProviderApiRouter(artcraft: api),
+        fallbackApiKeys: const <String, String>{'artcraft': 'secret'},
+        referenceVideoNormalizer: normalizer,
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+      final now = DateTime.utc(2026, 8, 21, 12);
+      final record = Generation(
+        localId: 'companion-seedance-submit',
+        provider: 'artcraft',
+        model: 'seedance_2p0',
+        status: 'submitting',
+        prompt: 'Follow the reference motion.',
+        mode: VideoMode.i2v,
+        config: GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 5,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+          references: <MediaReferenceLabel>[
+            MediaReferenceLabel(
+              label: 'Original clip',
+              kind: MediaReferenceKind.video,
+              source: retainedOriginal,
+            ),
+          ],
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      try {
+        final response = await http.post(
+          base.resolve('/generations'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{
+            'input': <String, Object?>{
+              'mode': 'i2v',
+              'reference_videos': <String>[originalSource],
+            },
+            'record': record.toJson(),
+            'autoFixReferenceVideos': true,
+          }),
+        );
+
+        expect(response.statusCode, 201, reason: response.body);
+        expect(normalizer.sources, <String>[originalSource]);
+        expect(api.input['reference_videos'], <String>[derivativeSource]);
+
+        final persisted = (await store.read()).generations.single;
+        final persistedSource = persisted.config.references!.single.source!;
+        expect(persistedSource.value, isNot(retainedOriginal.value));
+        expect(await store.readAsset(persistedSource), derivativeBytes);
+        expect(await store.readAsset(retainedOriginal), originalBytes);
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+
   test('companion turns a 503 Error payload into a terminal record', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'clawnsole-status-test.',
@@ -1192,6 +1291,44 @@ class _Terminal503Api extends BflApi {
         },
       },
     );
+  }
+}
+
+class _ChangedReferenceVideoNormalizer
+    implements ReferenceVideoNormalizationService {
+  _ChangedReferenceVideoNormalizer(this.derivative);
+
+  final String derivative;
+  List<String> sources = const <String>[];
+
+  @override
+  Future<PreparedReferenceVideos> normalize(List<String> sources) async {
+    this.sources = List<String>.of(sources);
+    return PreparedReferenceVideos(
+      sources: <String>[derivative],
+      changedIndexes: const <int>{0},
+    );
+  }
+}
+
+class _CapturingArtCraftApi extends ArtCraftApi {
+  Map<String, Object?> input = const <String, Object?>{};
+
+  @override
+  Future<ProviderAccountStatus> verify(String key) async =>
+      const ProviderAccountStatus(provider: 'artcraft', currency: 'credits');
+
+  @override
+  Future<Map<String, Object?>> submit(
+    String key,
+    String model,
+    Map<String, Object?> input,
+  ) async {
+    this.input = input;
+    return <String, Object?>{
+      'id': 'seedance-job',
+      'polling_url': 'https://api.storyteller.ai/v1/job/seedance-job',
+    };
   }
 }
 

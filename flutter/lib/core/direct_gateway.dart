@@ -10,6 +10,7 @@ import 'models.dart';
 import 'pricing.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
+import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
 
 List<String> _cleanLibraryTags(Iterable<String> input) {
@@ -50,15 +51,19 @@ class DirectGateway
     BflApi? api,
     http.Client? client,
     ProviderApiRouter? providerRouter,
+    ReferenceVideoNormalizationService referenceVideoNormalizer =
+        const DisabledReferenceVideoNormalizationService(),
     this.persistenceDescription = 'Durable Clawnsole data store',
     this.availableProviders = const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
-       _client = client ?? http.Client();
+       _client = client ?? http.Client(),
+       _referenceVideoNormalizer = referenceVideoNormalizer;
 
   final DurableDataStore _store;
   final ProviderApiRouter _providers;
   final http.Client _client;
+  final ReferenceVideoNormalizationService _referenceVideoNormalizer;
   @override
   final String persistenceDescription;
   final Set<String> availableProviders;
@@ -813,6 +818,7 @@ class DirectGateway
   @override
   Future<Generation> submit(GenerationSubmission submission) async {
     var record = submission.record;
+    var input = submission.input;
     final data = await _readFresh();
     final provider = record.provider;
     if (provider == 'apple-local') {
@@ -827,12 +833,20 @@ class DirectGateway
         'Add a ${providerById(provider).name} API key before generating.',
       );
     }
+    if ((submission.autoFixReferenceVideos ??
+            data.preferences.autoFixReferenceVideos) &&
+        modelById(provider, record.model).referenceVideoCompatibilityProfile !=
+            null) {
+      final prepared = await prepareGenerationReferenceVideos(
+        input: input,
+        config: record.config,
+        normalizer: _referenceVideoNormalizer,
+      );
+      input = prepared.input;
+      record = record.copyWith(config: prepared.config);
+    }
     record = record.copyWith(
-      config: await _persistInputs(
-        record.config,
-        submission.input,
-        record.storage,
-      ),
+      config: await _persistInputs(record.config, input, record.storage),
     );
     final estimate = estimateCost(
       provider,
@@ -870,7 +884,7 @@ class DirectGateway
         provider,
         key,
         record.model,
-        submission.input,
+        input,
       );
       final requestId = response['id'];
       final pollingUrl = response['polling_url'];
