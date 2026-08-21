@@ -4160,7 +4160,10 @@ class AppController extends ChangeNotifier {
     }
     final uri = generationMediaUri(item)
         .then((value) {
-          progress.value = 1;
+          // URI resolution ends the byte-transfer phase. Player
+          // initialization has no meaningful percentage, so keep that phase
+          // indeterminate instead of leaving the loading surface at 100%.
+          progress.value = null;
           if (asset?.kind == 'drive') _markVideoPreviewSourceAvailable();
           return value;
         })
@@ -4222,7 +4225,7 @@ class AppController extends ChangeNotifier {
     }
     final uri = referenceMediaUri(reference)
         .then((value) {
-          progress.value = 1;
+          progress.value = null;
           return value;
         })
         .whenComplete(() => detach?.call());
@@ -4294,8 +4297,8 @@ enum VideoSaveDestination { photos, files }
 
 /// One video delivery in flight: the resolving URI plus a live download
 /// fraction for the loading surface. The progress value is null while the
-/// total is unknown (or the surface cannot observe bytes) and reaches 1.0
-/// when the URI resolves.
+/// total is unknown, the surface cannot observe bytes, or delivery has
+/// finished and the player is initializing.
 class GenerationMediaDelivery {
   const GenerationMediaDelivery({required this.uri, required this.progress});
 

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:video_player/video_player.dart';
 
 import '../app/app_theme.dart';
@@ -512,64 +513,87 @@ class _GenerationVideoState extends State<GenerationVideo> {
           child: Column(
             children: <Widget>[
               Expanded(
-                child: Semantics(
-                  button: true,
-                  label: value.isPlaying ? 'Pause video' : 'Play video',
-                  onTap: () => unawaited(_togglePlayback()),
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      key: const ValueKey('video-play-surface'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => unawaited(_togglePlayback()),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: <Widget>[
-                          Center(
-                            child: AspectRatio(
-                              aspectRatio: value.aspectRatio,
-                              child: VideoPlayer(_controller),
-                            ),
-                          ),
-                          if (!value.isPlaying)
-                            Center(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: .58),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white38),
-                                ),
-                                child: const Padding(
-                                  padding: EdgeInsets.all(11),
-                                  child: Icon(
-                                    Icons.play_arrow_rounded,
-                                    color: Colors.white,
-                                    size: 30,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (widget.fullscreen && widget.onClose != null)
-                            Positioned(
-                              top: 6,
-                              left: 6,
-                              child: IconButton(
-                                key: const ValueKey('video-close-overlay'),
-                                tooltip: 'Close (Esc)',
-                                color: Colors.white,
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.black.withValues(
-                                    alpha: .45,
-                                  ),
-                                ),
-                                onPressed: widget.onClose,
-                                icon: const Icon(Icons.close_rounded),
-                              ),
-                            ),
-                        ],
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: value.aspectRatio,
+                        child: VideoPlayer(
+                          _controller,
+                          key: const ValueKey('video-platform-view'),
+                        ),
                       ),
                     ),
-                  ),
+                    Positioned.fill(
+                      child: PointerInterceptor(
+                        key: const ValueKey('video-pointer-interceptor'),
+                        // Electron renders Flutter web, whose HTML video
+                        // platform view otherwise consumes clicks before
+                        // Flutter's gesture system sees them.
+                        intercepting: kIsWeb,
+                        child: Semantics(
+                          button: true,
+                          label: value.isPlaying ? 'Pause video' : 'Play video',
+                          onTap: () => unawaited(_togglePlayback()),
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: GestureDetector(
+                              key: const ValueKey('video-play-surface'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => unawaited(_togglePlayback()),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: <Widget>[
+                                  if (!value.isPlaying)
+                                    Center(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: .58,
+                                          ),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: Colors.white38,
+                                          ),
+                                        ),
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(11),
+                                          child: Icon(
+                                            Icons.play_arrow_rounded,
+                                            color: Colors.white,
+                                            size: 30,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (widget.fullscreen &&
+                                      widget.onClose != null)
+                                    Positioned(
+                                      top: 6,
+                                      left: 6,
+                                      child: IconButton(
+                                        key: const ValueKey(
+                                          'video-close-overlay',
+                                        ),
+                                        tooltip: 'Close (Esc)',
+                                        color: Colors.white,
+                                        style: IconButton.styleFrom(
+                                          backgroundColor: Colors.black
+                                              .withValues(alpha: .45),
+                                        ),
+                                        onPressed: widget.onClose,
+                                        icon: const Icon(Icons.close_rounded),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               VideoFrameTimeline(
@@ -744,56 +768,66 @@ class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder>
           child: ValueListenableBuilder<double?>(
             valueListenable:
                 widget.progress ?? const AlwaysStoppedAnimation<double?>(null),
-            builder: (context, fraction, _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                RotationTransition(
-                  turns: _turns,
-                  child: const Icon(
-                    Icons.hourglass_bottom_rounded,
-                    color: ClawnsoleColors.creamMuted,
-                    size: 30,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Loading film',
-                  style: TextStyle(color: Colors.white70, fontSize: 11),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: 190,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      key: const ValueKey('video-loading-progress'),
-                      value: fraction,
-                      minHeight: 4,
-                      backgroundColor: Colors.white12,
+            builder: (context, fraction, _) {
+              // A transfer can reach 100% before the video player finishes
+              // opening the file. At that point byte progress no longer
+              // describes the remaining work, so return to an indeterminate
+              // preparation state instead of displaying a stuck 100%.
+              final transferFraction = fraction != null && fraction < 1
+                  ? fraction.clamp(0.0, 1.0)
+                  : null;
+              final preparing = fraction != null && fraction >= 1;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  RotationTransition(
+                    turns: _turns,
+                    child: const Icon(
+                      Icons.hourglass_bottom_rounded,
                       color: ClawnsoleColors.creamMuted,
+                      size: 30,
                     ),
                   ),
-                ),
-                SizedBox(
-                  height: 22,
-                  child: fraction == null
-                      ? null
-                      : Center(
-                          child: Text(
-                            '${(fraction.clamp(0.0, 1.0) * 100).round()}%',
-                            key: const ValueKey('video-loading-percent'),
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 10,
-                              fontFeatures: <FontFeature>[
-                                FontFeature.tabularFigures(),
-                              ],
+                  const SizedBox(height: 8),
+                  Text(
+                    preparing ? 'Preparing film' : 'Loading film',
+                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: 190,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        key: const ValueKey('video-loading-progress'),
+                        value: transferFraction,
+                        minHeight: 4,
+                        backgroundColor: Colors.white12,
+                        color: ClawnsoleColors.creamMuted,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: 22,
+                    child: transferFraction == null
+                        ? null
+                        : Center(
+                            child: Text(
+                              '${(transferFraction * 100).round()}%',
+                              key: const ValueKey('video-loading-percent'),
+                              style: const TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
+                                fontFeatures: <FontFeature>[
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                ),
-              ],
-            ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
         if (widget.onClose != null)
