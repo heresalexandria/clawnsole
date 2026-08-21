@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show PointerDeviceKind;
 
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
@@ -3018,6 +3019,53 @@ void main() {
     expect(find.text('System'), findsOneWidget);
     expect(find.text('Light'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
+  });
+
+  testWidgets('iOS touch outside a text field dismisses the keyboard', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    final prompt = find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('generation-prompt-');
+    });
+    final editable = find.descendant(
+      of: prompt,
+      matching: find.byType(EditableText),
+    );
+
+    await tester.tap(prompt, kind: PointerDeviceKind.touch);
+    await tester.pump();
+    expect(tester.widget<EditableText>(editable).focusNode.hasFocus, isTrue);
+
+    final promptTopLeft = tester.getTopLeft(prompt);
+    await tester.tapAt(
+      Offset(promptTopLeft.dx + 10, promptTopLeft.dy - 5),
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    expect(tester.widget<EditableText>(editable).focusNode.hasFocus, isFalse);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('desktop brand icon has no decorative border or background', (
