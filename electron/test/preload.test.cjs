@@ -92,6 +92,8 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.disconnectGoogleDrive, "function");
   assert.equal(typeof bridge.settingsVault, "function");
   assert.equal(typeof bridge.openExternalUrl, "function");
+  assert.equal(typeof bridge.revealDataFolder, "function");
+  assert.equal(typeof bridge.chooseDataDirectory, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
@@ -101,6 +103,8 @@ test("the preload publishes the renderer update bridge", async () => {
   await bridge.settingsVault("unlock", "passphrase");
   await bridge.settingsVault("sync");
   await bridge.openExternalUrl("https://cdn.example/video.mp4", "media");
+  await bridge.revealDataFolder();
+  await bridge.chooseDataDirectory();
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
@@ -112,6 +116,8 @@ test("the preload publishes the renderer update bridge", async () => {
       "clawnsole:vault:settings",
       "clawnsole:vault:settings",
       "clawnsole:external:open",
+      "clawnsole:data:reveal",
+      "clawnsole:data:choose",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);

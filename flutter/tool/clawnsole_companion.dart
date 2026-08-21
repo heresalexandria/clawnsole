@@ -569,6 +569,8 @@ class CompanionHybridStore {
     generationIds: generationIds,
     referenceIds: referenceIds,
   );
+
+  Future<GoogleDriveCopyCounts> moveLocalToDrive() => hybrid.moveLocalToDrive();
 }
 
 List<String> _cleanLibraryTags(Iterable<Object?> input) {
@@ -702,6 +704,14 @@ class CompanionApp {
           'snapshot': await _snapshotPayload(),
           'generations': copied.generations,
           'references': copied.references,
+        });
+      }
+      if (request.method == 'POST' && path == '/drive/migrate') {
+        final moved = await _store.moveLocalToDrive();
+        return await _json(request.response, 200, <String, Object?>{
+          'snapshot': await _snapshotPayload(),
+          'generations': moved.generations,
+          'references': moved.references,
         });
       }
       if (request.method == 'POST' &&

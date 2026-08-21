@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
+import 'data_location.dart';
+import 'data_location_shell.dart';
 import 'gateway.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
@@ -31,7 +33,8 @@ class WebGateway
         GenerationPreviewGateway,
         MediaPreviewGateway,
         GoogleDriveGateway,
-        SettingsVaultGateway {
+        SettingsVaultGateway,
+        DataLocationGateway {
   WebGateway({
     http.Client? client,
     Uri? baseUrl,
@@ -251,16 +254,25 @@ class WebGateway
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
     Set<String> generationIds = const <String>{},
     Set<String> referenceIds = const <String>{},
-  }) async {
+  }) => _driveTransfer('/drive/copy', <String, Object?>{
+    'generationIds': generationIds.toList(),
+    'referenceIds': referenceIds.toList(),
+  });
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() =>
+      _driveTransfer('/drive/migrate', const <String, Object?>{});
+
+  Future<GoogleDriveCopyResult> _driveTransfer(
+    String path,
+    Map<String, Object?> body,
+  ) async {
     final payload = _map(
       await _read(
         await _client.post(
-          _url('/drive/copy'),
+          _url(path),
           headers: const <String, String>{'Content-Type': 'application/json'},
-          body: jsonEncode(<String, Object?>{
-            'generationIds': generationIds.toList(),
-            'referenceIds': referenceIds.toList(),
-          }),
+          body: jsonEncode(body),
         ),
       ),
     );
@@ -275,6 +287,49 @@ class WebGateway
       snapshot: LocalSnapshot.fromJson(snapshotMap),
       generations: (payload['generations'] as num?)?.toInt() ?? 0,
       references: (payload['references'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  @override
+  bool get supportsRevealDataFolder => shellManagesDataLocation;
+
+  @override
+  bool get supportsDataRelocation => shellManagesDataLocation;
+
+  @override
+  bool get shellManagesDataRelocation => shellManagesDataLocation;
+
+  @override
+  Future<void> revealDataFolder() async {
+    final result = await revealShellDataFolder();
+    if (result['ok'] != true) {
+      throw StateError(
+        result['error']?.toString() ?? 'The data folder could not be opened.',
+      );
+    }
+  }
+
+  @override
+  Future<bool> dataDirectoryHasLibrary(String directory) =>
+      throw StateError('The desktop shell inspects the chosen folder itself.');
+
+  @override
+  Future<LocalSnapshot> relocateDataDirectory(
+    String directory, {
+    bool useExistingLibrary = false,
+  }) => throw StateError('The desktop shell moves the data folder itself.');
+
+  @override
+  Future<ShellDataRelocation> relocateDataDirectoryViaShell() async {
+    final result = await chooseShellDataDirectory();
+    if (result['ok'] != true) {
+      throw StateError(
+        result['error']?.toString() ?? 'The data folder could not be moved.',
+      );
+    }
+    return ShellDataRelocation(
+      moved: result['moved'] == true,
+      canceled: result['canceled'] == true,
     );
   }
 

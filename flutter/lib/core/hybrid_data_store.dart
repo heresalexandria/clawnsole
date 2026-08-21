@@ -357,6 +357,42 @@ class HybridDataStore implements DurableDataStore {
     );
   }
 
+  /// Copies everything local into Drive and, only after verifying that every
+  /// local record now has a Drive counterpart, removes the local originals.
+  /// The Drive folder linkage in the local file survives so the connection
+  /// resumes on the next launch. A partial copy aborts before any deletion.
+  Future<GoogleDriveCopyCounts> moveLocalToDrive() async {
+    final copied = await copyLocalToDrive();
+    final current = await read();
+    final driveGenerationIds = current.generations
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.localId)
+        .toSet();
+    final driveReferenceIds = current.savedReferences
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.id)
+        .toSet();
+    final unverified =
+        current.generations.any(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              !driveGenerationIds.contains('drive-${item.localId}'),
+        ) ||
+        current.savedReferences.any(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              !driveReferenceIds.contains('drive-${item.id}'),
+        );
+    if (unverified) {
+      throw StateError(
+        'Some local items were not confirmed in Google Drive, so the local '
+        'library was kept.',
+      );
+    }
+    await deleteLocalLibrary();
+    return copied;
+  }
+
   Future<Generation> _copyGeneration(
     Generation source, {
     required String id,

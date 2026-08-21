@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/secure_value_store.dart';
@@ -726,6 +728,157 @@ void main() {
       await temporary.delete(recursive: true);
     }
   });
+
+  test('companion migrates the local library to Drive entirely', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-migrate-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final drive = _MemoryDriveStore();
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    final asset = await local.writeAsset(
+      Uint8List.fromList(<int>[1, 2, 3]),
+      label: 'clip.mp4',
+      contentType: 'video/mp4',
+    );
+    final now = DateTime.utc(2026, 8, 20);
+    await local.write(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'generation-one',
+            status: 'Ready',
+            prompt: 'a local clip',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+            resultAsset: asset,
+          ),
+        ],
+      ),
+    );
+    await store.connectDrive('token', 'Portable Studio');
+    final application = CompanionApp.hybrid(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      final response = await http.post(base.resolve('/drive/migrate'));
+      expect(response.statusCode, 200);
+      final payload = jsonDecode(response.body) as Map<String, Object?>;
+      expect(payload['generations'], 1);
+      expect(payload['references'], 0);
+      final snapshot = payload['snapshot']! as Map<String, Object?>;
+      final generations = (snapshot['generations']! as List<Object?>)
+          .whereType<Map<Object?, Object?>>()
+          .toList();
+      expect(generations, hasLength(1));
+      expect(generations.single['localId'], 'drive-generation-one');
+      expect(generations.single['storage'], 'drive');
+      expect(drive.assets.values.single, <int>[1, 2, 3]);
+
+      // The local file lost its records but keeps the Drive linkage, and
+      // the now-unreferenced retained asset was pruned from disk.
+      final persisted = StoredData.decode(
+        File('${temporary.path}/clawnsole.json').readAsStringSync(),
+      );
+      expect(persisted.generations, isEmpty);
+      expect(persisted.driveFolderName, 'Portable Studio');
+      final assetsDirectory = Directory('${temporary.path}/assets');
+      expect(
+        assetsDirectory.existsSync()
+            ? assetsDirectory.listSync().whereType<File>().toList()
+            : const <File>[],
+        isEmpty,
+      );
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+}
+
+class _MemoryDriveStore extends GoogleDriveStore {
+  StoredData data = const StoredData();
+  final Map<String, Uint8List> assets = <String, Uint8List>{};
+  int _assetCounter = 0;
+  GoogleDriveConnection _memoryConnection = const GoogleDriveConnection(
+    state: GoogleDriveConnectionState.disconnected,
+  );
+
+  @override
+  GoogleDriveConnection get connection => _memoryConnection;
+
+  @override
+  Future<StoredData> connect(String accessToken, String folderName) async {
+    _memoryConnection = GoogleDriveConnection(
+      state: GoogleDriveConnectionState.connected,
+      folderName: folderName,
+      folderId: 'drive-root',
+    );
+    return data;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    _memoryConnection = const GoogleDriveConnection(
+      state: GoogleDriveConnectionState.disconnected,
+    );
+  }
+
+  @override
+  Future<StoredData> read() async => data;
+
+  @override
+  Future<void> write(StoredData value) async =>
+      data = googleDrivePortableData(value);
+
+  @override
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.drive,
+  }) async {
+    final id = 'drive-asset-${_assetCounter++}';
+    assets[id] = bytes;
+    return AssetReference(
+      kind: 'drive',
+      value: id,
+      label: label,
+      contentType: contentType,
+      bytes: bytes.length,
+    );
+  }
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async =>
+      assets[reference.value] ?? Uint8List(0);
+
+  @override
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) async {}
+
+  @override
+  Future<StorageStats> stats(int records) async => StorageStats(
+    path: 'drive',
+    bytes: data.encode().length,
+    records: records,
+  );
 }
 
 class _Terminal503Api extends BflApi {
