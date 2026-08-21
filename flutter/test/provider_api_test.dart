@@ -1166,7 +1166,14 @@ void main() {
       );
       expect(wan['resolution'], '1080P');
       expect(wan['ratio'], '9:16');
+      expect(wan['seed'], -1);
       expect(wan, isNot(contains('generate_audio')));
+
+      final seededWan = api.generationPayload(
+        'alibaba/wan-2.7/text-to-video',
+        <String, Object?>{...common, 'seed': 424242},
+      );
+      expect(seededWan['seed'], 424242);
 
       final veo = api.generationPayload(
         'google/veo3.1-fast/image-to-video',

@@ -231,6 +231,7 @@ class GenerationConfig {
     this.sourceThumbnailAsset,
     this.upscaleFactor = 2,
     this.upscaleCreativity = 1,
+    this.seed,
   });
 
   final String aspectRatio;
@@ -249,6 +250,9 @@ class GenerationConfig {
   final AssetReference? sourceThumbnailAsset;
   final double upscaleFactor;
   final int upscaleCreativity;
+
+  /// Reproducible random seed for models that accept one; null means random.
+  final int? seed;
 
   GenerationConfig copyWith({
     List<KeyframeLabel>? keyframes,
@@ -276,6 +280,7 @@ class GenerationConfig {
     sourceThumbnailAsset: sourceThumbnailAsset ?? this.sourceThumbnailAsset,
     upscaleFactor: upscaleFactor ?? this.upscaleFactor,
     upscaleCreativity: upscaleCreativity ?? this.upscaleCreativity,
+    seed: seed,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -299,6 +304,7 @@ class GenerationConfig {
       'sourceThumbnailAsset': sourceThumbnailAsset!.toJson(),
     if (upscaleFactor != 2) 'upscaleFactor': upscaleFactor,
     if (upscaleCreativity != 1) 'upscaleCreativity': upscaleCreativity,
+    if (seed != null) 'seed': seed,
   };
 
   factory GenerationConfig.fromJson(Map<String, Object?> json) {
@@ -370,6 +376,7 @@ class GenerationConfig {
       upscaleCreativity: (json['upscaleCreativity'] as num?)?.toInt() == 0
           ? 0
           : 1,
+      seed: (json['seed'] as num?)?.toInt(),
     );
   }
 }

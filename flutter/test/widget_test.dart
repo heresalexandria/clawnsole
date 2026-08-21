@@ -1898,6 +1898,350 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('duration readout accepts typed seconds and clamps to range', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final input = find.byKey(const ValueKey('duration-input'));
+    expect(input, findsOneWidget);
+
+    // Typing commits on submit and snaps into the model's range.
+    await tester.enterText(input, '999');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 20);
+
+    await tester.enterText(input, '2');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 5);
+
+    // Starting to type while AUTO is active takes manual control, exactly
+    // like touching the slider.
+    await tester.tap(find.byKey(const ValueKey('duration-mode-auto')));
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isTrue);
+    await tester.enterText(input, '7');
+    await tester.pumpAndSettle();
+    expect(controller.form.autoDuration, isFalse);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(controller.form.durationSeconds, 7);
+    expect(find.byKey(const ValueKey('duration-slider')), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('frame and finish dropdowns choose ratio and resolution', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The trigger wears the drawn glyph for the current ratio.
+    final ratioTrigger = find.byKey(const ValueKey('ratio-dropdown'));
+    await tester.ensureVisible(ratioTrigger);
+    await tester.tap(ratioTrigger);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ratio-21:9')));
+    await tester.pumpAndSettle();
+    expect(controller.form.aspectRatio, '21:9');
+
+    final resolutionTrigger = find.byKey(const ValueKey('resolution-dropdown'));
+    await tester.ensureVisible(resolutionTrigger);
+    await tester.tap(resolutionTrigger);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('resolution-fhd')));
+    await tester.pumpAndSettle();
+    expect(controller.form.resolution, 'fhd');
+
+    // Draft mode dims every choice but the provider's HD draft tier.
+    controller.updateForm((form) => form.draft = true);
+    await tester.pumpAndSettle();
+    await tester.tap(resolutionTrigger);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const ValueKey('resolution-fhd')),
+          )
+          .enabled,
+      isFalse,
+    );
+    expect(
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const ValueKey('resolution-hd')),
+          )
+          .enabled,
+      isTrue,
+    );
+    controller.dispose();
+  });
+
+  testWidgets('seed control appears only for Wan and survives reuse', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1600));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'atlas',
+            model: 'alibaba/wan-2.7/text-to-video',
+          ),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final seedInput = find.byKey(const ValueKey('seed-input'));
+    expect(seedInput, findsOneWidget);
+    await tester.ensureVisible(seedInput);
+    await tester.enterText(seedInput, '424242');
+    await tester.pump();
+    expect(controller.form.seed, 424242);
+    expect(controller.buildInputForTesting()['seed'], 424242);
+
+    // The dice rolls a fresh explicit seed; clearing returns to random.
+    await tester.ensureVisible(find.byTooltip('New random seed'));
+    await tester.tap(find.byTooltip('New random seed'));
+    await tester.pump();
+    expect(controller.form.seed, isNotNull);
+    await tester.enterText(seedInput, '');
+    await tester.pump();
+    expect(controller.form.seed, isNull);
+    expect(controller.buildInputForTesting(), isNot(contains('seed')));
+
+    // Reuse restores a stored seed with the rest of the request.
+    final now = DateTime.utc(2026, 8, 20);
+    await controller.reuse(
+      Generation(
+        localId: 'wan-seeded',
+        provider: 'atlas',
+        model: 'alibaba/wan-2.7/text-to-video',
+        status: 'Ready',
+        prompt: 'Same take again.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+          seed: 90210,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.selectedModelId, 'alibaba/wan-2.7/text-to-video');
+    expect(controller.form.seed, 90210);
+    expect(controller.buildInputForTesting()['seed'], 90210);
+
+    // A model without seed support hides the control and clears the value.
+    await controller.selectModel('google/veo3.1-fast/text-to-video');
+    await tester.pumpAndSettle();
+    expect(controller.form.seed, isNull);
+    expect(find.byKey(const ValueKey('seed-input')), findsNothing);
+
+    // The stored config round-trips seed through JSON, tolerating absence.
+    const seeded = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 8,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+      seed: 90210,
+    );
+    expect(GenerationConfig.fromJson(seeded.toJson()).seed, 90210);
+    expect(
+      GenerationConfig.fromJson(
+        const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ).toJson(),
+      ).seed,
+      isNull,
+    );
+    controller.dispose();
+  });
+
+  testWidgets('create screen fits above the fold at 1440x900', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Short viewports drop the heading description and tighten spacing.
+    expect(find.textContaining('Direct one continuous moment'), findsNothing);
+
+    // Cost and save-destination share one row at desktop widths.
+    expect(find.byKey(const ValueKey('cost-destination-row')), findsOneWidget);
+
+    // Every generation option through Generate sits above the fold, with
+    // the Recent work header peeking in below — all without scrolling.
+    final generate = find.text('Generate video');
+    expect(generate, findsOneWidget);
+    expect(tester.getBottomLeft(generate).dy, lessThan(900));
+    final recentHeader = find.text('Recent work');
+    expect(recentHeader, findsOneWidget);
+    expect(tester.getTopLeft(recentHeader).dy, lessThan(900));
+    controller.dispose();
+  });
+
+  testWidgets('console-only balances link to the provider console', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _ProviderMemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'artcraft',
+            model: 'seedance_2p0',
+          ),
+          hasApiKey: true,
+          connectedProviders: <String>{'artcraft'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        const ProviderAccountStatus(
+          provider: 'artcraft',
+          currency: 'credits',
+          balanceLabel: 'Open ArtCraft to view balance ↗',
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Open ArtCraft to view balance ↗'), findsOneWidget);
+    final link = find.byTooltip('Open provider console');
+    expect(link, findsOneWidget);
+    final ink = tester.widget<InkWell>(
+      find.descendant(of: link, matching: find.byType(InkWell)),
+    );
+    expect(ink.onTap, isNotNull);
+    controller.dispose();
+  });
+
   testWidgets('provider picker collapses and expands provider models', (
     tester,
   ) async {
@@ -3711,6 +4055,9 @@ void main() {
 
     expect(find.byType(StatusBadge), findsNWidgets(4));
 
+    // Recent work sits below the full-width composer, so bring its view
+    // toggle on screen before tapping.
+    await tester.ensureVisible(find.byTooltip('Mini'));
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
 
@@ -3736,6 +4083,7 @@ void main() {
       GenerationViewMode.mini,
     );
 
+    await tester.ensureVisible(find.byTooltip('Compact'));
     await tester.tap(find.byTooltip('Compact'));
     await tester.pumpAndSettle();
 
@@ -3749,6 +4097,7 @@ void main() {
       GenerationViewMode.compact,
     );
 
+    await tester.ensureVisible(find.byTooltip('Full'));
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
