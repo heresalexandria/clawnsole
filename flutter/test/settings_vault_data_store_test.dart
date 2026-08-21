@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/durable_data_store.dart';
@@ -46,6 +47,37 @@ void main() {
       clock: () => DateTime.utc(2026, 8, 20, 0, 1),
     );
     expect((await restarted.read()).apiKeyFor('ltx'), 'legacy-ltx');
+    expect(local.data.encode(), isNot(contains('legacy-')));
+  });
+
+  test('device ids survive base64url draws the id rules reject', () async {
+    // The top six bits of the first random byte become the id's first
+    // base64url character; 248-255 map to '-' or '_', which the vault's
+    // device-id rules reject as a leading character. The generator must
+    // redraw instead of failing the whole secure store (this exact draw
+    // was a 1-in-32 flake that hid keys and Drive state until restart).
+    final local = _MemoryStore(
+      const StoredData(apiKeys: <String, String>{'bfl': 'legacy-bfl'}),
+    );
+    final store = SettingsVaultDataStore(
+      delegate: local,
+      secureStore: MemorySecureValueStore(),
+      codec: fastCodec,
+      clock: () => DateTime.utc(2026, 8, 21),
+      random: _SequencedRandom(<int>[
+        ...List<int>.filled(32, 250),
+        ...List<int>.filled(32, 65),
+      ]),
+    );
+
+    final first = await store.read();
+
+    expect(first.apiKeyFor('bfl'), 'legacy-bfl');
+    expect(
+      store.settingsVaultStatus.state,
+      isNot(SettingsVaultState.error),
+      reason: store.settingsVaultStatus.message,
+    );
     expect(local.data.encode(), isNot(contains('legacy-')));
   });
 
@@ -240,6 +272,22 @@ class _FakeRemote implements SettingsVaultRemote {
   Future<void> delete() async {
     server.bytes = null;
   }
+}
+
+class _SequencedRandom implements Random {
+  _SequencedRandom(this._values);
+
+  final List<int> _values;
+  int _index = 0;
+
+  @override
+  int nextInt(int max) => _index < _values.length ? _values[_index++] % max : 0;
+
+  @override
+  double nextDouble() => 0;
+
+  @override
+  bool nextBool() => false;
 }
 
 class _MemoryStore implements DurableDataStore {

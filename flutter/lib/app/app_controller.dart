@@ -804,6 +804,7 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _apply(await gateway.load(), restorePreferences: true);
+      unawaited(resumeGoogleDrive());
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
@@ -2947,6 +2948,27 @@ class AppController extends ChangeNotifier {
       showNotice('Drive disconnected on this device. Cloud files were kept.');
     } on Object catch (error) {
       showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Quietly reattaches a previously connected Drive library, typically at
+  /// startup: the companion and shell hold Drive sessions per process, so
+  /// without this every launch would hide Drive work until a manual refresh.
+  /// Failures stay silent — Settings still offers the interactive refresh.
+  Future<void> resumeGoogleDrive() async {
+    if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    if (googleDriveConnected || !googleDriveConnection.isConfigured) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      final value = await (gateway as GoogleDriveGateway).resumeGoogleDrive();
+      if (value != null) _apply(value);
+    } on Object {
+      // The resume contract never throws, but a quiet startup must survive
+      // an unexpected error without surfacing a notice.
     } finally {
       googleDriveBusy = false;
       notifyListeners();

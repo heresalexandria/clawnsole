@@ -100,3 +100,127 @@ test("a desktop refresh token stays encrypted at rest and refreshes silently", a
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test("silent authorization refreshes a stored token without any interactive flow", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-auth."));
+  const tokenFile = path.join(directory, "google-drive-auth.json");
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(`encrypted:${value}`),
+    decryptString: (value) => value.toString().replace(/^encrypted:/, ""),
+  };
+  await fs.writeFile(
+    tokenFile,
+    JSON.stringify({
+      encrypted: Buffer.from("encrypted:refresh-token").toString("base64"),
+    }),
+  );
+  const requests = [];
+  let serversStarted = 0;
+  const auth = new GoogleDriveAuth({
+    clientId: "desktop-client",
+    userData: directory,
+    safeStorage,
+    openExternal: async () => {
+      throw new Error("silent authorization must never open a browser");
+    },
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: "fresh-access-token" }),
+      };
+    },
+    createServer: () => {
+      serversStarted += 1;
+      throw new Error("silent authorization must never start a callback server");
+    },
+  });
+
+  try {
+    assert.equal(await auth.authorizeSilently(), "fresh-access-token");
+    assert.equal(serversStarted, 0);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
+    assert.equal(requests[0].options.body.get("grant_type"), "refresh_token");
+    assert.equal(requests[0].options.body.get("refresh_token"), "refresh-token");
+    await fs.access(tokenFile);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("silent authorization forgets a refresh token Google rejects", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-auth."));
+  const tokenFile = path.join(directory, "google-drive-auth.json");
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(`encrypted:${value}`),
+    decryptString: (value) => value.toString().replace(/^encrypted:/, ""),
+  };
+  await fs.writeFile(
+    tokenFile,
+    JSON.stringify({
+      encrypted: Buffer.from("encrypted:stale-token").toString("base64"),
+    }),
+  );
+  let serversStarted = 0;
+  const auth = new GoogleDriveAuth({
+    clientId: "desktop-client",
+    userData: directory,
+    safeStorage,
+    openExternal: async () => {
+      throw new Error("silent authorization must never open a browser");
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error_description: "Token has been revoked." }),
+    }),
+    createServer: () => {
+      serversStarted += 1;
+      throw new Error("silent authorization must never start a callback server");
+    },
+  });
+
+  try {
+    assert.equal(await auth.authorizeSilently(), "");
+    assert.equal(serversStarted, 0);
+    await assert.rejects(fs.access(tokenFile));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("silent authorization returns nothing when no token is stored", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-auth."));
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(`encrypted:${value}`),
+    decryptString: (value) => value.toString().replace(/^encrypted:/, ""),
+  };
+  const requests = [];
+  const auth = new GoogleDriveAuth({
+    clientId: "desktop-client",
+    userData: directory,
+    safeStorage,
+    openExternal: async () => {
+      throw new Error("silent authorization must never open a browser");
+    },
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    createServer: () => {
+      throw new Error("silent authorization must never start a callback server");
+    },
+  });
+
+  try {
+    assert.equal(await auth.authorizeSilently(), "");
+    assert.equal(requests.length, 0);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});

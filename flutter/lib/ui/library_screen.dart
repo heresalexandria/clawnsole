@@ -72,6 +72,10 @@ class _LibraryResults extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       _LibraryToolbar(controller: controller),
+      if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+        const SizedBox(height: 12),
+        DriveReconnectNotice(controller: controller, subject: 'films'),
+      ],
       const SizedBox(height: 18),
       if (controller.filteredGenerations.isEmpty)
         _LibraryEmpty(controller: controller)
@@ -135,12 +139,27 @@ class _FolderSidebar extends StatelessWidget {
 
   final AppController controller;
 
+  Map<LibraryStorageFilter, int> get _storageCounts =>
+      <LibraryStorageFilter, int>{
+        for (final filter in LibraryStorageFilter.values)
+          filter: controller.generations
+              .where((item) => filter.matches(item.storage))
+              .length,
+      };
+
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        StorageSidebarSection(
+          controller: controller,
+          value: controller.libraryStorageFilter,
+          counts: _storageCounts,
+          onChanged: (value) =>
+              unawaited(controller.setLibraryStorageFilter(value)),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
           child: Row(
@@ -970,6 +989,23 @@ Future<void> _showFolderPicker(
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
                 children: <Widget>[
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) => StorageSidebarSection(
+                      controller: controller,
+                      value: controller.libraryStorageFilter,
+                      counts: <LibraryStorageFilter, int>{
+                        for (final filter in LibraryStorageFilter.values)
+                          filter: controller.generations
+                              .where((item) => filter.matches(item.storage))
+                              .length,
+                      },
+                      onChanged: (value) {
+                        unawaited(controller.setLibraryStorageFilter(value));
+                        Navigator.pop(sheetContext);
+                      },
+                    ),
+                  ),
                   _FolderPickerTile(
                     icon: Icons.video_library_outlined,
                     label: 'All films',

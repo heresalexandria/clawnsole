@@ -243,11 +243,23 @@ Generate button. Layout order:
   segments = plum fill with cream icon and text; both modes were verified
   against the old unreadable-active-tab bug. Narrow layouts stack the
   search above the segment row.
-- **Filters popover** (`LibraryFilterButton`): storage, favorites, and
-  tags live in an anchored panel instead of stacked chip rows. The key
-  lights plum with a count while any of them narrow the view, and the
-  panel offers *Reset filters*. The References toolbar shares the same
-  pattern (kind segments + search + sort key + Filters key).
+- **Filters popover** (`LibraryFilterButton`): favorites and tags live in
+  an anchored panel instead of stacked chip rows. The key lights plum with
+  a count while either narrows the view, and the panel offers *Reset
+  filters*. The References toolbar shares the same pattern (kind segments
+  + search + sort key + Filters key).
+- **Storage lives with the folders** (`StorageSidebarSection`): the left
+  sidebar leads with All storage / On this device / Google Drive rows and
+  per-storage counts, above the folder tree; narrow layouts get the same
+  rows in the folder picker. The Drive row carries the connection state
+  and a brass *Reconnect* action when a configured session is signed out.
+- **Drive reconnects itself at startup** (`resumeGoogleDrive`): the
+  companion and shell hold Drive sessions per process, so the controller
+  quietly reattaches a previously configured connection on launch using a
+  silent grant (stored refresh token on desktop, lightweight sign-in on
+  mobile) — never an interactive prompt. When no silent grant exists, a
+  `DriveReconnectNotice` card under the Library/References toolbar says
+  Drive work is hidden (not lost) and offers *Reconnect*.
 - **No Ready chips on cards**: a delivered thumbnail already says ready,
   so `StatusBadge` renders nothing for ready work and only appears for
   in-progress, failed, or status-unavailable items.

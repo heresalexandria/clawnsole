@@ -166,6 +166,10 @@ class _ReferenceResults extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       _ReferenceToolbar(controller: controller),
+      if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+        const SizedBox(height: 12),
+        DriveReconnectNotice(controller: controller, subject: 'references'),
+      ],
       const SizedBox(height: 18),
       if (controller.filteredSavedReferences.isEmpty)
         _ReferenceEmpty(controller: controller)
@@ -494,12 +498,27 @@ class _ReferenceFolderSidebar extends StatelessWidget {
 
   final AppController controller;
 
+  Map<LibraryStorageFilter, int> get _storageCounts =>
+      <LibraryStorageFilter, int>{
+        for (final filter in LibraryStorageFilter.values)
+          filter: controller.savedReferences
+              .where((item) => filter.matches(item.storage))
+              .length,
+      };
+
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        StorageSidebarSection(
+          controller: controller,
+          value: controller.referenceStorageFilter,
+          counts: _storageCounts,
+          onChanged: (value) =>
+              unawaited(controller.setReferenceStorageFilter(value)),
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
           child: Row(
@@ -667,48 +686,73 @@ class _ReferenceFolderPicker extends StatelessWidget {
 
   final AppController controller;
 
+  Map<LibraryStorageFilter, int> get _storageCounts =>
+      <LibraryStorageFilter, int>{
+        for (final filter in LibraryStorageFilter.values)
+          filter: controller.savedReferences
+              .where((item) => filter.matches(item.storage))
+              .length,
+      };
+
   @override
   Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    child: Row(
+    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Expanded(
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: controller.referenceFolderView,
-              isExpanded: true,
-              onChanged: (value) {
-                if (value != null) controller.setReferenceFolderView(value);
-              },
-              items: <DropdownMenuItem<String>>[
-                const DropdownMenuItem(
-                  value: AppController.libraryFolderAll,
-                  child: Text('All references'),
-                ),
-                const DropdownMenuItem(
-                  value: AppController.libraryFolderUnfiled,
-                  child: Text('Unfiled'),
-                ),
-                ...controller.referenceFolderTree.map(
-                  (folder) => DropdownMenuItem(
-                    value: folder.id,
-                    child: Text(
-                      controller.folderPath(
-                        folder.id,
-                        collection: LibraryCollection.references,
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: controller.referenceFolderView,
+                  isExpanded: true,
+                  onChanged: (value) {
+                    if (value != null) controller.setReferenceFolderView(value);
+                  },
+                  items: <DropdownMenuItem<String>>[
+                    const DropdownMenuItem(
+                      value: AppController.libraryFolderAll,
+                      child: Text('All references'),
+                    ),
+                    const DropdownMenuItem(
+                      value: AppController.libraryFolderUnfiled,
+                      child: Text('Unfiled'),
+                    ),
+                    ...controller.referenceFolderTree.map(
+                      (folder) => DropdownMenuItem(
+                        value: folder.id,
+                        child: Text(
+                          controller.folderPath(
+                            folder.id,
+                            collection: LibraryCollection.references,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
+            IconButton(
+              tooltip: 'New reference folder',
+              onPressed: () =>
+                  unawaited(_showReferenceFolderEditor(context, controller)),
+              icon: const Icon(Icons.create_new_folder_outlined),
+            ),
+          ],
         ),
-        IconButton(
-          tooltip: 'New reference folder',
-          onPressed: () =>
-              unawaited(_showReferenceFolderEditor(context, controller)),
-          icon: const Icon(Icons.create_new_folder_outlined),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Divider(height: 1),
+        ),
+        StorageSidebarSection(
+          controller: controller,
+          value: controller.referenceStorageFilter,
+          counts: _storageCounts,
+          trailingDivider: false,
+          onChanged: (value) =>
+              unawaited(controller.setReferenceStorageFilter(value)),
         ),
       ],
     ),

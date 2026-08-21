@@ -68,6 +68,18 @@ class GoogleDriveAuth {
     return this.#interactive();
   }
 
+  async authorizeSilently() {
+    if (!this.available) return "";
+    const refreshToken = await this.#readRefreshToken();
+    if (!refreshToken) return "";
+    try {
+      return await this.#refresh(refreshToken);
+    } catch {
+      await this.#deleteRefreshToken();
+      return "";
+    }
+  }
+
   async disconnect() {
     const refreshToken = await this.#readRefreshToken();
     await this.#deleteRefreshToken();
