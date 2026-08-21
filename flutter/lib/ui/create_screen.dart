@@ -15,6 +15,8 @@ import 'claw_mark.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
+import 'inline_video.dart';
+import 'library_screen.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
@@ -3469,157 +3471,172 @@ class _ComposerFooter extends StatelessWidget {
   }
 }
 
-class _RecentWork extends StatelessWidget {
+class _RecentWork extends StatefulWidget {
   const _RecentWork({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      LayoutBuilder(
-        builder: (context, constraints) {
-          final title = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Eyebrow('On the branch'),
-              const SizedBox(height: 6),
-              Text(
-                'Recent work',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-            ],
-          );
-          final toggle = GenerationViewToggle(
-            keyPrefix: 'recent-work-view',
-            value: controller.recentWorkViewMode,
-            onChanged: (value) =>
-                unawaited(controller.setRecentWorkViewMode(value)),
-          );
-          final library = TextButton(
-            onPressed: () => unawaited(controller.navigate(AppSection.library)),
-            child: const Text('View library'),
-          );
-          // Wide headers carry the view toggle inline so the first card
-          // starts a row sooner; narrow ones keep it on its own line.
-          if (constraints.maxWidth >= 520) {
-            return Row(
-              children: <Widget>[
-                Expanded(child: title),
-                toggle,
-                const SizedBox(width: 10),
-                library,
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(child: title),
-                  library,
-                ],
-              ),
-              const SizedBox(height: 8),
-              Align(alignment: Alignment.centerRight, child: toggle),
-            ],
-          );
-        },
-      ),
-      const SizedBox(height: 12),
-      if (controller.visibleGenerations.isEmpty)
-        SurfaceCard(
-          child: Column(
-            children: <Widget>[
-              const SizedBox(height: 10),
-              ClawMark(size: 40, color: context.tokens.brass),
-              const SizedBox(height: 13),
-              Text(
-                'A quiet branch.',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Your generations will gather here with live progress and playback.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: context.colors.onSurfaceVariant),
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        )
-      else if (controller.recentWorkViewMode == GenerationViewMode.mini)
+  State<_RecentWork> createState() => _RecentWorkState();
+}
+
+class _RecentWorkState extends State<_RecentWork> {
+  final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
+
+  AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _inlinePlayback.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => InlineVideoRegistryScope(
+    registry: _inlinePlayback,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
         LayoutBuilder(
           builder: (context, constraints) {
-            const gap = 10.0;
-            final columns = constraints.maxWidth >= 320 ? 2 : 1;
-            final width =
-                (constraints.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: controller.visibleGenerations
-                  .take(5)
-                  .map(
-                    (item) => SizedBox(
-                      width: width,
-                      child: MiniGenerationCard(
-                        controller: controller,
-                        item: item,
-                      ),
-                    ),
-                  )
-                  .toList(),
+            final title = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Eyebrow('On the branch'),
+                const SizedBox(height: 6),
+                Text(
+                  'Recent work',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ],
+            );
+            final toggle = GenerationViewToggle(
+              keyPrefix: 'recent-work-view',
+              value: controller.recentWorkViewMode,
+              onChanged: (value) =>
+                  unawaited(controller.setRecentWorkViewMode(value)),
+            );
+            final library = TextButton(
+              onPressed: () =>
+                  unawaited(controller.navigate(AppSection.library)),
+              child: const Text('View library'),
+            );
+            // Wide headers carry the view toggle inline so the first card
+            // starts a row sooner; narrow ones keep it on its own line.
+            if (constraints.maxWidth >= 520) {
+              return Row(
+                children: <Widget>[
+                  Expanded(child: title),
+                  toggle,
+                  const SizedBox(width: 10),
+                  library,
+                ],
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(child: title),
+                    library,
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerRight, child: toggle),
+              ],
             );
           },
-        )
-      else if (controller.recentWorkViewMode == GenerationViewMode.compact)
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.visibleGenerations
-              .take(5)
-              .map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: CompactGenerationRow(
-                    controller: controller,
-                    item: item,
+        ),
+        const SizedBox(height: 12),
+        if (controller.visibleGenerations.isEmpty)
+          SurfaceCard(
+            child: Column(
+              children: <Widget>[
+                const SizedBox(height: 10),
+                ClawMark(size: 40, color: context.tokens.brass),
+                const SizedBox(height: 13),
+                Text(
+                  'A quiet branch.',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Your generations will gather here with live progress and playback.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          )
+        else if (controller.recentWorkViewMode == GenerationViewMode.compact)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: controller.visibleGenerations
+                .take(5)
+                .map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(bottom: 9),
+                    child: CompactGenerationRow(
+                      controller: controller,
+                      item: item,
+                    ),
                   ),
-                ),
-              )
-              .toList(),
-        )
-      else
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: controller.visibleGenerations
-              .take(5)
-              .map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: ActivityCard(controller: controller, item: item),
-                ),
-              )
-              .toList(),
+                )
+                .toList(),
+          )
+        else
+          // Mini and full modes lay out the same cards, at the same widths,
+          // as the Library, so recent films read identically on both screens.
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final layout = GenerationCardGrid.fit(
+                constraints.maxWidth,
+                controller.recentWorkViewMode,
+              );
+              return Wrap(
+                spacing: GenerationCardGrid.gap,
+                runSpacing: GenerationCardGrid.gap,
+                children: controller.visibleGenerations
+                    .take(5)
+                    .map(
+                      (item) => SizedBox(
+                        width: layout.tileWidth,
+                        child:
+                            controller.recentWorkViewMode ==
+                                GenerationViewMode.mini
+                            ? MiniGenerationCard(
+                                controller: controller,
+                                item: item,
+                              )
+                            : GenerationCard(
+                                controller: controller,
+                                item: item,
+                              ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+        const SizedBox(height: 2),
+        SurfaceCard(
+          color: context.colors.surfaceContainer,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Wrap(
+            spacing: 18,
+            runSpacing: 8,
+            children: <Widget>[
+              _Summary('${controller.generations.length}', 'in library'),
+              _Summary('${controller.readyCount}', 'complete'),
+              _Summary('${controller.workingCount}', 'moving'),
+              _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),
+            ],
+          ),
         ),
-      const SizedBox(height: 2),
-      SurfaceCard(
-        color: context.colors.surfaceContainer,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        child: Wrap(
-          spacing: 18,
-          runSpacing: 8,
-          children: <Widget>[
-            _Summary('${controller.generations.length}', 'in library'),
-            _Summary('${controller.readyCount}', 'complete'),
-            _Summary('${controller.workingCount}', 'moving'),
-            _Summary(formatUsdAmount(controller.spentUsd), 'recorded spend'),
-          ],
-        ),
-      ),
-    ],
+      ],
+    ),
   );
 }
 

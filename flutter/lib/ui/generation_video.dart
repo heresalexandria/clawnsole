@@ -90,8 +90,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
   @override
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
-    // Timeline strip plus the transport bar under the video.
-    const chrome = 46.0 + 48.0;
+    const chrome = GenerationVideo.chromeHeight;
     final maxWidth = math.min(screen.width - 96, 1080.0);
     final maxVideoHeight = math.max(180.0, screen.height * .86 - chrome);
     final width = math
@@ -138,6 +137,7 @@ class GenerationVideo extends StatefulWidget {
     this.fullscreen = false,
     this.initialPosition = Duration.zero,
     this.autoplay = false,
+    this.autofocus = true,
     this.onClose,
     this.onAspectRatio,
     this.controllerFactory,
@@ -145,11 +145,20 @@ class GenerationVideo extends StatefulWidget {
     this.supportsPhotos = false,
   });
 
+  /// Height of the frame timeline plus the transport bar rendered under the
+  /// video surface, so hosts can size themselves around a known video height.
+  static const double chromeHeight = 46.0 + 48.0;
+
   final Uri uri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool fullscreen;
   final Duration initialPosition;
   final bool autoplay;
+
+  /// Whether the player claims keyboard focus as soon as it appears. Modal
+  /// and fullscreen hosts keep the default; players embedded in a card grid
+  /// pass false and gain focus when the viewer interacts with them.
+  final bool autofocus;
 
   /// Closes the surface hosting this player (modal dialog or a standalone
   /// fullscreen route). Escape triggers it and a close control is shown.
@@ -377,7 +386,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
       final value = _controller.value;
       return Focus(
         focusNode: _focusNode,
-        autofocus: true,
+        autofocus: widget.autofocus,
         onKeyEvent: _handleKeyEvent,
         child: ColoredBox(
           color: Colors.black,

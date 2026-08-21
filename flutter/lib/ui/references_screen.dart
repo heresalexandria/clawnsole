@@ -9,6 +9,7 @@ import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'generation_video.dart';
+import 'inline_video.dart';
 import 'media_thumbnail.dart';
 
 class ReferencesScreen extends StatelessWidget {
@@ -167,9 +168,16 @@ class _ReferenceResults extends StatefulWidget {
 
 class _ReferenceResultsState extends State<_ReferenceResults> {
   final Set<String> selectedIds = <String>{};
+  final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
   bool selecting = false;
 
   AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _inlinePlayback.dispose();
+    super.dispose();
+  }
 
   void _setSelecting(bool value) => setState(() {
     selecting = value;
@@ -188,122 +196,125 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
         .toList();
     final selectedAreHidden =
         selected.isNotEmpty && selected.every((item) => item.hidden);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _ReferenceToolbar(
-          controller: controller,
-          selecting: selecting,
-          selectedCount: selected.length,
-          onSelectingChanged: _setSelecting,
-        ),
-        if (DriveReconnectNotice.needed(controller)) ...<Widget>[
-          const SizedBox(height: 12),
-          DriveReconnectNotice(controller: controller, subject: 'references'),
-        ],
-        if (selecting) ...<Widget>[
-          const SizedBox(height: 10),
-          _ReferenceBulkActions(
+    return InlineVideoRegistryScope(
+      registry: _inlinePlayback,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _ReferenceToolbar(
+            controller: controller,
+            selecting: selecting,
             selectedCount: selected.length,
-            allVisibleSelected:
-                filtered.isNotEmpty &&
-                filtered.every((item) => selectedIds.contains(item.id)),
-            onSelectAll: () => setState(() {
-              final ids = filtered.map((item) => item.id).toSet();
-              if (ids.every(selectedIds.contains)) {
-                selectedIds.removeAll(ids);
-              } else {
-                selectedIds.addAll(ids);
-              }
-            }),
-            onMove: selected.isEmpty
-                ? null
-                : () async {
-                    final moved = await _showReferenceMoveDialog(
-                      context,
-                      controller,
-                      selectedIds,
-                    );
-                    if (moved && mounted) _setSelecting(false);
-                  },
-            onVisibility: selected.isEmpty
-                ? null
-                : () async {
-                    final saved = await controller.setReferencesHidden(
-                      selectedIds,
-                      !selectedAreHidden,
-                    );
-                    if (saved && mounted) _setSelecting(false);
-                  },
-            visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
-            onDone: () => _setSelecting(false),
+            onSelectingChanged: _setSelecting,
           ),
-        ],
-        const SizedBox(height: 18),
-        if (filtered.isEmpty)
-          _ReferenceEmpty(controller: controller)
-        else
-          LayoutBuilder(
-            builder: (context, grid) {
-              final columns = grid.maxWidth >= 1120
-                  ? 4
-                  : grid.maxWidth >= 760
-                  ? 3
-                  : grid.maxWidth >= 480
-                  ? 2
-                  : 1;
-              const gap = 16.0;
-              final width = (grid.maxWidth - gap * (columns - 1)) / columns;
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: filtered
-                    .map(
-                      (item) => SizedBox(
-                        width: width,
-                        child: Stack(
-                          children: <Widget>[
-                            _ReferenceCard(
-                              controller: controller,
-                              reference: item,
-                            ),
-                            if (selecting)
-                              Positioned(
-                                top: 8,
-                                left: 8,
-                                child: Material(
-                                  elevation: 7,
-                                  color: context.colors.surface,
-                                  borderRadius: BorderRadius.circular(9),
-                                  child: IconButton(
-                                    key: ValueKey(
-                                      'select-reference-${item.id}',
-                                    ),
-                                    tooltip: selectedIds.contains(item.id)
-                                        ? 'Deselect ${item.name}'
-                                        : 'Select ${item.name}',
-                                    onPressed: () => _toggle(item.id),
-                                    icon: Icon(
-                                      selectedIds.contains(item.id)
-                                          ? Icons.check_box_rounded
-                                          : Icons
-                                                .check_box_outline_blank_rounded,
-                                      color: selectedIds.contains(item.id)
-                                          ? context.tokens.brass
-                                          : null,
+          if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+            const SizedBox(height: 12),
+            DriveReconnectNotice(controller: controller, subject: 'references'),
+          ],
+          if (selecting) ...<Widget>[
+            const SizedBox(height: 10),
+            _ReferenceBulkActions(
+              selectedCount: selected.length,
+              allVisibleSelected:
+                  filtered.isNotEmpty &&
+                  filtered.every((item) => selectedIds.contains(item.id)),
+              onSelectAll: () => setState(() {
+                final ids = filtered.map((item) => item.id).toSet();
+                if (ids.every(selectedIds.contains)) {
+                  selectedIds.removeAll(ids);
+                } else {
+                  selectedIds.addAll(ids);
+                }
+              }),
+              onMove: selected.isEmpty
+                  ? null
+                  : () async {
+                      final moved = await _showReferenceMoveDialog(
+                        context,
+                        controller,
+                        selectedIds,
+                      );
+                      if (moved && mounted) _setSelecting(false);
+                    },
+              onVisibility: selected.isEmpty
+                  ? null
+                  : () async {
+                      final saved = await controller.setReferencesHidden(
+                        selectedIds,
+                        !selectedAreHidden,
+                      );
+                      if (saved && mounted) _setSelecting(false);
+                    },
+              visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
+              onDone: () => _setSelecting(false),
+            ),
+          ],
+          const SizedBox(height: 18),
+          if (filtered.isEmpty)
+            _ReferenceEmpty(controller: controller)
+          else
+            LayoutBuilder(
+              builder: (context, grid) {
+                final columns = grid.maxWidth >= 1120
+                    ? 4
+                    : grid.maxWidth >= 760
+                    ? 3
+                    : grid.maxWidth >= 480
+                    ? 2
+                    : 1;
+                const gap = 16.0;
+                final width = (grid.maxWidth - gap * (columns - 1)) / columns;
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: filtered
+                      .map(
+                        (item) => SizedBox(
+                          width: width,
+                          child: Stack(
+                            children: <Widget>[
+                              _ReferenceCard(
+                                controller: controller,
+                                reference: item,
+                              ),
+                              if (selecting)
+                                Positioned(
+                                  top: 8,
+                                  left: 8,
+                                  child: Material(
+                                    elevation: 7,
+                                    color: context.colors.surface,
+                                    borderRadius: BorderRadius.circular(9),
+                                    child: IconButton(
+                                      key: ValueKey(
+                                        'select-reference-${item.id}',
+                                      ),
+                                      tooltip: selectedIds.contains(item.id)
+                                          ? 'Deselect ${item.name}'
+                                          : 'Select ${item.name}',
+                                      onPressed: () => _toggle(item.id),
+                                      icon: Icon(
+                                        selectedIds.contains(item.id)
+                                            ? Icons.check_box_rounded
+                                            : Icons
+                                                  .check_box_outline_blank_rounded,
+                                        color: selectedIds.contains(item.id)
+                                            ? context.tokens.brass
+                                            : null,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    )
-                    .toList(),
-              );
-            },
-          ),
-      ],
+                      )
+                      .toList(),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }
@@ -492,68 +503,104 @@ class _ReferenceBulkActions extends StatelessWidget {
   );
 }
 
-class _ReferenceCard extends StatelessWidget {
+class _ReferenceCard extends StatefulWidget {
   const _ReferenceCard({required this.controller, required this.reference});
 
   final AppController controller;
   final SavedReference reference;
 
+  @override
+  State<_ReferenceCard> createState() => _ReferenceCardState();
+}
+
+class _ReferenceCardState extends State<_ReferenceCard> {
+  /// The film's measured aspect ratio once its metadata loads. References
+  /// store no dimensions, so video previews open at 16:9 and settle into
+  /// their true shape; images and audio stay 16:9.
+  double? _videoAspect;
+
+  AppController get controller => widget.controller;
+  SavedReference get reference => widget.reference;
+
+  Future<void> _download(VideoSaveDestination destination) async {
+    try {
+      await controller.saveReferenceVideo(reference, destination: destination);
+    } on Object catch (error) {
+      controller.showErrorNotice(error);
+    }
+  }
+
   Future<void> _play(BuildContext context) async {
     final uri = await controller.referenceMediaUri(reference);
     if (uri == null || !context.mounted) return;
+    // The hosting full-size card plays the film in place; narrow viewports
+    // keep the fullscreen route.
+    final inline = InlineVideoPlayback.of(context);
+    if (inline != null) {
+      inline(
+        InlineVideoRequest(
+          uri: uri,
+          onDownload: _download,
+          supportsPhotos: controller.supportsPhotoLibrarySave,
+        ),
+      );
+      return;
+    }
     await showVideoPlayerModal(
       context,
       uri: uri,
       supportsPhotos: controller.supportsPhotoLibrarySave,
-      onDownload: (destination) async {
-        try {
-          await controller.saveReferenceVideo(
-            reference,
-            destination: destination,
-          );
-        } on Object catch (error) {
-          controller.showErrorNotice(error);
-        }
-      },
+      initialAspectRatio: _videoAspect ?? 16 / 9,
+      onDownload: _download,
     );
+  }
+
+  void _onVideoMetadata(VideoSourceMetadata metadata) {
+    if (!metadata.isUsable) return;
+    final aspect = metadata.width / metadata.height;
+    if (_videoAspect != null && (aspect - _videoAspect!).abs() < .001) return;
+    setState(() => _videoAspect = aspect);
   }
 
   @override
   Widget build(BuildContext context) {
-    final thumbnail = AspectRatio(
-      aspectRatio: 16 / 9,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        child: MediaThumbnail(
-          gateway: controller.gateway,
-          kind: reference.kind,
-          reference: reference.asset,
-          thumbnailReference: reference.thumbnailAsset,
-          semanticsLabel: '${reference.name} thumbnail',
-          onThumbnail: reference.kind == MediaReferenceKind.video
-              ? (bytes) => unawaited(
-                  controller.cacheReferencePreview(reference, bytes),
-                )
-              : null,
-        ),
-      ),
+    final isVideo = reference.kind == MediaReferenceKind.video;
+    final thumbnail = MediaThumbnail(
+      gateway: controller.gateway,
+      kind: reference.kind,
+      reference: reference.asset,
+      thumbnailReference: reference.thumbnailAsset,
+      semanticsLabel: '${reference.name} thumbnail',
+      onThumbnail: isVideo
+          ? (bytes) =>
+                unawaited(controller.cacheReferencePreview(reference, bytes))
+          : null,
+      onVideoMetadata: isVideo ? _onVideoMetadata : null,
     );
     return SurfaceCard(
       padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (reference.kind == MediaReferenceKind.video)
-            Semantics(
-              button: true,
-              label: 'Play ${reference.name}',
-              child: InkWell(
-                onTap: () => unawaited(_play(context)),
-                child: thumbnail,
-              ),
-            )
-          else
-            thumbnail,
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: isVideo
+                ? InlineVideoMediaBox(
+                    playbackId: reference.id,
+                    aspectRatio: _videoAspect ?? 16 / 9,
+                    preview: Builder(
+                      builder: (previewContext) => Semantics(
+                        button: true,
+                        label: 'Play ${reference.name}',
+                        child: InkWell(
+                          onTap: () => unawaited(_play(previewContext)),
+                          child: thumbnail,
+                        ),
+                      ),
+                    ),
+                  )
+                : AspectRatio(aspectRatio: 16 / 9, child: thumbnail),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(13, 12, 8, 12),
             child: Row(

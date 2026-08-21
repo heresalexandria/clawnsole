@@ -85,6 +85,33 @@ String _generationViewModeLabel(GenerationViewMode mode) => switch (mode) {
   GenerationViewMode.full => 'Full',
 };
 
+/// Shared column math for generation-card listings, so every surface
+/// (Library, Recent work) lays out full and mini cards at identical widths.
+class GenerationCardGrid {
+  const GenerationCardGrid({required this.columns, required this.tileWidth});
+
+  factory GenerationCardGrid.fit(double maxWidth, GenerationViewMode mode) {
+    final full = maxWidth >= 1120
+        ? 3
+        : maxWidth >= 650
+        ? 2
+        : 1;
+    final columns = mode == GenerationViewMode.full
+        ? full
+        : ((maxWidth + gap) / (160 + gap)).floor().clamp(1, full * 2);
+    return GenerationCardGrid(
+      columns: columns,
+      tileWidth: (maxWidth - gap * (columns - 1)) / columns,
+    );
+  }
+
+  /// Gap between grid tiles, horizontally and vertically.
+  static const double gap = 16;
+
+  final int columns;
+  final double tileWidth;
+}
+
 class MiniGenerationCard extends StatelessWidget {
   const MiniGenerationCard({
     required this.controller,
