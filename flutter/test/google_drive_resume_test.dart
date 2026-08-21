@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_auth_base.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
