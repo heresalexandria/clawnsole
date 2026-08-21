@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'app_store_update_check.dart';
 import 'app_version.dart';
 import 'shell_bridge.dart';
 import 'update_check.dart';
@@ -18,7 +19,7 @@ class UpdateStatus extends ChangeNotifier {
   UpdateStatus._()
     : _shellProvider = _defaultShellUpdater,
       _storeManagedProvider = _defaultStoreManagedPlatform,
-      _releaseChecker = checkLatestRelease;
+      _releaseChecker = _defaultReleaseChecker;
 
   @visibleForTesting
   UpdateStatus.forTesting(ShellUpdater updater)
@@ -55,7 +56,7 @@ class UpdateStatus extends ChangeNotifier {
 
   bool get isStoreManaged => _storeManagedProvider();
 
-  /// Every supported surface can query the public stable-release endpoint.
+  /// Every supported surface can query its public release source.
   bool get supportsAutomaticChecks => true;
 
   bool get updateAvailable => result?.available == true;
@@ -130,3 +131,8 @@ class UpdateStatus extends ChangeNotifier {
 ShellUpdater? _defaultShellUpdater() => shellUpdater;
 
 bool _defaultStoreManagedPlatform() => storeManagedPlatform;
+
+Future<UpdateCheckResult> _defaultReleaseChecker() =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS
+    ? checkLatestIosAppStoreVersion()
+    : checkLatestRelease();

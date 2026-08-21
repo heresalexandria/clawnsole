@@ -1,19 +1,22 @@
 # App updates
 
-Every supported build checks GitHub Releases on startup and every 24 hours
-while running. A manual macOS check is also available from **Clawnsole → Check
+Every supported build checks its public release source on startup and every 24
+hours while running. Native iOS checks Apple's App Store lookup catalog so only
+versions that users can actually install are reported. The other surfaces check
+GitHub Releases. A manual macOS check is also available from **Clawnsole → Check
 for Updates…** or from the version beside the wordmark in the app's top bar.
 Native Windows builds send available updates to the GitHub release for a manual
-download. Development builds explain that they update through git
-instead of replacing themselves.
+download. Development builds explain that they update through git instead of
+replacing themselves.
 
-When GitHub successfully reports a newer **major** version, Clawnsole blocks
-continued use until the update begins. macOS uses the verified in-place updater;
-iOS opens App Store product `6801916362`, and Android opens Google Play package
-`app.clawnsole.clawnsole`. The gate is never shown when the request fails, the
-version cannot be parsed, or the newest release remains in the current major
-version. Publish the GitHub release only after the corresponding mobile store
-versions are available so users are never sent to a pending review.
+When the platform's release source successfully reports a newer **major**
+version, Clawnsole blocks continued use until the update begins. macOS uses the
+verified in-place updater; iOS opens App Store product `6801916362`, and Android
+opens Google Play package `app.clawnsole.clawnsole`. The gate is never shown
+when the request fails, the version cannot be parsed, or the newest release
+remains in the current major version. App Store review and processing are
+therefore decoupled from GitHub release timing. Android still reads GitHub, so
+publish the GitHub release only after its Play Store build is available.
 
 ## In-app version chip and update dialog
 

@@ -2,6 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const clawnsoleIosAppStoreId = '6801916362';
+const clawnsoleIosBundleId = 'app.clawnsole.clawnsole';
+const clawnsoleIosAppStoreWebUrl =
+    'https://apps.apple.com/app/id$clawnsoleIosAppStoreId';
 const clawnsoleAndroidPackageId = 'app.clawnsole.clawnsole';
 
 /// The store destination for a supported mobile platform.
@@ -24,9 +27,7 @@ StoreUpdateDestination? clawnsoleStoreDestination(TargetPlatform platform) =>
         appUri: Uri.parse(
           'itms-apps://apps.apple.com/app/id$clawnsoleIosAppStoreId',
         ),
-        webUri: Uri.parse(
-          'https://apps.apple.com/app/id$clawnsoleIosAppStoreId',
-        ),
+        webUri: Uri.parse(clawnsoleIosAppStoreWebUrl),
       ),
       TargetPlatform.android => StoreUpdateDestination(
         name: 'Google Play',
