@@ -30,6 +30,7 @@ import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
+import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -2191,9 +2192,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('console-only balances link to the provider console', (
-    tester,
-  ) async {
+  testWidgets('console-only balances stay off the cost panel', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2232,14 +2231,51 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Open ArtCraft to view balance ↗'), findsOneWidget);
-    final link = find.byTooltip('Open provider console');
-    expect(link, findsOneWidget);
-    final ink = tester.widget<InkWell>(
-      find.descendant(of: link, matching: find.byType(InkWell)),
-    );
-    expect(ink.onTap, isNotNull);
+    // The felt carries only the estimate; the top-right balance pill owns
+    // "open the provider console to view the balance".
+    expect(find.text('ESTIMATED CHARGE'), findsOneWidget);
+    expect(find.text('Rate card ↗'), findsOneWidget);
+    expect(find.text('Open ArtCraft to view balance ↗'), findsNothing);
+    expect(find.text('AVAILABLE NOW'), findsNothing);
+    expect(find.text('ESTIMATED AFTER'), findsNothing);
+    expect(find.byTooltip('Open provider console'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
     controller.dispose();
+
+    // A numeric balance keeps the estimated-after line.
+    final bflController = AppController(
+      gateway: _ProviderMemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: true,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+        const ProviderAccountStatus(
+          provider: 'bfl',
+          balance: 125,
+          currency: 'credits',
+        ),
+      ),
+    );
+    await bflController.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: bflController,
+            builder: (context, _) => CreateScreen(controller: bflController),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('ESTIMATED AFTER'), findsOneWidget);
+    expect(find.text('AVAILABLE NOW'), findsNothing);
+    bflController.dispose();
   });
 
   testWidgets('provider picker collapses and expands provider models', (
@@ -2274,7 +2310,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('MODEL & PROVIDER'), findsOneWidget);
+    // The label sits beside the plaque card rather than inside it.
+    final plaqueLabel = find.text('Model & Provider:');
+    expect(plaqueLabel, findsOneWidget);
+    expect(
+      find.ancestor(of: plaqueLabel, matching: find.byType(TexturePanel)),
+      findsNothing,
+    );
     await tester.tap(find.byTooltip('Choose provider and model'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('provider-model-search')), findsOneWidget);
@@ -2301,6 +2343,78 @@ void main() {
     await tester.ensureVisible(find.byKey(artcraftOption));
     await tester.tap(find.byKey(artcraftOption));
     await tester.pumpAndSettle();
+    expect(controller.selectedProviderId, 'artcraft');
+    expect(controller.selectedModelId, 'seedance_2p0');
+    controller.dispose();
+  });
+
+  testWidgets('cross-provider model taps apply before the preference write', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final gateway = _DelayedPreferencesGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.selectedProviderId, 'bfl');
+
+    await tester.tap(find.byTooltip('Choose provider and model'));
+    await tester.pumpAndSettle();
+    const artcraftHeading = ValueKey('provider-model-heading-artcraft');
+    const artcraftOption = ValueKey(
+      'provider-model-option-artcraft-seedance_2p0',
+    );
+    await tester.ensureVisible(find.byKey(artcraftHeading));
+    await tester.tap(find.byKey(artcraftHeading));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(artcraftOption));
+    await tester.tap(find.byKey(artcraftOption));
+    await tester.pumpAndSettle();
+
+    // The tapped model is active immediately: the store write is still
+    // pending, and the form already offers that model's options.
+    expect(gateway.pendingPreferences, hasLength(1));
+    expect(controller.selectedProviderId, 'artcraft');
+    expect(controller.selectedModelId, 'seedance_2p0');
+    final tapped = modelById('artcraft', 'seedance_2p0');
+    expect(
+      controller.availableResolutions.map((item) => item.id).toList(),
+      tapped.resolutions.map((item) => item.id).toList(),
+    );
+    expect(
+      controller.availableAspectRatios,
+      tapped.aspectRatiosFor(controller.form.resolution, withFrames: false),
+    );
+
+    // The preference write still lands once the store catches up.
+    while (gateway.pendingPreferences.isNotEmpty) {
+      await gateway.completeNextPreference();
+    }
+    await tester.pumpAndSettle();
+    expect(gateway.snapshot.preferences.provider, 'artcraft');
+    expect(gateway.snapshot.preferences.model, 'seedance_2p0');
     expect(controller.selectedProviderId, 'artcraft');
     expect(controller.selectedModelId, 'seedance_2p0');
     controller.dispose();
