@@ -81,6 +81,110 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('Space plays immediately and arrow keys seek', (tester) async {
+    await tester.pumpWidget(_testApp());
+    await tester.pumpAndSettle();
+
+    final playsBefore = videoPlatform.calls
+        .where((call) => call == 'play')
+        .length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(
+      videoPlatform.calls.where((call) => call == 'play').length,
+      playsBefore + 1,
+      reason: 'the player takes focus on its own, so Space works right away',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(videoPlatform.seekPositions.last.inMilliseconds, 1000);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(videoPlatform.seekPositions.last.inMilliseconds, 2000);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(videoPlatform.seekPositions.last.inMilliseconds, 1000);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('Escape closes a modal player through onClose', (tester) async {
+    var closed = 0;
+    await tester.pumpWidget(_testApp(onClose: () => closed += 1));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-close-button')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(closed, 1);
+
+    await tester.tap(find.byKey(const ValueKey('video-close-button')));
+    await tester.pump();
+    expect(closed, 2);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('wide viewports get an aspect-sized modal, not a takeover', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_modalLauncherApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Play'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-player-modal')), findsOneWidget);
+    final frame = find.byKey(const ValueKey('video-modal-frame'));
+    final size = tester.getSize(frame);
+    expect(size.width, lessThan(1280));
+    expect(size.height, lessThan(800));
+    // 1920x1080 media: the video area above the chrome keeps 16:9.
+    expect(size.width / (size.height - 94), closeTo(16 / 9, .05));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('video-player-modal')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('narrow viewports play fullscreen with a close control', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_modalLauncherApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Play'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-player-modal')), findsNothing);
+    final overlay = find.byKey(const ValueKey('video-close-overlay'));
+    expect(overlay, findsOneWidget);
+    // The standalone fullscreen player closes; it has no separate
+    // fullscreen toggle.
+    expect(find.byIcon(Icons.fullscreen_exit_rounded), findsNothing);
+
+    await tester.tap(overlay);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('video-play-surface')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('Escape exits the fullscreen video player', (tester) async {
     await tester.pumpWidget(_testApp());
     await tester.pumpAndSettle();
@@ -132,6 +236,7 @@ void main() {
 Widget _testApp({
   bool supportsPhotos = false,
   Future<void> Function(VideoSaveDestination)? onDownload,
+  VoidCallback? onClose,
 }) => MaterialApp(
   home: Scaffold(
     body: SizedBox(
@@ -142,6 +247,27 @@ Widget _testApp({
         onDownload: onDownload ?? (_) async {},
         supportsPhotos: supportsPhotos,
         frameLoader: (_, _) async => null,
+        onClose: onClose,
+      ),
+    ),
+  ),
+);
+
+Widget _modalLauncherApp() => MaterialApp(
+  home: Scaffold(
+    body: Builder(
+      builder: (context) => Center(
+        child: TextButton(
+          onPressed: () => unawaited(
+            showVideoPlayerModal(
+              context,
+              uri: Uri.parse('https://example.com/test.mp4'),
+              onDownload: (_) async {},
+              frameLoader: (_, _) async => null,
+            ),
+          ),
+          child: const Text('Play'),
+        ),
       ),
     ),
   ),

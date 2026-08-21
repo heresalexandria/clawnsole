@@ -3459,6 +3459,55 @@ class AppController extends ChangeNotifier {
     showNotice('Reference frame saved to $location');
   }
 
+  Future<Uri?> referenceMediaUri(SavedReference reference) async {
+    final asset = reference.asset;
+    if (asset.isLocal) return gateway.assetUri(asset);
+    if (Uri.tryParse(asset.value)?.scheme == 'https') {
+      return gateway.mediaUri(asset.value);
+    }
+    return null;
+  }
+
+  Future<void> saveReferenceVideo(
+    SavedReference reference, {
+    VideoSaveDestination destination = VideoSaveDestination.files,
+  }) async {
+    final asset = reference.asset;
+    final bytes = asset.isLocal
+        ? await gateway.readAsset(asset)
+        : await gateway.downloadMedia(asset.value);
+    final cleaned = reference.name.replaceAll(RegExp(r'[\\/:]'), '-').trim();
+    final base = cleaned.isEmpty ? 'clawnsole-reference' : cleaned;
+    final dotIndex = base.lastIndexOf('.');
+    final extensionLength = base.length - dotIndex - 1;
+    final hasExtension =
+        dotIndex > 0 && extensionLength >= 1 && extensionLength <= 5;
+    final fileName = hasExtension ? base : '$base.mp4';
+    final contentType = asset.contentType ?? 'video/mp4';
+    if (destination == VideoSaveDestination.photos) {
+      await gateway.saveMediaToPhotoLibrary(bytes, fileName, contentType);
+      showNotice('Video saved to Photos.');
+      return;
+    }
+    final isMp4 = fileName.endsWith('.mp4');
+    final location = await FilePicker.saveFile(
+      dialogTitle: 'Save reference video',
+      fileName: fileName,
+      bytes: bytes,
+      type: isMp4 ? FileType.custom : FileType.any,
+      allowedExtensions: isMp4 ? const <String>['mp4'] : null,
+    );
+    if (location == null) {
+      showNotice(
+        kIsWeb
+            ? 'Download started. Choose a location when your browser or desktop app asks.'
+            : 'Save canceled.',
+      );
+      return;
+    }
+    showNotice('Video saved to $location');
+  }
+
   @override
   void dispose() {
     _pollTimer?.cancel();

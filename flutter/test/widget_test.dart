@@ -3252,6 +3252,41 @@ void main() {
     );
   });
 
+  testWidgets('library Filters popover narrows and resets the view', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: List<Generation>.generate(3, _viewModeGeneration),
+        preferences: const AppPreferences(activeSection: AppSection.library),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 3),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    // Delivered work no longer wears a Ready chip; the only "Ready" text
+    // left is the toolbar's status segment.
+    expect(find.text('Ready'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('library-filter-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('FAVORITES'), findsOneWidget);
+
+    await tester.tap(find.text('Starred'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing in this view.'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('library-filter-reset')));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing in this view.'), findsNothing);
+  });
+
   testWidgets('recent work dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
