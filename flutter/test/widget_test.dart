@@ -29,6 +29,7 @@ import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
+import 'package:clawnsole/ui/inline_video.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
@@ -550,6 +551,146 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
+  });
+
+  testWidgets('full cards frame delivered media at its stored aspect ratio', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'aspect-thumb.png': frame,
+        'aspect-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    Widget card(String aspect) => MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: SizedBox(
+            width: 640,
+            child: ActivityCard(
+              controller: controller,
+              item: _deliveredGeneration('aspect-$aspect', aspect: aspect),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // A 16:9 film fills the card's width at its true ratio — never cropped
+    // into a strip.
+    await tester.pumpWidget(card('16:9'));
+    await tester.pumpAndSettle();
+    var box = tester.getSize(find.byType(InlineVideoMediaBox));
+    // The card border leaves 638 of the 640 for media.
+    expect(box.width, closeTo(638, .5));
+    expect(box.width / box.height, closeTo(16 / 9, .01));
+
+    // A 9:16 film would want 1138px of height at this width, so the box caps
+    // at 70% of the 600px viewport with the whole frame centered inside.
+    await tester.pumpWidget(card('9:16'));
+    await tester.pumpAndSettle();
+    box = tester.getSize(find.byType(InlineVideoMediaBox));
+    expect(box.height, closeTo(420, .1));
+    final film = tester.getSize(
+      find.descendant(
+        of: find.byType(InlineVideoMediaBox),
+        matching: find.byType(AspectRatio),
+      ),
+    );
+    expect(film.width / film.height, closeTo(9 / 16, .01));
+    expect(film.height, closeTo(420, .1));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('the filmstrip scales with its preview and hides when short', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'strip-thumb.png': frame,
+        'strip-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    final item = _deliveredGeneration(
+      'strip',
+      thumbnail: 'strip-thumb.png',
+      timeline: 'strip-strip.png',
+    );
+    const stripKey = ValueKey('generation-video-filmstrip');
+
+    // Compact rows stay a clean cover thumbnail: no band at 68px.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 420,
+            child: CompactGenerationRow(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(stripKey), findsNothing);
+
+    // Mini cards keep a slim band under their 118px preview.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(stripKey)).height, 24);
+
+    // Full cards keep the complete band under the aspect-true frame.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 640,
+              child: ActivityCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(stripKey)).height, 48);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 
   testWidgets('keeps Cyclone available as a generation placeholder', (
@@ -1823,8 +1964,10 @@ void main() {
       ValueKey<String>('generation-prompt-${controller.formRevision}'),
     );
     await tester.enterText(promptField(), 'Stale visible desktop prompt.');
-    await tester.ensureVisible(find.text('Reuse inputs'));
-    await tester.tap(find.text('Reuse inputs'));
+    // Recent work renders the Library's full cards, whose reuse button
+    // carries the shared 'Reuse' label.
+    await tester.ensureVisible(find.text('Reuse'));
+    await tester.tap(find.text('Reuse'));
     await tester.pumpAndSettle();
 
     final editable = tester.widget<EditableText>(
@@ -4583,6 +4726,51 @@ Generation _viewModeGeneration(
     ),
     createdAt: createdAt,
     updatedAt: createdAt,
+  );
+}
+
+Generation _deliveredGeneration(
+  String id, {
+  String aspect = '16:9',
+  String thumbnail = 'aspect-thumb.png',
+  String? timeline,
+}) {
+  final createdAt = DateTime.utc(2026, 8, 21, 12);
+  return Generation(
+    localId: 'delivered-$id',
+    status: 'Ready',
+    prompt: 'A delivered film with a cached preview.',
+    mode: VideoMode.t2v,
+    config: GenerationConfig(
+      aspectRatio: aspect,
+      duration: 8,
+      resolution: 'hd',
+      generateAudio: true,
+      safetyTolerance: 2,
+      draft: false,
+    ),
+    createdAt: createdAt,
+    updatedAt: createdAt,
+    resultAsset: AssetReference(
+      kind: 'local',
+      value: 'film-$id.mp4',
+      label: 'film-$id.mp4',
+      contentType: 'video/mp4',
+    ),
+    thumbnailAsset: AssetReference(
+      kind: 'local',
+      value: thumbnail,
+      label: thumbnail,
+      contentType: 'image/png',
+    ),
+    timelineThumbnailAsset: timeline == null
+        ? null
+        : AssetReference(
+            kind: 'local',
+            value: timeline,
+            label: timeline,
+            contentType: 'image/png',
+          ),
   );
 }
 

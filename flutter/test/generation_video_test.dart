@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/ui/generation_video.dart';
+import 'package:clawnsole/ui/inline_video.dart';
 import 'package:clawnsole/ui/video_frame_timeline.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -231,7 +232,210 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets('inline play swaps in an embedded player Escape collapses', (
+    tester,
+  ) async {
+    final registry = InlineVideoRegistry();
+    addTearDown(registry.dispose);
+    await tester.pumpWidget(_inlineHostApp(registry));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('inline-preview-a')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('inline-play-a')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('inline-video-a')), findsOneWidget);
+    expect(find.byKey(const ValueKey('inline-preview-a')), findsNothing);
+    expect(find.byKey(const ValueKey('video-play-surface')), findsOneWidget);
+    expect(registry.value, 'a');
+
+    // The embedded player must not steal keyboard focus from the page.
+    final callsBeforeSpace = videoPlatform.calls.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(videoPlatform.calls.length, callsBeforeSpace);
+
+    // Interacting with the player focuses it; Escape then collapses the
+    // card back to its preview.
+    await tester.tap(find.byKey(const ValueKey('video-play-surface')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('video-play-surface')), findsNothing);
+    expect(find.byKey(const ValueKey('inline-preview-a')), findsOneWidget);
+    expect(registry.value, isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('starting another card collapses the first inline player', (
+    tester,
+  ) async {
+    final registry = InlineVideoRegistry();
+    addTearDown(registry.dispose);
+    await tester.pumpWidget(
+      _inlineHostApp(registry, ids: const <String>['a', 'b']),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('inline-play-a')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('inline-video-a')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('inline-play-b')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('inline-video-b')), findsOneWidget);
+    expect(find.byKey(const ValueKey('inline-video-a')), findsNothing);
+    expect(find.byKey(const ValueKey('inline-preview-a')), findsOneWidget);
+    expect(find.byType(GenerationVideo), findsOneWidget);
+    expect(registry.value, 'b');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('inline players reach the shared fullscreen route and back', (
+    tester,
+  ) async {
+    final registry = InlineVideoRegistry();
+    addTearDown(registry.dispose);
+    await tester.pumpWidget(_inlineHostApp(registry));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('inline-play-a')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Enter fullscreen'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Exit fullscreen (Esc)'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Enter fullscreen'), findsOneWidget);
+    expect(find.byKey(const ValueKey('inline-video-a')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('the media box keeps stored ratios and caps portrait films', (
+    tester,
+  ) async {
+    final registry = InlineVideoRegistry();
+    addTearDown(registry.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: InlineVideoRegistryScope(
+            registry: registry,
+            child: ListView(
+              children: <Widget>[
+                Center(
+                  child: SizedBox(
+                    width: 400,
+                    child: InlineVideoMediaBox(
+                      key: const ValueKey('inline-box-landscape'),
+                      playbackId: 'landscape',
+                      aspectRatio: 16 / 9,
+                      preview: const ColoredBox(color: Colors.black),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: SizedBox(
+                    width: 400,
+                    child: InlineVideoMediaBox(
+                      key: const ValueKey('inline-box-portrait'),
+                      playbackId: 'portrait',
+                      aspectRatio: 9 / 16,
+                      preview: const ColoredBox(
+                        key: ValueKey('inline-preview-portrait'),
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final landscape = tester.getSize(
+      find.byKey(const ValueKey('inline-box-landscape')),
+    );
+    expect(landscape.width, 400);
+    expect(landscape.width / landscape.height, closeTo(16 / 9, .01));
+
+    // The default test viewport is 800×600: a 9:16 film would want 711px of
+    // height, so the box caps at 70% of the viewport with the whole frame
+    // still visible, centered on the dark media surface.
+    final portrait = tester.getSize(
+      find.byKey(const ValueKey('inline-box-portrait')),
+    );
+    expect(portrait.height, closeTo(420, .1));
+    final film = tester.getSize(
+      find.byKey(const ValueKey('inline-preview-portrait')),
+    );
+    expect(film.width / film.height, closeTo(9 / 16, .01));
+    expect(film.height, closeTo(420, .1));
+  });
 }
+
+Widget _inlineHostApp(
+  InlineVideoRegistry registry, {
+  List<String> ids = const <String>['a'],
+}) => MaterialApp(
+  home: Scaffold(
+    body: InlineVideoRegistryScope(
+      registry: registry,
+      child: ListView(
+        children: ids
+            .map(
+              (id) => Center(
+                child: SizedBox(
+                  width: 320,
+                  child: InlineVideoMediaBox(
+                    playbackId: id,
+                    aspectRatio: 16 / 9,
+                    preview: Builder(
+                      builder: (context) => ColoredBox(
+                        key: ValueKey('inline-preview-$id'),
+                        color: Colors.black,
+                        child: Center(
+                          child: TextButton(
+                            key: ValueKey('inline-play-$id'),
+                            onPressed: () =>
+                                InlineVideoPlayback.of(context)?.call(
+                                  InlineVideoRequest(
+                                    uri: Uri.parse(
+                                      'https://example.com/$id.mp4',
+                                    ),
+                                    onDownload: (_) async {},
+                                    frameLoader: (_, _) async => null,
+                                  ),
+                                ),
+                            child: const Text('Start inline'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    ),
+  ),
+);
 
 Widget _testApp({
   bool supportsPhotos = false,
