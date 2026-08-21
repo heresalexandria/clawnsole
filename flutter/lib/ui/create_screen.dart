@@ -107,15 +107,31 @@ class _CreateHeading extends StatelessWidget {
           ),
         );
         final plaque = _ProviderPlaque(controller: controller);
+        final plaqueLabel = Text(
+          'Model & Provider:',
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: .3,
+          ),
+        );
         // Wide layouts pin the plaque to the far right of the page; narrow ones
         // stack it under the title rather than squeezing both onto one line.
+        // The Wrap keeps the label beside the plaque where it fits and drops
+        // it onto its own line on phones.
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               title,
               SizedBox(height: short ? 10 : 16),
-              plaque,
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[plaqueLabel, plaque],
+              ),
             ],
           );
         }
@@ -126,6 +142,8 @@ class _CreateHeading extends StatelessWidget {
               child: Align(alignment: Alignment.centerLeft, child: title),
             ),
             const SizedBox(width: 22),
+            plaqueLabel,
+            const SizedBox(width: 10),
             plaque,
           ],
         );
@@ -163,10 +181,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     final provider = value.substring(0, divider);
     final model = value.substring(divider + 1);
     if (mounted) setState(() => _collapsedProviders.remove(provider));
-    if (controller.selectedProviderId != provider) {
-      await controller.selectProvider(provider);
-    }
-    await controller.selectModel(model);
+    await controller.selectProviderModel(provider, model);
   }
 
   @override
@@ -175,8 +190,10 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     return TexturePanel(
       surface: PanelSurface.navyLeather,
       stitched: true,
+      // Both paddings keep content clear of the saddle stitch, whose thread
+      // sits about 9.6px inside the panel edge.
       padding: _isShort(context)
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 7)
+          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
           : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
       child: PopupMenuButton<String>(
         tooltip: 'Choose provider and model',
@@ -221,32 +238,31 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
               ),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'MODEL & PROVIDER',
-                  style: TextStyle(
-                    color: ink.onMuted,
-                    fontSize: 8.5,
-                    letterSpacing: 1.6,
-                    fontWeight: FontWeight.w700,
+            // Flexible bounds the names on narrow layouts so long provider or
+            // model labels ellipsize instead of overflowing the card.
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    controller.selectedProvider.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: ink.on,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  controller.selectedProvider.name,
-                  style: TextStyle(
-                    color: ink.on,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
+                  Text(
+                    controller.selectedModel.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: ink.onMuted, fontSize: 10.5),
                   ),
-                ),
-                Text(
-                  controller.selectedModel.label,
-                  style: TextStyle(color: ink.onMuted, fontSize: 10.5),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(width: 12),
             Icon(Icons.unfold_more_rounded, size: 17, color: ink.accent),
@@ -2969,7 +2985,9 @@ class _CostPreview extends StatelessWidget {
       return TexturePanel(
         surface: PanelSurface.hunterFelt,
         stitched: true,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        // Clears the saddle stitch (thread about 9.6px inside the panel edge)
+        // by roughly 4px on every side.
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Row(
           children: <Widget>[
             Icon(Icons.memory_rounded, color: context.tokens.moneyAccent),
@@ -3114,25 +3132,10 @@ class _CostPreview extends StatelessWidget {
             ),
           )
         : null;
-    final availableValue = controller.credits == null
-        ? (controller.hasApiKey
-              ? account?.balanceLabel ?? 'Connected'
-              : 'Add API key')
-        : balanceUsesCredits
-        ? '${formatCredits(controller.credits!)} credits'
-        : formatUsdAmount(controller.credits!);
-    // A provider that only shows its balance in its own console gets a real
-    // link instead of an inert caption.
-    final availableTap =
-        controller.credits == null &&
-            controller.hasApiKey &&
-            account?.balanceLabel != null
-        ? () => unawaited(
-            launchUrl(Uri.parse(controller.selectedProvider.consoleUrl)),
-          )
-        : null;
+    // Providers without a numeric balance (console-only) skip the line
+    // entirely; the top-right balance pill already links to the console.
     final afterValue = afterMin == null || afterMax == null
-        ? '—'
+        ? null
         : balanceUsesCredits
         ? '${formatCreditRange(afterMin, afterMax)} credits'
         : formatUsdAmountRange(afterMin, afterMax);
@@ -3158,7 +3161,9 @@ class _CostPreview extends StatelessWidget {
     return TexturePanel(
       surface: PanelSurface.hunterFelt,
       stitched: true,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      // Clears the saddle stitch (thread about 9.6px inside the panel edge)
+      // by roughly 4px on every side.
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       child: Builder(
         builder: (context) {
           // One console row when the felt is wide enough; the tight column
@@ -3203,26 +3208,16 @@ class _CostPreview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 300),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        _BalanceLine(
-                          label: 'Available now',
-                          value: availableValue,
-                          onTap: availableTap,
-                        ),
-                        const SizedBox(height: 2),
-                        _BalanceLine(
-                          label: 'Estimated after',
-                          value: afterValue,
-                        ),
-                      ],
+                  if (afterValue != null) ...<Widget>[
+                    const SizedBox(width: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 300),
+                      child: _BalanceLine(
+                        label: 'Estimated after',
+                        value: afterValue,
+                      ),
                     ),
-                  ),
+                  ],
                   const SizedBox(width: 6),
                   rateCard,
                 ],
@@ -3265,35 +3260,49 @@ class _CostPreview extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 7),
-              Divider(height: 1, color: tokens.onMoney.withValues(alpha: .14)),
-              const SizedBox(height: 7),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: _BalanceLine(
-                      label: 'Available now',
-                      value: availableValue,
-                      onTap: availableTap,
-                      vertical: true,
+              // Without a numeric balance the divider row has nothing to
+              // carry, so the Rate card joins the basis caption instead.
+              if (afterValue != null) ...<Widget>[
+                const SizedBox(height: 7),
+                Divider(
+                  height: 1,
+                  color: tokens.onMoney.withValues(alpha: .14),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _BalanceLine(
+                        label: 'Estimated after',
+                        value: afterValue,
+                        vertical: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _BalanceLine(
-                      label: 'Estimated after',
-                      value: afterValue,
-                      vertical: true,
+                    rateCard,
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  basis,
+                  style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
+                ),
+              ] else ...<Widget>[
+                const SizedBox(height: 4),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        basis,
+                        style: TextStyle(
+                          color: tokens.onMoneyMuted,
+                          fontSize: 9.5,
+                        ),
+                      ),
                     ),
-                  ),
-                  rateCard,
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                basis,
-                style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
-              ),
+                    rateCard,
+                  ],
+                ),
+              ],
             ],
           );
         },
@@ -3306,16 +3315,11 @@ class _BalanceLine extends StatelessWidget {
   const _BalanceLine({
     required this.label,
     required this.value,
-    this.onTap,
     this.vertical = false,
   });
 
   final String label;
   final String value;
-
-  /// Present when the value is a provider caption that should open the
-  /// provider console rather than sit inert.
-  final VoidCallback? onTap;
 
   /// Stacks the label above the value for narrow layouts. Horizontal lines
   /// need a bounded width so the flexible value can shrink.
@@ -3340,11 +3344,9 @@ class _BalanceLine extends StatelessWidget {
         color: context.tokens.onMoney,
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
-        decoration: onTap == null ? null : TextDecoration.underline,
-        decorationColor: context.tokens.onMoneyMuted,
       ),
     );
-    final line = vertical
+    return vertical
         ? Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3358,15 +3360,6 @@ class _BalanceLine extends StatelessWidget {
               Flexible(child: valueText),
             ],
           );
-    if (onTap == null) return line;
-    return Tooltip(
-      message: 'Open provider console',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
-        child: line,
-      ),
-    );
   }
 }
 

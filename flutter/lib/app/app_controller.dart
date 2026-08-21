@@ -2070,12 +2070,8 @@ class AppController extends ChangeNotifier {
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     notifyListeners();
-    try {
-      await _savePreferences(_preferences());
-      if (provider.requiresApiKey && hasApiKey) unawaited(refreshCredits());
-    } on Object catch (error) {
-      showNotice(_message(error));
-    }
+    _kickProviderRefresh(provider);
+    await _persistSelection();
   }
 
   Future<void> selectModel(String modelId) async {
@@ -2083,6 +2079,40 @@ class AppController extends ChangeNotifier {
     _normalizeFormForModel();
     _invalidateProviderEstimate();
     notifyListeners();
+    await _persistSelection();
+  }
+
+  /// Applies a provider and model choice in one synchronous pass, so the form
+  /// reflects the tapped model immediately instead of showing the provider's
+  /// default model until the preference write lands.
+  Future<void> selectProviderModel(String providerId, String modelId) async {
+    final provider = providerById(providerId);
+    if (!providers.any((item) => item.id == provider.id)) return;
+    final providerChanged = selectedProviderId != provider.id;
+    selectedProviderId = provider.id;
+    selectedModelId = modelById(provider.id, modelId).id;
+    // An unknown model id falls back to the provider default, which must then
+    // defer to whichever model accepts the current form.
+    if (selectedModelId != modelId) _selectCompatibleModel();
+    _normalizeFormForModel();
+    _invalidateProviderEstimate();
+    credits = providerAccounts[provider.id]?.balance;
+    notifyListeners();
+    if (providerChanged) _kickProviderRefresh(provider);
+    await _persistSelection();
+  }
+
+  /// Kicks the balance and live catalog refreshes for [provider] without
+  /// gating the form; fresh pricing arrives in the background.
+  void _kickProviderRefresh(VideoProviderDefinition provider) {
+    if (!provider.requiresApiKey) return;
+    if (hasApiKey) unawaited(refreshCredits());
+    unawaited(refreshProviderModels(provider.id));
+  }
+
+  /// Persists preferences after selection state has already been applied and
+  /// announced, so a slow store write never delays the next interaction.
+  Future<void> _persistSelection() async {
     try {
       await _savePreferences(_preferences());
     } on Object catch (error) {
