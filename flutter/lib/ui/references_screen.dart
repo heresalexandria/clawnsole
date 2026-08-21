@@ -512,7 +512,7 @@ class _ReferenceCard extends StatelessWidget {
             destination: destination,
           );
         } on Object catch (error) {
-          controller.showNotice(error.toString());
+          controller.showErrorNotice(error);
         }
       },
     );

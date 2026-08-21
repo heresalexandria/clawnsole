@@ -185,9 +185,13 @@ in light mode.
   lives in the wordmark and as accents.
 - **Bottom nav (< 900 px):** the same burl, three labeled buttons with a
   cream-on-wood selected pill and brass count badge for working renders.
-- Breakpoints: 900 (rail vs bottom nav), 1160 (create-screen split),
-  1050 (settings split), 720/1180 (library 2/3 columns), 620 (gutters),
-  640 (settings grid columns), 480 (composer footer stacks).
+- Breakpoints: 900 (rail vs bottom nav), 1050 (settings split),
+  720/1180 (library 2/3 columns), 620 (gutters), 640 (settings grid
+  columns), 880 (composer guidance columns and the cost + destination
+  row), 560 (guidance sections compact to single rows), 480 (composer
+  footer stacks). A viewport under 950 px tall switches the create
+  screen into a dense mode (no heading description, smaller title,
+  tighter gaps).
 
 ## 7. The composer (Create)
 
@@ -217,23 +221,35 @@ Generate button. Layout order:
    collapses the irrelevant sections and explains what is set aside;
    removing it restores them. Draft enhance hides prompt/frames entirely
    (the original generation owns them) and shows only Finish + Safety.
-4. **Frame**: the ratio strip, one tile per aspect ratio with a *drawn
-   glyph of the actual shape* (bounded 28×18) plus label; Auto uses the
-   free-crop glyph. Selected tile fills plum.
+4. **Frame**: a console-key ratio dropdown whose trigger and menu rows
+   keep the *drawn glyph of the actual shape* plus label and hint; Auto
+   uses the free-crop glyph. The dropdown replaced the two-row tile
+   strip so the whole form fits above the fold.
 5. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
    resolution-specific slider range. Auto replaces the slider with the same
    possible-duration range in prose. The counter readout beside the label
-   states the current value (`10 s`, or `AUTO`). Layouts that require fixed
-   timing lock the switch to Manual and say why.
-6. **Finish**: HD / Full HD console keys, audio and fast-draft hardware
-   switches (lit hunter green when on), safety-tolerance knob with an
-   `n / 4` readout.
-7. **Estimated charge**: the stitched hunter-green panel with brass coin,
-   credits range in Fraunces, USD in brass, balance before/after, basis
-   note, rate-card link.
+   is an editable recessed field (`CounterReadoutField`): type a number
+   and it commits clamped to the range on blur/submit; focusing it while
+   AUTO is lit drops to Manual, like touching the slider. Layouts that
+   require fixed timing lock the switch to Manual and say why.
+6. **Finish**: a console-key resolution dropdown (label + pixel detail
+   per row; draft mode dims tiers above HD), audio and fast-draft
+   hardware switches (lit hunter green when on), safety-tolerance knob
+   with an `n / 4` readout, and — for models whose API takes one — a
+   **Seed** field with a dice button (empty = random).
+7. **Estimated charge + Save generation to**: side by side in one row at
+   desktop widths. The stitched hunter-green panel keeps the brass coin,
+   credits range in Fraunces, USD in brass, balances, and rate-card link
+   in a single console row; the destination panel is one row of storage
+   chips, the folder dropdown, and a new-folder icon button.
 8. Footer: claw + readiness line, mode chip, plum **Generate video**.
+
+**Fold contract:** the heading and the whole composer, Generate button
+included, fit above the fold at 1440×900, with the Recent work header
+visible beneath — enforced by a widget test. Recent work always sits
+below the composer (the old ≥1160 side column is gone).
 
 ## 8. Library & recent work
 

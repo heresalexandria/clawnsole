@@ -1006,7 +1006,7 @@ Future<void> showReferenceFrameViewer(
                         try {
                           await controller.saveReferenceImage(source);
                         } on Object catch (error) {
-                          controller.showNotice(error.toString());
+                          controller.showErrorNotice(error);
                         }
                       },
                       icon: const Icon(Icons.download_rounded, size: 16),
@@ -1113,7 +1113,7 @@ Future<void> showSourceReferenceSheet(
           try {
             await controller.saveReferenceImage(source);
           } on Object catch (error) {
-            controller.showNotice(error.toString());
+            controller.showErrorNotice(error);
           }
         },
         icon: const Icon(Icons.download_rounded, size: 16),
@@ -1638,7 +1638,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
             destination: destination,
           );
         } on Object catch (error) {
-          widget.controller.showNotice(error.toString());
+          widget.controller.showErrorNotice(error);
         }
       },
     );
