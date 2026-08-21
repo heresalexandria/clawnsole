@@ -258,8 +258,9 @@ Generate button. Layout order:
 ## 9. Version & updates
 
 - The top-bar **version chip** opens a dialog that reports the running
-  version and checks the latest GitHub release (through the Electron shell
-  bridge when present, otherwise the public releases API).
+  version. Automatic checks use Apple's public App Store listing on native iOS,
+  the Electron shell bridge when present, and the GitHub releases API on other
+  surfaces.
 - A newer release adds an **Update Available** chip beside the running version
   on wide layouts. Compact layouts and native mobile apps use a flash
   notification so the header remains responsive.
