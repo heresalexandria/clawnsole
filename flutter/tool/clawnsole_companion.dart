@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
+import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
@@ -14,12 +15,38 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/settings_vault.dart';
+import 'package:clawnsole/core/settings_vault_data_store.dart';
 
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
+  final bootstrap = await CompanionBootstrap.load(
+    Platform.environment,
+    stdin,
+    requireInput: config.secureBootstrap,
+  );
+  final deviceKey =
+      bootstrap.deviceKey ??
+      (config.secureBootstrap
+          ? null
+          : await DevelopmentDeviceKey.loadOrCreate(
+              File('${config.dataFile}.development-key'),
+            ));
   final localStore = CompanionStore(File(config.dataFile));
-  final store = CompanionHybridStore(
-    HybridDataStore(local: localStore, drive: GoogleDriveStore()),
+  final hybrid = HybridDataStore(local: localStore, drive: GoogleDriveStore());
+  final secureStore = deviceKey == null
+      ? null
+      : EncryptedFileSecureValueStore(
+          file: File('${config.dataFile}.secure'),
+          deviceKey: deviceKey,
+        );
+  final vault = secureStore == null
+      ? null
+      : SettingsVaultDataStore(delegate: hybrid, secureStore: secureStore);
+  final store = CompanionHybridStore(hybrid, vault: vault);
+  final server = await HttpServer.bind(
+    InternetAddress.loopbackIPv4,
+    config.port,
   );
   final app = CompanionApp.hybrid(
     store: store,
@@ -31,10 +58,8 @@ Future<void> main(List<String> arguments) async {
       'atlas': Platform.environment['ATLAS_CLOUD_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
-  );
-  final server = await HttpServer.bind(
-    InternetAddress.loopbackIPv4,
-    config.port,
+    requestToken: bootstrap.requestToken,
+    allowedOrigin: 'http://127.0.0.1:${server.port}',
   );
   stdout.writeln(
     'Clawnsole companion is listening on http://127.0.0.1:${server.port}',
@@ -47,16 +72,124 @@ Future<void> main(List<String> arguments) async {
   }
 }
 
+class CompanionBootstrap {
+  const CompanionBootstrap({required this.requestToken, this.deviceKey});
+
+  final String requestToken;
+  final String? deviceKey;
+
+  static Future<CompanionBootstrap> load(
+    Map<String, String> environment,
+    Stream<List<int>> input, {
+    bool requireInput = false,
+  }) async {
+    final developmentToken =
+        environment['CLAWNSOLE_COMPANION_TOKEN']?.trim() ?? '';
+    if (developmentToken.isNotEmpty) {
+      _validateBootstrapKey(developmentToken, 'request token');
+      return CompanionBootstrap(requestToken: developmentToken);
+    }
+    if (!requireInput) return const CompanionBootstrap(requestToken: '');
+    final bytes = <int>[];
+    await for (final chunk in input) {
+      bytes.addAll(chunk);
+      if (bytes.length > 8192) {
+        throw StateError('The companion bootstrap data is invalid.');
+      }
+      if (chunk.contains(10)) break;
+    }
+    final newline = bytes.indexOf(10);
+    final lineBytes = newline < 0 ? bytes : bytes.sublist(0, newline);
+    return CompanionBootstrap.fromJsonLine(utf8.decode(lineBytes));
+  }
+
+  factory CompanionBootstrap.fromJsonLine(String source) {
+    try {
+      final decoded = jsonDecode(source);
+      if (decoded is! Map<Object?, Object?> ||
+          decoded.length != 2 ||
+          decoded['deviceKey'] is! String ||
+          decoded['requestToken'] is! String) {
+        throw const FormatException();
+      }
+      final deviceKey = decoded['deviceKey']! as String;
+      final requestToken = decoded['requestToken']! as String;
+      _validateBootstrapKey(deviceKey, 'device key');
+      _validateBootstrapKey(requestToken, 'request token');
+      return CompanionBootstrap(
+        requestToken: requestToken,
+        deviceKey: deviceKey,
+      );
+    } on Object {
+      throw StateError('The companion bootstrap data is invalid.');
+    }
+  }
+}
+
+void _validateBootstrapKey(String value, String name) {
+  Uint8List bytes;
+  try {
+    bytes = Uint8List.fromList(base64Url.decode(base64Url.normalize(value)));
+  } on FormatException {
+    throw StateError('The companion $name is invalid.');
+  }
+  if (bytes.length != 32 ||
+      base64UrlEncode(bytes).replaceAll('=', '') != value) {
+    throw StateError('The companion $name is invalid.');
+  }
+}
+
+/// Development-only wrapping key for the internal companion harness.
+///
+/// Packaged Electron never uses this path: it supplies a safeStorage-protected
+/// key over stdin. This file keeps `start_web` useful without putting provider
+/// credentials back into clawnsole.json.
+class DevelopmentDeviceKey {
+  static Future<String> loadOrCreate(File file) async {
+    if (await file.exists()) {
+      final value = (await file.readAsString()).trim();
+      _validateBootstrapKey(value, 'development device key');
+      return value;
+    }
+    final random = Random.secure();
+    final value = base64UrlEncode(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    ).replaceAll('=', '');
+    await file.parent.create(recursive: true);
+    final temporary = File('${file.path}.$pid.tmp');
+    try {
+      await temporary.writeAsString('$value\n', flush: true);
+      if (!Platform.isWindows) {
+        final result = await Process.run('chmod', <String>[
+          '600',
+          temporary.path,
+        ]);
+        if (result.exitCode != 0) {
+          throw StateError(
+            'The development secure-storage key could not be protected.',
+          );
+        }
+      }
+      await temporary.rename(file.path);
+      return value;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+    }
+  }
+}
+
 class CompanionConfig {
   const CompanionConfig({
     required this.port,
     required this.dataFile,
     this.webRoot,
+    this.secureBootstrap = false,
   });
 
   final int port;
   final String dataFile;
   final String? webRoot;
+  final bool secureBootstrap;
 
   factory CompanionConfig.from(
     List<String> arguments,
@@ -65,6 +198,7 @@ class CompanionConfig {
     var port = int.tryParse(environment['CLAWNSOLE_PROXY_PORT'] ?? '') ?? 8787;
     var dataFile = environment['CLAWNSOLE_FLUTTER_DATA_FILE']?.trim() ?? '';
     var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
+    var secureBootstrap = false;
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
         port = int.parse(arguments[++index]);
@@ -74,6 +208,8 @@ class CompanionConfig {
       } else if (arguments[index] == '--web-root' &&
           index + 1 < arguments.length) {
         webRoot = arguments[++index];
+      } else if (arguments[index] == '--secure-bootstrap') {
+        secureBootstrap = true;
       }
     }
     if (dataFile.isEmpty) {
@@ -85,6 +221,7 @@ class CompanionConfig {
       port: port,
       dataFile: File(dataFile).absolute.path,
       webRoot: webRoot.isEmpty ? null : Directory(webRoot).absolute.path,
+      secureBootstrap: secureBootstrap,
     );
   }
 }
@@ -337,25 +474,28 @@ class StoreChange<T> {
 }
 
 class CompanionHybridStore {
-  CompanionHybridStore(this.hybrid);
+  CompanionHybridStore(this.hybrid, {this.vault});
 
   final HybridDataStore hybrid;
+  final SettingsVaultDataStore? vault;
   Future<void> _queue = Future<void>.value();
+
+  DurableDataStore get _dataStore => vault ?? hybrid;
 
   GoogleDriveConnection get connection => hybrid.connection;
 
   Future<StoredData> read() async {
     await _queue;
-    return hybrid.read();
+    return _dataStore.read();
   }
 
   Future<T> mutate<T>(
     FutureOr<StoreChange<T>> Function(StoredData data) callback,
   ) {
     final operation = _queue.then((_) async {
-      final current = await hybrid.read();
+      final current = await _dataStore.read();
       final change = await callback(current);
-      await hybrid.write(change.data);
+      await _dataStore.write(change.data);
       return change.result;
     });
     _queue = operation.then<void>((_) {}, onError: (_) {});
@@ -365,14 +505,14 @@ class CompanionHybridStore {
   Future<void> replace(StoredData data) =>
       mutate<void>((_) => StoreChange<void>(data, null));
 
-  Future<void> delete() => hybrid.delete();
+  Future<void> delete() => _dataStore.delete();
 
   Future<AssetReference> writeAsset(
     Uint8List bytes, {
     required String label,
     required String contentType,
     LibraryStorage storage = LibraryStorage.local,
-  }) => hybrid.writeAsset(
+  }) => _dataStore.writeAsset(
     bytes,
     label: label,
     contentType: contentType,
@@ -384,7 +524,7 @@ class CompanionHybridStore {
     required String label,
     AssetReference? retained,
     LibraryStorage storage = LibraryStorage.local,
-  }) => hybrid.persistSource(
+  }) => _dataStore.persistSource(
     source,
     label: label,
     retained: retained,
@@ -392,21 +532,35 @@ class CompanionHybridStore {
   );
 
   Future<Uint8List> readAsset(AssetReference reference) =>
-      hybrid.readAsset(reference);
+      _dataStore.readAsset(reference);
 
   Future<void> pruneAssets(
     List<Generation> generations,
     List<SavedReference> references,
-  ) => hybrid.pruneAssets(generations, references);
+  ) => _dataStore.pruneAssets(generations, references);
 
-  Future<StorageStats> stats(int records) => hybrid.stats(records);
+  Future<StorageStats> stats(int records) => _dataStore.stats(records);
 
-  Future<StoredData> connectDrive(String accessToken, String folderName) =>
-      hybrid.connect(accessToken, folderName);
+  Future<StoredData> connectDrive(String accessToken, String folderName) async {
+    // Migrate any legacy plaintext credentials before HybridDataStore copies
+    // the portable library into Drive.
+    await _dataStore.read();
+    await hybrid.connect(accessToken, folderName);
+    await vault?.connectRemote(accessToken, connection.folderId);
+    return _dataStore.read();
+  }
 
-  Future<StoredData> disconnectDrive() => hybrid.disconnect();
-  Future<StoredData> refreshDrive(String accessToken) =>
-      hybrid.connect(accessToken, hybrid.connection.folderName);
+  Future<StoredData> disconnectDrive() async {
+    await vault?.disconnectRemote();
+    await hybrid.disconnect();
+    return _dataStore.read();
+  }
+
+  Future<StoredData> refreshDrive(String accessToken) async {
+    await hybrid.connect(accessToken, hybrid.connection.folderName);
+    await vault?.connectRemote(accessToken, connection.folderId);
+    return _dataStore.read();
+  }
 
   Future<GoogleDriveCopyCounts> copyLocalToDrive({
     Set<String> generationIds = const <String>{},
@@ -442,12 +596,16 @@ class CompanionApp {
     ProviderApiRouter? providerRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
+    String requestToken = '',
+    String allowedOrigin = '',
   }) => CompanionApp.hybrid(
     store: CompanionHybridStore(HybridDataStore(local: store)),
     api: api,
     providerRouter: providerRouter,
     fallbackApiKeys: fallbackApiKeys,
     webRoot: webRoot,
+    requestToken: requestToken,
+    allowedOrigin: allowedOrigin,
   );
 
   CompanionApp.hybrid({
@@ -456,15 +614,21 @@ class CompanionApp {
     ProviderApiRouter? providerRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
+    String requestToken = '',
+    String allowedOrigin = '',
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _fallbackApiKeys = fallbackApiKeys,
-       _webRoot = webRoot;
+       _webRoot = webRoot,
+       _requestToken = requestToken,
+       _allowedOrigin = allowedOrigin;
 
   final CompanionHybridStore _store;
   final ProviderApiRouter _providers;
   final Map<String, String> _fallbackApiKeys;
   final Directory? _webRoot;
+  final String _requestToken;
+  final String _allowedOrigin;
 
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
@@ -475,6 +639,11 @@ class CompanionApp {
     }
     _cors(request.response, origin);
     if (request.method == 'OPTIONS') {
+      if (!_allowSession(request)) {
+        return _json(request.response, 403, <String, Object?>{
+          'error': 'The Clawnsole companion session is invalid.',
+        });
+      }
       request.response.statusCode = HttpStatus.noContent;
       return request.response.close();
     }
@@ -484,6 +653,14 @@ class CompanionApp {
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
         });
+      }
+      if (!_allowSession(request)) {
+        return await _json(request.response, 403, <String, Object?>{
+          'error': 'The Clawnsole companion session is invalid.',
+        });
+      }
+      if (request.method == 'POST' && path.startsWith('/vault/')) {
+        return await _vaultAction(request, path.substring('/vault/'.length));
       }
       if (request.method == 'GET' && path == '/state') {
         return await _json(request.response, 200, await _snapshotPayload());
@@ -641,12 +818,25 @@ class CompanionApp {
 
   bool _allowOrigin(String? origin) {
     if (origin == null || origin.isEmpty) return true;
+    if (_allowedOrigin.isNotEmpty) return origin == _allowedOrigin;
     final uri = Uri.tryParse(origin);
     return uri != null &&
         (uri.scheme == 'http' || uri.scheme == 'https') &&
         (uri.host == 'localhost' ||
             uri.host == '127.0.0.1' ||
             uri.host == '::1');
+  }
+
+  bool _allowSession(HttpRequest request) {
+    if (_requestToken.isEmpty) return true;
+    final candidate = request.headers.value('X-Clawnsole-Session') ?? '';
+    if (candidate.length != _requestToken.length) return false;
+    var difference = 0;
+    for (var index = 0; index < _requestToken.length; index += 1) {
+      difference |=
+          candidate.codeUnitAt(index) ^ _requestToken.codeUnitAt(index);
+    }
+    return difference == 0;
   }
 
   void _cors(HttpResponse response, String? origin) {
@@ -660,7 +850,7 @@ class CompanionApp {
     );
     response.headers.set(
       HttpHeaders.accessControlAllowHeadersHeader,
-      'Content-Type, Range',
+      'Content-Type, Range, X-Clawnsole-Session',
     );
     response.headers.set(HttpHeaders.cacheControlHeader, 'private, no-store');
   }
@@ -673,6 +863,84 @@ class CompanionApp {
       throw const ProviderException('A JSON object is required.', status: 400);
     }
     return decoded.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Future<void> _vaultAction(HttpRequest request, String action) async {
+    final vault = _store.vault;
+    if (vault == null) {
+      return _json(request.response, 503, <String, Object?>{
+        'ok': false,
+        'state': SettingsVaultState.unavailable.name,
+        'error': 'Secure settings sync is unavailable in this session.',
+      });
+    }
+    const valueActions = <String>{
+      'setup',
+      'unlock',
+      'recover',
+      'changePassphrase',
+    };
+    const emptyActions = <String>{'forget', 'sync'};
+    if (!valueActions.contains(action) && !emptyActions.contains(action)) {
+      return _json(request.response, 404, <String, Object?>{
+        'ok': false,
+        'state': vault.settingsVaultStatus.state.name,
+        'error': 'The settings-vault action is invalid.',
+      });
+    }
+    try {
+      final body = await _bodyMap(request);
+      final rawValue = body['value'];
+      if (rawValue is! String || body.length != 1) {
+        throw const FormatException();
+      }
+      final valueBytes = utf8.encode(rawValue).length;
+      if ((valueActions.contains(action) &&
+              (valueBytes == 0 || valueBytes > 4096)) ||
+          (emptyActions.contains(action) && valueBytes != 0)) {
+        throw const FormatException();
+      }
+
+      String? recoveryCode;
+      switch (action) {
+        case 'setup':
+          recoveryCode = await vault.setup(rawValue);
+        case 'unlock':
+          await vault.unlock(rawValue);
+        case 'recover':
+          await vault.recover(rawValue);
+        case 'changePassphrase':
+          await vault.changePassphrase(rawValue);
+        case 'forget':
+          await vault.forgetCachedUnlock();
+        case 'sync':
+          await vault.sync();
+      }
+      final status = vault.settingsVaultStatus;
+      return await _json(request.response, 200, <String, Object?>{
+        'ok': true,
+        'state': status.state.name,
+        if (status.message.isNotEmpty) 'message': status.message,
+        if (status.lastSyncedAt != null)
+          'syncedAt': status.lastSyncedAt!.toUtc().toIso8601String(),
+        if (action == 'setup' && recoveryCode != null)
+          'recoveryCode': recoveryCode,
+      });
+    } on Object catch (error) {
+      final status = vault.settingsVaultStatus;
+      return _json(
+        request.response,
+        _vaultErrorStatus(error),
+        <String, Object?>{
+          'ok': false,
+          'state': status.state.name,
+          if (status.message.isNotEmpty) 'message': status.message,
+          if (status.lastSyncedAt != null)
+            'syncedAt': status.lastSyncedAt!.toUtc().toIso8601String(),
+          'error': _safeVaultError(error),
+        },
+      );
+    }
   }
 
   Future<void> _stateAction(String action, Object? value) async {
@@ -1125,6 +1393,9 @@ class CompanionApp {
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
       availableProviders: const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
+      settingsVault:
+          _store.vault?.settingsVaultStatus ??
+          const SettingsVaultStatus.unavailable(),
       storage: await _store.stats(
         data.generations.length + data.savedReferences.length,
       ),
@@ -1722,6 +1993,32 @@ class CompanionApp {
     response.write(jsonEncode(payload));
     await response.close();
   }
+}
+
+int _vaultErrorStatus(Object error) {
+  if (error is GoogleDriveException) return 502;
+  if (error is StateError ||
+      error is ArgumentError ||
+      error is FormatException ||
+      error is SettingsVaultFormatException ||
+      error is SettingsVaultAuthenticationException) {
+    return 400;
+  }
+  return 500;
+}
+
+String _safeVaultError(Object error) {
+  if (error is SettingsVaultAuthenticationException) return error.message;
+  if (error is SettingsVaultFormatException) return error.message;
+  if (error is GoogleDriveException) return error.message;
+  if (error is StateError) return error.message;
+  if (error is ArgumentError && error.message is String) {
+    return error.message! as String;
+  }
+  if (error is FormatException) {
+    return 'The settings-vault request is invalid.';
+  }
+  return 'Encrypted settings sync failed. Your local settings were kept.';
 }
 
 extension<T> on Iterable<T> {

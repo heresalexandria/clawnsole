@@ -8,6 +8,8 @@ import 'gateway.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
 import 'models.dart';
+import 'settings_vault_gateway.dart';
+import 'settings_vault_shell.dart';
 
 Uri _configuredBaseUrl(Uri? override) {
   if (override != null) return override;
@@ -27,21 +29,27 @@ class WebGateway
         FavoriteGateway,
         GenerationPreviewGateway,
         MediaPreviewGateway,
-        GoogleDriveGateway {
+        GoogleDriveGateway,
+        SettingsVaultGateway {
   WebGateway({
     http.Client? client,
     Uri? baseUrl,
     GoogleDriveAuthorizer? driveAuthorizer,
+    SettingsVaultShellInvoker? settingsVaultInvoker,
   }) : _client = client ?? http.Client(),
        _baseUrl = _configuredBaseUrl(baseUrl),
-       _driveAuthorizer = driveAuthorizer ?? createGoogleDriveAuthorizer();
+       _driveAuthorizer = driveAuthorizer ?? createGoogleDriveAuthorizer(),
+       _settingsVaultInvoker = settingsVaultInvoker ?? invokeSettingsVaultShell;
 
   final http.Client _client;
   final Uri _baseUrl;
   final GoogleDriveAuthorizer _driveAuthorizer;
+  final SettingsVaultShellInvoker _settingsVaultInvoker;
   GoogleDriveConnection _driveConnection = const GoogleDriveConnection(
     state: GoogleDriveConnectionState.disconnected,
   );
+  SettingsVaultStatus _settingsVaultStatus =
+      const SettingsVaultStatus.unavailable();
 
   Uri _url(String path, [Map<String, String>? query]) =>
       _baseUrl.resolve(path).replace(queryParameters: query);
@@ -69,6 +77,9 @@ class WebGateway
       message: _driveAuthorizer.unavailableMessage,
     );
   }
+
+  @override
+  SettingsVaultStatus get settingsVaultStatus => _settingsVaultStatus;
 
   Future<Object?> _read(http.Response response) async {
     Object? payload;
@@ -106,12 +117,75 @@ class WebGateway
         rawDrive.map((key, value) => MapEntry(key.toString(), value)),
       );
     }
-    return LocalSnapshot.fromJson(payload);
+    final snapshot = LocalSnapshot.fromJson(payload);
+    _settingsVaultStatus = snapshot.settingsVault;
+    return snapshot;
   }
 
   @override
   Future<LocalSnapshot> load() async =>
       _snapshot(await _client.get(_url('/state')));
+
+  Future<Map<String, Object?>> _settingsVaultAction(
+    String action, [
+    String value = '',
+  ]) async {
+    final response = await _settingsVaultInvoker(action, value);
+    if (response['ok'] != true) {
+      throw ProviderException(
+        response['error']?.toString() ??
+            'Encrypted settings sync was not completed.',
+      );
+    }
+    return response;
+  }
+
+  @override
+  Future<SettingsVaultSetupResult> setupSettingsVault(String passphrase) async {
+    final response = await _settingsVaultAction('setup', passphrase);
+    final recoveryCode = response['recoveryCode']?.toString() ?? '';
+    if (recoveryCode.isEmpty) {
+      throw const ProviderException(
+        'The desktop shell did not return a recovery code.',
+      );
+    }
+    return SettingsVaultSetupResult(
+      snapshot: await load(),
+      recoveryCode: recoveryCode,
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> unlockSettingsVault(String passphrase) async {
+    await _settingsVaultAction('unlock', passphrase);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> recoverSettingsVault(String recoveryCode) async {
+    await _settingsVaultAction('recover', recoveryCode);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> syncSettingsVault() async {
+    await _settingsVaultAction('sync');
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> changeSettingsVaultPassphrase(
+    String newPassphrase,
+  ) async {
+    await _settingsVaultAction('changePassphrase', newPassphrase);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> forgetSettingsVaultUnlock() async {
+    await _settingsVaultAction('forget');
+    return load();
+  }
 
   @override
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async {

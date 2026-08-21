@@ -10,6 +10,7 @@ import 'models.dart';
 import 'pricing.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
+import 'settings_vault_gateway.dart';
 
 List<String> _cleanLibraryTags(Iterable<String> input) {
   final tags = <String>[];
@@ -153,6 +154,9 @@ class DirectGateway
       storage: await _store.stats(
         data.generations.length + data.savedReferences.length,
       ),
+      settingsVault: _store is SettingsVaultStatusSource
+          ? (_store as SettingsVaultStatusSource).settingsVaultStatus
+          : const SettingsVaultStatus.unavailable(),
     );
   }
 

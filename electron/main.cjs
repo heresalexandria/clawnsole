@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
@@ -22,9 +23,16 @@ const {
   waitForServer,
 } = require("./lib/runtime.cjs");
 const { installNativeTextContextMenu } = require("./lib/text-context-menu.cjs");
+const {
+  companionBootstrapLine,
+  installCompanionSessionHeader,
+  is32ByteBase64Url,
+  proxySettingsVault,
+} = require("./lib/companion-session.cjs");
 const updater = require("./lib/updater.cjs");
 const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
+const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
 
 const APP_NAME = "Clawnsole";
 const DEVELOPMENT_URL = process.env.CLAWNSOLE_RENDERER_URL || "http://127.0.0.1:7357";
@@ -36,6 +44,7 @@ let rendererUrl = null;
 let isQuitting = false;
 let updateBusy = false;
 let googleDriveAuth = null;
+let companionToken = "";
 
 app.setName(APP_NAME);
 
@@ -48,7 +57,7 @@ function logServerOutput(stream, label) {
   });
 }
 
-async function startBundledRenderer() {
+async function startBundledRenderer({ deviceKey, requestToken }) {
   const rendererDirectory = path.join(process.resourcesPath, "renderer");
   const companionExecutable = path.join(
     process.resourcesPath,
@@ -65,23 +74,41 @@ async function startBundledRenderer() {
     path.join(app.getPath("userData"), "clawnsole.json"),
     "--web-root",
     rendererDirectory,
+    "--secure-bootstrap",
   ];
-  rendererProcess = spawn(companionExecutable, companionArguments, {
+  const companionEnvironment = { ...process.env };
+  delete companionEnvironment.CLAWNSOLE_COMPANION_TOKEN;
+  const child = spawn(companionExecutable, companionArguments, {
     cwd: rendererDirectory,
-    env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    env: companionEnvironment,
+    stdio: ["pipe", "pipe", "pipe"],
   });
+  rendererProcess = child;
 
-  logServerOutput(rendererProcess.stdout, "out");
-  logServerOutput(rendererProcess.stderr, "error");
+  logServerOutput(child.stdout, "out");
+  logServerOutput(child.stderr, "error");
 
-  rendererProcess.once("exit", (code, signal) => {
+  child.once("exit", (code, signal) => {
     const stoppedUnexpectedly = !isQuitting;
-    rendererProcess = null;
+    if (rendererProcess === child) rendererProcess = null;
     if (stoppedUnexpectedly) {
       console.error(`Clawnsole's renderer stopped unexpectedly (${signal || code}).`);
       app.quit();
     }
+  });
+
+  await new Promise((resolve, reject) => {
+    const failed = () => reject(
+      new Error("Clawnsole could not initialize its local secure storage."),
+    );
+    child.stdin.once("error", failed);
+    child.stdin.end(
+      companionBootstrapLine(deviceKey, requestToken),
+      () => {
+        child.stdin.removeListener("error", failed);
+        resolve();
+      },
+    );
   });
 
   await waitForServer(`${localUrl}/health`, {
@@ -277,10 +304,14 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.onUpdateEvent,"
       + " typeof window.clawnsole?.authorizeGoogleDrive,"
       + " typeof window.clawnsole?.disconnectGoogleDrive,"
+      + " typeof window.clawnsole?.settingsVault,"
       + " typeof window.clawnsole?.openExternalUrl,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
-    if (shape === "function,function,function,function,function,function,true") {
+    if (
+      shape
+      === "function,function,function,function,function,function,function,true"
+    ) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -295,6 +326,20 @@ function installRendererBridge() {
   ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
   ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
   ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
+  ipcMain.handle(
+    "clawnsole:vault:settings",
+    (event, action, value) => {
+      if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
+        return { ok: false, error: "The settings-vault request was rejected." };
+      }
+      return proxySettingsVault({
+        action,
+        value,
+        rendererUrl,
+        requestToken: companionToken,
+      });
+    },
+  );
   ipcMain.handle("clawnsole:external:open", async (event, url, purpose) => {
     if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
     if (!isAllowedExplicitExternalUrl(url, purpose)) return false;
@@ -391,7 +436,35 @@ async function startApplication() {
     },
   );
 
-  rendererUrl = app.isPackaged ? await startBundledRenderer() : DEVELOPMENT_URL;
+  if (app.isPackaged) {
+    companionToken = crypto.randomBytes(32).toString("base64url");
+    const vaultKeyCache = new VaultKeyCache({
+      userData: app.getPath("userData"),
+      safeStorage,
+    });
+    let deviceKey = await vaultKeyCache.load("device");
+    if (!deviceKey) {
+      deviceKey = crypto.randomBytes(32).toString("base64url");
+      await vaultKeyCache.save("device", deviceKey);
+    }
+    rendererUrl = await startBundledRenderer({
+      deviceKey,
+      requestToken: companionToken,
+    });
+  } else {
+    companionToken = process.env.CLAWNSOLE_COMPANION_TOKEN?.trim() || "";
+    if (!is32ByteBase64Url(companionToken)) {
+      throw new Error(
+        "Development must be started through electron/scripts/start_macos.",
+      );
+    }
+    rendererUrl = DEVELOPMENT_URL;
+  }
+  installCompanionSessionHeader(
+    session.defaultSession.webRequest,
+    rendererUrl,
+    companionToken,
+  );
   if (!app.isPackaged) await waitForServer(rendererUrl, { timeoutMs: 60_000 });
   await createMainWindow(rendererUrl);
   if (IS_SMOKE_TEST) {

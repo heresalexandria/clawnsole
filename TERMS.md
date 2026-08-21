@@ -7,7 +7,7 @@ and release builds (collectively, "Clawnsole"). By using Clawnsole, you agree to
 these terms. If you do not agree, do not use Clawnsole.
 
 Clawnsole is an open-source client that lets you connect your own accounts and
-API keys to third-party AI generation services across web, mobile, and desktop.
+API keys to third-party AI generation services across mobile and desktop.
 The developer does not sell generation services, operate a Clawnsole account
 service, or receive the fees charged by providers.
 
@@ -90,10 +90,11 @@ availability, billing, or data handling.
 ## Storage, privacy, and security
 
 Depending on the platform and features you choose, project data and credentials
-may be kept in an application sandbox, a local companion data store, browser
-localStorage, or a Google Drive folder you authorize. You are responsible for
-securing your devices, browser profile, backups, provider accounts, and Drive
-account, and for keeping copies of work you cannot afford to lose.
+may be kept in an application sandbox, operating-system-backed secure storage,
+a local companion data store, or a passphrase-encrypted vault in a Google Drive
+folder you authorize. You are responsible for securing your devices, backups,
+sync passphrase and recovery code, provider accounts, and Drive account, and for
+keeping copies of work you cannot afford to lose.
 
 Do not put API keys, private prompts, personal media, or other secrets in a
 public GitHub issue. The [privacy policy](PRIVACY.md) explains what Clawnsole

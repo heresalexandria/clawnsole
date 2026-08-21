@@ -89,7 +89,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
             Text('Providers.', style: Theme.of(context).textTheme.displayLarge),
             const SizedBox(height: 10),
             Text(
-              'Choose where Clawnsole renders, keep credentials on this device, and compare a generation before you spend.',
+              _providerSecurityDescription(widget.controller),
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
             const SizedBox(height: 24),
@@ -220,7 +220,7 @@ class _ProviderCard extends StatelessWidget {
                       !provider.requiresApiKey
                           ? 'Ready on this device'
                           : connected
-                          ? 'Connected on this device'
+                          ? _connectedProviderLabel(controller)
                           : 'Key required',
                       style: TextStyle(
                         fontSize: 11,
@@ -357,6 +357,30 @@ class _ProviderCard extends StatelessWidget {
     );
   }
 }
+
+String _providerSecurityDescription(
+  AppController controller,
+) => switch (controller.settingsVaultStatus.state) {
+  SettingsVaultState.ready || SettingsVaultState.syncing =>
+    'Choose where Clawnsole renders. Provider keys stay in secure storage and sync through your encrypted Google Drive vault.',
+  SettingsVaultState.pending =>
+    'Choose where Clawnsole renders. Provider keys are secure on this device; encrypted Drive sync is pending.',
+  SettingsVaultState.locked =>
+    'Choose where Clawnsole renders. Local provider keys remain available; unlock encrypted settings sync in Settings to receive changes from other devices.',
+  SettingsVaultState.setupRequired =>
+    'Choose where Clawnsole renders. Provider keys stay in secure storage; encrypted cross-device sync can be set up in Settings.',
+  _ =>
+    'Choose where Clawnsole renders, keep credentials secure on this device, and compare a generation before you spend.',
+};
+
+String _connectedProviderLabel(AppController controller) =>
+    switch (controller.settingsVaultStatus.state) {
+      SettingsVaultState.ready ||
+      SettingsVaultState.syncing => 'Connected · encrypted sync on',
+      SettingsVaultState.pending => 'Connected · sync pending',
+      SettingsVaultState.locked => 'Connected here · vault locked',
+      _ => 'Connected securely on this device',
+    };
 
 class _ExternalLink extends StatelessWidget {
   const _ExternalLink(this.label, this.url);

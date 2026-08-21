@@ -1,8 +1,10 @@
 # Clawnsole for Flutter
 
-This directory is the canonical Clawnsole implementation for web, iOS, Android,
-native Windows, and the Electron macOS renderer. Product behavior belongs here;
-Electron owns only macOS desktop lifecycle, packaging, and self-update.
+This directory is the canonical Clawnsole implementation for iOS, Android,
+native Windows, and the Electron macOS renderer. Flutter web is retained as the
+internal Electron renderer and local companion-backed development harness, not
+as a standalone hosted product. Product behavior belongs here; Electron owns
+only macOS desktop lifecycle, packaging, and self-update.
 
 ## Capabilities
 
@@ -101,8 +103,11 @@ platform OAuth client before launching:
 - Android: `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`, using the registered
   web client ID; also register the Android package and every signing SHA
 - iOS: `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`; the iOS scripts derive and inject its
-  reversed callback URL scheme
-- standalone web: `CLAWNSOLE_GOOGLE_CLIENT_ID`
+  native client ID and reversed callback URL scheme. TestFlight and App Store
+  builds use Apple App Attest for Google Sign-In App Check. Local development
+  and simulator requests may remain unverified unless a debug provider is
+  configured, so enable App Check enforcement only after a Drive sign-in from
+  a TestFlight or App Store build appears as verified in Google Cloud.
 
 Use `CLAWNSOLE_IOS_SIMULATOR_ID`, `CLAWNSOLE_ANDROID_AVD_ID`, or
 `CLAWNSOLE_ANDROID_DEVICE_ID` to choose a specific emulator. Every script also
@@ -110,9 +115,9 @@ accepts extra `flutter run` arguments.
 
 ## Run on iOS or Android
 
-Native builds call the selected provider directly. API keys and compact
-history are stored in `Clawnsole/clawnsole.json`, with retained media in the
-adjacent `assets/` directory. The OS app sandbox protects both from other apps.
+Native builds call the selected provider directly. API keys are kept in
+OS-secure storage; compact history is stored in `Clawnsole/clawnsole.json`,
+with retained media in the adjacent `assets/` directory.
 
 ```bash
 flutter run -d ios
@@ -123,7 +128,7 @@ Android release builds require your own signing configuration before store
 distribution. iOS device/archive builds require an Apple development team and
 the usual Xcode signing setup.
 
-## Run on web
+## Develop the internal web renderer
 
 Browsers cannot write an application JSON file directly, and providers do not
 grant arbitrary browser origins API access. Clawnsole therefore includes a
@@ -154,38 +159,20 @@ flutter run -d chrome \
   --dart-define=CLAWNSOLE_PROXY_URL=http://127.0.0.1:8790
 ```
 
-The companion binds only to IPv4 loopback and accepts only localhost browser
-origins. The browser receives sanitized history and whether a key exists, never
-the saved key itself.
-
-### Standalone browser and GitHub Pages
-
-The isolated standalone target calls providers directly and uses an app-owned
-Google Drive folder instead of the companion:
-
-```bash
-CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
-  ./scripts/start_github_pages
-```
-
-Generated media, retained inputs, saved references, folders, history, and
-non-secret preferences sync through Drive. Provider keys remain in this
-browser's localStorage and must be entered separately on every device. They are
-never serialized into `clawnsole.json` or uploaded to Drive. Because localStorage
-is accessible to JavaScript on the same origin, run this target only on a
-trusted device and reviewed origin.
-
-This mode intentionally has no backend. Atlas Cloud is the only provider
-currently exposed because its API permits the hosted origin through browser
-CORS; the other configured provider APIs do not currently allow that origin. See
-[`docs/google-drive-web.md`](../docs/google-drive-web.md) for OAuth, origin, and
-GitHub Pages setup.
+The companion binds only to IPv4 loopback and authenticates privileged
+Electron requests with a per-launch token. The renderer receives sanitized
+history and whether a key exists, never the saved provider key or cached vault
+key. The direct `start_web` harness encrypts secure values with a development
+key stored beside its ignored local data with owner-only file permissions;
+packaged macOS uses Electron `safeStorage` instead. This target is not
+published as a standalone website.
 
 Native and companion-backed builds keep their existing local library and show
 it alongside Drive with explicit Local/Drive badges and filters. The default
 destination for new work is remembered. “Copy local library to Drive” creates
 portable copies while retaining the local originals; rerunning it is
-idempotent. Provider API keys never enter the portable Drive file.
+idempotent. Provider API keys and preferences sync only through the separately
+encrypted settings vault.
 
 ## Build targets
 
@@ -195,7 +182,6 @@ idempotent. Provider API keys never enter the portable Drive file.
 ./scripts/build_android
 ./scripts/build_macos
 ./scripts/build_windows
-./scripts/build_github_pages
 ```
 
 - `build_web` creates `build/web` and compiles the companion into the standalone
@@ -206,15 +192,17 @@ idempotent. Provider API keys never enter the portable Drive file.
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate. Xcode signing must already be configured. iOS
   builds are deliberately local-only and are not run or published by GitHub
-  Actions. For App Review, set `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
+  Actions. Provider test keys are opt-in and excluded by default. To prepare a
+  review build that includes them, set `INCLUDE_IOS_TEST_KEYS=true` plus
+  `CLAWNSOLE_IOS_REVIEW_BFL_API_KEY`,
   `CLAWNSOLE_IOS_REVIEW_LTX_API_KEY`,
   `CLAWNSOLE_IOS_REVIEW_ATLAS_API_KEY`, and/or
   `CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY`. A local, Git-ignored
   `flutter/.env.ios-review` or repository `.env` is loaded automatically; the
   ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
   `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
-  passes credentials only to the iOS compiler; web, Android, macOS, and Windows
-  builds do not receive it.
+  passes credentials only to the iOS compiler when the opt-in is true;
+  Android, macOS, Windows, and the internal renderer build do not receive them.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
@@ -226,9 +214,6 @@ idempotent. Provider API keys never enter the portable Drive file.
   credential variables so API keys cannot be compiled into the executable. Its
   Drive refresh token is stored with the operating-system-backed secure storage
   plugin.
-- `build_github_pages` creates the separate backend-free app under
-  `build/github-pages/app` with `/clawnsole/app/` as its default base path. It
-  does not replace or modify the existing `docs/` splash site.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.

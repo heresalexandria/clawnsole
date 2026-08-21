@@ -1,7 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import 'browser_drive_gateway_stub.dart'
-    if (dart.library.js_interop) 'browser_drive_gateway_web.dart';
 import 'models.dart';
 import 'native_gateway.dart';
 import 'web_gateway.dart';
@@ -102,9 +100,4 @@ abstract interface class MediaPreviewGateway {
   );
 }
 
-const _standaloneWeb = bool.fromEnvironment('CLAWNSOLE_STANDALONE_WEB');
-
-AppGateway createGateway() {
-  if (kIsWeb && _standaloneWeb) return createBrowserDriveGateway();
-  return kIsWeb ? WebGateway() : NativeGateway();
-}
+AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();

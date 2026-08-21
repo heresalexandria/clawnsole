@@ -72,7 +72,7 @@
         <h1>Privacy without a hidden backend.</h1>
         <p class="policy-intro">
           Clawnsole is a unified client for third-party video generation
-          services across web, mobile, and desktop. The native desktop and
+          services across mobile and desktop. The installed desktop and
           mobile apps contain no analytics or advertising SDKs. The public
           splash page at clawnsole.app uses Google Analytics with region-aware
           consent controls, as described below. The developer does not operate
@@ -85,7 +85,7 @@
         <article>
           <span aria-hidden="true">01</span>
           <h2>You choose storage</h2>
-          <p>Most targets store data locally. The standalone browser can use a Drive folder you authorize.</p>
+          <p>Installed apps store data locally and can use a Drive folder you authorize.</p>
         </article>
         <article>
           <span aria-hidden="true">02</span>
@@ -133,6 +133,8 @@
             <p>
               Clawnsole has no developer-operated sync service. Local data is
               not uploaded to a Clawnsole account or developer-operated cloud.
+              Provider API keys are kept in operating-system-backed secure
+              storage rather than the local project-history JSON.
               Operating-system
               backups or device-management tools may handle app data according
               to your device settings and their own policies.
@@ -143,12 +145,14 @@
             <p class="eyebrow">Optional cross-device sync</p>
             <h2>Data stored in Google Drive</h2>
             <p>
-              Every Clawnsole surface can use a Google Drive folder that you
+              Every installed Clawnsole app can use a Google Drive folder that you
               authorize to make selected Clawnsole data available across
-              devices. If enabled, prompts, generation records and settings,
+              devices. If enabled, prompts, generation records,
               saved-reference metadata, retained inputs, generated media,
-              folders, tags, and non-secret preferences are stored there.
-              Google processes and retains those files under your Google
+              folders, and tags are stored there. If you also enable encrypted
+              settings sync, provider API keys and app preferences are uploaded
+              only inside an authenticated encrypted vault. Google processes
+              and retains the project files and encrypted vault under your Google
               account settings and its
               <a href="https://policies.google.com/privacy">privacy policy</a>.
             </p>
@@ -157,10 +161,12 @@
               which covers files the app creates or that you explicitly make
               available to it. Drive access tokens and desktop refresh tokens
               are not sent to the developer; desktop refresh tokens are stored
-              using operating-system-backed encryption. Provider API keys are
-              never put in Drive; they stay on each device (in localStorage for
-              standalone web). Use the web mode only on a trusted device and
-              hosted origin.
+              using operating-system-backed encryption. The settings vault is
+              encrypted on the device with a random key protected by your sync
+              passphrase. The passphrase is not stored. A recovery code is shown
+              once, and an unlocked vault key is cached in device-secure storage
+              so you normally enter the passphrase only once per device. Keep
+              the passphrase and recovery code private.
             </p>
           </section>
 
@@ -286,7 +292,7 @@
             <p class="eyebrow">A short destination list</p>
             <h2>Other network requests</h2>
             <p>
-              The macOS, Windows, iOS, Android, and web builds ask GitHub’s
+              The macOS, Windows, iOS, and Android builds ask GitHub’s
               public releases API whether a newer Clawnsole version exists once
               per app launch, every 24 hours while running, and when you manually
               check where that action is available. The request contains no
@@ -303,7 +309,7 @@
             <p class="eyebrow">What we receive</p>
             <h2>Data collected by the developer</h2>
             <p>
-              The native Clawnsole apps do not send the developer your API key,
+              The installed Clawnsole apps do not send the developer your API key,
               prompts, reference media, generated media, project history,
               contacts, precise location, advertising identifiers, or analytics
               events. The developer can access aggregate and event-level
@@ -338,10 +344,10 @@
             <p class="eyebrow">Retention and safeguards</p>
             <h2>Security and retention</h2>
             <p>
-              User-supplied provider keys are stored in Clawnsole’s locally
-              protected JSON data or, in the standalone browser, localStorage.
-              They are not sent to the developer or written to Google Drive and
-              are never displayed again after saving. App Review credentials,
+              User-supplied provider keys are stored in operating-system-backed
+              secure storage. They are not sent to the developer and are
+              uploaded to Google Drive only inside the optional passphrase-
+              encrypted settings vault. App Review credentials,
               when present, are
               compiled into that iOS build and are not written to the local data
               file or shown in the interface. Keep provider keys private and

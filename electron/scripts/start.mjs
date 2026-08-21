@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import runtime from "../lib/runtime.cjs";
@@ -18,6 +19,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65_535) {
 }
 
 const rendererUrl = `http://127.0.0.1:${port}`;
+const requestToken = crypto.randomBytes(32).toString("base64url");
+const sessionEnvironment = {
+  ...process.env,
+  CLAWNSOLE_COMPANION_TOKEN: requestToken,
+};
 const dataFile = process.env.CLAWNSOLE_FLUTTER_DATA_FILE
   || path.join(repositoryRoot, ".clawnsole", "clawnsole.json");
 const executableSuffix = process.platform === "win32" ? ".cmd" : "";
@@ -58,7 +64,7 @@ async function run() {
     {
       cwd: flutterDirectory,
       detached: process.platform !== "win32",
-      env: process.env,
+      env: sessionEnvironment,
       stdio: "inherit",
     },
   );
@@ -76,7 +82,7 @@ async function run() {
     [electronDirectory, ...process.argv.slice(2)],
     {
       cwd: electronDirectory,
-      env: { ...process.env, CLAWNSOLE_RENDERER_URL: rendererUrl },
+      env: { ...sessionEnvironment, CLAWNSOLE_RENDERER_URL: rendererUrl },
       stdio: "inherit",
     },
   );

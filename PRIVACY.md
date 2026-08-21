@@ -3,7 +3,7 @@
 Effective: August 20, 2026
 
 Clawnsole is a unified client for third-party video generation services across
-web, mobile, and desktop. The native desktop and mobile apps contain no
+mobile and desktop. The installed desktop and mobile apps contain no
 analytics or advertising SDKs. The splash page at `clawnsole.app` uses Google
 Analytics with region-aware consent controls, as described below. The developer
 does not operate an account system or cloud database for project data.
@@ -21,7 +21,8 @@ private local storage. Depending on how you use the app, this can include:
 - appearance, retention, and other app preferences; and
 - on the `clawnsole.app` splash page, your analytics consent choice.
 
-Provider keys can be added, replaced, or removed from **Providers**. Saved
+Provider keys are kept in operating-system-backed secure storage rather than
+the local project-history JSON. They can be added, replaced, or removed from **Providers**. Saved
 references can be renamed, reorganized, or deleted from **References**.
 Generation history and app preferences can be cleared from **Settings**.
 Removing the app may also remove data held in its application sandbox, subject
@@ -29,20 +30,23 @@ to the backup and device-management behavior of your operating system.
 
 ## Optional Google Drive storage
 
-Every Clawnsole surface can use a Google Drive folder that you authorize to make
+Every installed Clawnsole app can use a Google Drive folder that you authorize to make
 selected Clawnsole data available across devices. If enabled, Clawnsole stores
-prompts, generation records and settings, saved-reference metadata, retained
-input media, generated media, folders, tags, and non-secret app preferences in
-that folder. Google processes and retains those files under your Google account
+prompts, generation records, saved-reference metadata, retained
+input media, generated media, folders, and tags in that folder. If you also
+enable encrypted settings sync, provider API keys and app preferences are
+uploaded only inside an authenticated encrypted vault. Google processes and
+retains the project files and encrypted vault under your Google account
 settings and the [Google Privacy Policy](https://policies.google.com/privacy).
 
 Clawnsole requests the limited `drive.file` permission and can access only the
 Drive files it creates or that you explicitly make available to the app. Drive
 access tokens and desktop refresh tokens are not sent to the developer; desktop
-refresh tokens use operating-system-backed encrypted storage. Provider API keys
-are excluded from Drive and remain on each device, including in localStorage for
-standalone web. localStorage is accessible to JavaScript on the same origin, so
-use the web build only on a trusted device and hosted origin.
+refresh tokens use operating-system-backed encrypted storage. The settings
+vault is encrypted on the device with a random key protected by your sync
+passphrase. The passphrase is not stored. A recovery code is shown once, and an
+unlocked vault key is cached in device-secure storage so you normally enter the
+passphrase only once per device. Keep the passphrase and recovery code private.
 
 ## Data sent to a generation provider
 
@@ -84,7 +88,7 @@ key for the same provider takes precedence after it is saved.
 
 ## Update checks and external links
 
-The macOS, Windows, iOS, Android, and web builds ask GitHub's public releases
+The macOS, Windows, iOS, and Android builds ask GitHub's public releases
 API whether a newer Clawnsole version exists once per app launch, every 24 hours
 while running, and when you manually check where that action is available. That
 request carries no provider API key, prompt, media, or history. GitHub receives
@@ -99,8 +103,8 @@ destination site's policy.
 
 The splash page at `https://clawnsole.app/` uses Google Analytics to understand
 visits and interactions, evaluate site performance, and decide what to improve.
-The Analytics tag is not present on the privacy policy, terms of use, hosted web
-app, or native macOS, Windows, iOS, and Android apps.
+The Analytics tag is not present on the privacy policy, terms of use, or
+installed macOS, Windows, iOS, and Android apps.
 
 The splash page uses the time zone reported by your browser through JavaScript's
 `Intl.DateTimeFormat` API as a best-effort estimate of whether you are in the
@@ -140,7 +144,7 @@ controls or Google's
 
 ## Data collected by the developer
 
-The native Clawnsole apps do not send the developer your API keys, prompts,
+The installed Clawnsole apps do not send the developer your API keys, prompts,
 reference media, generated media, generation history, contacts, precise
 location, advertising identifiers, or analytics events. The developer can
 access aggregate and event-level splash-page usage reports for visits where

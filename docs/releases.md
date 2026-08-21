@@ -69,5 +69,5 @@ and the unsigned native Windows x64 build. Release assets can include:
 The macOS ZIP is the Electron updater asset. Windows updates remain a manual ZIP
 download, and the unsigned executable may trigger a Microsoft Defender
 SmartScreen warning. Artifact naming, architecture selection, and digest parsing
-are covered by Electron tests. iOS, Android, and hosted web distribution remain
+are covered by Electron tests. iOS and Android distribution remain
 outside this workflow.

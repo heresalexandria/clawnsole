@@ -3,8 +3,8 @@
 Every supported build checks GitHub Releases on startup and every 24 hours
 while running. A manual macOS check is also available from **Clawnsole → Check
 for Updates…** or from the version beside the wordmark in the app's top bar.
-Native Windows and web builds send available updates to the GitHub release for
-a manual download. Development builds explain that they update through git
+Native Windows builds send available updates to the GitHub release for a manual
+download. Development builds explain that they update through git
 instead of replacing themselves.
 
 When GitHub successfully reports a newer **major** version, Clawnsole blocks
@@ -19,8 +19,8 @@ versions are available so users are never sent to a pending review.
 
 The Flutter top bar always shows the running version. On viewports at least 900
 pixels wide, a newer release adds an animated blue-purple **Update Available**
-chip beside the version. Packaged macOS can install from that chip; Windows,
-web, and development builds open the update dialog and release link. Compact
+chip beside the version. Packaged macOS can install from that chip; Windows and
+development builds open the update dialog and release link. Compact
 viewports and native mobile apps keep the header uncluttered and flash an update
 notification instead. iOS and Android leave installation to their stores.
 Opening the version dialog re-checks immediately outside store-managed builds.
@@ -33,7 +33,7 @@ shell's persisted 24-hour throttle, while other surfaces query on the shared
 Where the shell can install in place, the dialog's primary action is
 **Download and install <version>** uses the same verified pipeline as the system
 menu, not a link to GitHub. It falls back to a release link only when there is
-no self-updating shell, including native Windows and browser previews, and says
+no self-updating shell, including native Windows, and says
 so plainly when an unpackaged development build declines to replace itself.
 
 ## Renderer bridge

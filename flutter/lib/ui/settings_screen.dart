@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
@@ -505,7 +507,7 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
             child: Text(
               unavailable
                   ? connection.message
-                  : 'Drive items include generated media, references, folders, and non-secret preferences. Provider API keys never leave this device. Copying local items keeps the originals.',
+                  : 'Drive items include generated media, references, and folders. Provider keys and preferences stay in secure storage and sync only through your passphrase-encrypted vault when enabled. Copying local items keeps the originals.',
               style: const TextStyle(fontSize: 11.5, height: 1.4),
             ),
           ),
@@ -519,6 +521,574 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
               ),
             ),
           ],
+          if (widget.controller.supportsSettingsVault) ...<Widget>[
+            const Divider(height: 32),
+            _SettingsVaultPanel(controller: widget.controller),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsVaultPassphraseDialog extends StatefulWidget {
+  const _SettingsVaultPassphraseDialog({
+    required this.title,
+    required this.detail,
+    required this.actionLabel,
+    required this.confirm,
+  });
+
+  final String title;
+  final String detail;
+  final String actionLabel;
+  final bool confirm;
+
+  @override
+  State<_SettingsVaultPassphraseDialog> createState() =>
+      _SettingsVaultPassphraseDialogState();
+}
+
+class _SettingsVaultPassphraseDialogState
+    extends State<_SettingsVaultPassphraseDialog> {
+  static const _maximumEncodedBytes = 1024;
+
+  final _passphrase = TextEditingController();
+  final _confirmation = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _passphrase.dispose();
+    _confirmation.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = _passphrase.text;
+    if (value.isEmpty || (widget.confirm && value.runes.length < 12)) {
+      setState(() {
+        _error = widget.confirm
+            ? 'Enter at least 12 characters.'
+            : 'Enter your sync passphrase.';
+      });
+      return;
+    }
+    if (utf8.encode(value).length > _maximumEncodedBytes) {
+      setState(() {
+        _error = 'The passphrase must be at most 1,024 encoded bytes.';
+      });
+      return;
+    }
+    if (widget.confirm && value != _confirmation.text) {
+      setState(() {
+        _error = 'The passphrases do not match exactly.';
+      });
+      return;
+    }
+    Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(widget.detail),
+            const SizedBox(height: 16),
+            TextField(
+              key: const ValueKey('settings-vault-passphrase'),
+              controller: _passphrase,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              autofocus: true,
+              onSubmitted: (_) => _submit(),
+              decoration: InputDecoration(
+                labelText: 'Sync passphrase',
+                helperText: widget.confirm
+                    ? 'Use at least 12 characters. Spaces count.'
+                    : 'Enter it exactly. Spaces count.',
+              ),
+            ),
+            if (widget.confirm) ...<Widget>[
+              const SizedBox(height: 12),
+              TextField(
+                key: const ValueKey('settings-vault-passphrase-confirmation'),
+                controller: _confirmation,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                onSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(
+                  labelText: 'Confirm sync passphrase',
+                ),
+              ),
+            ],
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                key: const ValueKey('settings-vault-passphrase-error'),
+                style: TextStyle(color: context.colors.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const ValueKey('settings-vault-passphrase-submit'),
+        onPressed: _submit,
+        child: Text(widget.actionLabel),
+      ),
+    ],
+  );
+}
+
+class _SettingsVaultRecoveryDialog extends StatefulWidget {
+  const _SettingsVaultRecoveryDialog();
+
+  @override
+  State<_SettingsVaultRecoveryDialog> createState() =>
+      _SettingsVaultRecoveryDialogState();
+}
+
+class _SettingsVaultRecoveryDialogState
+    extends State<_SettingsVaultRecoveryDialog> {
+  final _recoveryCode = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _recoveryCode.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_recoveryCode.text.isEmpty) {
+      setState(() => _error = 'Enter your recovery code.');
+      return;
+    }
+    Navigator.pop(context, _recoveryCode.text);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Use recovery code'),
+    content: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const Text(
+            'Enter the recovery code exactly as it was shown when the vault was created.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const ValueKey('settings-vault-recovery-input'),
+            controller: _recoveryCode,
+            autocorrect: false,
+            enableSuggestions: false,
+            autofocus: true,
+            onSubmitted: (_) => _submit(),
+            decoration: const InputDecoration(labelText: 'Recovery code'),
+          ),
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Text(_error!, style: TextStyle(color: context.colors.error)),
+          ],
+        ],
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const ValueKey('settings-vault-recovery-submit'),
+        onPressed: _submit,
+        child: const Text('Recover'),
+      ),
+    ],
+  );
+}
+
+class _SettingsVaultPanel extends StatefulWidget {
+  const _SettingsVaultPanel({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_SettingsVaultPanel> createState() => _SettingsVaultPanelState();
+}
+
+class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
+  Future<String?> _requestPassphrase({
+    required String title,
+    required String detail,
+    required String actionLabel,
+    bool confirm = false,
+  }) => showDialog<String>(
+    context: context,
+    builder: (dialogContext) => _SettingsVaultPassphraseDialog(
+      title: title,
+      detail: detail,
+      actionLabel: actionLabel,
+      confirm: confirm,
+    ),
+  );
+
+  Future<String?> _requestRecoveryCode() => showDialog<String>(
+    context: context,
+    builder: (dialogContext) => const _SettingsVaultRecoveryDialog(),
+  );
+
+  Future<void> _showRecoveryCode(String recoveryCode) async {
+    var acknowledged = false;
+    var copied = false;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => PopScope(
+          canPop: acknowledged,
+          child: AlertDialog(
+            title: const Text('Save your recovery code'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Text(
+                    'This is shown once. Store it in a password manager. It can unlock your encrypted settings if you forget the passphrase.',
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.colors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: SelectableText(
+                      recoveryCode,
+                      key: const ValueKey('settings-vault-recovery-code'),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    key: const ValueKey('settings-vault-recovery-copy'),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: recoveryCode),
+                      );
+                      setDialogState(() => copied = true);
+                    },
+                    icon: Icon(
+                      copied ? Icons.check_rounded : Icons.copy_rounded,
+                      size: 17,
+                    ),
+                    label: Text(copied ? 'Copied' : 'Copy recovery code'),
+                  ),
+                  CheckboxListTile(
+                    key: const ValueKey('settings-vault-recovery-ack'),
+                    contentPadding: EdgeInsets.zero,
+                    value: acknowledged,
+                    onChanged: (value) =>
+                        setDialogState(() => acknowledged = value == true),
+                    title: const Text(
+                      'I saved this recovery code somewhere safe.',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              ),
+            ),
+            actions: <Widget>[
+              FilledButton(
+                key: const ValueKey('settings-vault-recovery-done'),
+                onPressed: acknowledged
+                    ? () => Navigator.pop(dialogContext)
+                    : null,
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setup() async {
+    final passphrase = await _requestPassphrase(
+      title: 'Set up encrypted settings sync',
+      detail:
+          'Your provider keys and preferences will be encrypted before they are stored in Google Drive. You will enter this passphrase once on each new device.',
+      actionLabel: 'Create vault',
+      confirm: true,
+    );
+    if (passphrase == null || !mounted) return;
+    final recoveryCode = await widget.controller.setupSettingsVault(passphrase);
+    if (!mounted) return;
+    setState(() {});
+    if (recoveryCode != null && recoveryCode.isNotEmpty) {
+      await _showRecoveryCode(recoveryCode);
+    }
+  }
+
+  Future<void> _unlock() async {
+    final passphrase = await _requestPassphrase(
+      title: 'Unlock encrypted settings',
+      detail:
+          'Enter your sync passphrase once. Clawnsole will remember the vault key securely on this device.',
+      actionLabel: 'Unlock',
+    );
+    if (passphrase == null || !mounted) return;
+    await widget.controller.unlockSettingsVault(passphrase);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _recover() async {
+    final recoveryCode = await _requestRecoveryCode();
+    if (recoveryCode == null || !mounted) return;
+    await widget.controller.recoverSettingsVault(recoveryCode);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _changePassphrase() async {
+    final passphrase = await _requestPassphrase(
+      title: 'Change sync passphrase',
+      detail:
+          'Use the new passphrase on future devices. Devices that already remember this vault remain connected.',
+      actionLabel: 'Change passphrase',
+      confirm: true,
+    );
+    if (passphrase == null || !mounted) return;
+    await widget.controller.changeSettingsVaultPassphrase(passphrase);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _forget() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Forget vault unlock on this device?'),
+        content: const Text(
+          'Your local provider keys and encrypted Drive vault will be kept. You will need the passphrase or recovery code before this device can sync them again.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('settings-vault-forget-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Forget unlock'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.controller.forgetSettingsVaultUnlock();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.controller.settingsVaultStatus;
+    final busy =
+        widget.controller.settingsVaultBusy ||
+        status.state == SettingsVaultState.syncing;
+    final (icon, title, detail) = switch (status.state) {
+      SettingsVaultState.unavailable => (
+        Icons.lock_outline_rounded,
+        'Encrypted settings sync unavailable',
+        'This build cannot access the secure settings vault.',
+      ),
+      SettingsVaultState.driveDisconnected => (
+        Icons.cloud_off_rounded,
+        'Encrypted settings sync paused',
+        'Connect Google Drive to set up or resume encrypted provider-key and preference sync.',
+      ),
+      SettingsVaultState.setupRequired => (
+        Icons.enhanced_encryption_outlined,
+        'Protect and sync provider keys',
+        'Create a sync passphrase once, then enter it on each new device. The passphrase is never stored.',
+      ),
+      SettingsVaultState.locked => (
+        Icons.lock_rounded,
+        'Encrypted settings are locked',
+        'This Drive has a Clawnsole vault. Unlock it once on this device with your passphrase or recovery code.',
+      ),
+      SettingsVaultState.syncing => (
+        Icons.sync_rounded,
+        'Syncing encrypted settings',
+        'Provider keys and preferences are being encrypted and synchronized.',
+      ),
+      SettingsVaultState.ready => (
+        Icons.verified_user_rounded,
+        'Encrypted settings are synced',
+        'Provider keys and preferences are encrypted before they leave this device.',
+      ),
+      SettingsVaultState.pending => (
+        Icons.cloud_upload_outlined,
+        'Encrypted settings sync pending',
+        'Your latest settings are secure on this device and will remain pending until Drive sync succeeds.',
+      ),
+      SettingsVaultState.error => (
+        Icons.sync_problem_rounded,
+        'Encrypted settings need attention',
+        'Your local provider keys remain available. Try syncing again or unlock the vault again if prompted.',
+      ),
+    };
+    final message = status.message.trim();
+    return Container(
+      key: const ValueKey('settings-vault-panel'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(icon, color: context.colors.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(detail, style: const TextStyle(height: 1.35)),
+                  ],
+                ),
+              ),
+              if (busy)
+                const Padding(
+                  padding: EdgeInsets.only(left: 10),
+                  child: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+          if (status.lastSyncedAt != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              'Last synced ${relativeTime(status.lastSyncedAt!)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (message.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              message,
+              key: const ValueKey('settings-vault-status-message'),
+              style: TextStyle(
+                fontSize: 11,
+                color: status.state == SettingsVaultState.error
+                    ? context.colors.error
+                    : context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: switch (status.state) {
+              SettingsVaultState.setupRequired => <Widget>[
+                FilledButton.icon(
+                  key: const ValueKey('settings-vault-setup'),
+                  onPressed: busy ? null : _setup,
+                  icon: const Icon(Icons.lock_rounded, size: 17),
+                  label: const Text('Set up encrypted sync'),
+                ),
+              ],
+              SettingsVaultState.locked => <Widget>[
+                FilledButton.icon(
+                  key: const ValueKey('settings-vault-unlock'),
+                  onPressed: busy ? null : _unlock,
+                  icon: const Icon(Icons.lock_open_rounded, size: 17),
+                  label: const Text('Unlock with passphrase'),
+                ),
+                OutlinedButton.icon(
+                  key: const ValueKey('settings-vault-recover'),
+                  onPressed: busy ? null : _recover,
+                  icon: const Icon(Icons.key_rounded, size: 17),
+                  label: const Text('Use recovery code'),
+                ),
+              ],
+              SettingsVaultState.ready ||
+              SettingsVaultState.pending => <Widget>[
+                FilledButton.tonalIcon(
+                  key: const ValueKey('settings-vault-sync'),
+                  onPressed: busy ? null : widget.controller.syncSettingsVault,
+                  icon: const Icon(Icons.sync_rounded, size: 17),
+                  label: const Text('Sync now'),
+                ),
+                OutlinedButton.icon(
+                  key: const ValueKey('settings-vault-change-passphrase'),
+                  onPressed: busy ? null : _changePassphrase,
+                  icon: const Icon(Icons.password_rounded, size: 17),
+                  label: const Text('Change passphrase'),
+                ),
+                TextButton.icon(
+                  key: const ValueKey('settings-vault-forget'),
+                  onPressed: busy ? null : _forget,
+                  icon: const Icon(Icons.phonelink_erase_rounded, size: 17),
+                  label: const Text('Forget cached unlock'),
+                ),
+              ],
+              SettingsVaultState.error => <Widget>[
+                FilledButton.tonalIcon(
+                  key: const ValueKey('settings-vault-sync'),
+                  onPressed: busy ? null : widget.controller.syncSettingsVault,
+                  icon: const Icon(Icons.refresh_rounded, size: 17),
+                  label: const Text('Try sync again'),
+                ),
+                TextButton.icon(
+                  key: const ValueKey('settings-vault-forget'),
+                  onPressed: busy ? null : _forget,
+                  icon: const Icon(Icons.phonelink_erase_rounded, size: 17),
+                  label: const Text('Forget cached unlock'),
+                ),
+              ],
+              _ => const <Widget>[],
+            },
+          ),
         ],
       ),
     );
@@ -626,8 +1196,8 @@ class _SettingsSide extends StatelessWidget {
               Text(
                 controller.supportsGoogleDrive
                     ? controller.supportsLocalLibrary
-                          ? 'These actions cover both Local and connected Drive items. API keys remain device-only.'
-                          : 'These actions cover connected Drive items and this browser’s device settings. API keys remain device-only.'
+                          ? 'These actions cover both Local and connected Drive items. Provider keys remain in secure storage and may also exist in your encrypted sync vault.'
+                          : 'These actions cover connected Drive items and this device’s secure settings.'
                     : 'These actions update only Clawnsole data on this device.',
               ),
               const SizedBox(height: 12),
@@ -658,7 +1228,7 @@ class _SettingsSide extends StatelessWidget {
                           : 'Delete Drive and device data'
                     : 'Delete all local data',
                 subtitle:
-                    'History, saved references, assets, preferences, and device API keys',
+                    'History, saved references, assets, preferences, and securely stored provider keys',
                 danger: true,
                 onTap: () async {
                   if (await confirm(
@@ -669,8 +1239,8 @@ class _SettingsSide extends StatelessWidget {
                         : 'Delete all local data?',
                     controller.supportsGoogleDrive
                         ? controller.supportsLocalLibrary
-                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus device API keys.'
-                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus settings and API keys from this browser.'
+                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus provider keys from secure storage.'
+                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus this device’s secure settings.'
                         : 'This permanently removes the Flutter app’s local JSON file.',
                   )) {
                     await controller.clearAll();

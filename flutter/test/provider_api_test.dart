@@ -842,7 +842,7 @@ void main() {
     },
   );
 
-  test('provider keys round-trip independently through schema 16', () {
+  test('schema 17 strips provider keys while legacy files still decode', () {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
@@ -851,11 +851,14 @@ void main() {
         .encode();
     final decoded = StoredData.decode(encoded);
 
-    expect(decoded.apiKeyFor('bfl'), 'bfl-secret');
-    expect(decoded.apiKeyFor('ltx'), 'ltx-secret');
-    expect(decoded.apiKeyFor('artcraft'), 'artcraft-secret');
-    expect(decoded.apiKeyFor('atlas'), 'atlas-secret');
-    expect(decoded.toJson()['schemaVersion'], 16);
+    expect(encoded, isNot(contains('secret')));
+    expect(decoded.apiKeys, isEmpty);
+    expect(decoded.toJson()['schemaVersion'], 17);
+    final legacy = StoredData.decode(
+      '{"schemaVersion":16,"apiKeys":{"bfl":"old-bfl","ltx":"old-ltx"},"generations":[]}',
+    );
+    expect(legacy.apiKeyFor('bfl'), 'old-bfl');
+    expect(legacy.apiKeyFor('ltx'), 'old-ltx');
   });
 
   test('ArtCraft resolutions survive history serialization', () {

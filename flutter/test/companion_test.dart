@@ -1,9 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/secure_value_store.dart';
+import 'package:clawnsole/core/settings_vault.dart';
+import 'package:clawnsole/core/settings_vault_data_store.dart';
+import 'package:clawnsole/core/settings_vault_remote.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
@@ -23,6 +29,198 @@ void main() {
     expect(config.dataFile, endsWith('data.json'));
     expect(config.webRoot, endsWith('build/web'));
   });
+
+  test(
+    'companion bootstrap accepts packaged stdin and development env',
+    () async {
+      final requestToken = _bootstrapKey(1);
+      final deviceKey = _bootstrapKey(2);
+      final packaged = await CompanionBootstrap.load(
+        const <String, String>{},
+        Stream<List<int>>.value(
+          utf8.encode(
+            '${jsonEncode(<String, String>{'deviceKey': deviceKey, 'requestToken': requestToken})}\n',
+          ),
+        ),
+        requireInput: true,
+      );
+      expect(packaged.requestToken, requestToken);
+      expect(packaged.deviceKey, deviceKey);
+
+      final development = await CompanionBootstrap.load(<String, String>{
+        'CLAWNSOLE_COMPANION_TOKEN': requestToken,
+      }, const Stream<List<int>>.empty());
+      expect(development.requestToken, requestToken);
+      expect(development.deviceKey, isNull);
+      final localDevelopment = await CompanionBootstrap.load(
+        const <String, String>{},
+        const Stream<List<int>>.empty(),
+      );
+      expect(localDevelopment.requestToken, isEmpty);
+      expect(
+        () => CompanionBootstrap.fromJsonLine(
+          '{"deviceKey":"plaintext","requestToken":"plaintext"}',
+        ),
+        throwsStateError,
+      );
+    },
+  );
+
+  test('development device keys are stable and protected', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-development-key.',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final file = File('${temporary.path}/device.key');
+
+    final first = await DevelopmentDeviceKey.loadOrCreate(file);
+    final second = await DevelopmentDeviceKey.loadOrCreate(file);
+
+    expect(first, second);
+    expect(first, hasLength(43));
+    if (!Platform.isWindows) {
+      expect((await file.stat()).modeString(), endsWith('rw-------'));
+    }
+  });
+
+  test(
+    'companion enforces the launch token and exact renderer origin',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-session-test.',
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+      final token = _bootstrapKey(3);
+      final application = CompanionApp(
+        store: CompanionStore(File('${temporary.path}/clawnsole.json')),
+        api: BflApi(),
+        requestToken: token,
+        allowedOrigin: base.origin,
+      );
+      final subscription = server.listen(application.handle);
+
+      try {
+        final health = await http.get(base.resolve('/health'));
+        expect(health.statusCode, 200);
+
+        final missingToken = await http.get(base.resolve('/state'));
+        expect(missingToken.statusCode, 403);
+
+        final authenticated = await http.get(
+          base.resolve('/state'),
+          headers: <String, String>{'X-Clawnsole-Session': token},
+        );
+        expect(authenticated.statusCode, 200);
+
+        final exactOrigin = await http.get(
+          base.resolve('/state'),
+          headers: <String, String>{
+            'Origin': base.origin,
+            'X-Clawnsole-Session': token,
+          },
+        );
+        expect(exactOrigin.statusCode, 200);
+        expect(
+          exactOrigin.headers[HttpHeaders.accessControlAllowOriginHeader],
+          base.origin,
+        );
+
+        final otherLocalOrigin = await http.get(
+          base.resolve('/state'),
+          headers: <String, String>{
+            'Origin': 'http://127.0.0.1:${server.port + 1}',
+            'X-Clawnsole-Session': token,
+          },
+        );
+        expect(otherLocalOrigin.statusCode, 403);
+
+        final preflight = await http.Client().send(
+          http.Request('OPTIONS', base.resolve('/state'))
+            ..headers.addAll(<String, String>{
+              'Origin': base.origin,
+              'X-Clawnsole-Session': token,
+            }),
+        );
+        expect(preflight.statusCode, HttpStatus.noContent);
+        expect(
+          preflight.headers[HttpHeaders.accessControlAllowHeadersHeader],
+          contains('X-Clawnsole-Session'),
+        );
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+
+  test(
+    'companion vault route returns only the scalar shell contract',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-vault-route-test.',
+      );
+      final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      final hybrid = HybridDataStore(local: local);
+      final remote = _MemorySettingsVaultRemote();
+      final vault = SettingsVaultDataStore(
+        delegate: hybrid,
+        secureStore: MemorySecureValueStore(),
+        remote: remote,
+        codec: SettingsVaultCodec(
+          kdfParameters: const SettingsVaultKdfParameters(
+            memoryKiB: settingsVaultMinimumMemoryKiB,
+            iterations: 1,
+          ),
+        ),
+      );
+      await vault.connectRemote('access-token', 'folder-id');
+      final application = CompanionApp.hybrid(
+        store: CompanionHybridStore(hybrid, vault: vault),
+        api: BflApi(),
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+      try {
+        final response = await http.post(
+          base.resolve('/vault/setup'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, String>{
+            'value': 'correct horse battery staple',
+          }),
+        );
+        expect(response.statusCode, 200);
+        final payload = jsonDecode(response.body) as Map<String, Object?>;
+        expect(payload['ok'], isTrue);
+        expect(payload['state'], SettingsVaultState.ready.name);
+        expect(payload['recoveryCode'], isA<String>());
+        expect(payload.keys, <String>{
+          'ok',
+          'state',
+          'message',
+          'syncedAt',
+          'recoveryCode',
+        });
+
+        final sync = await http.post(
+          base.resolve('/vault/sync'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, String>{'value': ''}),
+        );
+        final syncPayload = jsonDecode(sync.body) as Map<String, Object?>;
+        expect(sync.statusCode, 200);
+        expect(syncPayload['ok'], isTrue);
+        expect(syncPayload, isNot(contains('recoveryCode')));
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
 
   test(
     'local companion copies a retained Drive input into local storage',
@@ -490,7 +688,11 @@ void main() {
         ],
       ),
     );
-    final application = CompanionApp(store: store, api: _Terminal503Api());
+    final application = CompanionApp(
+      store: store,
+      api: _Terminal503Api(),
+      fallbackApiKeys: const <String, String>{'bfl': 'test-key'},
+    );
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final subscription = server.listen(application.handle);
     final base = Uri.parse('http://127.0.0.1:${server.port}');
@@ -538,6 +740,53 @@ class _Terminal503Api extends BflApi {
           'message': 'Generation dependency unavailable',
         },
       },
+    );
+  }
+}
+
+String _bootstrapKey(int seed) => base64UrlEncode(
+  Uint8List.fromList(List<int>.generate(32, (index) => seed + index)),
+).replaceAll('=', '');
+
+class _MemorySettingsVaultRemote implements SettingsVaultRemote {
+  bool _connected = false;
+  SettingsVaultRemoteDocument? _document;
+  var _version = 0;
+
+  @override
+  bool get isConnected => _connected;
+
+  @override
+  Future<SettingsVaultRemoteDocument?> connect(
+    String accessToken,
+    String folderId,
+  ) async {
+    _connected = accessToken.isNotEmpty && folderId.isNotEmpty;
+    return _document;
+  }
+
+  @override
+  Future<void> delete() async {
+    _document = null;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    _connected = false;
+  }
+
+  @override
+  Future<SettingsVaultRemoteDocument?> read() async => _document;
+
+  @override
+  Future<SettingsVaultRemoteDocument> write(
+    Uint8List bytes, {
+    String? expectedEtag,
+  }) async {
+    _version += 1;
+    return _document = SettingsVaultRemoteDocument(
+      Uint8List.fromList(bytes),
+      etag: 'version-$_version',
     );
   }
 }

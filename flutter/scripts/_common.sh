@@ -39,7 +39,9 @@ prepare_google_ios_oauth() {
     echo "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID is not a Google OAuth client ID." >&2
     exit 1
   fi
-  printf 'GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.%s\n' \
+  printf \
+    'GOOGLE_IOS_CLIENT_ID = %s\nGOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.%s\n' \
+    "$CLAWNSOLE_GOOGLE_IOS_CLIENT_ID" \
     "$identifier" >"$config"
 }
 
