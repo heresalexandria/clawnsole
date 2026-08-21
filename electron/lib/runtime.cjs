@@ -7,6 +7,7 @@ const EXTERNAL_HOSTS = new Set([
   "docs.ltx.io",
   "console.ltx.io",
   "app.getartcraft.com",
+  "github.com",
   "storyteller-docs.netlify.app",
   "www.atlascloud.ai",
   "heresalexandria.com",

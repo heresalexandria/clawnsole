@@ -431,7 +431,10 @@ const artCraftProvider = VideoProviderDefinition(
   description:
       'A broad, live video model catalog behind ArtCraft’s API-key Omni API.',
   consoleUrl: 'https://app.getartcraft.com/',
-  docsUrl: 'https://storyteller-docs.netlify.app/',
+  // ArtCraft's branded Omni API doc; it links onward to the unbranded
+  // storyteller-docs.netlify.app reference, which stays allowlisted.
+  docsUrl:
+      'https://github.com/storytold/artcraft/blob/main/_docs/omni_api/artcraft_omni_api.md',
   pricingUrl: 'https://app.getartcraft.com/pricing',
   pricingSource:
       'Live configuration quotes with published defaults · \$0.01/credit',

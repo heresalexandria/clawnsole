@@ -1799,6 +1799,7 @@ class CompanionApp {
         payload,
         balanceAfter: balanceAfter,
         allowDeterministicQuote: status == 'Ready',
+        terminal: terminal,
       );
       next = current.copyWith(
         status: status,

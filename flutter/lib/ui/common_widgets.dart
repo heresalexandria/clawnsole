@@ -1906,7 +1906,10 @@ class GenerationCost extends StatelessWidget {
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();
     final realizedUsd = recordedRealizedCostUsd(item);
-    final exact = realizedUsd != null;
+    // A failed generation only carries a realized charge when the terminal
+    // poll confirmed it; a submit-time observation stays estimate wording.
+    final unconfirmedFailure = item.isFailed && !countsTowardSpend(item);
+    final exact = realizedUsd != null && !unconfirmedFailure;
     final usesUsd = item.billingUnit == 'usd';
     final background = exact
         ? context.colors.primaryContainer
@@ -1969,7 +1972,7 @@ class GenerationCost extends StatelessWidget {
             ),
           ],
           if (!compact &&
-              realizedUsd != null &&
+              exact &&
               item.quotedCostUsdMin != null &&
               item.quotedCostUsdMax != null) ...<Widget>[
             const SizedBox(height: 5),
@@ -1977,6 +1980,19 @@ class GenerationCost extends StatelessWidget {
               'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
               'realized ${formatUsdAmount(realizedUsd)}'
               '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
+              style: TextStyle(
+                fontSize: 10.5,
+                color: foreground.withValues(alpha: .8),
+              ),
+            ),
+          ],
+          if (!compact &&
+              unconfirmedFailure &&
+              realizedUsd != null) ...<Widget>[
+            const SizedBox(height: 5),
+            Text(
+              'No confirmed charge · submit-time estimate '
+              '${formatUsdAmount(realizedUsd)}',
               style: TextStyle(
                 fontSize: 10.5,
                 color: foreground.withValues(alpha: .8),
@@ -2007,7 +2023,10 @@ class ActivityCard extends StatelessWidget {
           child: hasMedia
               ? GenerationMedia(controller: controller, item: item)
               : isGeneratingVideo
-              ? GenerationLoadingPlaceholder(item: item)
+              ? GenerationLoadingPlaceholder(
+                  item: item,
+                  style: controller.generationPlaceholderStyle,
+                )
               : GenerationInputPreview(controller: controller, item: item),
         ),
         Positioned(left: 8, top: 8, child: StatusBadge(item: item)),

@@ -1001,6 +1001,7 @@ class DirectGateway
         payload,
         balanceAfter: balanceAfter,
         allowDeterministicQuote: status == 'Ready',
+        terminal: terminal,
       );
       final reportedProgress = findProviderProgress(payload);
       next = generation.copyWith(

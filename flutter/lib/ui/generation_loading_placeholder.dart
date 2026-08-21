@@ -251,6 +251,14 @@ class _BroadcastStaticPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final bounds = Offset.zero & size;
     final t = phase();
+    // The noise tiling and retrace sweep intentionally overshoot the surface,
+    // and several passes use backdrop-reading blends (screen/color). Clip to
+    // the surface and composite through a layer so those blends read this
+    // painting alone — drawn directly, Impeller on Windows can smear them
+    // against the window backdrop at the framebuffer origin.
+    canvas.save();
+    canvas.clipRect(bounds);
+    canvas.saveLayer(bounds, Paint());
     canvas.drawRect(bounds, Paint()..color = const Color(0xFF121416));
 
     if (frames.isNotEmpty) {
@@ -271,6 +279,8 @@ class _BroadcastStaticPainter extends CustomPainter {
     _drawRetrace(canvas, size, t);
     _drawRaster(canvas, size, t);
     _drawGlass(canvas, size);
+    canvas.restore();
+    canvas.restore();
   }
 
   void _drawSyncTears(
@@ -776,6 +786,13 @@ class _CyclonePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final bounds = Offset.zero & size;
+    // The covering feedback image overscans the surface and the grain pass
+    // blends with BlendMode.overlay; clip and composite through a layer so
+    // the blend reads this painting rather than the window backdrop (an
+    // Impeller artifact source on Windows).
+    canvas.save();
+    canvas.clipRect(bounds);
+    canvas.saveLayer(bounds, Paint());
     canvas.drawRect(bounds, Paint()..color = const Color(0xFF04050D));
 
     if (field.image case final image?) {
@@ -863,6 +880,8 @@ class _CyclonePainter extends CustomPainter {
           stops: const <double>[0, .62, .72, .88, .97, .994, 1],
         ).createShader(bounds),
     );
+    canvas.restore();
+    canvas.restore();
   }
 
   @override

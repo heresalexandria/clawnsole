@@ -368,12 +368,11 @@ class AppController extends ChangeNotifier {
   int get workingCount => generations.where((item) => item.isWorking).length;
   int get readyCount => generations.where((item) => item.isReady).length;
   double get spentCredits => generations
-      .where((item) => item.billingUnit == 'credits')
+      .where((item) => item.billingUnit == 'credits' && countsTowardSpend(item))
       .fold(0, (total, item) => total + (item.cost ?? 0));
-  double get spentUsd => generations.fold(
-    0,
-    (total, item) => total + (recordedRealizedCostUsd(item) ?? 0),
-  );
+  double get spentUsd => generations
+      .where(countsTowardSpend)
+      .fold(0, (total, item) => total + (recordedRealizedCostUsd(item) ?? 0));
   bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
   bool isCopyingGeneration(String localId) =>
       copyingGenerationIds.contains(localId);
