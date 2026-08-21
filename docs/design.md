@@ -237,13 +237,34 @@ Generate button. Layout order:
 
 ## 8. Library & recent work
 
-- Filter is a **segmented control** with icon + label + count per state
-  (All / In progress / Ready / Needs attention). Selected = plum fill with
-  cream icon and text; both modes were verified against the old
-  unreadable-active-tab bug.
+- The toolbar is **one quiet row**: console-key status segments
+  (All / In progress / Ready / Needs attention, icon + label + count),
+  a search field, a **Filters** console key, and the view toggle. Selected
+  segments = plum fill with cream icon and text; both modes were verified
+  against the old unreadable-active-tab bug. Narrow layouts stack the
+  search above the segment row.
+- **Filters popover** (`LibraryFilterButton`): storage, favorites, and
+  tags live in an anchored panel instead of stacked chip rows. The key
+  lights plum with a count while any of them narrow the view, and the
+  panel offers *Reset filters*. The References toolbar shares the same
+  pattern (kind segments + search + sort key + Filters key).
+- **No Ready chips on cards**: a delivered thumbnail already says ready,
+  so `StatusBadge` renders nothing for ready work and only appears for
+  in-progress, failed, or status-unavailable items.
+- Card actions stay light: the primary verbs (**Save video**,
+  **Reuse/Retry**, **Check status**) are buttons; everything else
+  (Organize, Enhance, Copy to Drive, View details, Delete) folds into the
+  shared `GenerationActionsMenu` (⋯).
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
   keyframes.
+- **Playback opens a film-sized modal** (`showVideoPlayerModal`): wide
+  viewports get a dialog matched to the video's aspect ratio (dark media
+  chrome, timeline strip, transport bar); viewports under 700 px get a
+  fullscreen player with a close overlay. The fullscreen button inside the
+  modal opens the true fullscreen route. Space toggles playback, ←/→ seek
+  (5% of the film, clamped 1–5 s), Escape closes the surface it is pressed
+  on. Saved video references play through the same modal.
 - `ReferenceInputsStrip` shows 44 px thumbnails of each keyframe (and a
   chip for a video/draft source). Tapping opens the full-resolution viewer
   (zoomable) with **Download** and, for remote frames, **Open link**.
@@ -289,7 +310,8 @@ exclamation points, no jargon-as-drama.
   weight).
 - Every icon-only control has a tooltip; frame thumbs describe role and
   timing.
-- Keyboard: dialogs close on Escape; the video player keeps Space/Escape
-  bindings; interactive rows are real `InkWell`s with focus states.
+- Keyboard: dialogs close on Escape; the video player focuses itself and
+  keeps Space (play/pause), ←/→ (seek), and Escape bindings; interactive
+  rows are real `InkWell`s with focus states.
 - Test both modes at 375 px and ≥ 1440 px before shipping UI changes;
   `flutter test` guards the narrow-width overflows that test fonts expose.

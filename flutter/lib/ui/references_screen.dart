@@ -7,6 +7,8 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
+import 'filter_menu.dart';
+import 'generation_video.dart';
 import 'media_thumbnail.dart';
 
 class ReferencesScreen extends StatelessWidget {
@@ -164,32 +166,6 @@ class _ReferenceResults extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       _ReferenceToolbar(controller: controller),
-      if (controller.referenceTags.isNotEmpty) ...<Widget>[
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 35,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: controller.referenceTags.length + 1,
-            separatorBuilder: (_, _) => const SizedBox(width: 7),
-            itemBuilder: (context, index) {
-              final tag = index == 0
-                  ? null
-                  : controller.referenceTags[index - 1];
-              return FilterChip(
-                label: Text(
-                  tag == null
-                      ? 'All tags'
-                      : '#$tag · ${controller.referenceTagCount(tag)}',
-                ),
-                selected: controller.referenceTag == tag,
-                onSelected: (_) => controller.setReferenceTag(tag),
-                visualDensity: VisualDensity.compact,
-              );
-            },
-          ),
-        ),
-      ],
       const SizedBox(height: 18),
       if (controller.filteredSavedReferences.isEmpty)
         _ReferenceEmpty(controller: controller)
@@ -234,133 +210,79 @@ class _ReferenceToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (controller.supportsLocalLibrary) ...<Widget>[
-          StorageFilterChips(
-            value: controller.referenceStorageFilter,
-            showLocal: true,
-            onChanged: (value) =>
-                unawaited(controller.setReferenceStorageFilter(value)),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 900;
+        final keys = <Widget>[
+          ConsoleFilterSegment(
+            label: 'All',
+            icon: Icons.grid_view_rounded,
+            selected: controller.referenceKind == null,
+            onTap: () => controller.setReferenceKind(null),
           ),
-          const SizedBox(height: 9),
-        ],
-        FavoriteFilterChips(
-          value: controller.referenceFavoriteFilter,
-          onChanged: controller.setReferenceFavoriteFilter,
-        ),
-        const SizedBox(height: 9),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final kindFilters = Wrap(
-              spacing: 5,
-              runSpacing: 5,
+          ...MediaReferenceKind.values.map(
+            (kind) => ConsoleFilterSegment(
+              label: kind.label,
+              icon: _kindIcon(kind),
+              selected: controller.referenceKind == kind,
+              onTap: () => controller.setReferenceKind(kind),
+            ),
+          ),
+        ];
+        final segments = wide
+            ? Wrap(spacing: 5, runSpacing: 5, children: keys)
+            : ConsoleSegmentStrip(children: keys);
+        final search = TextField(
+          key: const ValueKey('reference-library-search'),
+          onChanged: controller.setReferenceSearch,
+          style: const TextStyle(fontSize: 13),
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
+            hintText: 'Search names, tags, folders',
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        );
+        final sortButton = ReferenceSortButton(
+          controller: controller,
+          compact: !wide,
+        );
+        final filterButton = LibraryFilterButton(
+          controller: controller,
+          collection: LibraryCollection.references,
+          compact: !wide,
+        );
+        if (wide) {
+          return Row(
+            children: <Widget>[
+              Expanded(child: segments),
+              const SizedBox(width: 16),
+              SizedBox(width: 320, child: search),
+              const SizedBox(width: 8),
+              sortButton,
+              const SizedBox(width: 8),
+              filterButton,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            search,
+            const SizedBox(height: 10),
+            Row(
               children: <Widget>[
-                _KindChip(
-                  label: 'All',
-                  icon: Icons.grid_view_rounded,
-                  selected: controller.referenceKind == null,
-                  onTap: () => controller.setReferenceKind(null),
-                ),
-                ...MediaReferenceKind.values.map(
-                  (kind) => _KindChip(
-                    label: kind.label,
-                    icon: _kindIcon(kind),
-                    selected: controller.referenceKind == kind,
-                    onTap: () => controller.setReferenceKind(kind),
-                  ),
-                ),
+                Expanded(child: segments),
+                const SizedBox(width: 8),
+                sortButton,
+                const SizedBox(width: 8),
+                filterButton,
               ],
-            );
-            final search = TextField(
-              key: const ValueKey('reference-library-search'),
-              onChanged: controller.setReferenceSearch,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded, size: 18),
-                hintText: 'Search names, tags, folders',
-                isDense: true,
-              ),
-            );
-            final sort = DropdownButtonHideUnderline(
-              child: DropdownButton<ReferenceSort>(
-                key: const ValueKey('reference-library-sort'),
-                value: controller.referenceSort,
-                borderRadius: BorderRadius.circular(12),
-                onChanged: (value) {
-                  if (value != null) controller.setReferenceSort(value);
-                },
-                items: ReferenceSort.values
-                    .map(
-                      (sort) => DropdownMenuItem(
-                        value: sort,
-                        child: Text(_sortLabel(sort)),
-                      ),
-                    )
-                    .toList(),
-              ),
-            );
-            final controls = constraints.maxWidth < 430
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      search,
-                      const SizedBox(height: 8),
-                      Align(alignment: Alignment.centerLeft, child: sort),
-                    ],
-                  )
-                : Row(
-                    children: <Widget>[
-                      Expanded(child: search),
-                      const SizedBox(width: 10),
-                      sort,
-                    ],
-                  );
-
-            if (constraints.maxWidth >= 900) {
-              return Row(
-                children: <Widget>[
-                  Expanded(child: kindFilters),
-                  const SizedBox(width: 16),
-                  SizedBox(width: 500, child: controls),
-                ],
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                kindFilters,
-                const SizedBox(height: 10),
-                controls,
-              ],
-            );
-          },
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     ),
-  );
-}
-
-class _KindChip extends StatelessWidget {
-  const _KindChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => ChoiceChip(
-    avatar: Icon(icon, size: 15),
-    label: Text(label),
-    selected: selected,
-    onSelected: (_) => onTap(),
-    showCheckmark: false,
   );
 }
 
@@ -370,133 +292,164 @@ class _ReferenceCard extends StatelessWidget {
   final AppController controller;
   final SavedReference reference;
 
+  Future<void> _play(BuildContext context) async {
+    final uri = await controller.referenceMediaUri(reference);
+    if (uri == null || !context.mounted) return;
+    await showVideoPlayerModal(
+      context,
+      uri: uri,
+      supportsPhotos: controller.supportsPhotoLibrarySave,
+      onDownload: (destination) async {
+        try {
+          await controller.saveReferenceVideo(
+            reference,
+            destination: destination,
+          );
+        } on Object catch (error) {
+          controller.showNotice(error.toString());
+        }
+      },
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: EdgeInsets.zero,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            child: MediaThumbnail(
-              gateway: controller.gateway,
-              kind: reference.kind,
-              reference: reference.asset,
-              thumbnailReference: reference.thumbnailAsset,
-              semanticsLabel: '${reference.name} thumbnail',
-              onThumbnail: reference.kind == MediaReferenceKind.video
-                  ? (bytes) => unawaited(
-                      controller.cacheReferencePreview(reference, bytes),
-                    )
-                  : null,
-            ),
-          ),
+  Widget build(BuildContext context) {
+    final thumbnail = AspectRatio(
+      aspectRatio: 16 / 9,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        child: MediaThumbnail(
+          gateway: controller.gateway,
+          kind: reference.kind,
+          reference: reference.asset,
+          thumbnailReference: reference.thumbnailAsset,
+          semanticsLabel: '${reference.name} thumbnail',
+          onThumbnail: reference.kind == MediaReferenceKind.video
+              ? (bytes) => unawaited(
+                  controller.cacheReferencePreview(reference, bytes),
+                )
+              : null,
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(13, 12, 8, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      reference.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 6),
-                    StorageBadge(storage: reference.storage, compact: true),
-                    const SizedBox(height: 5),
-                    Text(
-                      '${reference.kind.label}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                    if (reference.tags.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 7),
+      ),
+    );
+    return SurfaceCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (reference.kind == MediaReferenceKind.video)
+            Semantics(
+              button: true,
+              label: 'Play ${reference.name}',
+              child: InkWell(
+                onTap: () => unawaited(_play(context)),
+                child: thumbnail,
+              ),
+            )
+          else
+            thumbnail,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(13, 12, 8, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
                       Text(
-                        reference.tags.map((tag) => '#$tag').join('  '),
+                        reference.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${reference.kind.label} · ${reference.storage.shortLabel}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 10.5,
-                          color: context.colors.primary,
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
                         ),
                       ),
+                      if (reference.tags.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 7),
+                        Text(
+                          reference.tags.map((tag) => '#$tag').join('  '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: context.colors.primary,
+                          ),
+                        ),
+                      ],
                     ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: reference.favorite
+                      ? 'Remove from favorites'
+                      : 'Add to favorites',
+                  onPressed: () =>
+                      unawaited(controller.toggleReferenceFavorite(reference)),
+                  icon: Icon(
+                    reference.favorite
+                        ? Icons.star_rounded
+                        : Icons.star_border_rounded,
+                    color: reference.favorite ? context.tokens.brass : null,
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: '${reference.name} options',
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      unawaited(
+                        showReferenceMetadataDialog(
+                          context,
+                          controller,
+                          reference: reference,
+                        ),
+                      );
+                    } else if (value == 'copy') {
+                      unawaited(
+                        controller.copyLocalLibraryToGoogleDrive(
+                          referenceIds: <String>{reference.id},
+                        ),
+                      );
+                    } else {
+                      unawaited(
+                        _confirmReferenceDelete(context, controller, reference),
+                      );
+                    }
+                  },
+                  itemBuilder: (context) => <PopupMenuEntry<String>>[
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Rename and file'),
+                    ),
+                    if (reference.storage == LibraryStorage.local &&
+                        controller.googleDriveConnected)
+                      PopupMenuItem(
+                        value: 'copy',
+                        enabled: !controller.isCopyingReference(reference.id),
+                        child: Text(
+                          controller.isCopyingReference(reference.id)
+                              ? 'Copying to Google Drive…'
+                              : 'Copy to Google Drive',
+                        ),
+                      ),
+                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
                   ],
                 ),
-              ),
-              IconButton(
-                tooltip: reference.favorite
-                    ? 'Remove from favorites'
-                    : 'Add to favorites',
-                onPressed: () =>
-                    unawaited(controller.toggleReferenceFavorite(reference)),
-                icon: Icon(
-                  reference.favorite
-                      ? Icons.star_rounded
-                      : Icons.star_border_rounded,
-                  color: reference.favorite ? context.tokens.brass : null,
-                ),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '${reference.name} options',
-                onSelected: (value) {
-                  if (value == 'edit') {
-                    unawaited(
-                      showReferenceMetadataDialog(
-                        context,
-                        controller,
-                        reference: reference,
-                      ),
-                    );
-                  } else if (value == 'copy') {
-                    unawaited(
-                      controller.copyLocalLibraryToGoogleDrive(
-                        referenceIds: <String>{reference.id},
-                      ),
-                    );
-                  } else {
-                    unawaited(
-                      _confirmReferenceDelete(context, controller, reference),
-                    );
-                  }
-                },
-                itemBuilder: (context) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Rename and file'),
-                  ),
-                  if (reference.storage == LibraryStorage.local &&
-                      controller.googleDriveConnected)
-                    PopupMenuItem(
-                      value: 'copy',
-                      enabled: !controller.isCopyingReference(reference.id),
-                      child: Text(
-                        controller.isCopyingReference(reference.id)
-                            ? 'Copying to Google Drive…'
-                            : 'Copy to Google Drive',
-                      ),
-                    ),
-                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class _ReferenceEmpty extends StatelessWidget {
@@ -1499,11 +1452,4 @@ IconData _kindIcon(MediaReferenceKind kind) => switch (kind) {
   MediaReferenceKind.image => Icons.image_rounded,
   MediaReferenceKind.video => Icons.video_library_rounded,
   MediaReferenceKind.audio => Icons.graphic_eq_rounded,
-};
-
-String _sortLabel(ReferenceSort sort) => switch (sort) {
-  ReferenceSort.newest => 'Newest',
-  ReferenceSort.oldest => 'Oldest',
-  ReferenceSort.name => 'Name',
-  ReferenceSort.kind => 'Media type',
 };

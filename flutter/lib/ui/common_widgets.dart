@@ -12,6 +12,7 @@ import '../core/shell_bridge.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
+import 'generation_view_widgets.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
@@ -433,6 +434,8 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A delivered thumbnail already says "ready" — no chip needed.
+    if (item.isReady) return const SizedBox.shrink();
     final (background, foreground) = item.isStatusUnavailable
         ? (context.colors.errorContainer, context.colors.onErrorContainer)
         : item.isWorking
@@ -1623,34 +1626,21 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   Future<void> _open() async {
     final uri = await widget.uri;
     if (!mounted || uri == null) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => Dialog.fullscreen(
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Generation playback'),
-            leading: IconButton(
-              tooltip: 'Close',
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close_rounded),
-            ),
-          ),
-          body: GenerationVideo(
-            uri: uri,
-            supportsPhotos: widget.controller.supportsPhotoLibrarySave,
-            onDownload: (destination) async {
-              try {
-                await widget.controller.saveMedia(
-                  widget.item,
-                  destination: destination,
-                );
-              } on Object catch (error) {
-                widget.controller.showNotice(error.toString());
-              }
-            },
-          ),
-        ),
-      ),
+    await showVideoPlayerModal(
+      context,
+      uri: uri,
+      supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+      initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
+      onDownload: (destination) async {
+        try {
+          await widget.controller.saveMedia(
+            widget.item,
+            destination: destination,
+          );
+        } on Object catch (error) {
+          widget.controller.showNotice(error.toString());
+        }
+      },
     );
   }
 
@@ -2094,32 +2084,50 @@ class ActivityCard extends StatelessWidget {
                   GenerationStatusDetails(item: item),
                 ],
                 const SizedBox(height: 10),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
+                Row(
                   children: <Widget>[
-                    if (hasMedia)
-                      FilledButton.tonalIcon(
-                        onPressed: () => unawaited(
-                          saveGenerationVideo(context, controller, item),
-                        ),
-                        icon: const Icon(Icons.download_rounded, size: 15),
-                        label: const Text('Save'),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: <Widget>[
+                          if (hasMedia)
+                            FilledButton.tonalIcon(
+                              onPressed: () => unawaited(
+                                saveGenerationVideo(context, controller, item),
+                              ),
+                              icon: const Icon(
+                                Icons.download_rounded,
+                                size: 15,
+                              ),
+                              label: const Text('Save'),
+                            ),
+                          if (controller.canReuse(item))
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  unawaited(controller.reuse(item)),
+                              icon: const Icon(Icons.replay_rounded, size: 15),
+                              label: Text(
+                                item.isFailed
+                                    ? 'Retry generation'
+                                    : 'Reuse inputs',
+                              ),
+                            ),
+                          GenerationStatusButton(
+                            controller: controller,
+                            item: item,
+                            compact: true,
+                          ),
+                        ],
                       ),
-                    if (controller.canReuse(item))
-                      OutlinedButton.icon(
-                        onPressed: () => unawaited(controller.reuse(item)),
-                        icon: const Icon(Icons.replay_rounded, size: 15),
-                        label: Text(
-                          item.isFailed ? 'Retry generation' : 'Reuse inputs',
-                        ),
-                      ),
-                    GenerationStatusButton(
+                    ),
+                    GenerationActionsMenu(
                       controller: controller,
                       item: item,
-                      compact: true,
+                      includeSave: false,
+                      includeReuse: false,
+                      includeCheckStatus: false,
                     ),
-                    GenerationDetailsButton(item: item),
                   ],
                 ),
               ],

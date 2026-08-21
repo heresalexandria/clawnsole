@@ -6,10 +6,10 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
+import 'filter_menu.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
-import 'hardware.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatelessWidget {
@@ -72,10 +72,6 @@ class _LibraryResults extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
       _LibraryToolbar(controller: controller),
-      if (controller.libraryTags.isNotEmpty) ...<Widget>[
-        const SizedBox(height: 12),
-        _TagFilters(controller: controller),
-      ],
       const SizedBox(height: 18),
       if (controller.filteredGenerations.isEmpty)
         _LibraryEmpty(controller: controller)
@@ -408,34 +404,6 @@ class _MobileFolderBar extends StatelessWidget {
   );
 }
 
-class _TagFilters extends StatelessWidget {
-  const _TagFilters({required this.controller});
-
-  final AppController controller;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 35,
-    child: ListView.separated(
-      scrollDirection: Axis.horizontal,
-      itemCount: controller.libraryTags.length + 1,
-      separatorBuilder: (_, _) => const SizedBox(width: 7),
-      itemBuilder: (context, index) {
-        final tag = index == 0 ? null : controller.libraryTags[index - 1];
-        return FilterChip(
-          avatar: index == 0 ? const Icon(Icons.sell_outlined, size: 15) : null,
-          label: Text(
-            tag == null ? 'All tags' : '#$tag · ${controller.tagCount(tag)}',
-          ),
-          selected: controller.libraryTag == tag,
-          onSelected: (_) => controller.setLibraryTag(tag),
-          visualDensity: VisualDensity.compact,
-        );
-      },
-    ),
-  );
-}
-
 class _LibraryHeading extends StatelessWidget {
   const _LibraryHeading({required this.controller});
 
@@ -519,166 +487,84 @@ class _LibraryToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SurfaceCard(
     padding: const EdgeInsets.all(10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Align(
-          alignment: Alignment.centerRight,
-          child: GenerationViewToggle(
-            keyPrefix: 'library-view',
-            value: controller.libraryViewMode,
-            onChanged: (value) =>
-                unawaited(controller.setLibraryViewMode(value)),
-          ),
-        ),
-        const SizedBox(height: 9),
-        if (controller.supportsLocalLibrary) ...<Widget>[
-          StorageFilterChips(
-            value: controller.libraryStorageFilter,
-            showLocal: true,
-            onChanged: (value) =>
-                unawaited(controller.setLibraryStorageFilter(value)),
-          ),
-          const SizedBox(height: 9),
-        ],
-        FavoriteFilterChips(
-          value: controller.libraryFavoriteFilter,
-          onChanged: controller.setLibraryFavoriteFilter,
-        ),
-        const SizedBox(height: 9),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final filters = Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: LibraryFilter.values
-                  .map(
-                    (filter) => _FilterSegment(
-                      filter: filter,
-                      count: _count(filter),
-                      selected: controller.libraryFilter == filter,
-                      onTap: () =>
-                          unawaited(controller.setLibraryFilter(filter)),
-                    ),
-                  )
-                  .toList(),
-            );
-            final search = TextField(
-              key: const ValueKey('generation-library-search'),
-              onChanged: controller.setSearch,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search_rounded, size: 18),
-                hintText: 'Search prompts, tags, folders',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 760;
+        final keys = LibraryFilter.values
+            .map(
+              (filter) => ConsoleFilterSegment(
+                label: _filterLabel(filter),
+                icon: _filterIcons[filter],
+                count: _count(filter),
+                selected: controller.libraryFilter == filter,
+                onTap: () => unawaited(controller.setLibraryFilter(filter)),
               ),
-              style: const TextStyle(fontSize: 13),
-            );
+            )
+            .toList();
+        final segments = wide
+            ? Wrap(spacing: 5, runSpacing: 5, children: keys)
+            : ConsoleSegmentStrip(children: keys);
+        final search = TextField(
+          key: const ValueKey('generation-library-search'),
+          onChanged: controller.setSearch,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded, size: 18),
+            hintText: 'Search prompts, tags, folders',
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          style: const TextStyle(fontSize: 13),
+        );
+        final filterButton = LibraryFilterButton(
+          controller: controller,
+          collection: LibraryCollection.generated,
+          compact: !wide,
+        );
+        final viewToggle = GenerationViewToggle(
+          keyPrefix: 'library-view',
+          value: controller.libraryViewMode,
+          onChanged: (value) => unawaited(controller.setLibraryViewMode(value)),
+        );
 
-            if (constraints.maxWidth >= 760) {
-              return Row(
-                children: <Widget>[
-                  Expanded(child: filters),
-                  const SizedBox(width: 16),
-                  SizedBox(width: 320, child: search),
-                ],
-              );
-            }
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[filters, const SizedBox(height: 10), search],
-            );
-          },
-        ),
-      ],
+        if (wide) {
+          return Row(
+            children: <Widget>[
+              Expanded(child: segments),
+              const SizedBox(width: 16),
+              SizedBox(width: 320, child: search),
+              const SizedBox(width: 8),
+              filterButton,
+              const SizedBox(width: 8),
+              viewToggle,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            search,
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                Expanded(child: segments),
+                const SizedBox(width: 8),
+                filterButton,
+                const SizedBox(width: 8),
+                viewToggle,
+              ],
+            ),
+          ],
+        );
+      },
     ),
   );
-}
 
-class _FilterSegment extends StatelessWidget {
-  const _FilterSegment({
-    required this.filter,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final LibraryFilter filter;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-
-  static const _icons = <LibraryFilter, IconData>{
+  static const _filterIcons = <LibraryFilter, IconData>{
     LibraryFilter.all: Icons.grid_view_rounded,
     LibraryFilter.working: Icons.autorenew_rounded,
     LibraryFilter.ready: Icons.check_circle_outline_rounded,
     LibraryFilter.failed: Icons.error_outline_rounded,
   };
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = selected
-        ? context.colors.onPrimary
-        : context.colors.onSurfaceVariant;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-        decoration: consoleKeyDecoration(
-          context,
-          selected: selected,
-          radius: 10,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(_icons[filter], size: 14, color: foreground),
-            const SizedBox(width: 6),
-            Text(
-              _filterLabel(filter),
-              style: TextStyle(
-                color: selected
-                    ? context.colors.onPrimary
-                    : context.colors.onSurface,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (count > 0) ...<Widget>[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 5.5,
-                  vertical: 1.5,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? context.colors.onPrimary.withValues(alpha: .18)
-                      : context.colors.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    color: selected
-                        ? context.colors.onPrimary
-                        : context.colors.onSurfaceVariant,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 String _filterLabel(LibraryFilter filter) => switch (filter) {
@@ -976,85 +862,57 @@ class _GenerationCardState extends State<GenerationCard> {
                   ),
                 ],
                 const SizedBox(height: 13),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
+                Row(
                   children: <Widget>[
-                    OutlinedButton.icon(
-                      onPressed: () => unawaited(
-                        _showGenerationOrganizer(
-                          context,
-                          controller: widget.controller,
-                          item: item,
-                        ),
-                      ),
-                      icon: const Icon(Icons.drive_file_move_outline, size: 16),
-                      label: const Text('Organize'),
-                    ),
-                    if (item.resultAsset != null || item.resultUrl != null)
-                      FilledButton.tonalIcon(
-                        onPressed: saving ? null : () => unawaited(_save()),
-                        icon: saving
-                            ? const SizedBox.square(
-                                dimension: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.download_rounded, size: 16),
-                        label: const Text('Save video'),
-                      ),
-                    if (item.draftCacheUrl != null)
-                      OutlinedButton.icon(
-                        onPressed: () => widget.controller.enhance(item),
-                        icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
-                        label: const Text('Enhance'),
-                      ),
-                    if (widget.controller.canReuse(item))
-                      OutlinedButton.icon(
-                        onPressed: () =>
-                            unawaited(widget.controller.reuse(item)),
-                        icon: const Icon(Icons.replay_rounded, size: 16),
-                        label: Text(
-                          item.isFailed ? 'Retry generation' : 'Reuse',
-                        ),
-                      ),
-                    if (item.storage == LibraryStorage.local &&
-                        widget.controller.googleDriveConnected)
-                      OutlinedButton.icon(
-                        onPressed:
-                            widget.controller.isCopyingGeneration(item.localId)
-                            ? null
-                            : () => unawaited(
-                                widget.controller.copyLocalLibraryToGoogleDrive(
-                                  generationIds: <String>{item.localId},
-                                ),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: <Widget>[
+                          if (item.resultAsset != null ||
+                              item.resultUrl != null)
+                            FilledButton.tonalIcon(
+                              onPressed: saving
+                                  ? null
+                                  : () => unawaited(_save()),
+                              icon: saving
+                                  ? const SizedBox.square(
+                                      dimension: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.download_rounded,
+                                      size: 16,
+                                    ),
+                              label: const Text('Save video'),
+                            ),
+                          if (widget.controller.canReuse(item))
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  unawaited(widget.controller.reuse(item)),
+                              icon: const Icon(Icons.replay_rounded, size: 16),
+                              label: Text(
+                                item.isFailed ? 'Retry generation' : 'Reuse',
                               ),
-                        icon:
-                            widget.controller.isCopyingGeneration(item.localId)
-                            ? const SizedBox.square(
-                                dimension: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.cloud_upload_outlined, size: 16),
-                        label: Text(
-                          widget.controller.isCopyingGeneration(item.localId)
-                              ? 'Copying…'
-                              : 'Copy to Drive',
-                        ),
+                            ),
+                          GenerationStatusButton(
+                            controller: widget.controller,
+                            item: item,
+                          ),
+                        ],
                       ),
-                    GenerationStatusButton(
+                    ),
+                    GenerationActionsMenu(
                       controller: widget.controller,
                       item: item,
-                    ),
-                    GenerationDetailsButton(item: item),
-                    IconButton.outlined(
-                      tooltip: 'Delete history record',
-                      onPressed: () => unawaited(_remove()),
-                      color: context.colors.error,
-                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                      includeSave: false,
+                      includeReuse: false,
+                      includeCheckStatus: false,
+                      onOrganize: organize,
+                      onDelete: () => unawaited(_remove()),
+                      onCopyToDrive: copyToDrive,
                     ),
                   ],
                 ),

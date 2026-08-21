@@ -171,7 +171,7 @@ class MiniGenerationCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  _DenseGenerationActionsMenu(
+                  GenerationActionsMenu(
                     controller: controller,
                     item: item,
                     onOrganize: onOrganize,
@@ -277,7 +277,7 @@ class CompactGenerationRow extends StatelessWidget {
             ),
           ),
         ),
-        _DenseGenerationActionsMenu(
+        GenerationActionsMenu(
           controller: controller,
           item: item,
           onOrganize: onOrganize,
@@ -336,13 +336,17 @@ enum _DenseGenerationAction {
   delete,
 }
 
-class _DenseGenerationActionsMenu extends StatelessWidget {
-  const _DenseGenerationActionsMenu({
+class GenerationActionsMenu extends StatelessWidget {
+  const GenerationActionsMenu({
     required this.controller,
     required this.item,
+    super.key,
     this.onOrganize,
     this.onDelete,
     this.onCopyToDrive,
+    this.includeSave = true,
+    this.includeReuse = true,
+    this.includeCheckStatus = true,
   });
 
   final AppController controller;
@@ -350,15 +354,18 @@ class _DenseGenerationActionsMenu extends StatelessWidget {
   final VoidCallback? onOrganize;
   final VoidCallback? onDelete;
   final VoidCallback? onCopyToDrive;
+  final bool includeSave;
+  final bool includeReuse;
+  final bool includeCheckStatus;
 
   List<_DenseGenerationAction> get _actions => <_DenseGenerationAction>[
     if (onOrganize != null) _DenseGenerationAction.organize,
-    if (item.resultAsset != null || item.resultUrl != null)
+    if (includeSave && (item.resultAsset != null || item.resultUrl != null))
       _DenseGenerationAction.save,
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
-    if (controller.canReuse(item)) _DenseGenerationAction.reuse,
+    if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
     if (onCopyToDrive != null) _DenseGenerationAction.copyToDrive,
-    if (item.canCheckStatus && !item.isReady)
+    if (includeCheckStatus && item.canCheckStatus && !item.isReady)
       _DenseGenerationAction.checkStatus,
     if (item.hasProviderDetails) _DenseGenerationAction.details,
     if (onDelete != null) _DenseGenerationAction.delete,
@@ -394,20 +401,26 @@ class _DenseGenerationActionsMenu extends StatelessWidget {
               onDelete?.call();
           }
         },
-        itemBuilder: (context) => actions
-            .map(
-              (action) => PopupMenuItem<_DenseGenerationAction>(
-                value: action,
-                child: Row(
-                  children: <Widget>[
-                    Icon(_denseGenerationActionIcon(action), size: 18),
-                    const SizedBox(width: 10),
-                    Text(_denseGenerationActionLabel(action, item)),
-                  ],
+        itemBuilder: (context) => actions.map((action) {
+          final copying =
+              action == _DenseGenerationAction.copyToDrive &&
+              controller.isCopyingGeneration(item.localId);
+          return PopupMenuItem<_DenseGenerationAction>(
+            value: action,
+            enabled: !copying,
+            child: Row(
+              children: <Widget>[
+                Icon(_denseGenerationActionIcon(action), size: 18),
+                const SizedBox(width: 10),
+                Text(
+                  copying
+                      ? 'Copying to Drive…'
+                      : _denseGenerationActionLabel(action, item),
                 ),
-              ),
-            )
-            .toList(),
+              ],
+            ),
+          );
+        }).toList(),
       ),
     );
   }
