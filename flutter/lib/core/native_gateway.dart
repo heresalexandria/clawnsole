@@ -11,7 +11,9 @@ import 'direct_gateway.dart';
 import 'directory_reveal.dart';
 import 'flutter_secure_value_store.dart';
 import 'google_drive.dart';
+import 'google_drive_asset_presenter_io.dart';
 import 'google_drive_auth.dart';
+import 'google_drive_store.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'models.dart';
@@ -21,6 +23,8 @@ import 'settings_vault.dart';
 import 'settings_vault_data_store.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_remote.dart';
+import 'video_cache.dart';
+import 'video_cache_gateway.dart';
 
 const _configuredIosReviewApiKey = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY',
@@ -53,7 +57,11 @@ const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
 /// library data and the independently encrypted settings vault stay behind
 /// separate storage boundaries.
 class NativeGateway extends DirectGateway
-    implements GoogleDriveGateway, SettingsVaultGateway, DataLocationGateway {
+    implements
+        GoogleDriveGateway,
+        SettingsVaultGateway,
+        DataLocationGateway,
+        VideoCacheGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
   // ignore: use_super_parameters
@@ -79,7 +87,25 @@ class NativeGateway extends DirectGateway
     SettingsVaultDataStore? settingsVaultStore,
   }) {
     final localStore = store ?? (hybridStore == null ? LocalDataStore() : null);
-    final hybrid = hybridStore ?? HybridDataStore(local: localStore!);
+    // The video cache lives in the app cache directory: unlike a per-process
+    // system-temp folder it survives relaunches (which is the entire point of
+    // the cache), while the operating system may still reclaim it under
+    // storage pressure and it stays out of device backups. The directory is
+    // resolved lazily so constructing a gateway never touches path_provider.
+    final videoCache = VideoCache(
+      directory: () async => Directory(
+        '${(await getApplicationCacheDirectory()).path}'
+        '${Platform.pathSeparator}video-cache',
+      ),
+    );
+    final hybrid =
+        hybridStore ??
+        HybridDataStore(
+          local: localStore!,
+          drive: GoogleDriveStore(
+            presenter: IoGoogleDriveAssetPresenter(cache: videoCache),
+          ),
+        );
     final vault =
         settingsVaultStore ??
         SettingsVaultDataStore(
@@ -96,6 +122,7 @@ class NativeGateway extends DirectGateway
       hybrid: hybrid,
       localStore: localStore,
       vault: vault,
+      videoCache: videoCache,
       driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
       api: api,
       client: client,
@@ -116,6 +143,7 @@ class NativeGateway extends DirectGateway
   NativeGateway._({
     required HybridDataStore hybrid,
     required SettingsVaultDataStore vault,
+    required VideoCache videoCache,
     required GoogleDriveAuthorizer driveAuthorizer,
     LocalDataStore? localStore,
     BflApi? api,
@@ -133,6 +161,7 @@ class NativeGateway extends DirectGateway
   }) : _hybrid = hybrid,
        _localStore = localStore,
        _vault = vault,
+       _videoCache = videoCache,
        _driveAuthorizer = driveAuthorizer,
        _iosReviewKeys = <String, String>{
          'bfl': (iosReviewApiKey ?? _configuredIosReviewApiKey).trim(),
@@ -166,13 +195,99 @@ class NativeGateway extends DirectGateway
   final HybridDataStore _hybrid;
   final LocalDataStore? _localStore;
   final SettingsVaultDataStore _vault;
+  final VideoCache _videoCache;
   final GoogleDriveAuthorizer _driveAuthorizer;
+  final Map<
+    String,
+    Map<VideoDeliveryProgressListener, VideoCacheProgressListener>
+  >
+  _videoProgressListeners =
+      <
+        String,
+        Map<VideoDeliveryProgressListener, VideoCacheProgressListener>
+      >{};
   final Map<String, String> _iosReviewKeys;
   final Map<String, String> _iosReviewKeyIds;
   final bool _isIos;
 
   @override
   bool get supportsLocalLibrary => true;
+
+  /// Keeps the on-disk cap in step with the persisted preference. Failures
+  /// never surface: the cache is a best-effort speed-up, not user data.
+  Future<void> _applyVideoCachePreference(AppPreferences preferences) async {
+    try {
+      await _videoCache.setMaxBytes(
+        preferences.localVideoCacheMb * 1024 * 1024,
+      );
+    } on Object {
+      // Ignored: the next successful write or sweep restores the invariant.
+    }
+  }
+
+  @override
+  Future<LocalSnapshot> load() async {
+    final snapshot = await super.load();
+    await _applyVideoCachePreference(snapshot.preferences);
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
+    final snapshot = await super.setPreferences(preferences);
+    await _applyVideoCachePreference(snapshot.preferences);
+    return snapshot;
+  }
+
+  @override
+  Future<int> videoCacheUsedBytes() => _videoCache.usedBytes();
+
+  @override
+  Future<void> clearVideoCache() => _videoCache.clear();
+
+  @override
+  Future<Uri?> cachedVideoAssetUri(AssetReference reference) =>
+      _hybrid.cachedAssetUri(reference);
+
+  @override
+  Future<void> prefetchVideoAsset(AssetReference reference) async {
+    if (reference.kind != 'drive' || !_videoCache.enabled) return;
+    await _hybrid.assetUri(reference);
+  }
+
+  @override
+  void addVideoProgressListener(
+    String assetId,
+    VideoDeliveryProgressListener listener,
+  ) {
+    void wrapped(int received, int? total, bool done) {
+      if (done) {
+        listener(1);
+      } else if (total != null && total > 0) {
+        listener((received / total).clamp(0.0, 1.0));
+      } else {
+        listener(null);
+      }
+    }
+
+    _videoProgressListeners.putIfAbsent(
+      assetId,
+      () => <VideoDeliveryProgressListener, VideoCacheProgressListener>{},
+    )[listener] = wrapped;
+    _videoCache.addProgressListener(assetId, wrapped);
+  }
+
+  @override
+  void removeVideoProgressListener(
+    String assetId,
+    VideoDeliveryProgressListener listener,
+  ) {
+    final wrapped = _videoProgressListeners[assetId]?.remove(listener);
+    if (_videoProgressListeners[assetId]?.isEmpty ?? false) {
+      _videoProgressListeners.remove(assetId);
+    }
+    if (wrapped != null) _videoCache.removeProgressListener(assetId, wrapped);
+  }
 
   @override
   SettingsVaultStatus get settingsVaultStatus => _vault.settingsVaultStatus;

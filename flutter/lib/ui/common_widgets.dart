@@ -1416,7 +1416,13 @@ class _GenerationMediaState extends State<GenerationMedia> {
   Future<Uint8List>? _imageBytes;
 
   void _load() {
-    _uri = widget.controller.generationMediaUri(widget.item);
+    // Resolving a Drive-stored film downloads the whole file on native
+    // surfaces, so the URI future is deferred: work starts on the first
+    // await (a play tap), never at listing build for every visible card.
+    final item = widget.item;
+    _uri = _DeferredFuture<Uri?>(
+      () => widget.controller.generationMediaUri(item),
+    );
     _imageBytes = widget.item.isImage
         ? widget.item.resultAsset != null
               ? widget.controller.gateway.readAsset(widget.item.resultAsset!)
@@ -1572,7 +1578,13 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
 
   Future<_GeneratedVideoPreview?> _generateAndCache() async {
     try {
-      final uri = await widget.uri;
+      // Frame extraction must never force a full Drive download for a card
+      // that is merely visible: ask only for a cheap source (cached file,
+      // local file, or companion URL). A cold Drive film keeps its
+      // tap-to-play placeholder until the cache warms up.
+      final uri = await widget.controller.generationPreviewSourceUri(
+        widget.item,
+      );
       if (uri == null) return null;
       final configured = widget.item.config.duration;
       final seconds = configured is num ? configured.toDouble() : 8.0;
@@ -1714,6 +1726,37 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
       );
     },
   );
+}
+
+/// A [Future] whose computation starts on the first await/then, not at
+/// construction. Lets listing cards hold a playable-URI future without
+/// triggering the Drive download it may represent until someone plays it.
+class _DeferredFuture<T> implements Future<T> {
+  _DeferredFuture(this._compute);
+
+  final Future<T> Function() _compute;
+  Future<T>? _started;
+
+  Future<T> get _future => _started ??= _compute();
+
+  @override
+  Stream<T> asStream() => _future.asStream();
+
+  @override
+  Future<T> catchError(Function onError, {bool Function(Object)? test}) =>
+      _future.catchError(onError, test: test);
+
+  @override
+  Future<R> then<R>(FutureOr<R> Function(T) onValue, {Function? onError}) =>
+      _future.then(onValue, onError: onError);
+
+  @override
+  Future<T> timeout(Duration timeLimit, {FutureOr<T> Function()? onTimeout}) =>
+      _future.timeout(timeLimit, onTimeout: onTimeout);
+
+  @override
+  Future<T> whenComplete(FutureOr<void> Function() action) =>
+      _future.whenComplete(action);
 }
 
 Future<Uint8List?> _composeTimelineStrip(List<Uint8List> frames) async {

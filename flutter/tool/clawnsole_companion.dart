@@ -10,6 +10,7 @@ import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
@@ -18,6 +19,7 @@ import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
+import 'package:clawnsole/core/video_cache.dart';
 
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
@@ -34,7 +36,19 @@ Future<void> main(List<String> arguments) async {
               File('${config.dataFile}.development-key'),
             ));
   final localStore = CompanionStore(File(config.dataFile));
-  final hybrid = HybridDataStore(local: localStore, drive: GoogleDriveStore());
+  // The video cache sits beside the companion's data file so it shares the
+  // library's lifetime and disk, and survives companion restarts.
+  final videoCache = VideoCache(
+    directory: () async => Directory(
+      '${File(config.dataFile).parent.path}${Platform.pathSeparator}video-cache',
+    ),
+  );
+  final hybrid = HybridDataStore(
+    local: localStore,
+    drive: GoogleDriveStore(
+      presenter: IoGoogleDriveAssetPresenter(cache: videoCache),
+    ),
+  );
   final secureStore = deviceKey == null
       ? null
       : EncryptedFileSecureValueStore(
@@ -61,6 +75,7 @@ Future<void> main(List<String> arguments) async {
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
     requestToken: bootstrap.requestToken,
     allowedOrigin: 'http://127.0.0.1:${server.port}',
+    videoCache: videoCache,
   );
   stdout.writeln(
     'Clawnsole companion is listening on http://127.0.0.1:${server.port}',
@@ -573,6 +588,16 @@ class CompanionHybridStore {
   Future<Uint8List> readAsset(AssetReference reference) =>
       _dataStore.readAsset(reference);
 
+  Future<GoogleDriveByteStream> readDriveAssetStream(
+    AssetReference reference,
+  ) => hybrid.readDriveAssetStream(reference);
+
+  Future<Uint8List> readDriveAssetRange(
+    AssetReference reference,
+    int start,
+    int end,
+  ) => hybrid.readDriveAssetRange(reference, start, end);
+
   Future<void> pruneAssets(
     List<Generation> generations,
     List<SavedReference> references,
@@ -612,6 +637,15 @@ class CompanionHybridStore {
   Future<GoogleDriveCopyCounts> moveLocalToDrive() => hybrid.moveLocalToDrive();
 }
 
+/// One parsed `Range: bytes=a-b` header before it is resolved against a
+/// concrete size. Either edge may be absent (`bytes=a-` and `bytes=-n`).
+class _RawByteRange {
+  const _RawByteRange(this.rawStart, this.rawEnd);
+
+  final int? rawStart;
+  final int? rawEnd;
+}
+
 List<String> _cleanLibraryTags(Iterable<Object?> input) {
   final tags = <String>[];
   final seen = <String>{};
@@ -639,6 +673,7 @@ class CompanionApp {
     Directory? webRoot,
     String requestToken = '',
     String allowedOrigin = '',
+    VideoCache? videoCache,
   }) => CompanionApp.hybrid(
     store: CompanionHybridStore(HybridDataStore(local: store)),
     api: api,
@@ -647,6 +682,7 @@ class CompanionApp {
     webRoot: webRoot,
     requestToken: requestToken,
     allowedOrigin: allowedOrigin,
+    videoCache: videoCache,
   );
 
   CompanionApp.hybrid({
@@ -657,12 +693,14 @@ class CompanionApp {
     Directory? webRoot,
     String requestToken = '',
     String allowedOrigin = '',
+    VideoCache? videoCache,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _fallbackApiKeys = fallbackApiKeys,
        _webRoot = webRoot,
        _requestToken = requestToken,
-       _allowedOrigin = allowedOrigin;
+       _allowedOrigin = allowedOrigin,
+       _videoCache = videoCache;
 
   final CompanionHybridStore _store;
   final ProviderApiRouter _providers;
@@ -670,6 +708,8 @@ class CompanionApp {
   final Directory? _webRoot;
   final String _requestToken;
   final String _allowedOrigin;
+  final VideoCache? _videoCache;
+  final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
 
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
@@ -843,6 +883,22 @@ class CompanionApp {
       }
       if (request.method == 'GET' && path == '/media') {
         return await _media(request);
+      }
+      if (request.method == 'GET' && path == '/video-cache') {
+        final cache = await _syncedVideoCache(await _store.read());
+        return await _json(request.response, 200, <String, Object?>{
+          'usedBytes': cache == null ? 0 : await cache.usedBytes(),
+          'capBytes': cache?.maxBytes ?? 0,
+        });
+      }
+      if (request.method == 'DELETE' && path == '/video-cache') {
+        await _videoCache?.clear();
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
+      }
+      if (request.method == 'POST' && path == '/video-cache/prefetch') {
+        return await _prefetchVideo(request);
       }
       if ((request.method == 'GET' || request.method == 'HEAD') &&
           _webRoot != null) {
@@ -1953,6 +2009,22 @@ class CompanionApp {
     return null;
   }
 
+  /// Applies the persisted cache-cap preference before any cache use, so a
+  /// cap changed on another surface (through the synced preferences) takes
+  /// effect on the very next request.
+  Future<VideoCache?> _syncedVideoCache(StoredData data) async {
+    final cache = _videoCache;
+    if (cache == null) return null;
+    await cache.setMaxBytes(data.preferences.localVideoCacheMb * 1024 * 1024);
+    return cache;
+  }
+
+  bool _isVideoAsset(AssetReference reference) => const <String>{
+    '.mp4',
+    '.mov',
+    '.webm',
+  }.contains(retainedAssetExtension(reference.contentType, reference.label));
+
   Future<void> _asset(HttpRequest request) async {
     final id = request.uri.queryParameters['id'];
     if (id == null) {
@@ -1969,36 +2041,148 @@ class CompanionApp {
         status: 404,
       );
     }
-    final bytes = await _store.readAsset(reference);
-    final size = bytes.length;
-    var start = 0;
-    var end = size - 1;
-    final range = request.headers.value(HttpHeaders.rangeHeader);
-    final match = range == null
-        ? null
-        : RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(range);
-    if (match != null) {
-      final parsedStart = int.tryParse(match.group(1) ?? '');
-      final parsedEnd = int.tryParse(match.group(2) ?? '');
-      if (parsedStart == null && parsedEnd != null) {
-        start = max(0, size - parsedEnd);
-      } else if (parsedStart != null) {
-        start = parsedStart;
+    // Retained asset ids are immutable: replacing content always mints a new
+    // id, so the browser may privately reuse a delivered film for a day
+    // instead of refetching it on every playback. `private` keeps user media
+    // out of shared caches; the blanket CORS default stays no-store.
+    request.response.headers.set(
+      HttpHeaders.cacheControlHeader,
+      'private, max-age=86400, immutable',
+    );
+    if (reference.kind == 'drive' && _isVideoAsset(reference)) {
+      final cache = await _syncedVideoCache(data);
+      if (cache != null && cache.enabled) {
+        return _driveVideoAsset(request, reference, cache);
       }
-      if (parsedEnd != null && parsedStart != null) end = min(parsedEnd, end);
-      if (start < 0 || start >= size || end < start) {
-        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
-        request.response.headers.set(
-          HttpHeaders.contentRangeHeader,
-          'bytes */$size',
-        );
-        return request.response.close();
+    }
+    return _serveAssetBytes(
+      request,
+      reference,
+      await _store.readAsset(reference),
+    );
+  }
+
+  /// Serves a Drive-stored film from the local disk cache, filling the cache
+  /// exactly once on a miss. A cold request for a later byte range is
+  /// answered directly from Drive's Range support instead of waiting behind
+  /// the full download.
+  Future<void> _driveVideoAsset(
+    HttpRequest request,
+    AssetReference reference,
+    VideoCache cache,
+  ) async {
+    final cached = await cache.lookup(reference.value);
+    if (cached != null) return _serveAssetFile(request, reference, cached);
+    final range = _parseByteRange(request);
+    final knownSize = reference.bytes;
+    final opensAtZero =
+        range == null || (range.rawStart == 0 && range.rawEnd == null);
+    if (!opensAtZero && knownSize != null && knownSize > 0) {
+      final resolved = _resolveByteRange(range, knownSize);
+      if (resolved == null) {
+        return _rangeNotSatisfiable(request, knownSize);
       }
+      final bytes = await _store.readDriveAssetRange(
+        reference,
+        resolved.start,
+        resolved.end,
+      );
       request.response
         ..statusCode = HttpStatus.partialContent
         ..headers.set(
           HttpHeaders.contentRangeHeader,
-          'bytes $start-$end/$size',
+          'bytes ${resolved.start}-${resolved.end}/$knownSize',
+        );
+      request.response.headers
+        ..contentType = ContentType.parse(
+          reference.contentType ?? 'application/octet-stream',
+        )
+        ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+        ..contentLength = bytes.length;
+      request.response.add(bytes);
+      return request.response.close();
+    }
+    final file = await _fillDriveVideo(reference, cache);
+    return _serveAssetFile(request, reference, file);
+  }
+
+  /// Streams one Drive download into the cache, shared across concurrent
+  /// requests so a film is never fetched upstream more than once at a time.
+  Future<File> _fillDriveVideo(AssetReference reference, VideoCache cache) {
+    final existing = _driveVideoFills[reference.value];
+    if (existing != null) return existing;
+    late final Future<File> operation;
+    operation =
+        () async {
+          final already = await cache.lookup(reference.value);
+          if (already != null) return already;
+          final download = await _store.readDriveAssetStream(reference);
+          return cache.put(
+            reference.value,
+            retainedAssetExtension(reference.contentType, reference.label),
+            download.stream,
+            expectedLength: download.contentLength ?? reference.bytes,
+          );
+        }().whenComplete(() {
+          if (identical(_driveVideoFills[reference.value], operation)) {
+            _driveVideoFills.remove(reference.value);
+          }
+        });
+    _driveVideoFills[reference.value] = operation;
+    return operation;
+  }
+
+  Future<void> _prefetchVideo(HttpRequest request) async {
+    final body = await _bodyMap(request);
+    final id = body['id']?.toString() ?? '';
+    if (id.isEmpty) {
+      throw const ProviderException('An asset id is required.', status: 400);
+    }
+    final data = await _store.read();
+    final reference = _findAsset(data.generations, data.savedReferences, id);
+    if (reference == null) {
+      throw const ProviderException(
+        'The local asset was not found.',
+        status: 404,
+      );
+    }
+    final cache = await _syncedVideoCache(data);
+    final queued =
+        reference.kind == 'drive' &&
+        _isVideoAsset(reference) &&
+        cache != null &&
+        cache.enabled;
+    if (queued) {
+      unawaited(
+        _fillDriveVideo(reference, cache).then<void>(
+          (_) {},
+          onError: (Object error) {
+            stderr.writeln('Video prefetch failed for $id: $error');
+          },
+        ),
+      );
+    }
+    return _json(request.response, 202, <String, Object?>{
+      'ok': true,
+      'queued': queued,
+    });
+  }
+
+  Future<void> _serveAssetFile(
+    HttpRequest request,
+    AssetReference reference,
+    File file,
+  ) async {
+    final size = await file.length();
+    final range = _parseByteRange(request);
+    final resolved = _resolveByteRange(range, size);
+    if (resolved == null) return _rangeNotSatisfiable(request, size);
+    if (range != null) {
+      request.response
+        ..statusCode = HttpStatus.partialContent
+        ..headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes ${resolved.start}-${resolved.end}/$size',
         );
     }
     request.response.headers
@@ -2006,9 +2190,76 @@ class CompanionApp {
         reference.contentType ?? 'application/octet-stream',
       )
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
-      ..contentLength = end - start + 1;
-    request.response.add(bytes.sublist(start, end + 1));
-    await request.response.close();
+      ..contentLength = resolved.end - resolved.start + 1;
+    await request.response.addStream(
+      file.openRead(resolved.start, resolved.end + 1),
+    );
+    return request.response.close();
+  }
+
+  Future<void> _serveAssetBytes(
+    HttpRequest request,
+    AssetReference reference,
+    Uint8List bytes,
+  ) async {
+    final size = bytes.length;
+    final range = _parseByteRange(request);
+    final resolved = _resolveByteRange(range, size);
+    if (resolved == null) return _rangeNotSatisfiable(request, size);
+    if (range != null) {
+      request.response
+        ..statusCode = HttpStatus.partialContent
+        ..headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes ${resolved.start}-${resolved.end}/$size',
+        );
+    }
+    request.response.headers
+      ..contentType = ContentType.parse(
+        reference.contentType ?? 'application/octet-stream',
+      )
+      ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..contentLength = resolved.end - resolved.start + 1;
+    request.response.add(bytes.sublist(resolved.start, resolved.end + 1));
+    return request.response.close();
+  }
+
+  _RawByteRange? _parseByteRange(HttpRequest request) {
+    final range = request.headers.value(HttpHeaders.rangeHeader);
+    final match = range == null
+        ? null
+        : RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(range);
+    if (match == null) return null;
+    return _RawByteRange(
+      int.tryParse(match.group(1) ?? ''),
+      int.tryParse(match.group(2) ?? ''),
+    );
+  }
+
+  ({int start, int end})? _resolveByteRange(_RawByteRange? range, int size) {
+    var start = 0;
+    var end = size - 1;
+    if (range != null) {
+      if (range.rawStart == null && range.rawEnd != null) {
+        start = max(0, size - range.rawEnd!);
+      } else if (range.rawStart != null) {
+        start = range.rawStart!;
+      }
+      if (range.rawEnd != null && range.rawStart != null) {
+        end = min(range.rawEnd!, end);
+      }
+      if (start < 0 || start >= size || end < start) return null;
+    }
+    return (start: start, end: end);
+  }
+
+  Future<void> _rangeNotSatisfiable(HttpRequest request, int size) {
+    request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+    request.response.headers.set(
+      HttpHeaders.contentRangeHeader,
+      'bytes */$size',
+    );
+    return request.response.close();
   }
 
   Future<void> _media(HttpRequest request) async {

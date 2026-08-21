@@ -199,6 +199,18 @@ class GoogleDriveContent {
   final String? etag;
 }
 
+/// A media download delivered as a byte stream instead of a buffered body,
+/// so large videos can be written to disk with progress as they arrive.
+class GoogleDriveByteStream {
+  const GoogleDriveByteStream(this.stream, {this.contentLength});
+
+  final Stream<List<int>> stream;
+
+  /// Total bytes announced by Drive, or null when the response did not
+  /// include a usable length.
+  final int? contentLength;
+}
+
 /// Small REST client for the subset of Drive used by Clawnsole.
 class GoogleDriveApi {
   GoogleDriveApi({
@@ -422,6 +434,48 @@ class GoogleDriveApi {
 
   Future<Uint8List> downloadFile(String fileId) async =>
       (await readFile(fileId)).bytes;
+
+  Uri _mediaUri(String fileId) => _apiBase
+      .resolve('files/${Uri.encodeComponent(fileId)}')
+      .replace(queryParameters: const <String, String>{'alt': 'media'});
+
+  /// Streams a media download without buffering the file in memory.
+  ///
+  /// [readFile] remains the right call for small JSON and state documents;
+  /// this one exists for videos, where the whole point is not to hold the
+  /// body in RAM and to observe byte progress while it lands on disk.
+  Future<GoogleDriveByteStream> readFileStream(String fileId) async {
+    final request = http.Request('GET', _mediaUri(fileId))
+      ..headers.addAll(_headers);
+    final response = await _client.send(request);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await _expect(await http.Response.fromStream(response));
+    }
+    final length = response.contentLength;
+    return GoogleDriveByteStream(
+      response.stream,
+      contentLength: length != null && length > 0 ? length : null,
+    );
+  }
+
+  /// Reads one byte range of a media file. Drive honors Range for
+  /// `alt=media`; a server that answers 200 anyway is sliced locally so the
+  /// caller always receives exactly the requested window.
+  Future<Uint8List> readFileRange(String fileId, int start, int end) async {
+    if (start < 0 || end < start) {
+      throw ArgumentError('The requested byte range is invalid.');
+    }
+    final response = await _client.get(
+      _mediaUri(fileId),
+      headers: <String, String>{..._headers, 'Range': 'bytes=$start-$end'},
+    );
+    await _expect(response, decodeBody: false);
+    final bytes = response.bodyBytes;
+    if (response.statusCode == 206) return bytes;
+    final from = start.clamp(0, bytes.length);
+    final to = (end + 1).clamp(from, bytes.length);
+    return Uint8List.sublistView(bytes, from, to);
+  }
 
   Future<void> deleteFile(String fileId) async {
     final response = await _client.delete(
