@@ -101,37 +101,45 @@ class _ReferencesHeading extends StatelessWidget {
           ],
         ),
       ),
-      PopupMenuButton<MediaReferenceKind>(
-        onSelected: (kind) => unawaited(
-          controller.importSavedReferences(
-            kind,
-            folderId:
-                controller.referenceFolderView ==
-                        AppController.libraryFolderAll ||
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          if (controller.supportsGoogleDrive)
+            DriveRefreshButton(controller: controller, keyPrefix: 'references'),
+          PopupMenuButton<MediaReferenceKind>(
+            onSelected: (kind) => unawaited(
+              controller.importSavedReferences(
+                kind,
+                folderId:
                     controller.referenceFolderView ==
-                        AppController.libraryFolderUnfiled
-                ? null
-                : controller.referenceFolderView,
-          ),
-        ),
-        itemBuilder: (context) => MediaReferenceKind.values
-            .map(
-              (kind) => PopupMenuItem<MediaReferenceKind>(
-                value: kind,
-                child: Row(
-                  children: <Widget>[
-                    Icon(_kindIcon(kind), size: 18),
-                    const SizedBox(width: 10),
-                    Text('Add ${kind.pluralLabel}'),
-                  ],
-                ),
+                            AppController.libraryFolderAll ||
+                        controller.referenceFolderView ==
+                            AppController.libraryFolderUnfiled
+                    ? null
+                    : controller.referenceFolderView,
               ),
-            )
-            .toList(),
-        child: const FilledButtonIconVisual(
-          icon: Icons.add_rounded,
-          label: 'Add references',
-        ),
+            ),
+            itemBuilder: (context) => MediaReferenceKind.values
+                .map(
+                  (kind) => PopupMenuItem<MediaReferenceKind>(
+                    value: kind,
+                    child: Row(
+                      children: <Widget>[
+                        Icon(_kindIcon(kind), size: 18),
+                        const SizedBox(width: 10),
+                        Text('Add ${kind.pluralLabel}'),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(),
+            child: const FilledButtonIconVisual(
+              icon: Icons.add_rounded,
+              label: 'Add references',
+            ),
+          ),
+        ],
       ),
     ],
   );

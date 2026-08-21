@@ -118,22 +118,15 @@ class _CreateHeading extends StatelessWidget {
             letterSpacing: .3,
           ),
         );
-        // Wide layouts pin the plaque to the far right of the page; narrow ones
-        // stack it under the title rather than squeezing both onto one line.
-        // The Wrap keeps the label beside the plaque where it fits and drops
-        // it onto its own line on phones.
+        // Wide layouts keep the quiet label and pin the plaque to the far
+        // right. Phones drop the redundant label and right-align the plaque.
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               title,
               SizedBox(height: short ? 10 : 16),
-              Wrap(
-                spacing: 10,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[plaqueLabel, plaque],
-              ),
+              Align(alignment: Alignment.centerRight, child: plaque),
             ],
           );
         }
@@ -190,6 +183,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
   Widget build(BuildContext context) {
     final ink = PanelSurface.navyLeather.ink(context.tokens);
     return TexturePanel(
+      key: const ValueKey('provider-plaque'),
       surface: PanelSurface.navyLeather,
       stitched: true,
       // Both paddings keep content at least 4px clear of the saddle stitch,
@@ -724,11 +718,11 @@ class _ComposerState extends State<_Composer> {
             builder: (context, constraints) {
               final sideBySide = constraints.maxWidth >= 880;
               final costWidth = sideBySide
-                  ? (constraints.maxWidth - 14) * 3 / 5
+                  ? math.min(680.0, (constraints.maxWidth - 14) / 2)
                   : constraints.maxWidth;
               final cost = _CostPreview(
                 controller: controller,
-                wide: costWidth >= 700,
+                wide: costWidth >= 650,
               );
               final destination = _GenerationDestinationControls(
                 controller: controller,
@@ -750,9 +744,9 @@ class _ComposerState extends State<_Composer> {
                   key: const ValueKey('cost-destination-row'),
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Expanded(flex: 3, child: cost),
+                    SizedBox(width: costWidth, child: cost),
                     const SizedBox(width: 14),
-                    Expanded(flex: 2, child: destination),
+                    Expanded(child: destination),
                   ],
                 ),
               );
@@ -852,6 +846,7 @@ class _GenerationDestinationControls extends StatelessWidget {
       icon: const Icon(Icons.create_new_folder_outlined, size: 18),
     );
     return Container(
+      key: const ValueKey('generation-destination-panel'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
@@ -3113,6 +3108,7 @@ class _CostPreview extends StatelessWidget {
     );
     final rate = Text(
       rateLabel ?? controller.selectedModel.label,
+      key: const ValueKey('estimate-rate'),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(
@@ -3125,6 +3121,7 @@ class _CostPreview extends StatelessWidget {
     final credits = providerUnits
         ? Text(
             '${formatCreditRange(estimate.providerUnitsMinimum!, estimate.providerUnitsMaximum!)} credits',
+            key: const ValueKey('estimate-provider-units'),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -3161,6 +3158,7 @@ class _CostPreview extends StatelessWidget {
       ),
     );
     return TexturePanel(
+      key: const ValueKey('estimated-charge-panel'),
       surface: PanelSurface.hunterFelt,
       stitched: true,
       // Clears the saddle stitch (thread about 9.6px inside the panel edge)
@@ -3236,7 +3234,7 @@ class _CostPreview extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(child: charge),
                   const SizedBox(width: 12),
-                  Flexible(
+                  Expanded(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.end,
@@ -3474,6 +3472,8 @@ class _RecentWork extends StatefulWidget {
 }
 
 class _RecentWorkState extends State<_RecentWork> {
+  static const int _itemLimit = 100;
+
   final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
 
   AppController get controller => widget.controller;
@@ -3521,7 +3521,15 @@ class _RecentWorkState extends State<_RecentWork> {
                 children: <Widget>[
                   Expanded(child: title),
                   toggle,
-                  const SizedBox(width: 10),
+                  if (controller.supportsGoogleDrive) ...<Widget>[
+                    const SizedBox(width: 8),
+                    DriveRefreshButton(
+                      controller: controller,
+                      keyPrefix: 'recent-work',
+                      compact: true,
+                    ),
+                  ],
+                  const SizedBox(width: 8),
                   library,
                 ],
               );
@@ -3532,6 +3540,14 @@ class _RecentWorkState extends State<_RecentWork> {
                 Row(
                   children: <Widget>[
                     Expanded(child: title),
+                    if (controller.supportsGoogleDrive) ...<Widget>[
+                      DriveRefreshButton(
+                        controller: controller,
+                        keyPrefix: 'recent-work',
+                        compact: true,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
                     library,
                   ],
                 ),
@@ -3567,7 +3583,7 @@ class _RecentWorkState extends State<_RecentWork> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: controller.visibleGenerations
-                .take(5)
+                .take(_itemLimit)
                 .map(
                   (item) => Padding(
                     padding: const EdgeInsets.only(bottom: 9),
@@ -3592,7 +3608,7 @@ class _RecentWorkState extends State<_RecentWork> {
                 spacing: GenerationCardGrid.gap,
                 runSpacing: GenerationCardGrid.gap,
                 children: controller.visibleGenerations
-                    .take(5)
+                    .take(_itemLimit)
                     .map(
                       (item) => SizedBox(
                         width: layout.tileWidth,

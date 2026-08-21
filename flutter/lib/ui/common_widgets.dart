@@ -60,6 +60,58 @@ class StorageBadge extends StatelessWidget {
   );
 }
 
+/// Reloads the connected Google Drive library from its source of truth.
+///
+/// Screens keep this action near their primary controls so work changed on a
+/// second device can be pulled in without detouring through Settings.
+class DriveRefreshButton extends StatelessWidget {
+  const DriveRefreshButton({
+    required this.controller,
+    required this.keyPrefix,
+    super.key,
+    this.compact = false,
+  });
+
+  final AppController controller;
+  final String keyPrefix;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final configured = controller.googleDriveConnection.isConfigured;
+    final busy = controller.googleDriveBusy;
+    final callback = configured && !busy
+        ? () => unawaited(controller.refreshGoogleDrive())
+        : null;
+    final tooltip = configured
+        ? 'Refresh from Google Drive'
+        : 'Connect Google Drive in Settings to refresh';
+    final icon = busy
+        ? const SizedBox.square(
+            dimension: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.refresh_rounded, size: 18);
+    if (compact) {
+      return IconButton.outlined(
+        key: ValueKey('$keyPrefix-drive-refresh'),
+        tooltip: tooltip,
+        onPressed: callback,
+        icon: icon,
+      );
+    }
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton.icon(
+        key: ValueKey('$keyPrefix-drive-refresh'),
+        onPressed: callback,
+        icon: icon,
+        label: const Text('Refresh'),
+      ),
+    );
+  }
+}
+
 class StorageFilterChips extends StatelessWidget {
   const StorageFilterChips({
     required this.value,
@@ -2112,12 +2164,7 @@ class ActivityCard extends StatelessWidget {
         children: <Widget>[
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-            child: isGeneratingVideo
-                ? AspectRatio(
-                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
-                    child: preview,
-                  )
-                : hasMedia
+            child: isGeneratingVideo || hasMedia
                 ? InlineVideoMediaBox(
                     playbackId: item.localId,
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),
