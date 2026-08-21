@@ -363,24 +363,16 @@ class _SideRail extends StatelessWidget {
             borderRadius: BorderRadius.circular(15),
             onTap: () => unawaited(controller.navigate(AppSection.create)),
             child: SizedBox.square(
+              key: const ValueKey<String>('side-rail-brand-icon'),
               dimension: 48,
               child: Center(
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(
-                      color: context.tokens.panelBrass.withValues(alpha: .55),
-                    ),
-                  ),
-                  padding: const EdgeInsets.all(1.5),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(11),
-                    child: Image.asset(
-                      'assets/icon.png',
-                      width: 42,
-                      height: 42,
-                      fit: BoxFit.cover,
-                    ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.asset(
+                    'assets/icon.png',
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),

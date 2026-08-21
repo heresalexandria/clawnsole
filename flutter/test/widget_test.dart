@@ -3020,6 +3020,40 @@ void main() {
     expect(find.text('Dark'), findsOneWidget);
   });
 
+  testWidgets('desktop brand icon has no decorative border or background', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    final brandIcon = find.byKey(
+      const ValueKey<String>('side-rail-brand-icon'),
+    );
+    expect(brandIcon, findsOneWidget);
+    expect(
+      find.descendant(of: brandIcon, matching: find.byType(DecoratedBox)),
+      findsNothing,
+    );
+  });
+
   testWidgets('opens the saved References tab from desktop navigation', (
     tester,
   ) async {
