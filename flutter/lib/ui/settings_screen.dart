@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -231,10 +232,90 @@ class _ProviderAccessCard extends StatelessWidget {
   );
 }
 
-class _StorageSection extends StatelessWidget {
+class _StorageSection extends StatefulWidget {
   const _StorageSection({required this.controller});
 
   final AppController controller;
+
+  @override
+  State<_StorageSection> createState() => _StorageSectionState();
+}
+
+class _StorageSectionState extends State<_StorageSection> {
+  AppController get controller => widget.controller;
+
+  Future<bool> _confirm({
+    required String title,
+    required String detail,
+    required String actionLabel,
+    required Key actionKey,
+  }) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(title),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Text(detail),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: actionKey,
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(actionLabel),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _changeLocation() async {
+    if (controller.shellManagesDataRelocation) {
+      // The desktop shell shows its own picker and confirmations, migrates
+      // the files, and relaunches the app on success.
+      await controller.relocateDataDirectoryViaShell();
+      return;
+    }
+    final directory = await FilePicker.getDirectoryPath(
+      dialogTitle: 'Choose a Clawnsole data folder',
+      lockParentWindow: true,
+    );
+    if (directory == null || !mounted) return;
+    final hasLibrary = await controller.dataDirectoryHasLibrary(directory);
+    if (hasLibrary == null || !mounted) return;
+    if (hasLibrary) {
+      final adopt = await _confirm(
+        title: 'Use the existing library?',
+        detail:
+            'That folder already contains a Clawnsole library. Clawnsole can '
+            'switch to it as-is; your current library stays where it is and '
+            'is no longer shown.',
+        actionLabel: 'Use existing library',
+        actionKey: const ValueKey('data-location-use-existing'),
+      );
+      if (!adopt || !mounted) return;
+      await controller.relocateDataDirectory(
+        directory,
+        useExistingLibrary: true,
+      );
+      return;
+    }
+    final confirmed = await _confirm(
+      title: 'Move Clawnsole data?',
+      detail:
+          'Your library file and assets will be copied to $directory and '
+          'used from there. The current copy stays in the old folder until '
+          'you delete it.',
+      actionLabel: 'Move data',
+      actionKey: const ValueKey('data-location-move-confirm'),
+    );
+    if (!confirmed || !mounted) return;
+    await controller.relocateDataDirectory(directory);
+  }
 
   @override
   Widget build(BuildContext context) => SurfaceCard(
@@ -313,6 +394,36 @@ class _StorageSection extends StatelessWidget {
             ),
           ],
         ),
+        if (controller.supportsGoogleDrive) ...<Widget>[
+          const SizedBox(height: 15),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Default for new generations and references',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (!controller.googleDriveConnected) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Connect Google Drive below to save new items there.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              StorageDestinationButton(controller: controller),
+            ],
+          ),
+        ],
         const SizedBox(height: 15),
         Container(
           padding: const EdgeInsets.all(12),
@@ -347,6 +458,32 @@ class _StorageSection extends StatelessWidget {
             ],
           ),
         ),
+        if (controller.supportsRevealDataFolder ||
+            controller.supportsDataRelocation) ...<Widget>[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              if (controller.supportsRevealDataFolder)
+                OutlinedButton.icon(
+                  key: const ValueKey('storage-open-folder'),
+                  onPressed: () => unawaited(controller.revealDataFolder()),
+                  icon: const Icon(Icons.folder_open_rounded, size: 17),
+                  label: const Text('Open folder'),
+                ),
+              if (controller.supportsDataRelocation)
+                OutlinedButton.icon(
+                  key: const ValueKey('storage-change-location'),
+                  onPressed: controller.dataRelocationBusy
+                      ? null
+                      : () => unawaited(_changeLocation()),
+                  icon: const Icon(Icons.drive_folder_upload_rounded, size: 17),
+                  label: const Text('Change location…'),
+                ),
+            ],
+          ),
+        ],
       ],
     ),
   );
@@ -372,6 +509,39 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
   void dispose() {
     _folder.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmMoveToDrive() async {
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Move the local library to Drive?'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: const Text(
+                'Clawnsole copies every local generation and reference to '
+                'Google Drive, verifies the copies, and then removes the '
+                'local originals. Afterwards this library exists only in '
+                'Drive.',
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('drive-move-confirm'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Move and remove local copies'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    await widget.controller.moveLocalLibraryToGoogleDrive();
   }
 
   @override
@@ -471,7 +641,7 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                         ) ||
                         widget.controller.savedReferences.any(
                           (item) => item.storage == LibraryStorage.local,
-                        )))
+                        ))) ...<Widget>[
                   OutlinedButton.icon(
                     onPressed: widget.controller.googleDriveBusy
                         ? null
@@ -479,24 +649,18 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                     icon: const Icon(Icons.cloud_upload_outlined, size: 18),
                     label: const Text('Copy local library to Drive'),
                   ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('drive-move-local-library'),
+                    onPressed: widget.controller.googleDriveBusy
+                        ? null
+                        : () => unawaited(_confirmMoveToDrive()),
+                    icon: const Icon(Icons.drive_file_move_outline, size: 18),
+                    label: const Text('Move local library to Drive'),
+                  ),
+                ],
               ],
             ],
           ),
-          if (connected) ...<Widget>[
-            const SizedBox(height: 14),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    'Default for new generations and references',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                StorageDestinationButton(controller: widget.controller),
-              ],
-            ),
-          ],
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),

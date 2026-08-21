@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
 import '../core/bfl_api.dart';
+import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/google_drive.dart';
 import '../core/models.dart';
@@ -367,6 +368,15 @@ class AppController extends ChangeNotifier {
   bool get supportsSettingsVault => gateway is SettingsVaultGateway;
   SettingsVaultStatus get settingsVaultStatus =>
       snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
+  DataLocationGateway? get _dataLocation =>
+      gateway is DataLocationGateway ? gateway as DataLocationGateway : null;
+  bool get supportsRevealDataFolder =>
+      _dataLocation?.supportsRevealDataFolder ?? false;
+  bool get supportsDataRelocation =>
+      _dataLocation?.supportsDataRelocation ?? false;
+  bool get shellManagesDataRelocation =>
+      _dataLocation?.shellManagesDataRelocation ?? false;
+  bool dataRelocationBusy = false;
   bool googleDriveBusy = false;
   bool settingsVaultBusy = false;
   final Set<String> copyingGenerationIds = <String>{};
@@ -3289,6 +3299,108 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  Future<void> revealDataFolder() async {
+    final location = _dataLocation;
+    if (location == null || !location.supportsRevealDataFolder) return;
+    try {
+      await location.revealDataFolder();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  /// Whether [directory] already holds a Clawnsole library, or null when the
+  /// check itself failed (a notice explains the failure).
+  Future<bool?> dataDirectoryHasLibrary(String directory) async {
+    final location = _dataLocation;
+    if (location == null) return null;
+    try {
+      return await location.dataDirectoryHasLibrary(directory);
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    }
+  }
+
+  // Relocation swaps the live data directory, so it must never race an
+  // in-flight submission, poll retention, or Drive transfer.
+  bool get _dataRelocationBlocked =>
+      submitting ||
+      workingCount > 0 ||
+      googleDriveBusy ||
+      copyingGenerationIds.isNotEmpty ||
+      copyingReferenceIds.isNotEmpty;
+
+  Future<void> relocateDataDirectory(
+    String directory, {
+    bool useExistingLibrary = false,
+  }) async {
+    final location = _dataLocation;
+    if (location == null ||
+        !location.supportsDataRelocation ||
+        dataRelocationBusy) {
+      return;
+    }
+    if (_dataRelocationBlocked) {
+      showNotice(
+        'Wait for active generations and Drive transfers to finish before '
+        'moving the library.',
+      );
+      return;
+    }
+    dataRelocationBusy = true;
+    notifyListeners();
+    try {
+      _apply(
+        await location.relocateDataDirectory(
+          directory,
+          useExistingLibrary: useExistingLibrary,
+        ),
+        restorePreferences: true,
+      );
+      showNotice(
+        useExistingLibrary
+            ? 'Clawnsole is now using the library in $directory.'
+            : 'Clawnsole data now lives in $directory. The previous copy '
+                  'stays in the old folder until you delete it.',
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      dataRelocationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> relocateDataDirectoryViaShell() async {
+    final location = _dataLocation;
+    if (location == null ||
+        !location.shellManagesDataRelocation ||
+        dataRelocationBusy) {
+      return;
+    }
+    if (_dataRelocationBlocked) {
+      showNotice(
+        'Wait for active generations and Drive transfers to finish before '
+        'moving the library.',
+      );
+      return;
+    }
+    dataRelocationBusy = true;
+    notifyListeners();
+    try {
+      final result = await location.relocateDataDirectoryViaShell();
+      if (result.moved) {
+        showNotice('Clawnsole is reopening from the new data folder.');
+      }
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      dataRelocationBusy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> connectGoogleDrive(String folderName) async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
@@ -3479,6 +3591,39 @@ class AppController extends ChangeNotifier {
       if (bulk) googleDriveBusy = false;
       copyingGenerationIds.removeAll(generationIds);
       copyingReferenceIds.removeAll(referenceIds);
+      notifyListeners();
+    }
+  }
+
+  Future<void> moveLocalLibraryToGoogleDrive() async {
+    if (gateway is! GoogleDriveGateway) return;
+    if (!googleDriveConnected) {
+      showNotice('Connect Google Drive before moving local items.');
+      return;
+    }
+    if (googleDriveBusy) return;
+    googleDriveBusy = true;
+    notifyListeners();
+    try {
+      late GoogleDriveCopyResult moved;
+      final operation = _driveCopyQueue.then((_) async {
+        moved = await (gateway as GoogleDriveGateway)
+            .moveLocalLibraryToGoogleDrive();
+      });
+      _driveCopyQueue = operation.then<void>((_) {}, onError: (_) {});
+      await operation;
+      _apply(moved.snapshot);
+      final total = moved.generations + moved.references;
+      showNotice(
+        total == 0
+            ? 'The local library was removed. Every item already lives in '
+                  'Google Drive.'
+            : 'Moved ${moved.generations} generation${moved.generations == 1 ? '' : 's'} and ${moved.references} reference${moved.references == 1 ? '' : 's'} to Drive. The local copies were removed.',
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    } finally {
+      googleDriveBusy = false;
       notifyListeners();
     }
   }

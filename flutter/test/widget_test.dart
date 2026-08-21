@@ -4185,6 +4185,10 @@ class _ResumableDriveGateway extends _MemoryGateway
     Set<String> referenceIds = const <String>{},
   }) async =>
       GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 }
 
 class _MemoryGateway implements AppGateway {

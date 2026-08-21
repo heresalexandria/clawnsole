@@ -6,7 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'bfl_api.dart';
+import 'data_location.dart';
 import 'direct_gateway.dart';
+import 'directory_reveal.dart';
 import 'flutter_secure_value_store.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
@@ -51,7 +53,7 @@ const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
 /// library data and the independently encrypted settings vault stay behind
 /// separate storage boundaries.
 class NativeGateway extends DirectGateway
-    implements GoogleDriveGateway, SettingsVaultGateway {
+    implements GoogleDriveGateway, SettingsVaultGateway, DataLocationGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
   // ignore: use_super_parameters
@@ -76,8 +78,8 @@ class NativeGateway extends DirectGateway
     SettingsVaultCodec? settingsVaultCodec,
     SettingsVaultDataStore? settingsVaultStore,
   }) {
-    final hybrid =
-        hybridStore ?? HybridDataStore(local: store ?? LocalDataStore());
+    final localStore = store ?? (hybridStore == null ? LocalDataStore() : null);
+    final hybrid = hybridStore ?? HybridDataStore(local: localStore!);
     final vault =
         settingsVaultStore ??
         SettingsVaultDataStore(
@@ -92,6 +94,7 @@ class NativeGateway extends DirectGateway
         );
     return NativeGateway._(
       hybrid: hybrid,
+      localStore: localStore,
       vault: vault,
       driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
       api: api,
@@ -114,6 +117,7 @@ class NativeGateway extends DirectGateway
     required HybridDataStore hybrid,
     required SettingsVaultDataStore vault,
     required GoogleDriveAuthorizer driveAuthorizer,
+    LocalDataStore? localStore,
     BflApi? api,
     http.Client? client,
     String? iosReviewApiKey,
@@ -127,6 +131,7 @@ class NativeGateway extends DirectGateway
     ProviderApiRouter? providerRouter,
     bool? isIos,
   }) : _hybrid = hybrid,
+       _localStore = localStore,
        _vault = vault,
        _driveAuthorizer = driveAuthorizer,
        _iosReviewKeys = <String, String>{
@@ -159,6 +164,7 @@ class NativeGateway extends DirectGateway
        );
 
   final HybridDataStore _hybrid;
+  final LocalDataStore? _localStore;
   final SettingsVaultDataStore _vault;
   final GoogleDriveAuthorizer _driveAuthorizer;
   final Map<String, String> _iosReviewKeys;
@@ -281,6 +287,65 @@ class NativeGateway extends DirectGateway
       references: copied.references,
     );
   }
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async {
+    final moved = await _hybrid.moveLocalToDrive();
+    return GoogleDriveCopyResult(
+      snapshot: await load(),
+      generations: moved.generations,
+      references: moved.references,
+    );
+  }
+
+  @override
+  bool get supportsRevealDataFolder =>
+      _localStore != null && canRevealDirectory;
+
+  @override
+  bool get supportsDataRelocation =>
+      _localStore != null &&
+      (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
+  @override
+  bool get shellManagesDataRelocation => false;
+
+  @override
+  Future<void> revealDataFolder() async {
+    final store = _localStore;
+    if (store == null || !supportsRevealDataFolder) {
+      throw StateError('Opening the data folder is not supported here.');
+    }
+    await revealDirectory(await store.dataDirectoryPath());
+  }
+
+  @override
+  Future<bool> dataDirectoryHasLibrary(String directory) {
+    final store = _localStore;
+    if (store == null) {
+      throw StateError('Moving the data folder is not supported here.');
+    }
+    return store.hasLibraryAt(directory);
+  }
+
+  @override
+  Future<LocalSnapshot> relocateDataDirectory(
+    String directory, {
+    bool useExistingLibrary = false,
+  }) async {
+    final store = _localStore;
+    if (store == null || !supportsDataRelocation) {
+      throw StateError('Moving the data folder is not supported here.');
+    }
+    await store.relocate(directory, useExistingLibrary: useExistingLibrary);
+    return load();
+  }
+
+  @override
+  Future<ShellDataRelocation> relocateDataDirectoryViaShell() =>
+      throw StateError(
+        'This build moves its data folder directly rather than via a shell.',
+      );
 
   @override
   bool get supportsPhotoLibrarySave => Platform.isIOS || Platform.isAndroid;

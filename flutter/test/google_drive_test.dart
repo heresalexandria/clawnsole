@@ -652,6 +652,125 @@ void main() {
       );
     },
   );
+
+  test(
+    'moveLocalToDrive copies, verifies, then clears the local library',
+    () async {
+      final local = _migrationLocalStore();
+      final drive = _MemoryDriveStore(const StoredData());
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Shared Studio');
+
+      final moved = await hybrid.moveLocalToDrive();
+
+      expect(moved.generations, 1);
+      expect(moved.references, 1);
+      final after = await hybrid.read();
+      expect(after.generations.map((item) => item.localId), <String>[
+        'drive-local-generation',
+      ]);
+      expect(after.savedReferences.map((item) => item.id), <String>[
+        'drive-local-reference',
+      ]);
+      expect(
+        after.generations.every((item) => item.storage == LibraryStorage.drive),
+        isTrue,
+      );
+      // The local file keeps device secrets and the Drive linkage so the
+      // connection resumes on the next launch, but no library records.
+      expect(local.data.generations, isEmpty);
+      expect(local.data.savedReferences, isEmpty);
+      expect(local.data.folders, isEmpty);
+      expect(local.data.driveFolderName, 'Shared Studio');
+      expect(local.data.driveFolderId, 'drive-root');
+      expect(local.data.apiKeyFor('bfl'), 'device-secret');
+      expect(local.assets, isEmpty);
+      expect(drive.assets.values, hasLength(2));
+
+      // A second migration is a no-op rather than an error.
+      final again = await hybrid.moveLocalToDrive();
+      expect(again.generations, 0);
+      expect(again.references, 0);
+    },
+  );
+
+  test(
+    'moveLocalToDrive keeps the local library when a copy is unverified',
+    () async {
+      final local = _migrationLocalStore();
+      final drive = _GenerationDroppingDriveStore(const StoredData());
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Shared Studio');
+
+      await expectLater(hybrid.moveLocalToDrive(), throwsStateError);
+
+      expect(local.data.generations, hasLength(1));
+      expect(local.data.savedReferences, hasLength(1));
+      expect(local.assets, isNotEmpty);
+    },
+  );
+}
+
+_MemoryStore _migrationLocalStore() {
+  final now = DateTime.utc(2026, 8, 20);
+  return _MemoryStore(
+    StoredData(
+      apiKeys: const <String, String>{'bfl': 'device-secret'},
+      generations: <Generation>[
+        Generation(
+          localId: 'local-generation',
+          status: 'Ready',
+          prompt: 'local generation',
+          mode: VideoMode.t2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 8,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+          ),
+          createdAt: now,
+          updatedAt: now,
+          resultAsset: const AssetReference(
+            kind: 'local',
+            value: 'local-video',
+            label: 'local.mp4',
+            contentType: 'video/mp4',
+          ),
+        ),
+      ],
+      savedReferences: <SavedReference>[
+        SavedReference(
+          id: 'local-reference',
+          name: 'Local reference',
+          kind: MediaReferenceKind.image,
+          asset: const AssetReference(
+            kind: 'local',
+            value: 'local-image',
+            label: 'reference.png',
+            contentType: 'image/png',
+          ),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ],
+    ),
+    assets: <String, Uint8List>{
+      'local-video': Uint8List.fromList(<int>[1, 2, 3]),
+      'local-image': Uint8List.fromList(<int>[4, 5]),
+    },
+  );
+}
+
+/// Simulates a Drive write that silently loses generation records so the
+/// migration's verification step must refuse to delete anything local.
+class _GenerationDroppingDriveStore extends _MemoryDriveStore {
+  _GenerationDroppingDriveStore(super.data);
+
+  @override
+  Future<void> write(StoredData value) =>
+      super.write(value.copyWith(generations: const <Generation>[]));
 }
 
 class _MemoryStore implements DurableDataStore {
@@ -706,7 +825,34 @@ class _MemoryStore implements DurableDataStore {
   Future<void> pruneAssets(
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
-  ]) async {}
+  ]) async {
+    final retained = <String>{};
+    void add(AssetReference? reference) {
+      if (reference?.kind == 'local') retained.add(reference!.value);
+    }
+
+    for (final generation in generations) {
+      add(generation.resultAsset);
+      add(generation.thumbnailAsset);
+      add(generation.timelineThumbnailAsset);
+      add(generation.config.source);
+      add(generation.config.sourceThumbnailAsset);
+      for (final frame
+          in generation.config.keyframes ?? const <KeyframeLabel>[]) {
+        add(frame.source);
+      }
+      for (final media
+          in generation.config.references ?? const <MediaReferenceLabel>[]) {
+        add(media.source);
+        add(media.thumbnailAsset);
+      }
+    }
+    for (final reference in savedReferences) {
+      add(reference.asset);
+      add(reference.thumbnailAsset);
+    }
+    assets.removeWhere((id, _) => !retained.contains(id));
+  }
 
   @override
   Future<void> delete() async {
