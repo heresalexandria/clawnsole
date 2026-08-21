@@ -1038,6 +1038,7 @@ class AppPreferences {
         GenerationPlaceholderStyle.broadcastStatic,
     this.lastLocalGenerationFolderId,
     this.lastDriveGenerationFolderId,
+    this.costDeskColumns,
   });
 
   final AppSection activeSection;
@@ -1052,6 +1053,10 @@ class AppPreferences {
   final GenerationPlaceholderStyle generationPlaceholderStyle;
   final String? lastLocalGenerationFolderId;
   final String? lastDriveGenerationFolderId;
+
+  /// Visible cost-desk column ids in display order. Null keeps the default
+  /// set; ids missing from the list stay hidden and unknown ids are ignored.
+  final List<String>? costDeskColumns;
 
   AppPreferences copyWith({
     AppSection? activeSection,
@@ -1068,6 +1073,8 @@ class AppPreferences {
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
     bool clearLastDriveGenerationFolder = false,
+    List<String>? costDeskColumns,
+    bool clearCostDeskColumns = false,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1087,6 +1094,9 @@ class AppPreferences {
     lastDriveGenerationFolderId: clearLastDriveGenerationFolder
         ? null
         : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
+    costDeskColumns: clearCostDeskColumns
+        ? null
+        : costDeskColumns ?? this.costDeskColumns,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1104,6 +1114,7 @@ class AppPreferences {
       'lastLocalGenerationFolderId': lastLocalGenerationFolderId,
     if (lastDriveGenerationFolderId != null)
       'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
+    if (costDeskColumns != null) 'costDeskColumns': costDeskColumns,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -1142,6 +1153,10 @@ class AppPreferences {
     ),
     lastLocalGenerationFolderId: json['lastLocalGenerationFolderId'] as String?,
     lastDriveGenerationFolderId: json['lastDriveGenerationFolderId'] as String?,
+    costDeskColumns: switch (json['costDeskColumns']) {
+      final List<Object?> ids => ids.whereType<String>().toList(),
+      _ => null,
+    },
   );
 }
 
