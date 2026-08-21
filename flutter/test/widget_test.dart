@@ -3167,9 +3167,7 @@ void main() {
     }
   });
 
-  testWidgets('library view toggle switches and saves mini and compact views', (
-    tester,
-  ) async {
+  testWidgets('library dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final gateway = _MemoryGateway(
@@ -3188,10 +3186,12 @@ void main() {
     expect(find.byTooltip('Compact'), findsOneWidget);
     expect(find.byTooltip('Mini'), findsOneWidget);
     expect(find.byTooltip('Full'), findsOneWidget);
+    expect(find.byType(StatusBadge), findsNWidgets(4));
 
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(StatusBadge), findsNothing);
     expect(
       find.byKey(const ValueKey('generation-mini-view-generation-0')),
       findsOneWidget,
@@ -3216,6 +3216,7 @@ void main() {
     await tester.tap(find.byTooltip('Compact'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(StatusBadge), findsNothing);
     final firstCompact = find.byKey(
       const ValueKey('generation-compact-view-generation-0'),
     );
@@ -3240,11 +3241,18 @@ void main() {
       gateway.snapshot.preferences.libraryViewMode,
       GenerationViewMode.compact,
     );
+
+    await tester.tap(find.byTooltip('Full'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StatusBadge), findsNWidgets(4));
+    expect(
+      gateway.snapshot.preferences.libraryViewMode,
+      GenerationViewMode.full,
+    );
   });
 
-  testWidgets('recent work view toggle renders a two-column mini grid', (
-    tester,
-  ) async {
+  testWidgets('recent work dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final gateway = _MemoryGateway(
@@ -3260,9 +3268,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.byType(StatusBadge), findsNWidgets(4));
+
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
 
+    expect(find.byType(StatusBadge), findsNothing);
     final first = find.byKey(
       const ValueKey('generation-mini-view-generation-0'),
     );
@@ -3282,6 +3293,28 @@ void main() {
     expect(
       gateway.snapshot.preferences.recentWorkViewMode,
       GenerationViewMode.mini,
+    );
+
+    await tester.tap(find.byTooltip('Compact'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StatusBadge), findsNothing);
+    expect(
+      find.byKey(const ValueKey('generation-compact-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(
+      gateway.snapshot.preferences.recentWorkViewMode,
+      GenerationViewMode.compact,
+    );
+
+    await tester.tap(find.byTooltip('Full'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StatusBadge), findsNWidgets(4));
+    expect(
+      gateway.snapshot.preferences.recentWorkViewMode,
+      GenerationViewMode.full,
     );
   });
 

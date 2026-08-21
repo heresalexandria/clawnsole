@@ -308,7 +308,6 @@ class _DenseGenerationPreview extends StatelessWidget {
           GenerationLoadingPlaceholder(item: item)
         else
           GenerationInputPreview(controller: controller, item: item),
-        Positioned(left: 7, top: 7, child: StatusBadge(item: item)),
         if (item.isWorking && !item.isStatusUnavailable)
           Positioned(
             bottom: 0,
