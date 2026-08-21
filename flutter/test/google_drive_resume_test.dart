@@ -133,6 +133,48 @@ void main() {
     expect(await gateway.resumeGoogleDrive(), isNull);
     expect(authorizer.silentCalls, 0);
   });
+
+  test('forced resume replaces a session that still looks connected', () async {
+    final refreshBodies = <Map<String, Object?>>[];
+    final authorizer = _FakeAuthorizer(silentToken: 'renewed-token');
+    final gateway = WebGateway(
+      baseUrl: Uri.parse('http://127.0.0.1:9999/'),
+      driveAuthorizer: authorizer,
+      settingsVaultInvoker: (_, _) async => <String, Object?>{'ok': true},
+      client: MockClient((request) async {
+        if (request.url.path == '/state') {
+          return http.Response(
+            jsonEncode(
+              statePayload(folderName: 'Clawnsole', state: 'connected'),
+            ),
+            200,
+          );
+        }
+        if (request.url.path == '/drive/refresh') {
+          refreshBodies.add(
+            (jsonDecode(request.body) as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+          return http.Response(
+            jsonEncode(
+              statePayload(folderName: 'Clawnsole', state: 'connected'),
+            ),
+            200,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    await gateway.load();
+    final resumed = await gateway.resumeGoogleDrive(force: true);
+
+    expect(resumed, isNotNull);
+    expect(refreshBodies.single['accessToken'], 'renewed-token');
+    expect(authorizer.silentCalls, 1);
+    expect(authorizer.interactiveCalls, 0);
+  });
 }
 
 class _FakeAuthorizer implements GoogleDriveAuthorizer {

@@ -230,11 +230,13 @@ class WebGateway
   }
 
   @override
-  Future<LocalSnapshot?> resumeGoogleDrive() async {
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async {
     // The companion holds the Drive session in memory only, so a configured
     // but disconnected library means the process restarted; reattach quietly
-    // when a stored grant still exists.
-    if (_driveConnection.isConnected || !_driveConnection.isConfigured) {
+    // when a stored grant still exists. A forced resume replaces a token that
+    // expired while the client still believed the companion was connected.
+    if ((!force && _driveConnection.isConnected) ||
+        !_driveConnection.isConfigured) {
       return null;
     }
     try {

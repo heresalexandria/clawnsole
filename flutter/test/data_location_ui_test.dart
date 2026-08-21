@@ -246,7 +246,7 @@ class _DataLocationGateway
   Future<LocalSnapshot> refreshGoogleDrive() async => snapshot;
 
   @override
-  Future<LocalSnapshot?> resumeGoogleDrive() async => null;
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async => null;
 
   @override
   Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
