@@ -533,10 +533,18 @@ class _LibraryHeading extends StatelessWidget {
           ],
         ),
       ),
-      FilledButton.icon(
-        onPressed: () => unawaited(controller.navigate(AppSection.create)),
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('New generation'),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: <Widget>[
+          if (controller.supportsGoogleDrive)
+            DriveRefreshButton(controller: controller, keyPrefix: 'library'),
+          FilledButton.icon(
+            onPressed: () => unawaited(controller.navigate(AppSection.create)),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('New generation'),
+          ),
+        ],
       ),
     ],
   );
@@ -991,12 +999,7 @@ class _GenerationCardState extends State<GenerationCard> {
         children: <Widget>[
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-            child: isGeneratingVideo
-                ? AspectRatio(
-                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
-                    child: preview,
-                  )
-                : hasMedia
+            child: isGeneratingVideo || hasMedia
                 ? InlineVideoMediaBox(
                     playbackId: item.localId,
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),

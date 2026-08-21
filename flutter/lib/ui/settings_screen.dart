@@ -1532,12 +1532,19 @@ class _SettingsSide extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 15),
-        OutlinedButton.icon(
-          onPressed: () => unawaited(launchUrl(Uri.parse(bflProvider.docsUrl))),
-          icon: const Icon(Icons.open_in_new_rounded, size: 16),
-          label: const Text('FLUX 3 documentation'),
-        ),
-        const SizedBox(height: 8),
+        for (final provider in videoProviders) ...<Widget>[
+          OutlinedButton.icon(
+            key: ValueKey('provider-documentation-${provider.id}'),
+            onPressed: () => unawaited(launchUrl(Uri.parse(provider.docsUrl))),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: Text(
+              provider.id == bflProvider.id
+                  ? 'FLUX 3 documentation'
+                  : '${provider.name} documentation',
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         OutlinedButton.icon(
           onPressed: () =>
               unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),

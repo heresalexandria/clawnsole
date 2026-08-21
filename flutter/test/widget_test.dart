@@ -612,6 +612,42 @@ void main() {
     expect(film.width / film.height, closeTo(9 / 16, .01));
     expect(film.height, closeTo(420, .1));
 
+    // In-progress video cards use the identical capped media viewport, so a
+    // portrait placeholder cannot make the card taller than its delivered
+    // neighbor with the same ratio.
+    final now = DateTime.utc(2026, 8, 21, 12);
+    final working = Generation(
+      localId: 'working-portrait',
+      status: 'Pending',
+      prompt: 'A portrait render crossing the wire.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '9:16',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 640,
+              child: ActivityCard(controller: controller, item: working),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final workingBox = tester.getSize(find.byType(InlineVideoMediaBox));
+    expect(workingBox.height, closeTo(box.height, .1));
+
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
@@ -2419,6 +2455,97 @@ void main() {
     expect(find.text('ESTIMATED AFTER'), findsOneWidget);
     expect(find.text('AVAILABLE NOW'), findsNothing);
     bflController.dispose();
+  });
+
+  testWidgets('mobile provider plaque and estimate align to the right edge', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Model & Provider:'), findsNothing);
+    final plaque = find.byKey(const ValueKey('provider-plaque'));
+    expect(tester.getTopRight(plaque).dx, closeTo(374, .1));
+
+    final panel = find.byKey(const ValueKey('estimated-charge-panel'));
+    final rate = find.byKey(const ValueKey('estimate-rate'));
+    final credits = find.byKey(const ValueKey('estimate-provider-units'));
+    final rateRight = tester.getTopRight(rate).dx;
+    final creditsRight = tester.getTopRight(credits).dx;
+    expect(rateRight, closeTo(creditsRight, .1));
+    expect(tester.getTopRight(panel).dx - rateRight, inInclusiveRange(13, 16));
+    controller.dispose();
+  });
+
+  testWidgets('desktop estimate gives more room to save controls', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('estimated-charge-panel')))
+          .width,
+      lessThanOrEqualTo(
+        tester
+            .getSize(find.byKey(const ValueKey('generation-destination-panel')))
+            .width,
+      ),
+    );
+    controller.dispose();
   });
 
   testWidgets('provider picker collapses and expands provider models', (
@@ -4294,6 +4421,76 @@ void main() {
     expect(find.text('A film that lives in Drive.'), findsOneWidget);
   });
 
+  testWidgets('primary media views refresh their connected Drive library', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const views = <(AppSection, String)>[
+      (AppSection.library, 'library'),
+      (AppSection.references, 'references'),
+      (AppSection.create, 'recent-work'),
+    ];
+
+    for (final view in views) {
+      final snapshot = LocalSnapshot(
+        generations: const <Generation>[],
+        preferences: AppPreferences(activeSection: view.$1),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+      );
+      final gateway = _ResumableDriveGateway(
+        snapshot,
+        configured: true,
+        resumed: snapshot,
+        refreshed: snapshot,
+      );
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+
+      final refresh = find.byKey(ValueKey('${view.$2}-drive-refresh'));
+      expect(refresh, findsOneWidget);
+      await tester.ensureVisible(refresh);
+      await tester.tap(refresh);
+      await tester.pumpAndSettle();
+      expect(gateway.refreshCalls, 1);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
+  });
+
+  testWidgets('recent work shows at most the newest 100 items', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      LocalSnapshot(
+        generations: List<Generation>.generate(101, _viewModeGeneration),
+        preferences: const AppPreferences(
+          recentWorkViewMode: GenerationViewMode.compact,
+        ),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 101),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CompactGenerationRow), findsNWidgets(100));
+    expect(
+      find.byKey(const ValueKey('generation-compact-view-generation-99')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-compact-view-generation-100')),
+      findsNothing,
+    );
+  });
+
   testWidgets('recent work dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -4391,6 +4588,16 @@ void main() {
       portrait.backgroundImage,
       const AssetImage('assets/profile-alexandria.jpg'),
     );
+    expect(find.text('ArtCraft documentation'), findsOneWidget);
+    expect(find.text('Atlas Cloud documentation'), findsOneWidget);
+    expect(find.text('FLUX 3 documentation'), findsOneWidget);
+    expect(find.text('LTX Studio documentation'), findsOneWidget);
+    for (final provider in videoProviders) {
+      expect(
+        find.byKey(ValueKey('provider-documentation-${provider.id}')),
+        findsOneWidget,
+      );
+    }
   });
 
   testWidgets('settings persists the selected generation placeholder', (

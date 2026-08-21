@@ -136,6 +136,33 @@ void main() {
     expect(await cache.lookup('drive-file-0003'), isNotNull);
   });
 
+  test('a newly uploaded Drive film seeds the local presenter cache', () async {
+    final cache = VideoCache(directory: () async => temporary);
+    final api = _UploadDriveApi();
+    final store = GoogleDriveStore(
+      apiFactory: (_) => api,
+      presenter: IoGoogleDriveAssetPresenter(cache: cache),
+    );
+    await store.connect('token', 'Shared Studio');
+
+    final film = await store.writeAsset(
+      Uint8List.fromList(<int>[7, 8, 9]),
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    expect(
+      await File.fromUri((await cache.lookup(film.value))!.uri).readAsBytes(),
+      <int>[7, 8, 9],
+    );
+
+    final image = await store.writeAsset(
+      Uint8List.fromList(<int>[1, 2]),
+      label: 'poster.png',
+      contentType: 'image/png',
+    );
+    expect(await cache.lookup(image.value), isNull);
+  });
+
   test('readFileRange requests a byte window and slices 200s', () async {
     final media = Uint8List.fromList(List<int>.generate(10, (index) => index));
     String? observedRange;
@@ -188,6 +215,7 @@ void main() {
       expect(uri, Uri.parse('file:///cache/film-asset-0001.mp4'));
       expect(seen, <double?>[.25, .75, 1]);
       expect(gateway.listenerCount('film-asset-0001'), 0);
+      expect(controller.videoPreviewSourceRevision, 1);
 
       // A provider-URL film has no observable byte progress.
       final remote = controller.generationMediaDelivery(
@@ -226,6 +254,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(gateway.prefetched, <String>['film-asset-0009']);
+    expect(controller.videoPreviewSourceRevision, 1);
     controller.dispose();
   });
 
@@ -446,5 +475,50 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
   ) {
     _listeners[assetId]?.remove(listener);
     if (_listeners[assetId]?.isEmpty ?? false) _listeners.remove(assetId);
+  }
+}
+
+class _UploadDriveApi extends GoogleDriveApi {
+  _UploadDriveApi() : super(accessToken: 'token');
+
+  int _fileCount = 0;
+
+  @override
+  Future<GoogleDriveFile?> findRootFolder(String name) async =>
+      const GoogleDriveFile(
+        id: 'root-folder-0001',
+        name: 'Shared Studio',
+        mimeType: 'application/vnd.google-apps.folder',
+      );
+
+  @override
+  Future<GoogleDriveFile?> findChild(
+    String parentId,
+    String name, {
+    String? appPropertyKey,
+    String? appPropertyValue,
+  }) async => name == clawnsoleDriveAssetsFolder
+      ? const GoogleDriveFile(
+          id: 'assets-folder-0001',
+          name: clawnsoleDriveAssetsFolder,
+          mimeType: 'application/vnd.google-apps.folder',
+        )
+      : null;
+
+  @override
+  Future<GoogleDriveFile> createFile({
+    required String parentId,
+    required String name,
+    required Uint8List bytes,
+    required String contentType,
+    Map<String, String> appProperties = const <String, String>{},
+  }) async {
+    _fileCount += 1;
+    return GoogleDriveFile(
+      id: 'uploaded-file-${_fileCount.toString().padLeft(4, '0')}',
+      name: name,
+      mimeType: contentType,
+      size: bytes.length,
+    );
   }
 }
