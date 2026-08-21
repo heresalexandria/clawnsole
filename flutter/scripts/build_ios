@@ -38,21 +38,23 @@ prepare_clawnsole_review_defines
 prepare_google_ios_oauth
 trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
 
-OAUTH_BUILD_ARGUMENTS=()
+IOS_BUILD_ARGUMENTS=(
+  --release
+  --export-method "$EXPORT_METHOD"
+)
+if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
+  IOS_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
+fi
 if [[ -n "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
-  OAUTH_BUILD_ARGUMENTS+=(
+  IOS_BUILD_ARGUMENTS+=(
     --dart-define "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID=${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID}"
   )
 fi
+IOS_BUILD_ARGUMENTS+=("$@")
 
 "$REPOSITORY_ROOT/scripts/prepare_platform_icons" ios
 
-flutter build ipa \
-  --release \
-  --export-method "$EXPORT_METHOD" \
-  "${REVIEW_BUILD_ARGUMENTS[@]}" \
-  "${OAUTH_BUILD_ARGUMENTS[@]}" \
-  "$@"
+flutter build ipa "${IOS_BUILD_ARGUMENTS[@]}"
 
 echo
 echo "iOS archive: $FLUTTER_DIRECTORY/build/ios/archive/Runner.xcarchive"

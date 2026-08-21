@@ -55,13 +55,14 @@ prepare_google_ios_oauth
 trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
 
 echo "Launching Clawnsole on iOS simulator ${SIMULATOR_ID}…"
-OAUTH_BUILD_ARGUMENTS=()
+IOS_RUN_ARGUMENTS=(-d "$SIMULATOR_ID")
+if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
+  IOS_RUN_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
+fi
 if [[ -n "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
-  OAUTH_BUILD_ARGUMENTS+=(
+  IOS_RUN_ARGUMENTS+=(
     --dart-define "CLAWNSOLE_GOOGLE_IOS_CLIENT_ID=${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID}"
   )
 fi
-flutter run -d "$SIMULATOR_ID" \
-  "${REVIEW_BUILD_ARGUMENTS[@]}" \
-  "${OAUTH_BUILD_ARGUMENTS[@]}" \
-  "$@"
+IOS_RUN_ARGUMENTS+=("$@")
+flutter run "${IOS_RUN_ARGUMENTS[@]}"

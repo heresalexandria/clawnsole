@@ -32,7 +32,6 @@ load_clawnsole_review_credentials() {
 
 prepare_clawnsole_review_defines() {
   REVIEW_DEFINE_FILE=""
-  REVIEW_BUILD_ARGUMENTS=()
 
   case "${INCLUDE_IOS_TEST_KEYS:-false}" in
     true|TRUE|1|yes|YES)
@@ -58,7 +57,6 @@ prepare_clawnsole_review_defines() {
   _append_clawnsole_review_define "ARTCRAFT" "$artcraft_key"
 
   if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
-    REVIEW_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
     echo "Including configured App Review provider credentials."
   else
     echo "No App Review credentials are configured; this build will require user keys."
