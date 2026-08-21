@@ -39,6 +39,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('video-frame-timeline')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('video-pointer-interceptor')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('video-play-surface')),
+        matching: find.byKey(const ValueKey('video-platform-view')),
+      ),
+      findsNothing,
+      reason: 'the click target must stay in front of the platform video view',
+    );
     final playsBeforeTap = videoPlatform.calls
         .where((call) => call == 'play')
         .length;
@@ -253,7 +265,9 @@ void main() {
 
     progress.value = 1;
     await tester.pump();
-    expect(find.text('100%'), findsOneWidget);
+    expect(find.text('100%'), findsNothing);
+    expect(find.text('Preparing film'), findsOneWidget);
+    expect(tester.widget<LinearProgressIndicator>(bar).value, isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

@@ -192,7 +192,7 @@ void main() {
   });
 
   test(
-    'generationMediaDelivery reports progress and completes at one',
+    'generationMediaDelivery reports transfer progress then clears it',
     () async {
       final gateway = _CacheGateway(_snapshot());
       final controller = AppController(gateway: gateway);
@@ -213,7 +213,7 @@ void main() {
       final uri = await delivery.uri;
 
       expect(uri, Uri.parse('file:///cache/film-asset-0001.mp4'));
-      expect(seen, <double?>[.25, .75, 1]);
+      expect(seen, <double?>[.25, .75, null]);
       expect(gateway.listenerCount('film-asset-0001'), 0);
       expect(controller.videoPreviewSourceRevision, 1);
 
