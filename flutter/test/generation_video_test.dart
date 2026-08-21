@@ -202,6 +202,63 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('loading shows an animated loader with determinate progress', (
+    tester,
+  ) async {
+    videoPlatform.holdInitialization = true;
+    final progress = ValueNotifier<double?>(null);
+    addTearDown(progress.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            height: 360,
+            child: GenerationVideo(
+              uri: Uri.parse('https://example.com/test.mp4'),
+              onDownload: (_) async {},
+              frameLoader: (_, _) async => null,
+              progress: progress,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Loading film'), findsOneWidget);
+    final bar = find.byKey(const ValueKey('video-loading-progress'));
+    expect(tester.widget<LinearProgressIndicator>(bar).value, isNull);
+
+    // The hourglass keeps moving while nothing else changes.
+    final hourglass = find
+        .ancestor(
+          of: find.byIcon(Icons.hourglass_bottom_rounded),
+          matching: find.byType(RotationTransition),
+        )
+        .first;
+    final turnsBefore = tester
+        .widget<RotationTransition>(hourglass)
+        .turns
+        .value;
+    await tester.pump(const Duration(milliseconds: 200));
+    final turnsAfter = tester.widget<RotationTransition>(hourglass).turns.value;
+    expect(turnsAfter, isNot(turnsBefore));
+
+    // Byte progress switches the bar to determinate with a percent label.
+    progress.value = .42;
+    await tester.pump();
+    expect(tester.widget<LinearProgressIndicator>(bar).value, .42);
+    expect(find.text('42%'), findsOneWidget);
+
+    progress.value = 1;
+    await tester.pump();
+    expect(find.text('100%'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('download offers Photos first and returns that destination', (
     tester,
   ) async {
@@ -485,6 +542,10 @@ class _FakeVideoPlayerPlatform extends VideoPlayerPlatform {
   final Map<int, Duration> _positions = <int, Duration>{};
   int _nextPlayerId = 0;
 
+  /// When set, players never report initialization, keeping the loading
+  /// placeholder on screen for tests that exercise it.
+  bool holdInitialization = false;
+
   @override
   Future<void> init() async {
     calls.add('init');
@@ -496,13 +557,15 @@ class _FakeVideoPlayerPlatform extends VideoPlayerPlatform {
     final id = _nextPlayerId++;
     final events = StreamController<VideoEvent>();
     _events[id] = events;
-    events.add(
-      VideoEvent(
-        eventType: VideoEventType.initialized,
-        size: const Size(1920, 1080),
-        duration: const Duration(seconds: 10),
-      ),
-    );
+    if (!holdInitialization) {
+      events.add(
+        VideoEvent(
+          eventType: VideoEventType.initialized,
+          size: const Size(1920, 1080),
+          duration: const Duration(seconds: 10),
+        ),
+      );
+    }
     return id;
   }
 

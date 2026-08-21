@@ -14,6 +14,7 @@ import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
+import '../core/video_cache_gateway.dart';
 
 class PickedAsset {
   const PickedAsset({
@@ -245,6 +246,10 @@ class AppController extends ChangeNotifier {
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
 
+  /// Size cap in megabytes for the local video player cache; 0 turns the
+  /// cache and its prefetching off.
+  int localVideoCacheMb = AppPreferences.defaultLocalVideoCacheMb;
+
   /// Visible cost-desk column ids in display order; null keeps the defaults.
   List<String>? costDeskColumns;
   String? lastLocalGenerationFolderId;
@@ -290,6 +295,10 @@ class AppController extends ChangeNotifier {
   CostEstimate? _liveEstimate;
   Timer? _noticeTimer;
   bool _polling = false;
+  Timer? _prefetchDebounce;
+  int _prefetchRevision = 0;
+  Future<void> _prefetchQueue = Future<void>.value();
+  final Set<String> _prefetchedVideoAssets = <String>{};
   final Set<String> _retentionAttempts = <String>{};
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -369,6 +378,9 @@ class AppController extends ChangeNotifier {
           state: GoogleDriveConnectionState.unavailable,
         );
   bool get supportsSettingsVault => gateway is SettingsVaultGateway;
+  VideoCacheGateway? get _videoCacheGateway =>
+      gateway is VideoCacheGateway ? gateway as VideoCacheGateway : null;
+  bool get supportsVideoCache => gateway is VideoCacheGateway;
   SettingsVaultStatus get settingsVaultStatus =>
       snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
   DataLocationGateway? get _dataLocation =>
@@ -898,6 +910,7 @@ class AppController extends ChangeNotifier {
       libraryStorageFilter = value.preferences.libraryStorageFilter;
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
+      localVideoCacheMb = value.preferences.localVideoCacheMb;
       costDeskColumns = value.preferences.costDeskColumns;
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
@@ -945,6 +958,7 @@ class AppController extends ChangeNotifier {
       referenceFolderView = libraryFolderAll;
     }
     loadError = null;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -1084,6 +1098,95 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> setLocalVideoCacheMb(int value) async {
+    final clamped = value.clamp(0, 1 << 20);
+    localVideoCacheMb = clamped;
+    notifyListeners();
+    try {
+      // The gateway applies the new cap (native sweeps its cache directly;
+      // the companion reads the synced preference on its next request).
+      await _savePreferences(_preferences(localVideoCacheMb: clamped));
+      if (clamped == 0) {
+        _prefetchDebounce?.cancel();
+        _prefetchedVideoAssets.clear();
+        await _videoCacheGateway?.clearVideoCache();
+      } else {
+        _scheduleListingPrefetch();
+      }
+      notifyListeners();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<int> videoCacheUsedBytes() async =>
+      await _videoCacheGateway?.videoCacheUsedBytes() ?? 0;
+
+  Future<void> clearVideoCache() async {
+    try {
+      _prefetchedVideoAssets.clear();
+      await _videoCacheGateway?.clearVideoCache();
+      notifyListeners();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  static const int _listingPrefetchCount = 6;
+
+  /// Queues a background cache fill for the first few Drive-stored films of
+  /// the current listing, so tapping a visible card plays instantly. Runs
+  /// debounced off the controller's listing state — never from widget
+  /// initState — and is superseded when the listing changes again.
+  void _scheduleListingPrefetch() {
+    if (_videoCacheGateway == null || localVideoCacheMb <= 0) return;
+    _prefetchRevision += 1;
+    final revision = _prefetchRevision;
+    _prefetchDebounce?.cancel();
+    _prefetchDebounce = Timer(const Duration(milliseconds: 900), () {
+      if (revision != _prefetchRevision) return;
+      final candidates =
+          (section == AppSection.library
+                  ? filteredGenerations
+                  : visibleGenerations)
+              .where(
+                (item) =>
+                    item.isReady &&
+                    !item.isImage &&
+                    item.storage == LibraryStorage.drive &&
+                    item.resultAsset?.kind == 'drive',
+              )
+              .take(_listingPrefetchCount);
+      for (final item in candidates) {
+        _enqueueVideoPrefetch(item.resultAsset, revision: revision);
+      }
+    });
+  }
+
+  /// Serially fills the video cache in the background. [revision] cancels a
+  /// listing pass that was superseded before its turn came up; ready-film
+  /// prefetches pass none and always run.
+  void _enqueueVideoPrefetch(AssetReference? asset, {int? revision}) {
+    final cacheGateway = _videoCacheGateway;
+    if (cacheGateway == null || localVideoCacheMb <= 0) return;
+    if (asset == null || asset.kind != 'drive') return;
+    if (!_prefetchedVideoAssets.add(asset.value)) return;
+    _prefetchQueue = _prefetchQueue.then((_) async {
+      if (localVideoCacheMb <= 0 ||
+          (revision != null && revision != _prefetchRevision)) {
+        _prefetchedVideoAssets.remove(asset.value);
+        return;
+      }
+      try {
+        await cacheGateway.prefetchVideoAsset(asset);
+      } on Object {
+        // A failed prefetch (offline, Drive expired) may retry on the next
+        // listing pass; playback itself still downloads on demand.
+        _prefetchedVideoAssets.remove(asset.value);
+      }
+    });
+  }
+
   String? get selectedGenerationFolderId =>
       effectiveStorage == LibraryStorage.drive
       ? lastDriveGenerationFolderId
@@ -1118,6 +1221,7 @@ class AppController extends ChangeNotifier {
 
   void setLibraryFavoriteFilter(FavoriteFilter value) {
     libraryFavoriteFilter = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -1128,6 +1232,7 @@ class AppController extends ChangeNotifier {
 
   void setLibraryVisibilityFilter(VisibilityFilter value) {
     libraryVisibilityFilter = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -1347,6 +1452,7 @@ class AppController extends ChangeNotifier {
 
   void setSearch(String value) {
     librarySearch = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -1362,11 +1468,13 @@ class AppController extends ChangeNotifier {
       );
     }
     libraryFolderView = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
   void setLibraryTag(String? value) {
     libraryTag = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -1981,6 +2089,7 @@ class AppController extends ChangeNotifier {
     bool clearLastDriveGenerationFolder = false,
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
+    int? localVideoCacheMb,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -2002,6 +2111,7 @@ class AppController extends ChangeNotifier {
     costDeskColumns: clearCostDeskColumns
         ? null
         : costDeskColumns ?? this.costDeskColumns,
+    localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
   );
 
   int _validDuration(int value) {
@@ -2964,6 +3074,9 @@ class AppController extends ChangeNotifier {
           }
           if (updated.isReady) {
             showNotice('Your film is ready to watch and save.');
+            if (updated.storage == LibraryStorage.drive) {
+              _enqueueVideoPrefetch(updated.resultAsset);
+            }
           } else if (!item.isFailed && updated.isFailed) {
             showNotice(
               'Generation needs attention: ${updated.error ?? updated.statusLabel}',
@@ -3020,6 +3133,9 @@ class AppController extends ChangeNotifier {
         showNotice(
           '${providerNameForHistory(item.provider)} reports that this film is ready.',
         );
+        if (updated.storage == LibraryStorage.drive) {
+          _enqueueVideoPrefetch(updated.resultAsset);
+        }
       } else if (updated.isFailed) {
         showNotice(
           updated.error ??
@@ -4014,6 +4130,42 @@ class AppController extends ChangeNotifier {
     return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
   }
 
+  /// Resolves a playable URI while exposing byte progress for surfaces that
+  /// can observe it (native Drive downloads). Web builds hand playback to the
+  /// browser, so their progress listenable simply stays null (indeterminate).
+  GenerationMediaDelivery generationMediaDelivery(Generation item) {
+    final progress = ValueNotifier<double?>(null);
+    final asset = item.resultAsset;
+    final cacheGateway = _videoCacheGateway;
+    void Function()? detach;
+    if (asset != null && asset.kind == 'drive' && cacheGateway != null) {
+      void listener(double? fraction) => progress.value = fraction;
+      cacheGateway.addVideoProgressListener(asset.value, listener);
+      detach = () =>
+          cacheGateway.removeVideoProgressListener(asset.value, listener);
+    }
+    final uri = generationMediaUri(item)
+        .then((value) {
+          progress.value = 1;
+          return value;
+        })
+        .whenComplete(() => detach?.call());
+    return GenerationMediaDelivery(uri: uri, progress: progress);
+  }
+
+  /// A URI usable for preview-frame extraction only when producing it is
+  /// cheap: an already-cached Drive film, a local file, or a companion URL.
+  /// Never triggers a full Drive download — cold Drive items return null and
+  /// the card keeps its tap-to-play placeholder until the film is cached.
+  Future<Uri?> generationPreviewSourceUri(Generation item) async {
+    final asset = item.resultAsset;
+    final cacheGateway = _videoCacheGateway;
+    if (asset != null && asset.kind == 'drive' && cacheGateway != null) {
+      return cacheGateway.cachedVideoAssetUri(asset);
+    }
+    return generationMediaUri(item);
+  }
+
   Future<void> saveReferenceImage(AssetReference reference) async {
     final bytes = await gateway.readAsset(reference);
     final cleaned = reference.label.replaceAll(RegExp(r'[\\/:]'), '-').trim();
@@ -4095,11 +4247,23 @@ class AppController extends ChangeNotifier {
     _creditTimer?.cancel();
     _estimateTimer?.cancel();
     _noticeTimer?.cancel();
+    _prefetchDebounce?.cancel();
     super.dispose();
   }
 }
 
 enum VideoSaveDestination { photos, files }
+
+/// One video delivery in flight: the resolving URI plus a live download
+/// fraction for the loading surface. The progress value is null while the
+/// total is unknown (or the surface cannot observe bytes) and reaches 1.0
+/// when the URI resolves.
+class GenerationMediaDelivery {
+  const GenerationMediaDelivery({required this.uri, required this.progress});
+
+  final Future<Uri?> uri;
+  final ValueListenable<double?> progress;
+}
 
 extension<T> on List<T> {
   T? get firstOrNull => isEmpty ? null : first;

@@ -1046,7 +1046,10 @@ class AppPreferences {
     this.lastLocalGenerationFolderId,
     this.lastDriveGenerationFolderId,
     this.costDeskColumns,
+    this.localVideoCacheMb = defaultLocalVideoCacheMb,
   });
+
+  static const int defaultLocalVideoCacheMb = 100;
 
   final AppSection activeSection;
   final LibraryFilter libraryFilter;
@@ -1065,6 +1068,11 @@ class AppPreferences {
   /// set; ids missing from the list stay hidden and unknown ids are ignored.
   final List<String>? costDeskColumns;
 
+  /// Size cap in megabytes for the local video player cache that keeps
+  /// Drive-stored films on this device for instant playback. Zero turns the
+  /// cache (and its prefetching) off.
+  final int localVideoCacheMb;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1082,6 +1090,7 @@ class AppPreferences {
     bool clearLastDriveGenerationFolder = false,
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
+    int? localVideoCacheMb,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1104,6 +1113,7 @@ class AppPreferences {
     costDeskColumns: clearCostDeskColumns
         ? null
         : costDeskColumns ?? this.costDeskColumns,
+    localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1122,6 +1132,7 @@ class AppPreferences {
     if (lastDriveGenerationFolderId != null)
       'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
     if (costDeskColumns != null) 'costDeskColumns': costDeskColumns,
+    'localVideoCacheMb': localVideoCacheMb,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -1163,6 +1174,10 @@ class AppPreferences {
     costDeskColumns: switch (json['costDeskColumns']) {
       final List<Object?> ids => ids.whereType<String>().toList(),
       _ => null,
+    },
+    localVideoCacheMb: switch (json['localVideoCacheMb']) {
+      final num value => value.toInt().clamp(0, 1 << 20),
+      _ => defaultLocalVideoCacheMb,
     },
   );
 }

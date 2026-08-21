@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -27,6 +28,7 @@ Future<void> showVideoPlayerModal(
   double initialAspectRatio = 16 / 9,
   VideoPlayerController Function(Uri uri)? controllerFactory,
   VideoFrameLoader? frameLoader,
+  ValueListenable<double?>? progress,
 }) {
   if (MediaQuery.sizeOf(context).width < 700) {
     return Navigator.of(context).push(
@@ -44,6 +46,7 @@ Future<void> showVideoPlayerModal(
               supportsPhotos: supportsPhotos,
               controllerFactory: controllerFactory,
               frameLoader: frameLoader,
+              progress: progress,
             ),
           ),
         ),
@@ -59,6 +62,7 @@ Future<void> showVideoPlayerModal(
       initialAspectRatio: initialAspectRatio,
       controllerFactory: controllerFactory,
       frameLoader: frameLoader,
+      progress: progress,
     ),
   );
 }
@@ -71,6 +75,7 @@ class _VideoPlayerModal extends StatefulWidget {
     required this.initialAspectRatio,
     this.controllerFactory,
     this.frameLoader,
+    this.progress,
   });
 
   final Uri uri;
@@ -79,6 +84,7 @@ class _VideoPlayerModal extends StatefulWidget {
   final double initialAspectRatio;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
+  final ValueListenable<double?>? progress;
 
   @override
   State<_VideoPlayerModal> createState() => _VideoPlayerModalState();
@@ -122,6 +128,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
             supportsPhotos: widget.supportsPhotos,
             controllerFactory: widget.controllerFactory,
             frameLoader: widget.frameLoader,
+            progress: widget.progress,
           ),
         ),
       ),
@@ -143,6 +150,7 @@ class GenerationVideo extends StatefulWidget {
     this.controllerFactory,
     this.frameLoader,
     this.supportsPhotos = false,
+    this.progress,
   });
 
   /// Height of the frame timeline plus the transport bar rendered under the
@@ -170,6 +178,10 @@ class GenerationVideo extends StatefulWidget {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final bool supportsPhotos;
+
+  /// Live delivery progress rendered while the film is still loading. A null
+  /// fraction (or a null listenable) keeps the loader indeterminate.
+  final ValueListenable<double?>? progress;
 
   @override
   State<GenerationVideo> createState() => _GenerationVideoState();
@@ -298,6 +310,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
               controllerFactory: widget.controllerFactory,
               frameLoader: widget.frameLoader,
               supportsPhotos: widget.supportsPhotos,
+              progress: widget.progress,
             ),
           ),
         ),
@@ -376,9 +389,8 @@ class _GenerationVideoState extends State<GenerationVideo> {
         );
       }
       if (snapshot.connectionState != ConnectionState.done) {
-        return _VideoPlaceholder(
-          icon: Icons.hourglass_bottom_rounded,
-          label: 'Loading film',
+        return _VideoLoadingPlaceholder(
+          progress: widget.progress,
           onClose: widget.onClose,
         );
       }
@@ -558,6 +570,135 @@ class _VideoControls extends StatelessWidget {
             color: Colors.white,
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded),
+          ),
+      ],
+    ),
+  );
+}
+
+/// The loading surface shown while a film is fetched and initialized: a
+/// gently flipping hourglass over the plum panel, with a determinate progress
+/// bar whenever byte progress is known and a quiet indeterminate sweep
+/// otherwise. No spinner, no default blue.
+class _VideoLoadingPlaceholder extends StatefulWidget {
+  const _VideoLoadingPlaceholder({this.progress, this.onClose});
+
+  final ValueListenable<double?>? progress;
+  final VoidCallback? onClose;
+
+  @override
+  State<_VideoLoadingPlaceholder> createState() =>
+      _VideoLoadingPlaceholderState();
+}
+
+class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _flipper = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  )..repeat();
+
+  // Two half-turns per cycle with a rest between them, like an hourglass
+  // being turned over on a desk; each cycle ends upright so the loop never
+  // visibly snaps.
+  late final Animation<double> _turns = _flipper.drive(
+    TweenSequence<double>(<TweenSequenceItem<double>>[
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: 0,
+          end: .5,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 22,
+      ),
+      TweenSequenceItem<double>(tween: ConstantTween<double>(.5), weight: 28),
+      TweenSequenceItem<double>(
+        tween: Tween<double>(
+          begin: .5,
+          end: 1,
+        ).chain(CurveTween(curve: Curves.easeInOutCubic)),
+        weight: 22,
+      ),
+      TweenSequenceItem<double>(tween: ConstantTween<double>(1), weight: 28),
+    ]),
+  );
+
+  @override
+  void dispose() {
+    _flipper.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    color: ClawnsoleColors.plumInk,
+    child: Stack(
+      children: <Widget>[
+        Center(
+          child: ValueListenableBuilder<double?>(
+            valueListenable:
+                widget.progress ?? const AlwaysStoppedAnimation<double?>(null),
+            builder: (context, fraction, _) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                RotationTransition(
+                  turns: _turns,
+                  child: const Icon(
+                    Icons.hourglass_bottom_rounded,
+                    color: ClawnsoleColors.creamMuted,
+                    size: 30,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Loading film',
+                  style: TextStyle(color: Colors.white70, fontSize: 11),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: 190,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      key: const ValueKey('video-loading-progress'),
+                      value: fraction,
+                      minHeight: 4,
+                      backgroundColor: Colors.white12,
+                      color: ClawnsoleColors.creamMuted,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  height: 22,
+                  child: fraction == null
+                      ? null
+                      : Center(
+                          child: Text(
+                            '${(fraction.clamp(0.0, 1.0) * 100).round()}%',
+                            key: const ValueKey('video-loading-percent'),
+                            style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 10,
+                              fontFeatures: <FontFeature>[
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (widget.onClose != null)
+          Positioned(
+            top: 6,
+            right: 6,
+            child: IconButton(
+              tooltip: 'Close (Esc)',
+              color: Colors.white70,
+              onPressed: widget.onClose,
+              icon: const Icon(Icons.close_rounded),
+            ),
           ),
       ],
     ),

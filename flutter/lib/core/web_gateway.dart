@@ -12,6 +12,7 @@ import 'google_drive_auth.dart';
 import 'models.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_shell.dart';
+import 'video_cache_gateway.dart';
 
 Uri _configuredBaseUrl(Uri? override) {
   if (override != null) return override;
@@ -34,7 +35,8 @@ class WebGateway
         MediaPreviewGateway,
         GoogleDriveGateway,
         SettingsVaultGateway,
-        DataLocationGateway {
+        DataLocationGateway,
+        VideoCacheGateway {
   WebGateway({
     http.Client? client,
     Uri? baseUrl,
@@ -637,6 +639,50 @@ class WebGateway
     }
     return response.bodyBytes;
   }
+
+  @override
+  Future<int> videoCacheUsedBytes() async {
+    final payload = _map(await _read(await _client.get(_url('/video-cache'))));
+    return (payload['usedBytes'] as num?)?.toInt() ?? 0;
+  }
+
+  @override
+  Future<void> clearVideoCache() async {
+    await _read(await _client.delete(_url('/video-cache')));
+  }
+
+  @override
+  Future<Uri?> cachedVideoAssetUri(AssetReference reference) =>
+      // Building a companion URL is always cheap; the companion streams the
+      // asset with Range support and keeps its own disk cache warm.
+      assetUri(reference);
+
+  @override
+  Future<void> prefetchVideoAsset(AssetReference reference) async {
+    if (reference.kind != 'drive') return;
+    await _read(
+      await _client.post(
+        _url('/video-cache/prefetch'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'id': reference.value}),
+      ),
+    );
+  }
+
+  @override
+  void addVideoProgressListener(
+    String assetId,
+    VideoDeliveryProgressListener listener,
+  ) {
+    // A browser video element exposes no byte progress for its own fetches,
+    // so web surfaces stay on the indeterminate loader.
+  }
+
+  @override
+  void removeVideoProgressListener(
+    String assetId,
+    VideoDeliveryProgressListener listener,
+  ) {}
 
   @override
   Uri mediaUri(String source) =>

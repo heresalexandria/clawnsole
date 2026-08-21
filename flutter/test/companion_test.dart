@@ -12,6 +12,7 @@ import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/settings_vault_remote.dart';
+import 'package:clawnsole/core/video_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
@@ -917,6 +918,194 @@ void main() {
       await temporary.delete(recursive: true);
     }
   });
+
+  test(
+    'companion serves Drive films from its disk cache with ranges',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-video-cache-test.',
+      );
+      final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      final drive = _StreamingDriveStore();
+      final filmOne = Uint8List.fromList(<int>[1, 2, 3, 4, 5, 6, 7, 8]);
+      final filmTwo = Uint8List.fromList(<int>[9, 8, 7, 6, 5, 4]);
+      drive.assets['drive-film-one'] = filmOne;
+      drive.assets['drive-film-two'] = filmTwo;
+      final now = DateTime.utc(2026, 8, 21);
+      Generation generation(String id, String assetId, Uint8List bytes) =>
+          Generation(
+            localId: id,
+            status: 'Ready',
+            prompt: 'a cached clip',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+            resultAsset: AssetReference(
+              kind: 'drive',
+              value: assetId,
+              label: 'clip.mp4',
+              contentType: 'video/mp4',
+              bytes: bytes.length,
+            ),
+          );
+      drive.data = StoredData(
+        generations: <Generation>[
+          generation('one', 'drive-film-one', filmOne),
+          generation('two', 'drive-film-two', filmTwo),
+        ],
+      );
+      final store = CompanionHybridStore(
+        HybridDataStore(local: local, drive: drive),
+      );
+      await store.connectDrive('token', 'Cached Studio');
+      final cache = VideoCache(
+        directory: () async => Directory('${temporary.path}/video-cache'),
+      );
+      final application = CompanionApp.hybrid(
+        store: store,
+        api: BflApi(),
+        videoCache: cache,
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+      try {
+        // A cold open-from-zero request fills the cache exactly once while
+        // answering the range, and allows private browser caching.
+        final first = await http.get(
+          base.resolve('/assets?id=drive-film-one&kind=drive'),
+          headers: const <String, String>{'Range': 'bytes=0-'},
+        );
+        expect(first.statusCode, 206);
+        expect(first.bodyBytes, filmOne);
+        expect(first.headers['content-range'], 'bytes 0-7/8');
+        expect(first.headers['cache-control'], contains('max-age'));
+        expect(drive.streamDownloads, 1);
+
+        // A later seek is served from the cached file: no new Drive traffic.
+        final seek = await http.get(
+          base.resolve('/assets?id=drive-film-one&kind=drive'),
+          headers: const <String, String>{'Range': 'bytes=2-5'},
+        );
+        expect(seek.statusCode, 206);
+        expect(seek.bodyBytes, filmOne.sublist(2, 6));
+        expect(seek.headers['content-range'], 'bytes 2-5/8');
+        expect(drive.streamDownloads, 1);
+        expect(drive.rangeReads, 0);
+
+        // A cold seek on an uncached film answers straight from Drive's Range
+        // support instead of waiting behind a full download.
+        final coldSeek = await http.get(
+          base.resolve('/assets?id=drive-film-two&kind=drive'),
+          headers: const <String, String>{'Range': 'bytes=1-3'},
+        );
+        expect(coldSeek.statusCode, 206);
+        expect(coldSeek.bodyBytes, filmTwo.sublist(1, 4));
+        expect(coldSeek.headers['content-range'], 'bytes 1-3/6');
+        expect(drive.rangeReads, 1);
+        expect(drive.streamDownloads, 1);
+
+        final usage = await http.get(base.resolve('/video-cache'));
+        final usagePayload = jsonDecode(usage.body) as Map<String, Object?>;
+        expect(usagePayload['usedBytes'], filmOne.length);
+        expect(usagePayload['capBytes'], 100 * 1024 * 1024);
+
+        // Prefetch queues a background fill for the second film.
+        final prefetch = await http.post(
+          base.resolve('/video-cache/prefetch'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{'id': 'drive-film-two'}),
+        );
+        expect(prefetch.statusCode, 202);
+        expect(
+          (jsonDecode(prefetch.body) as Map<String, Object?>)['queued'],
+          true,
+        );
+        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        while (await cache.lookup('drive-film-two') == null &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(await cache.lookup('drive-film-two'), isNotNull);
+        expect(drive.streamDownloads, 2);
+
+        // Turning the preference off through the synced state clears the disk
+        // cache and returns /assets to direct serving.
+        final patched = await http.patch(
+          base.resolve('/state'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{
+            'action': 'setPreferences',
+            'value': const AppPreferences(localVideoCacheMb: 0).toJson(),
+          }),
+        );
+        expect(patched.statusCode, 200);
+        final off = await http.get(base.resolve('/video-cache'));
+        final offPayload = jsonDecode(off.body) as Map<String, Object?>;
+        expect(offPayload['capBytes'], 0);
+        expect(offPayload['usedBytes'], 0);
+
+        final direct = await http.get(
+          base.resolve('/assets?id=drive-film-one&kind=drive'),
+        );
+        expect(direct.statusCode, 200);
+        expect(direct.bodyBytes, filmOne);
+        expect(drive.fullReads, 1);
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+}
+
+class _StreamingDriveStore extends _MemoryDriveStore {
+  int streamDownloads = 0;
+  int rangeReads = 0;
+  int fullReads = 0;
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) {
+    fullReads += 1;
+    return super.readAsset(reference);
+  }
+
+  @override
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async {
+    streamDownloads += 1;
+    final bytes = assets[reference.value] ?? Uint8List(0);
+    return GoogleDriveByteStream(
+      Stream<List<int>>.value(bytes),
+      contentLength: bytes.length,
+    );
+  }
+
+  @override
+  Future<Uint8List> readAssetRange(
+    AssetReference reference,
+    int start,
+    int end,
+  ) async {
+    rangeReads += 1;
+    final bytes = assets[reference.value] ?? Uint8List(0);
+    return Uint8List.sublistView(
+      bytes,
+      start.clamp(0, bytes.length),
+      (end + 1).clamp(0, bytes.length),
+    );
+  }
 }
 
 class _MemoryDriveStore extends GoogleDriveStore {
