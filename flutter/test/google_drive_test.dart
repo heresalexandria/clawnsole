@@ -185,6 +185,74 @@ void main() {
     );
   });
 
+  test('Drive account lookup returns a human-readable identity', () async {
+    final api = GoogleDriveApi(
+      accessToken: 'token',
+      apiBase: Uri.parse('https://drive.test/drive/v3/'),
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode(<String, Object?>{
+            'user': <String, Object?>{
+              'displayName': 'Alexandria',
+              'emailAddress': 'alexandria@example.com',
+            },
+          }),
+          200,
+        ),
+      ),
+    );
+
+    final user = await api.currentUser();
+
+    expect(user.label, 'alexandria@example.com');
+  });
+
+  test('a single app-owned Drive folder is reused instead of split', () async {
+    final api = _DiscoveryApi(<GoogleDriveFile>[
+      const GoogleDriveFile(
+        id: 'existing-root',
+        name: 'Original Clawnsole',
+        mimeType: 'application/vnd.google-apps.folder',
+      ),
+    ]);
+    final store = GoogleDriveStore(apiFactory: (_) => api);
+
+    await store.connect('token', 'Accidental New Name');
+
+    expect(store.connection.folderId, 'existing-root');
+    expect(store.connection.folderName, 'Original Clawnsole');
+    expect(store.connection.accountLabel, 'alexandria@example.com');
+    expect(api.createdRootFolders, 0);
+  });
+
+  test('multiple app-owned roots require an exact existing name', () async {
+    final api = _DiscoveryApi(<GoogleDriveFile>[
+      const GoogleDriveFile(
+        id: 'root-a',
+        name: 'Personal',
+        mimeType: 'application/vnd.google-apps.folder',
+      ),
+      const GoogleDriveFile(
+        id: 'root-b',
+        name: 'Studio',
+        mimeType: 'application/vnd.google-apps.folder',
+      ),
+    ]);
+    final store = GoogleDriveStore(apiFactory: (_) => api);
+
+    await expectLater(
+      store.connect('token', 'Another'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Enter one of those exact names'),
+        ),
+      ),
+    );
+    expect(api.createdRootFolders, 0);
+  });
+
   test(
     'schema 16 preserves Drive provenance and migrates old items locally',
     () {
@@ -212,9 +280,22 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 17);
+      expect(migrated.toJson()['schemaVersion'], 18);
     },
   );
+
+  test('stored Drive reconnect intent migrates and persists explicitly', () {
+    final migrated = StoredData.fromJson(<String, Object?>{
+      'driveFolderName': 'Clawnsole',
+      'driveFolderId': 'root',
+    });
+    final disconnected = StoredData.decode(
+      migrated.copyWith(driveAutoConnect: false).encode(),
+    );
+
+    expect(migrated.driveAutoConnect, isTrue);
+    expect(disconnected.driveAutoConnect, isFalse);
+  });
 
   test('schema 16 round-trips favorites, previews, folders, and views', () {
     final now = DateTime.utc(2026, 8, 19, 12);
@@ -581,6 +662,7 @@ void main() {
       final hybrid = HybridDataStore(local: local, drive: drive);
 
       final connected = await hybrid.connect('token', 'Shared Studio');
+      expect(hybrid.connection.autoReconnect, isTrue);
       expect(
         connected.generations.map((item) => item.localId).toSet(),
         <String>{'local-generation', 'drive-generation'},
@@ -629,6 +711,7 @@ void main() {
       expect(drive.data.encode(), isNot(contains('device-secret')));
 
       await hybrid.disconnect();
+      expect(hybrid.connection.autoReconnect, isFalse);
       final offline = await hybrid.read();
       await hybrid.write(
         offline.copyWith(
@@ -652,6 +735,56 @@ void main() {
       );
     },
   );
+}
+
+class _DiscoveryApi extends GoogleDriveApi {
+  _DiscoveryApi(this.roots) : super(accessToken: 'test-token');
+
+  final List<GoogleDriveFile> roots;
+  int createdRootFolders = 0;
+
+  @override
+  Future<GoogleDriveUser> currentUser() async => const GoogleDriveUser(
+    displayName: 'Alexandria',
+    emailAddress: 'alexandria@example.com',
+  );
+
+  @override
+  Future<List<GoogleDriveFile>> findRootFolders() async => roots;
+
+  @override
+  Future<GoogleDriveFile> createFolder(
+    String name, {
+    String? parentId,
+    Map<String, String> appProperties = const <String, String>{},
+  }) async {
+    if (parentId == null) createdRootFolders += 1;
+    return GoogleDriveFile(
+      id: parentId == null ? 'created-root' : 'assets-folder',
+      name: name,
+      mimeType: 'application/vnd.google-apps.folder',
+    );
+  }
+
+  @override
+  Future<GoogleDriveFile?> findChild(
+    String parentId,
+    String name, {
+    String? appPropertyKey,
+    String? appPropertyValue,
+  }) async => GoogleDriveFile(
+    id: name == clawnsoleDriveStateFile ? 'state-file' : 'assets-folder',
+    name: name,
+    mimeType: name == clawnsoleDriveStateFile
+        ? 'application/json'
+        : 'application/vnd.google-apps.folder',
+  );
+
+  @override
+  Future<GoogleDriveContent> readFile(String fileId) async =>
+      GoogleDriveContent(
+        Uint8List.fromList(utf8.encode(const StoredData().encode())),
+      );
 }
 
 class _MemoryStore implements DurableDataStore {

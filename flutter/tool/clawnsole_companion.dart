@@ -879,6 +879,7 @@ class CompanionApp {
       'unlock',
       'recover',
       'changePassphrase',
+      'reset',
     };
     const emptyActions = <String>{'forget', 'sync'};
     if (!valueActions.contains(action) && !emptyActions.contains(action)) {
@@ -911,6 +912,8 @@ class CompanionApp {
           await vault.recover(rawValue);
         case 'changePassphrase':
           await vault.changePassphrase(rawValue);
+        case 'reset':
+          recoveryCode = await vault.reset(rawValue);
         case 'forget':
           await vault.forgetCachedUnlock();
         case 'sync':
@@ -923,7 +926,7 @@ class CompanionApp {
         if (status.message.isNotEmpty) 'message': status.message,
         if (status.lastSyncedAt != null)
           'syncedAt': status.lastSyncedAt!.toUtc().toIso8601String(),
-        if (action == 'setup' && recoveryCode != null)
+        if ((action == 'setup' || action == 'reset') && recoveryCode != null)
           'recoveryCode': recoveryCode,
       });
     } on Object catch (error) {

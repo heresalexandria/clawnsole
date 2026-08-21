@@ -268,6 +268,7 @@ class AppController extends ChangeNotifier {
 
   Timer? _pollTimer;
   Timer? _creditTimer;
+  Timer? _driveSyncTimer;
   Future<void> _preferenceWrites = Future<void>.value();
   Future<bool>? _creditRefreshFuture;
   Timer? _estimateTimer;
@@ -804,6 +805,7 @@ class AppController extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       _apply(await gateway.load(), restorePreferences: true);
+      await _resumeDriveSilently();
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
@@ -830,6 +832,34 @@ class AppController extends ChangeNotifier {
         unawaited(refreshCredits());
       }
     });
+    _driveSyncTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => unawaited(_resumeDriveSilently()),
+    );
+  }
+
+  Future<void> resumeCloudSync() => _resumeDriveSilently();
+
+  Future<void> _resumeDriveSilently() async {
+    if (gateway is! GoogleDriveGateway ||
+        googleDriveBusy ||
+        settingsVaultBusy ||
+        !googleDriveConnection.autoReconnect) {
+      return;
+    }
+    googleDriveBusy = true;
+    try {
+      _apply(
+        await (gateway as GoogleDriveGateway).resumeGoogleDrive(),
+        restorePreferences: true,
+      );
+    } on Object {
+      // Background restore is best effort. The Drive panel retains the last
+      // actionable connection message and manual Connect remains available.
+    } finally {
+      googleDriveBusy = false;
+      notifyListeners();
+    }
   }
 
   void _apply(LocalSnapshot value, {bool restorePreferences = false}) {
@@ -2911,8 +2941,8 @@ class AppController extends ChangeNotifier {
     showNotice(
       supportsGoogleDrive
           ? supportsLocalLibrary
-                ? 'Clawnsole’s Local and Drive data plus device keys were removed.'
-                : 'Clawnsole’s Drive data plus device keys were removed.'
+                ? 'Clawnsole’s Local and Drive data, shared encrypted vault, and device keys were removed.'
+                : 'Clawnsole’s Drive data, shared encrypted vault, and device keys were removed.'
           : 'Clawnsole’s local data was removed.',
     );
   }
@@ -2994,7 +3024,7 @@ class AppController extends ChangeNotifier {
   Future<bool> unlockSettingsVault(String passphrase) async =>
       _runSettingsVaultAction(
         () => (gateway as SettingsVaultGateway).unlockSettingsVault(passphrase),
-        'Encrypted settings unlocked and synced.',
+        'Encrypted settings unlocked, merged, and synced.',
       );
 
   Future<bool> recoverSettingsVault(String recoveryCode) async =>
@@ -3017,6 +3047,28 @@ class AppController extends ChangeNotifier {
         ),
         'Sync passphrase changed.',
       );
+
+  Future<String?> resetSettingsVault(String passphrase) async {
+    if (gateway is! SettingsVaultGateway || settingsVaultBusy) return null;
+    settingsVaultBusy = true;
+    notifyListeners();
+    try {
+      final result = await (gateway as SettingsVaultGateway).resetSettingsVault(
+        passphrase,
+      );
+      _apply(result.snapshot, restorePreferences: true);
+      showNotice(
+        'Encrypted sync was reset. Local keys, preferences, and Drive library were kept.',
+      );
+      return result.recoveryCode;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    } finally {
+      settingsVaultBusy = false;
+      notifyListeners();
+    }
+  }
 
   Future<bool> forgetSettingsVaultUnlock() async => _runSettingsVaultAction(
     () => (gateway as SettingsVaultGateway).forgetSettingsVaultUnlock(),
@@ -3463,6 +3515,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _pollTimer?.cancel();
     _creditTimer?.cancel();
+    _driveSyncTimer?.cancel();
     _estimateTimer?.cancel();
     _noticeTimer?.cancel();
     super.dispose();

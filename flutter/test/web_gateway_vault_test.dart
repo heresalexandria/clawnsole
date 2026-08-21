@@ -19,7 +19,8 @@ void main() {
           calls.add((action, value));
           return <String, Object?>{
             'ok': true,
-            if (action == 'setup') 'recoveryCode': 'recovery-code-123',
+            if (action == 'setup' || action == 'reset')
+              'recoveryCode': 'recovery-code-123',
           };
         },
         client: MockClient((request) async {
@@ -50,6 +51,8 @@ void main() {
       await gateway.recoverSettingsVault(' recovery exactly ');
       await gateway.syncSettingsVault();
       await gateway.changeSettingsVaultPassphrase(' change exactly ');
+      final reset = await gateway.resetSettingsVault(' reset exactly ');
+      expect(reset.recoveryCode, 'recovery-code-123');
       await gateway.forgetSettingsVaultUnlock();
 
       expect(calls, <(String, String)>[
@@ -58,6 +61,7 @@ void main() {
         ('recover', ' recovery exactly '),
         ('sync', ''),
         ('changePassphrase', ' change exactly '),
+        ('reset', ' reset exactly '),
         ('forget', ''),
       ]);
       expect(stateReads, calls.length);

@@ -182,6 +182,23 @@ class WebGateway
   }
 
   @override
+  Future<SettingsVaultSetupResult> resetSettingsVault(
+    String newPassphrase,
+  ) async {
+    final response = await _settingsVaultAction('reset', newPassphrase);
+    final recoveryCode = response['recoveryCode']?.toString() ?? '';
+    if (recoveryCode.isEmpty) {
+      throw const ProviderException(
+        'The desktop shell did not return a recovery code.',
+      );
+    }
+    return SettingsVaultSetupResult(
+      snapshot: await load(),
+      recoveryCode: recoveryCode,
+    );
+  }
+
+  @override
   Future<LocalSnapshot> forgetSettingsVaultUnlock() async {
     await _settingsVaultAction('forget');
     return load();
@@ -214,6 +231,23 @@ class WebGateway
   @override
   Future<LocalSnapshot> refreshGoogleDrive() async {
     final token = await _driveAuthorizer.authorize();
+    return _snapshot(
+      await _client.post(
+        _url('/drive/refresh'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'accessToken': token}),
+      ),
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> resumeGoogleDrive() async {
+    if (!googleDriveConnection.autoReconnect ||
+        googleDriveConnection.folderName.isEmpty) {
+      return load();
+    }
+    final token = await _driveAuthorizer.restore();
+    if (token == null) return load();
     return _snapshot(
       await _client.post(
         _url('/drive/refresh'),

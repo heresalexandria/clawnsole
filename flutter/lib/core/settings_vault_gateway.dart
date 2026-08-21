@@ -22,6 +22,10 @@ abstract interface class SettingsVaultGateway
   Future<LocalSnapshot> syncSettingsVault();
   Future<LocalSnapshot> changeSettingsVaultPassphrase(String newPassphrase);
 
+  /// Replaces an inaccessible encrypted Drive vault while preserving this
+  /// device's provider keys, preferences, and portable Drive library.
+  Future<SettingsVaultSetupResult> resetSettingsVault(String newPassphrase);
+
   /// Erases only this device's cached vault key. Local provider credentials
   /// remain available; another sync requires the passphrase or recovery code.
   Future<LocalSnapshot> forgetSettingsVaultUnlock();

@@ -72,6 +72,10 @@ test("settings-vault requests use a strict action and value contract", () => {
     action: "setup",
     value: "a passphrase",
   });
+  assert.deepEqual(validateVaultRequest("reset", "a new passphrase"), {
+    action: "reset",
+    value: "a new passphrase",
+  });
   assert.deepEqual(validateVaultRequest("sync"), {
     action: "sync",
     value: "",
@@ -124,7 +128,7 @@ test("vault proxy authenticates requests and returns only approved fields", asyn
   });
 });
 
-test("recovery codes only cross the bridge after successful setup", async () => {
+test("recovery codes only cross after successful setup or reset", async () => {
   for (const action of ["unlock", "recover", "changePassphrase"]) {
     const result = await proxySettingsVault({
       action,
@@ -142,6 +146,21 @@ test("recovery codes only cross the bridge after successful setup", async () => 
     });
     assert.equal(result.recoveryCode, undefined);
   }
+  const reset = await proxySettingsVault({
+    action: "reset",
+    value: "replacement passphrase",
+    rendererUrl,
+    requestToken,
+    fetchImpl: async () => ({
+      ok: true,
+      text: async () => JSON.stringify({
+        ok: true,
+        state: "ready",
+        recoveryCode: "new-recovery-code",
+      }),
+    }),
+  });
+  assert.equal(reset.recoveryCode, "new-recovery-code");
 });
 
 test("invalid and failed vault proxy requests return sanitized errors", async () => {

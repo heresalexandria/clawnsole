@@ -25,12 +25,17 @@ class HybridDataStore implements DurableDataStore {
 
   GoogleDriveConnection get connection {
     final current = _drive.connection;
-    if (current.folderName.isNotEmpty || _lastLocal == null) return current;
     return GoogleDriveConnection(
       state: current.state,
-      folderName: _lastLocal!.driveFolderName,
-      folderId: _lastLocal!.driveFolderId,
+      folderName: current.folderName.isNotEmpty
+          ? current.folderName
+          : _lastLocal?.driveFolderName ?? '',
+      folderId: current.folderId.isNotEmpty
+          ? current.folderId
+          : _lastLocal?.driveFolderId ?? '',
       message: current.message,
+      accountLabel: current.accountLabel,
+      autoReconnect: _lastLocal?.driveAutoConnect ?? false,
     );
   }
 
@@ -46,6 +51,7 @@ class HybridDataStore implements DurableDataStore {
       combined.copyWith(
         driveFolderName: _drive.connection.folderName,
         driveFolderId: _drive.connection.folderId,
+        driveAutoConnect: true,
       ),
     );
     return read();
@@ -54,6 +60,9 @@ class HybridDataStore implements DurableDataStore {
   Future<StoredData> disconnect() async {
     await _drive.disconnect();
     _lastRemote = null;
+    final local = (await _local.read()).copyWith(driveAutoConnect: false);
+    await _local.write(local);
+    _lastLocal = local;
     return read();
   }
 
@@ -444,6 +453,7 @@ class HybridDataStore implements DurableDataStore {
       driveFolderId: _drive.connection.folderId.isNotEmpty
           ? _drive.connection.folderId
           : local.driveFolderId,
+      driveAutoConnect: local.driveAutoConnect,
       generations: <Generation>[...local.generations, ...remote.generations]
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       folders: <LibraryFolder>[...local.folders, ...remote.folders],
@@ -478,6 +488,7 @@ class HybridDataStore implements DurableDataStore {
         .toList(),
     driveFolderName: '',
     driveFolderId: '',
+    driveAutoConnect: false,
   );
 
   StoredData _localPartition(StoredData data) => StoredData(
@@ -489,6 +500,7 @@ class HybridDataStore implements DurableDataStore {
     preferencesUpdatedAt: data.preferencesUpdatedAt,
     driveFolderName: data.driveFolderName,
     driveFolderId: data.driveFolderId,
+    driveAutoConnect: data.driveAutoConnect,
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.local)
         .toList(),

@@ -405,7 +405,9 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                     const SizedBox(height: 3),
                     Text(
                       connected
-                          ? 'Synced with “${connection.folderName}”.'
+                          ? connection.accountLabel.isEmpty
+                                ? 'Synced with “${connection.folderName}”.'
+                                : 'Synced with “${connection.folderName}” as ${connection.accountLabel}.'
                           : 'Use one portable library across every Clawnsole surface.',
                     ),
                   ],
@@ -911,6 +913,44 @@ class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _reset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset encrypted settings sync?'),
+        content: const Text(
+          'Use this only if the passphrase and recovery code are both lost. The encrypted vault on Drive will be replaced for every device. Provider keys and preferences on this device, plus your Drive library and media, will be kept. Other devices will need the new passphrase.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('settings-vault-reset-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Replace vault'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final passphrase = await _requestPassphrase(
+      title: 'Create a new sync passphrase',
+      detail:
+          'This passphrase replaces the inaccessible vault. You will use it once on every other device.',
+      actionLabel: 'Reset encrypted sync',
+      confirm: true,
+    );
+    if (passphrase == null || !mounted) return;
+    final recoveryCode = await widget.controller.resetSettingsVault(passphrase);
+    if (!mounted) return;
+    setState(() {});
+    if (recoveryCode != null && recoveryCode.isNotEmpty) {
+      await _showRecoveryCode(recoveryCode);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = widget.controller.settingsVaultStatus;
@@ -936,7 +976,9 @@ class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
       SettingsVaultState.locked => (
         Icons.lock_rounded,
         'Encrypted settings are locked',
-        'This Drive has a Clawnsole vault. Unlock it once on this device with your passphrase or recovery code.',
+        status.localCredentialCount > 0 || status.hasLocalPreferences
+            ? 'Unlocking will safely merge this device’s ${status.localCredentialCount} provider key${status.localCredentialCount == 1 ? '' : 's'}${status.hasLocalPreferences ? ' and preferences' : ''} with the encrypted Drive vault. Newer edits win per key and preference.'
+            : 'This Drive has a Clawnsole vault. Unlock it once on this device with your passphrase or recovery code.',
       ),
       SettingsVaultState.syncing => (
         Icons.sync_rounded,
@@ -1050,6 +1092,12 @@ class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
                   icon: const Icon(Icons.key_rounded, size: 17),
                   label: const Text('Use recovery code'),
                 ),
+                TextButton.icon(
+                  key: const ValueKey('settings-vault-reset'),
+                  onPressed: busy ? null : _reset,
+                  icon: const Icon(Icons.restart_alt_rounded, size: 17),
+                  label: const Text('Lost both? Reset encrypted sync'),
+                ),
               ],
               SettingsVaultState.ready ||
               SettingsVaultState.pending => <Widget>[
@@ -1084,6 +1132,12 @@ class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
                   onPressed: busy ? null : _forget,
                   icon: const Icon(Icons.phonelink_erase_rounded, size: 17),
                   label: const Text('Forget cached unlock'),
+                ),
+                TextButton.icon(
+                  key: const ValueKey('settings-vault-reset'),
+                  onPressed: busy ? null : _reset,
+                  icon: const Icon(Icons.restart_alt_rounded, size: 17),
+                  label: const Text('Reset encrypted sync'),
                 ),
               ],
               _ => const <Widget>[],
@@ -1239,8 +1293,8 @@ class _SettingsSide extends StatelessWidget {
                         : 'Delete all local data?',
                     controller.supportsGoogleDrive
                         ? controller.supportsLocalLibrary
-                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus provider keys from secure storage.'
-                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus this device’s secure settings.'
+                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder. It also deletes the shared encrypted settings vault, so synced provider keys and recovery access are removed for every device. This cannot be undone.'
+                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder. It also deletes the shared encrypted settings vault for every device and this device’s secure settings. This cannot be undone.'
                         : 'This permanently removes the Flutter app’s local JSON file.',
                   )) {
                     await controller.clearAll();

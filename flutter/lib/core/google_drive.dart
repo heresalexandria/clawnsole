@@ -92,12 +92,16 @@ class GoogleDriveConnection {
     this.folderName = '',
     this.folderId = '',
     this.message = '',
+    this.accountLabel = '',
+    this.autoReconnect = false,
   });
 
   final GoogleDriveConnectionState state;
   final String folderName;
   final String folderId;
   final String message;
+  final String accountLabel;
+  final bool autoReconnect;
 
   bool get isConnected => state == GoogleDriveConnectionState.connected;
   bool get isConfigured => folderName.isNotEmpty || folderId.isNotEmpty;
@@ -107,6 +111,8 @@ class GoogleDriveConnection {
     'folderName': folderName,
     'folderId': folderId,
     'message': message,
+    if (accountLabel.isNotEmpty) 'accountLabel': accountLabel,
+    'autoReconnect': autoReconnect,
   };
 
   factory GoogleDriveConnection.fromJson(Map<String, Object?> json) =>
@@ -118,6 +124,8 @@ class GoogleDriveConnection {
         folderName: json['folderName'] as String? ?? '',
         folderId: json['folderId'] as String? ?? '',
         message: json['message'] as String? ?? '',
+        accountLabel: json['accountLabel'] as String? ?? '',
+        autoReconnect: json['autoReconnect'] == true,
       );
 }
 
@@ -132,6 +140,10 @@ abstract interface class GoogleDriveGateway {
   Future<LocalSnapshot> disconnectGoogleDrive();
 
   Future<LocalSnapshot> refreshGoogleDrive();
+
+  /// Silently restores a previously authorized Drive session. Returns the
+  /// local snapshot unchanged when no reusable authorization exists.
+  Future<LocalSnapshot> resumeGoogleDrive();
 
   /// Copies local records and retained assets into Drive without deleting the
   /// local originals. Stable `drive-` ids make the operation idempotent.
@@ -188,6 +200,15 @@ class GoogleDriveContent {
   final String? etag;
 }
 
+class GoogleDriveUser {
+  const GoogleDriveUser({this.displayName = '', this.emailAddress = ''});
+
+  final String displayName;
+  final String emailAddress;
+
+  String get label => emailAddress.isNotEmpty ? emailAddress : displayName;
+}
+
 /// Small REST client for the subset of Drive used by Clawnsole.
 class GoogleDriveApi {
   GoogleDriveApi({
@@ -219,6 +240,32 @@ class GoogleDriveApi {
       "name = '${_queryValue(name)}' and trashed = false",
     );
     return files.firstOrNull;
+  }
+
+  Future<List<GoogleDriveFile>> findRootFolders() async => _list(
+    "mimeType = 'application/vnd.google-apps.folder' and "
+    "appProperties has { key='clawnsoleRoot' and value='true' } and "
+    'trashed = false',
+  );
+
+  Future<GoogleDriveUser> currentUser() async {
+    final response = await _client.get(
+      _apiBase
+          .resolve('about')
+          .replace(
+            queryParameters: const <String, String>{
+              'fields': 'user(displayName,emailAddress)',
+            },
+          ),
+      headers: _headers,
+    );
+    final payload = _json(await _expect(response));
+    final rawUser = payload['user'];
+    if (rawUser is! Map<Object?, Object?>) return const GoogleDriveUser();
+    return GoogleDriveUser(
+      displayName: rawUser['displayName'] as String? ?? '',
+      emailAddress: rawUser['emailAddress'] as String? ?? '',
+    );
   }
 
   Future<GoogleDriveFile?> findChild(

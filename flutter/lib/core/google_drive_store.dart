@@ -57,15 +57,35 @@ class GoogleDriveStore implements DurableDataStore {
       _api =
           _apiFactory?.call(token) ??
           GoogleDriveApi(accessToken: token, client: _client);
-      final root =
-          await _api!.findRootFolder(name) ??
-          await _api!.createFolder(
-            name,
-            appProperties: const <String, String>{
-              'clawnsoleRoot': 'true',
-              'schema': '2',
-            },
-          );
+      GoogleDriveUser user = const GoogleDriveUser();
+      try {
+        user = await _api!.currentUser();
+      } on Object {
+        // Account identity is helpful context, but failure to read it must not
+        // block access to the app-created Drive files.
+      }
+      final roots = await _api!.findRootFolders();
+      GoogleDriveFile? root;
+      for (final candidate in roots) {
+        if (candidate.name == name) {
+          root = candidate;
+          break;
+        }
+      }
+      if (root == null && roots.length == 1) root = roots.single;
+      if (root == null && roots.length > 1) {
+        final names = roots.map((item) => '“${item.name}”').join(', ');
+        throw StateError(
+          'Multiple Clawnsole Drive folders already exist ($names). Enter one of those exact names so the wrong encrypted vault is never opened.',
+        );
+      }
+      root ??= await _api!.createFolder(
+        name,
+        appProperties: const <String, String>{
+          'clawnsoleRoot': 'true',
+          'schema': '2',
+        },
+      );
       final assets =
           await _api!.findChild(
             root.id,
@@ -85,9 +105,12 @@ class GoogleDriveStore implements DurableDataStore {
       );
       _connection = GoogleDriveConnection(
         state: GoogleDriveConnectionState.connected,
-        folderName: name,
+        folderName: root.name,
         folderId: root.id,
-        message: 'Synced with Google Drive',
+        accountLabel: user.label,
+        message: user.label.isEmpty
+            ? 'Synced with Google Drive'
+            : 'Synced with Google Drive as ${user.label}',
       );
       if (_stateFile == null) {
         const initial = StoredData();

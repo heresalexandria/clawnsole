@@ -83,7 +83,7 @@ test("a desktop refresh token stays encrypted at rest and refreshes silently", a
   });
 
   try {
-    assert.equal(await auth.authorize(), "fresh-access-token");
+    assert.equal(await auth.restore(), "fresh-access-token");
     assert.equal(requests.length, 1);
     assert.equal(requests[0].url, "https://oauth2.googleapis.com/token");
     assert.equal(requests[0].options.body.get("refresh_token"), "refresh-token");
@@ -91,6 +91,30 @@ test("a desktop refresh token stays encrypted at rest and refreshes silently", a
     await auth.disconnect();
     assert.equal(requests[1].url, "https://oauth2.googleapis.com/revoke");
     await assert.rejects(fs.access(tokenFile));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("restore never opens an interactive authorization without a cached token", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-restore."));
+  let opened = false;
+  const auth = new GoogleDriveAuth({
+    clientId: "desktop-client",
+    userData: directory,
+    safeStorage: {
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(value),
+      decryptString: (value) => value.toString(),
+    },
+    openExternal: async () => {
+      opened = true;
+    },
+  });
+
+  try {
+    assert.equal(await auth.restore(), "");
+    assert.equal(opened, false);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

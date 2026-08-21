@@ -71,6 +71,24 @@ class _MobileGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
   }
 
   @override
+  Future<String?> restore() async {
+    if (!isAvailable) return null;
+    try {
+      await _initialize();
+      final lightweight = _signIn.attemptLightweightAuthentication();
+      if (lightweight == null) return null;
+      final account = await lightweight;
+      if (account == null) return null;
+      final authorization = await account.authorizationClient
+          .authorizationForScopes(const <String>[googleDriveFileScope]);
+      final token = authorization?.accessToken.trim() ?? '';
+      return token.isEmpty ? null : token;
+    } on Object {
+      return null;
+    }
+  }
+
+  @override
   Future<void> disconnect() async {
     if (!isAvailable) return;
     await _initialize();
@@ -107,6 +125,19 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
       }
     }
     return _interactiveAuthorization();
+  }
+
+  @override
+  Future<String?> restore() async {
+    if (!isAvailable) return null;
+    final refreshToken = await _secureStorage.read(key: _refreshTokenKey);
+    if (refreshToken?.isNotEmpty != true) return null;
+    try {
+      return await _refresh(refreshToken!);
+    } on Object {
+      await _secureStorage.delete(key: _refreshTokenKey);
+      return null;
+    }
   }
 
   Future<String> _interactiveAuthorization() async {
@@ -260,6 +291,9 @@ class _UnavailableIoGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
 
   @override
   Future<String> authorize() => throw UnsupportedError(unavailableMessage);
+
+  @override
+  Future<String?> restore() async => null;
 
   @override
   Future<void> disconnect() async {}

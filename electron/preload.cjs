@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld("clawnsole", {
   startUpdate: () => ipcRenderer.invoke("clawnsole:update:start"),
   authorizeGoogleDrive: () =>
     ipcRenderer.invoke("clawnsole:drive:authorize"),
+  restoreGoogleDrive: () => ipcRenderer.invoke("clawnsole:drive:restore"),
   disconnectGoogleDrive: () =>
     ipcRenderer.invoke("clawnsole:drive:disconnect"),
   settingsVault: (action, value = "") =>
