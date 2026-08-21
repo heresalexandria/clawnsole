@@ -27,7 +27,8 @@ void main() {
     expect(portable.apiKeys, isEmpty);
     expect(portable.apiKey, isEmpty);
     expect(portable.rejectedIosReviewApiKeyIds, isEmpty);
-    expect(portable.preferences.provider, 'ltx');
+    expect(portable.preferences.provider, 'bfl');
+    expect(portable.preferencesUpdatedAt, isNull);
     expect(portable.encode(), isNot(contains('secret')));
     expect(portable.encode(), isNot(contains('review-id')));
   });
@@ -80,8 +81,8 @@ void main() {
       merged.generations.singleWhere((item) => item.localId == 'one').prompt,
       'Edited here',
     );
-    expect(merged.preferences.provider, 'ltx');
-    expect(merged.apiKeyFor('bfl'), 'device-key');
+    expect(merged.preferences.provider, 'bfl');
+    expect(merged.apiKeys, isEmpty);
   });
 
   test('Drive folder lookup is app-scoped and authenticated', () async {
@@ -211,7 +212,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 16);
+      expect(migrated.toJson()['schemaVersion'], 17);
     },
   );
 

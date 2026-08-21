@@ -51,45 +51,45 @@ and optional Google Drive sync keep work organized wherever you create.
 - One-tap folder and tag filters with a desktop folder rail and compact mobile picker
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
-- Local API-key setup with no database, `localStorage`, or IndexedDB history in
-  the native and companion-backed targets
-- Optional Google Drive history/media sync across macOS, Windows, iOS,
-  Android, and the isolated GitHub Pages-ready browser target, with Local and
-  Drive items shown together and device-local API keys; Atlas Cloud is the initial
-  static-host provider because its API allows the Pages origin
+- OS-secure API-key storage with no database, `localStorage`, or IndexedDB
+  history in installed builds
+- Optional Google Drive history/media sync across macOS, Windows, iOS, and
+  Android, plus passphrase-encrypted provider-key and preference sync with a
+  one-time recovery code
 - A Providers desk for per-provider keys, console/docs links, live Atlas model
   discovery, canonical cross-provider model matching, observed quote variance,
   and route-aware 10/15/20/30-second USD comparisons
 
 ## One studio, every screen
 
-The same Clawnsole workflow runs on web, iOS, Android, macOS, and Windows.
+The same Clawnsole workflow runs on iOS, Android, macOS, and Windows.
 Flutter owns all product behavior, including the native Windows app. Electron
 is only the macOS lifecycle and self-update shell around Flutter's web build and
-local Dart companion. The old root Next.js implementation has been removed.
+local Dart companion. Flutter web remains the internal Electron renderer and a
+local development harness; the standalone hosted app has been retired. The old
+root Next.js implementation has also been removed.
 
 ```bash
 # from the repository root
-./flutter/scripts/start_web
 ./flutter/scripts/start_ios
 ./flutter/scripts/start_android
 ./flutter/scripts/start_macos
 ./flutter/scripts/start_windows
 
-# isolated backend-free browser target
-CLAWNSOLE_GOOGLE_CLIENT_ID='…apps.googleusercontent.com' \
-  ./flutter/scripts/start_github_pages
+# internal companion-backed renderer development
+./flutter/scripts/start_web
 ```
 
 The matching deployable builds are:
 
 ```bash
-./flutter/scripts/build_web
 ./flutter/scripts/build_ios
 ./flutter/scripts/build_android
 ./flutter/scripts/build_macos
 ./flutter/scripts/build_windows
-./flutter/scripts/build_github_pages
+
+# internal Electron renderer/companion build
+./flutter/scripts/build_web
 ```
 
 See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/README.md).
@@ -99,14 +99,12 @@ with C++ workload installed.
 ## Persistence
 
 Clawnsole has no database. Native apps store `clawnsole.json` inside their
-application support sandbox. Companion-backed web and Electron store the same
-compact schema in a local file, with retained inputs and videos in an adjacent
-`assets/` directory. All five targets can additionally connect to the same
+application support sandbox. Electron's companion stores the same compact
+schema in a local file, with retained inputs and videos in an adjacent
+`assets/` directory. All installed targets can additionally connect to the same
 app-owned Google Drive folder. Local and Drive generations, references, and
 folders remain separate records with visible provenance; copying local work to
-Drive is non-destructive. The standalone browser requires Drive for library
-media and uses localStorage only for device settings, provider keys, and a
-connection hint.
+Drive is non-destructive.
 
 - History is not capped.
 - Folder names, tag labels, generation assignments, and saved-reference metadata
@@ -119,16 +117,13 @@ connection hint.
 - Removing history prunes media only when it is no longer used by another
   generation or a saved reference.
 - Provider delivery links may be temporary; completed videos are retained locally first.
-- User-supplied provider keys are plaintext inside the locally protected JSON file
-  (or localStorage in the standalone browser), never uploaded to Drive, and
-  never returned to the companion-backed web renderer. An optional temporary iOS App
+- User-supplied provider keys live in OS-secure storage, never in
+  `clawnsole.json`, and are uploaded only inside the passphrase-encrypted
+  settings vault. They are never returned to the Electron renderer. An optional temporary iOS App
   Review fallback is compiled only by the local iOS build script, never written
   to local JSON, and never displayed in the app.
-- Standalone-browser keys are never written to Drive. localStorage is not a
-  secret vault, so this mode should be used only on trusted devices and served
-  from the reviewed GitHub Pages origin.
 
-See [Google Drive and standalone web setup](docs/google-drive-web.md).
+See [Google Drive and encrypted settings sync](docs/google-drive-web.md).
 
 ## Architecture
 
@@ -154,7 +149,7 @@ Every surface checks GitHub for a newer stable release on startup and every 24
 hours while running. Packaged Electron builds also expose **Clawnsole → Check
 for Updates…**; an accepted update downloads the architecture-matched ZIP,
 verifies `SHA256SUMS.txt`, replaces the installed app with rollback, and reopens
-it. Windows and web updates open the GitHub release for a manual download, while
+it. Windows updates open the GitHub release for a manual download, while
 iOS remains under normal App Store distribution semantics.
 
 See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
@@ -175,7 +170,6 @@ dart format --output=none --set-exit-if-changed lib tool test
 flutter analyze
 flutter test
 flutter build web
-./scripts/build_github_pages
 
 cd ../electron
 npm test

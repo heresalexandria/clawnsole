@@ -22,14 +22,16 @@ These instructions apply to the whole repository.
 
 ## Supported surfaces
 
-Clawnsole is one Flutter product delivered through five targets:
+Clawnsole is one Flutter product delivered through four installed targets:
 
 - `flutter/`: the canonical UI, provider contracts, pricing, persistence, and
-  platform gateways for web, iOS, Android, and native Windows.
+  platform gateways for iOS, Android, native Windows, and the internal web
+  renderer used by Electron.
 - `electron/`: a thin macOS shell around the compiled Flutter web app and Dart
   companion. It owns desktop lifecycle, packaging, and self-update only.
 
-Flutter web, iOS, Android, native Windows, and Electron macOS are supported.
+Flutter web is an internal renderer/development harness, not a standalone
+hosted product. iOS, Android, native Windows, and Electron macOS are supported.
 Treat functional changes as cross-platform by default. A platform exception
 must be required by the platform and documented in the change.
 
@@ -85,8 +87,8 @@ desktop entry points live beside the other Flutter scripts:
   refuses unverified downloads.
 - `.github/workflows/release.yml` publishes signed, notarized macOS builds and
   unsigned Windows x64 ZIPs in parallel. iOS distribution builds and signing
-  material stay local to a configured Mac. Android and hosted web release jobs
-  can be added later without changing product code.
+  material stay local to a configured Mac. Android release jobs can be added
+  later without changing product code.
 
 ## Verification
 

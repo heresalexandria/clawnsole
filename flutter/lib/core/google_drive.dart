@@ -9,10 +9,10 @@ const googleDriveFileScope = 'https://www.googleapis.com/auth/drive.file';
 const clawnsoleDriveStateFile = 'clawnsole.json';
 const clawnsoleDriveAssetsFolder = 'assets';
 
-/// Removes device-only credentials before data is serialized to Drive.
+/// Removes credentials and preferences before library data is serialized.
+/// Both are synchronized only through the independently encrypted settings
+/// vault; this file remains portable generation and asset metadata.
 StoredData googleDrivePortableData(StoredData data) => StoredData(
-  preferences: data.preferences,
-  preferencesUpdatedAt: data.preferencesUpdatedAt,
   generations: data.generations,
   folders: data.folders,
   savedReferences: data.savedReferences,
@@ -46,16 +46,7 @@ StoredData mergeGoogleDriveData({
     id: (item) => item.id,
     json: (item) => item.toJson(),
   )..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-  final preferencesChanged =
-      jsonEncode(base.preferences.toJson()) !=
-      jsonEncode(next.preferences.toJson());
   return StoredData(
-    apiKey: next.apiKey,
-    apiKeys: next.apiKeys,
-    preferences: preferencesChanged ? next.preferences : remote.preferences,
-    preferencesUpdatedAt: preferencesChanged
-        ? next.preferencesUpdatedAt
-        : remote.preferencesUpdatedAt,
     generations: generations,
     folders: folders,
     savedReferences: references,

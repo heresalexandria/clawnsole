@@ -12,6 +12,7 @@ import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/reference_prompts.dart';
+import '../core/settings_vault_gateway.dart';
 
 class PickedAsset {
   const PickedAsset({
@@ -347,7 +348,11 @@ class AppController extends ChangeNotifier {
       : const GoogleDriveConnection(
           state: GoogleDriveConnectionState.unavailable,
         );
+  bool get supportsSettingsVault => gateway is SettingsVaultGateway;
+  SettingsVaultStatus get settingsVaultStatus =>
+      snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
   bool googleDriveBusy = false;
+  bool settingsVaultBusy = false;
   final Set<String> copyingGenerationIds = <String>{};
   final Set<String> copyingReferenceIds = <String>{};
   Future<void> _driveCopyQueue = Future<void>.value();
@@ -839,6 +844,7 @@ class AppController extends ChangeNotifier {
             connectedProviders: value.connectedProviders,
             availableProviders: value.availableProviders,
             storage: value.storage,
+            settingsVault: value.settingsVault,
           );
     if (restorePreferences) {
       section = value.preferences.activeSection;
@@ -2423,6 +2429,7 @@ class AppController extends ChangeNotifier {
         folders: current.folders,
         savedReferences: current.savedReferences,
         storage: current.storage,
+        settingsVault: current.settingsVault,
       );
     }
     submitting = true;
@@ -2499,6 +2506,7 @@ class AppController extends ChangeNotifier {
       folders: current.folders,
       savedReferences: current.savedReferences,
       storage: current.storage,
+      settingsVault: current.settingsVault,
     );
     notifyListeners();
   }
@@ -2959,6 +2967,78 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
     } finally {
       googleDriveBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String?> setupSettingsVault(String passphrase) async {
+    if (gateway is! SettingsVaultGateway || settingsVaultBusy) return null;
+    settingsVaultBusy = true;
+    notifyListeners();
+    try {
+      final result = await (gateway as SettingsVaultGateway).setupSettingsVault(
+        passphrase,
+      );
+      _apply(result.snapshot, restorePreferences: true);
+      showNotice('Encrypted settings sync is ready.');
+      return result.recoveryCode;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    } finally {
+      settingsVaultBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> unlockSettingsVault(String passphrase) async =>
+      _runSettingsVaultAction(
+        () => (gateway as SettingsVaultGateway).unlockSettingsVault(passphrase),
+        'Encrypted settings unlocked and synced.',
+      );
+
+  Future<bool> recoverSettingsVault(String recoveryCode) async =>
+      _runSettingsVaultAction(
+        () => (gateway as SettingsVaultGateway).recoverSettingsVault(
+          recoveryCode,
+        ),
+        'Recovery code accepted. Encrypted settings are synced.',
+      );
+
+  Future<bool> syncSettingsVault() async => _runSettingsVaultAction(
+    () => (gateway as SettingsVaultGateway).syncSettingsVault(),
+    'Encrypted settings synced.',
+  );
+
+  Future<bool> changeSettingsVaultPassphrase(String passphrase) async =>
+      _runSettingsVaultAction(
+        () => (gateway as SettingsVaultGateway).changeSettingsVaultPassphrase(
+          passphrase,
+        ),
+        'Sync passphrase changed.',
+      );
+
+  Future<bool> forgetSettingsVaultUnlock() async => _runSettingsVaultAction(
+    () => (gateway as SettingsVaultGateway).forgetSettingsVaultUnlock(),
+    'This device forgot the vault unlock. Local provider keys were kept.',
+  );
+
+  Future<bool> _runSettingsVaultAction(
+    Future<LocalSnapshot> Function() action,
+    String success,
+  ) async {
+    if (gateway is! SettingsVaultGateway || settingsVaultBusy) return false;
+    settingsVaultBusy = true;
+    notifyListeners();
+    try {
+      _apply(await action(), restorePreferences: true);
+      showNotice(success);
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    } finally {
+      settingsVaultBusy = false;
       notifyListeners();
     }
   }

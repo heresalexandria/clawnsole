@@ -47,7 +47,7 @@ jobs:
                 electron=true
                 macos=true
                 ;;
-              .github/workflows/pr.yml|.github/workflows/web-preview.yml)
+              .github/workflows/pr.yml)
                 flutter=true
                 electron=true
                 macos=true
@@ -97,17 +97,11 @@ jobs:
         run: flutter analyze
       - working-directory: flutter
         run: flutter test
-      - name: Build standalone web app
-        env:
-          CLAWNSOLE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-          CLAWNSOLE_WEB_BASE_HREF: /clawnsole/app/
-        run: ./flutter/scripts/build_github_pages
-      - uses: actions/upload-artifact@v7
-        with:
-          name: clawnsole-github-pages-app
-          path: flutter/build/github-pages/app
-          if-no-files-found: error
-          retention-days: 14
+      - name: Build internal Electron renderer
+        working-directory: flutter
+        run: >-
+          flutter build web --release
+          --dart-define=CLAWNSOLE_PROXY_URL=
 
   electron:
     name: Electron checks

@@ -1211,11 +1211,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 16,
-    'apiKeys': <String, Object?>{
-      if (apiKey.isNotEmpty) 'bfl': apiKey,
-      ...apiKeys,
-    },
+    'schemaVersion': 17,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1306,6 +1302,60 @@ class StoredData {
   }
 }
 
+enum SettingsVaultState {
+  unavailable,
+  driveDisconnected,
+  setupRequired,
+  locked,
+  syncing,
+  ready,
+  pending,
+  error,
+}
+
+class SettingsVaultStatus {
+  const SettingsVaultStatus({
+    required this.state,
+    this.vaultId = '',
+    this.lastSyncedAt,
+    this.message = '',
+  });
+
+  const SettingsVaultStatus.unavailable()
+    : state = SettingsVaultState.unavailable,
+      vaultId = '',
+      lastSyncedAt = null,
+      message = '';
+
+  final SettingsVaultState state;
+  final String vaultId;
+  final DateTime? lastSyncedAt;
+  final String message;
+
+  bool get isReady => state == SettingsVaultState.ready;
+  bool get needsPassphrase => state == SettingsVaultState.locked;
+  bool get needsSetup => state == SettingsVaultState.setupRequired;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'state': state.name,
+    if (vaultId.isNotEmpty) 'vaultId': vaultId,
+    if (lastSyncedAt != null)
+      'lastSyncedAt': lastSyncedAt!.toUtc().toIso8601String(),
+    if (message.isNotEmpty) 'message': message,
+  };
+
+  factory SettingsVaultStatus.fromJson(Map<String, Object?> json) =>
+      SettingsVaultStatus(
+        state: SettingsVaultState.values.firstWhere(
+          (value) => value.name == json['state'],
+          orElse: () => SettingsVaultState.unavailable,
+        ),
+        vaultId: json['vaultId'] as String? ?? '',
+        lastSyncedAt: DateTime.tryParse(json['lastSyncedAt'] as String? ?? ''),
+        message: json['message'] as String? ?? '',
+      );
+}
+
 class StorageStats {
   const StorageStats({
     required this.path,
@@ -1353,6 +1403,7 @@ class LocalSnapshot {
     this.availableProviders = const <String>{},
     this.folders = const <LibraryFolder>[],
     this.savedReferences = const <SavedReference>[],
+    this.settingsVault = const SettingsVaultStatus.unavailable(),
   });
 
   final List<Generation> generations;
@@ -1363,6 +1414,7 @@ class LocalSnapshot {
   final Set<String> availableProviders;
   final List<LibraryFolder> folders;
   final List<SavedReference> savedReferences;
+  final SettingsVaultStatus settingsVault;
 
   bool hasApiKeyFor(String provider) =>
       connectedProviders.contains(provider) || (provider == 'bfl' && hasApiKey);
@@ -1375,6 +1427,7 @@ class LocalSnapshot {
     'availableProviders': availableProviders.toList()..sort(),
     'folders': folders.map((folder) => folder.toJson()).toList(),
     'savedReferences': savedReferences.map((item) => item.toJson()).toList(),
+    'settingsVault': settingsVault.toJson(),
     'storage': storage.toJson(),
   };
 
@@ -1418,6 +1471,11 @@ class LocalSnapshot {
               ),
             )
             .toList(),
+    settingsVault: SettingsVaultStatus.fromJson(
+      (json['settingsVault'] as Map<Object?, Object?>? ?? const {}).map(
+        (key, value) => MapEntry(key.toString(), value),
+      ),
+    ),
     storage: StorageStats.fromJson(
       (json['storage'] as Map<Object?, Object?>? ?? const {}).map(
         (key, value) => MapEntry(key.toString(), value),

@@ -619,7 +619,8 @@ void main() {
       );
 
       final decoded = StoredData.decode(original.encode());
-      expect(decoded.apiKey, 'secret');
+      expect(original.encode(), isNot(contains('secret')));
+      expect(decoded.apiKey, isEmpty);
       expect(decoded.generations.single.cost, 136);
       expect(decoded.generations.single.creditsAfter, 364);
       expect(decoded.generations.single.config.exactTiming, isTrue);
@@ -697,7 +698,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 16);
+    expect(decoded.toJson()['schemaVersion'], 17);
   });
 
   test('persists folders and tags while removing a folder safely', () async {
@@ -831,7 +832,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 16);
+      expect(decoded.toJson()['schemaVersion'], 17);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',

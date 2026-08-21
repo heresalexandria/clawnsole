@@ -7,12 +7,18 @@ import 'package:path_provider/path_provider.dart';
 
 import 'bfl_api.dart';
 import 'direct_gateway.dart';
+import 'flutter_secure_value_store.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'models.dart';
 import 'provider_api.dart';
+import 'secure_value_store.dart';
+import 'settings_vault.dart';
+import 'settings_vault_data_store.dart';
+import 'settings_vault_gateway.dart';
+import 'settings_vault_remote.dart';
 
 const _configuredIosReviewApiKey = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY',
@@ -41,9 +47,11 @@ const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
 
 /// Native direct-provider gateway backed by the private app-documents store.
 ///
-/// Provider and persistence behavior lives in [DirectGateway] so the
-/// standalone browser build can use the same contracts with Google Drive.
-class NativeGateway extends DirectGateway implements GoogleDriveGateway {
+/// Provider and persistence behavior lives in [DirectGateway]. Google Drive
+/// library data and the independently encrypted settings vault stay behind
+/// separate storage boundaries.
+class NativeGateway extends DirectGateway
+    implements GoogleDriveGateway, SettingsVaultGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
   // ignore: use_super_parameters
@@ -63,11 +71,28 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
     String? iosReviewArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     bool? isIos,
+    SecureValueStore? secureValueStore,
+    SettingsVaultRemote? settingsVaultRemote,
+    SettingsVaultCodec? settingsVaultCodec,
+    SettingsVaultDataStore? settingsVaultStore,
   }) {
     final hybrid =
         hybridStore ?? HybridDataStore(local: store ?? LocalDataStore());
+    final vault =
+        settingsVaultStore ??
+        SettingsVaultDataStore(
+          delegate: hybrid,
+          secureStore:
+              secureValueStore ??
+              (store != null || hybridStore != null
+                  ? MemorySecureValueStore()
+                  : FlutterSecureValueStore()),
+          remote: settingsVaultRemote,
+          codec: settingsVaultCodec,
+        );
     return NativeGateway._(
       hybrid: hybrid,
+      vault: vault,
       driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
       api: api,
       client: client,
@@ -87,6 +112,7 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
   // ignore: use_super_parameters
   NativeGateway._({
     required HybridDataStore hybrid,
+    required SettingsVaultDataStore vault,
     required GoogleDriveAuthorizer driveAuthorizer,
     BflApi? api,
     http.Client? client,
@@ -101,6 +127,7 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
     ProviderApiRouter? providerRouter,
     bool? isIos,
   }) : _hybrid = hybrid,
+       _vault = vault,
        _driveAuthorizer = driveAuthorizer,
        _iosReviewKeys = <String, String>{
          'bfl': (iosReviewApiKey ?? _configuredIosReviewApiKey).trim(),
@@ -123,7 +150,7 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
        },
        _isIos = isIos ?? Platform.isIOS,
        super(
-         store: hybrid,
+         store: vault,
          api: api,
          client: client,
          providerRouter: providerRouter,
@@ -132,6 +159,7 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
        );
 
   final HybridDataStore _hybrid;
+  final SettingsVaultDataStore _vault;
   final GoogleDriveAuthorizer _driveAuthorizer;
   final Map<String, String> _iosReviewKeys;
   final Map<String, String> _iosReviewKeyIds;
@@ -139,6 +167,9 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
 
   @override
   bool get supportsLocalLibrary => true;
+
+  @override
+  SettingsVaultStatus get settingsVaultStatus => _vault.settingsVaultStatus;
 
   @override
   GoogleDriveConnection get googleDriveConnection {
@@ -156,11 +187,13 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async {
     final token = await _driveAuthorizer.authorize();
     await _hybrid.connect(token, folderName);
+    await _vault.connectRemote(token, _hybrid.connection.folderId);
     return load();
   }
 
   @override
   Future<LocalSnapshot> disconnectGoogleDrive() async {
+    await _vault.disconnectRemote();
     await _hybrid.disconnect();
     await _driveAuthorizer.disconnect();
     return load();
@@ -170,6 +203,48 @@ class NativeGateway extends DirectGateway implements GoogleDriveGateway {
   Future<LocalSnapshot> refreshGoogleDrive() async {
     final token = await _driveAuthorizer.authorize();
     await _hybrid.connect(token, googleDriveConnection.folderName);
+    await _vault.connectRemote(token, _hybrid.connection.folderId);
+    return load();
+  }
+
+  @override
+  Future<SettingsVaultSetupResult> setupSettingsVault(String passphrase) async {
+    final recoveryCode = await _vault.setup(passphrase);
+    return SettingsVaultSetupResult(
+      snapshot: await load(),
+      recoveryCode: recoveryCode,
+    );
+  }
+
+  @override
+  Future<LocalSnapshot> unlockSettingsVault(String passphrase) async {
+    await _vault.unlock(passphrase);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> recoverSettingsVault(String recoveryCode) async {
+    await _vault.recover(recoveryCode);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> syncSettingsVault() async {
+    await _vault.sync();
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> changeSettingsVaultPassphrase(
+    String newPassphrase,
+  ) async {
+    await _vault.changePassphrase(newPassphrase);
+    return load();
+  }
+
+  @override
+  Future<LocalSnapshot> forgetSettingsVaultUnlock() async {
+    await _vault.forgetCachedUnlock();
     return load();
   }
 

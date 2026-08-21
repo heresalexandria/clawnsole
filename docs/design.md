@@ -5,7 +5,8 @@ leather panels, brass hardware, parchment paper, and a patient sloth's claw
 for a maker's mark. Every screen should feel like furniture: warm, solid,
 unhurried, and built from a small number of honest materials.
 
-This guide is the contract for all surfaces (web, iOS, Android, macOS).
+This guide is the contract for all installed surfaces (iOS, Android, native
+Windows, and Electron macOS). Flutter web is the internal Electron renderer.
 The tokens and components live in `flutter/lib/app/app_theme.dart` and
 `flutter/lib/ui/panels.dart`; presentation code must draw from them rather
 than inventing new colors or sizes.

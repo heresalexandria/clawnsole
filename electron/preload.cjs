@@ -101,6 +101,8 @@ contextBridge.exposeInMainWorld("clawnsole", {
     ipcRenderer.invoke("clawnsole:drive:authorize"),
   disconnectGoogleDrive: () =>
     ipcRenderer.invoke("clawnsole:drive:disconnect"),
+  settingsVault: (action, value = "") =>
+    ipcRenderer.invoke("clawnsole:vault:settings", action, value),
   openExternalUrl: (url, purpose) =>
     ipcRenderer.invoke("clawnsole:external:open", url, purpose),
   onUpdateEvent: (callback) => {

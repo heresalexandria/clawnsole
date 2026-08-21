@@ -4,9 +4,9 @@ import 'models.dart';
 
 /// Durable metadata and media used by a direct-to-provider gateway.
 ///
-/// Native builds implement this with app-document files. The standalone web
-/// build implements it with a user-authorized Google Drive folder while
-/// keeping provider credentials in browser-local storage.
+/// Native builds implement this with app-document files. Electron uses the
+/// same contract through its loopback companion. Provider credentials live
+/// behind a separate secure-storage boundary.
 abstract interface class DurableDataStore {
   Future<StoredData> read();
   Future<void> write(StoredData data);

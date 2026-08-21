@@ -501,8 +501,6 @@ class HybridDataStore implements DurableDataStore {
   );
 
   StoredData _drivePartition(StoredData data) => StoredData(
-    preferences: data.preferences,
-    preferencesUpdatedAt: data.preferencesUpdatedAt,
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
         .toList(),
@@ -520,8 +518,7 @@ class HybridDataStore implements DurableDataStore {
   bool _hasPortableContent(StoredData data) =>
       data.generations.isNotEmpty ||
       data.folders.isNotEmpty ||
-      data.savedReferences.isNotEmpty ||
-      data.preferencesUpdatedAt != null;
+      data.savedReferences.isNotEmpty;
 
   bool _remoteRecordsChanged(StoredData remote) {
     final previous = _lastRemote;
