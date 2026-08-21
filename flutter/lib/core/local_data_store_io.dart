@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -57,9 +58,32 @@ class LocalDataStore implements DurableDataStore {
     final preferred = await _assetFile(reference.value, extension);
     if (await preferred.exists()) return preferred;
     final legacy = await _assetFile(reference.value);
-    if (!await legacy.exists() || extension == '.asset') return legacy;
-    if (!migrateGenericName) return legacy;
-    return legacy.rename(preferred.path);
+    if (await legacy.exists()) {
+      if (extension == '.asset' || !migrateGenericName) return legacy;
+      return legacy.rename(preferred.path);
+    }
+    // Neither expected name exists. Another Clawnsole build may have retained
+    // the file under a different extension, so scan for a matching stem before
+    // giving up. The scan only runs on a miss, keeping the hot path untouched.
+    final match = await _assetFileByStem(reference.value);
+    if (match == null) return legacy;
+    if (extension == '.asset' || !migrateGenericName) return match;
+    return match.rename(preferred.path);
+  }
+
+  /// Finds an asset file whose basename-without-extension equals [id].
+  /// The id charset is validated by [_assetFile], so a stem match is safe.
+  Future<File?> _assetFileByStem(String id) async {
+    final assets = await _assets();
+    if (!await assets.exists()) return null;
+    await for (final entry in assets.list()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      final dot = name.lastIndexOf('.');
+      final stem = dot > 0 ? name.substring(0, dot) : name;
+      if (stem == id) return entry;
+    }
+    return null;
   }
 
   @override
@@ -127,7 +151,16 @@ class LocalDataStore implements DurableDataStore {
     if (reference.kind != 'local') {
       throw StateError('The asset is not stored locally.');
     }
-    return (await _resolveAssetFile(reference)).readAsBytes();
+    final file = await _resolveAssetFile(reference);
+    if (!await file.exists()) {
+      developer.log(
+        'Missing local asset file ${file.path} '
+        '(id ${reference.value}, contentType ${reference.contentType}).',
+        name: 'clawnsole.store',
+      );
+      throw StateError(missingLocalAssetMessage(reference.contentType));
+    }
+    return file.readAsBytes();
   }
 
   @override

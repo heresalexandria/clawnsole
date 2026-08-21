@@ -172,21 +172,14 @@ class HybridDataStore implements DurableDataStore {
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
   ]) async {
-    final localGenerations = generations
-        .where((item) => item.storage == LibraryStorage.local)
-        .toList();
-    final driveGenerations = generations
-        .where((item) => item.storage == LibraryStorage.drive)
-        .toList();
-    final localReferences = savedReferences
-        .where((item) => item.storage == LibraryStorage.local)
-        .toList();
-    final driveReferences = savedReferences
-        .where((item) => item.storage == LibraryStorage.drive)
-        .toList();
-    await _local.pruneAssets(localGenerations, localReferences);
+    // Both stores compute their retention sets from AssetReference.kind, so
+    // hand each of them the ENTIRE dataset. Partitioning by the record's
+    // storage tag would let a storage/kind mismatch (a Drive-tagged record
+    // still holding a local-kind asset, or the reverse) delete a file that is
+    // still referenced.
+    await _local.pruneAssets(generations, savedReferences);
     if (isDriveConnected) {
-      await _drive.pruneAssets(driveGenerations, driveReferences);
+      await _drive.pruneAssets(generations, savedReferences);
     }
   }
 

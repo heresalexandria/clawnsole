@@ -3968,6 +3968,53 @@ void main() {
     expect(controller.notice, 'Video saved to Photos.');
     controller.dispose();
   });
+
+  testWidgets('an identical repeated notice surfaces both times', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+    final controller =
+        // ignore: avoid_dynamic_calls
+        (tester.state(find.byType(ClawnsoleApp)) as dynamic).controller
+            as AppController;
+    const message = 'The saved video file is missing.';
+
+    controller.showNotice(message);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(message), findsOneWidget);
+
+    // The notice auto-clears after four seconds. The snack bar's own display
+    // timer only starts once its entrance animation completes, so finish the
+    // entrance, let both timers fire, then settle the exit animation.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsNothing);
+
+    // A second identical failure must surface again, not be deduplicated.
+    controller.showNotice(message);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(message), findsOneWidget);
+    expect(controller.noticeSequence, 2);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 Generation _viewModeGeneration(
