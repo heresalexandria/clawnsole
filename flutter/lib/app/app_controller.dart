@@ -268,6 +268,10 @@ class AppController extends ChangeNotifier {
   String? creditError;
   String? notice;
 
+  /// Increments with every [showNotice] call so listeners can surface a
+  /// repeated identical message instead of deduplicating it forever.
+  int noticeSequence = 0;
+
   Timer? _pollTimer;
   Timer? _creditTimer;
   Future<void> _preferenceWrites = Future<void>.value();
@@ -929,12 +933,20 @@ class AppController extends ChangeNotifier {
 
   void showNotice(String message) {
     notice = message;
+    noticeSequence += 1;
     _noticeTimer?.cancel();
     _noticeTimer = Timer(const Duration(seconds: 4), () {
       notice = null;
       notifyListeners();
     });
     notifyListeners();
+  }
+
+  /// Surfaces [error] as a cleaned human notice while keeping the raw details
+  /// in the debug log.
+  void showErrorNotice(Object error) {
+    debugPrint('Clawnsole notice for error: $error');
+    showNotice(_message(error));
   }
 
   String _message(Object error) => error

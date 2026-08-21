@@ -249,6 +249,115 @@ void main() {
     },
   );
 
+  test(
+    'companion stores typed asset extensions and resolves drifted names',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-asset-name-test.',
+      );
+      final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      try {
+        final written = await store.writeAsset(
+          Uint8List.fromList(<int>[1, 2, 3]),
+          label: 'result.mp4',
+          contentType: 'video/mp4',
+        );
+        final files = store.assets.listSync().whereType<File>().toList();
+        expect(files.single.path, endsWith('${written.value}.mp4'));
+        expect(await store.readAsset(written), <int>[1, 2, 3]);
+
+        // A library written by an older companion keeps the generic name.
+        const legacy = AssetReference(
+          kind: 'local',
+          value: 'aaaaaaaaaaaaaaaa',
+          label: 'legacy.mp4',
+          contentType: 'video/mp4',
+        );
+        File(
+          '${store.assets.path}/aaaaaaaaaaaaaaaa.asset',
+        ).writeAsBytesSync(<int>[4, 5]);
+        expect(await store.readAsset(legacy), <int>[4, 5]);
+
+        // A file whose on-disk extension no longer matches the reference's
+        // contentType mapping is still found by its id stem.
+        const drifted = AssetReference(
+          kind: 'local',
+          value: 'bbbbbbbbbbbbbbbb',
+          label: 'drifted',
+          contentType: 'video/mp4',
+        );
+        File(
+          '${store.assets.path}/bbbbbbbbbbbbbbbb.mov',
+        ).writeAsBytesSync(<int>[6, 7]);
+        expect(await store.readAsset(drifted), <int>[6, 7]);
+
+        const missing = AssetReference(
+          kind: 'local',
+          value: 'cccccccccccccccc',
+          label: 'missing',
+          contentType: 'video/mp4',
+        );
+        await expectLater(
+          store.readAsset(missing),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains("missing from this device's library storage"),
+            ),
+          ),
+        );
+      } finally {
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+
+  test('prune keeps local files referenced by Drive-tagged records', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-prune-safety-test.',
+    );
+    final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final hybrid = HybridDataStore(local: store);
+    try {
+      final asset = await store.writeAsset(
+        Uint8List.fromList(<int>[1, 2, 3]),
+        label: 'result.mp4',
+        contentType: 'video/mp4',
+      );
+      final now = DateTime.utc(2026, 8, 21, 12);
+      // The record's storage tag drifted to Drive while its asset is still
+      // stored locally. Pruning must never delete the referenced file.
+      final mismatched = Generation(
+        localId: 'drive-tagged',
+        status: 'Ready',
+        prompt: 'A record whose storage tag says Drive.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        resultAsset: asset,
+        storage: LibraryStorage.drive,
+      );
+
+      await hybrid.pruneAssets(<Generation>[mismatched]);
+      expect(await store.readAsset(asset), <int>[1, 2, 3]);
+
+      // Once nothing references the asset, pruning removes the typed file.
+      await hybrid.pruneAssets(const <Generation>[]);
+      expect(store.assets.listSync().whereType<File>(), isEmpty);
+    } finally {
+      await temporary.delete(recursive: true);
+    }
+  });
+
   test('companion serves the Flutter bundle and API on one origin', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'clawnsole-companion-test.',

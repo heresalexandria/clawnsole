@@ -17,7 +17,7 @@ Future<void> saveGenerationVideo(
   try {
     await controller.saveMedia(item, destination: destination);
   } on Object catch (error) {
-    controller.showNotice(error.toString());
+    controller.showErrorNotice(error);
   }
 }
 
