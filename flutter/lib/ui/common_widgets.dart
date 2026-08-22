@@ -1187,7 +1187,8 @@ class GenerationStatusDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final problem = item.error ?? item.lastCheckError;
+    final problem =
+        item.error ?? item.resultRetentionError ?? item.lastCheckError;
     final isTerminal = item.error != null || item.isFailed;
     final checked = item.lastCheckedAt;
     if (problem == null && checked == null && !item.isLongRunning) {
@@ -1260,6 +1261,17 @@ class GenerationStatusDetails extends StatelessWidget {
               ),
             ),
           ],
+          if (item.needsResultRetention) ...<Widget>[
+            if (problem != null) const SizedBox(height: 6),
+            Text(
+              'The provider finished this generation, but Clawnsole has not safely retained the result yet. Retrieval will keep retrying across the app and after resume.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ],
           if (checked != null) ...<Widget>[
             if (problem != null || item.isLongRunning)
               const SizedBox(height: 6),
@@ -1293,7 +1305,9 @@ class GenerationStatusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!item.canCheckStatus || item.isReady) return const SizedBox.shrink();
+    if (!item.canCheckStatus || (item.isReady && !item.needsResultRetention)) {
+      return const SizedBox.shrink();
+    }
     final checking = controller.isCheckingStatus(item.localId);
     return OutlinedButton.icon(
       onPressed: checking
@@ -1308,6 +1322,8 @@ class GenerationStatusButton extends StatelessWidget {
       label: Text(
         checking
             ? 'Checking…'
+            : item.isReady
+            ? 'Retry retrieval'
             : item.lastCheckError != null
             ? 'Retry status'
             : item.isFailed
@@ -1373,6 +1389,15 @@ Future<void> showGenerationDetails(BuildContext context, Generation item) =>
                   const Eyebrow('Error', icon: Icons.error_outline_rounded),
                   const SizedBox(height: 7),
                   SelectableText(item.error!),
+                ],
+                if (item.resultRetentionError != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  const Eyebrow(
+                    'Last result-retrieval error',
+                    icon: Icons.cloud_download_outlined,
+                  ),
+                  const SizedBox(height: 7),
+                  SelectableText(item.resultRetentionError!),
                 ],
                 if (item.lastCheckError != null) ...<Widget>[
                   const SizedBox(height: 14),
@@ -2229,6 +2254,7 @@ class ActivityCard extends StatelessWidget {
                   ),
                 ],
                 if (item.error != null ||
+                    item.resultRetentionError != null ||
                     item.lastCheckError != null ||
                     item.lastCheckedAt != null ||
                     item.isLongRunning) ...<Widget>[

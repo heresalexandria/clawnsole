@@ -224,6 +224,7 @@ class VideoProviderDefinition {
     this.pricingSource = 'Published rate card',
     this.requiresApiKey = true,
     this.isLocal = false,
+    this.resultDelivery = const ProviderResultDelivery(),
   });
 
   final String id;
@@ -236,6 +237,7 @@ class VideoProviderDefinition {
   final List<VideoModelDefinition> models;
   final bool requiresApiKey;
   final bool isLocal;
+  final ProviderResultDelivery resultDelivery;
 
   VideoModelDefinition get defaultModel => models.first;
   String get model => defaultModel.id;
@@ -245,6 +247,21 @@ class VideoProviderDefinition {
   int get minDuration => defaultModel.minDuration;
   int get maxDuration => defaultModel.maxDuration;
   int get maxKeyframes => defaultModel.maxKeyframes;
+}
+
+/// Provider-side availability after a generation reaches a terminal state.
+///
+/// Clawnsole always tries to retain completed media immediately. A null
+/// [availability] means the provider does not publish a dependable window, so
+/// the app must keep retrying instead of inventing an expiry.
+class ProviderResultDelivery {
+  const ProviderResultDelivery({
+    this.availability,
+    this.keepOpenRecommended = false,
+  });
+
+  final Duration? availability;
+  final bool keepOpenRecommended;
 }
 
 class _ArtCraftModel extends VideoModelDefinition {
@@ -340,6 +357,10 @@ const bflProvider = VideoProviderDefinition(
   docsUrl: 'https://docs.bfl.ai/flux_3/flux3_video',
   pricingUrl: 'https://bfl.ai/pricing',
   pricingSource: 'Published credits · converted at \$0.01/credit',
+  resultDelivery: ProviderResultDelivery(
+    availability: Duration(minutes: 10),
+    keepOpenRecommended: true,
+  ),
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'flux-3-video',
@@ -398,6 +419,7 @@ const ltxProvider = VideoProviderDefinition(
   consoleUrl: 'https://console.ltx.io/',
   docsUrl: 'https://docs.ltx.io',
   pricingUrl: 'https://docs.ltx.io/pricing',
+  resultDelivery: ProviderResultDelivery(availability: Duration(hours: 24)),
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'ltx-2-3-fast',
@@ -451,6 +473,7 @@ const artCraftProvider = VideoProviderDefinition(
   pricingUrl: 'https://app.getartcraft.com/pricing',
   pricingSource:
       'Live configuration quotes with published defaults · \$0.01/credit',
+  resultDelivery: ProviderResultDelivery(keepOpenRecommended: true),
   models: <VideoModelDefinition>[
     _ArtCraftModel(
       id: 'seedance_2p0',
@@ -937,6 +960,7 @@ const atlasProvider = VideoProviderDefinition(
   pricingUrl: 'https://www.atlascloud.ai/pricing/models?sort=new',
   pricingSource:
       'Live Atlas Cloud 720p cost preflight, with published starting-rate fallback',
+  resultDelivery: ProviderResultDelivery(keepOpenRecommended: true),
   models: <VideoModelDefinition>[
     VideoModelDefinition(
       id: 'bytedance/seedance-2.5/text-to-video',

@@ -1543,6 +1543,23 @@ class CompanionApp {
           updatedAt: now,
         );
       }
+      if (next.isReady && next.resultAsset == null) {
+        final availability = providerById(
+          next.provider,
+        ).resultDelivery.availability;
+        final expectedExpiry = availability == null
+            ? null
+            : next.lastProviderResponseAt?.add(availability);
+        if (availability == null && next.deliveryExpiresAt != null) {
+          changed = true;
+          next = next.copyWith(clearDeliveryExpiresAt: true);
+        } else if (expectedExpiry != null &&
+            (next.deliveryExpiresAt == null ||
+                next.deliveryExpiresAt!.isBefore(expectedExpiry))) {
+          changed = true;
+          next = next.copyWith(deliveryExpiresAt: expectedExpiry);
+        }
+      }
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
           (next.resultUrl == null && next.draftCacheUrl == null)) {
@@ -1720,10 +1737,18 @@ class CompanionApp {
     final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {
-      final upstream = await (await client.getUrl(target)).close();
-      if (upstream.statusCode < 200 || upstream.statusCode >= 300) return null;
+      final request = await client.getUrl(target);
+      final upstream = await request.close().timeout(
+        const Duration(seconds: 30),
+      );
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+        throw ProviderException(
+          'The provider result download returned HTTP ${upstream.statusCode}.',
+          status: upstream.statusCode,
+        );
+      }
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in upstream) {
+      await for (final chunk in upstream.timeout(const Duration(seconds: 30))) {
         builder.add(chunk);
       }
       return await _store.writeAsset(
@@ -1731,6 +1756,10 @@ class CompanionApp {
         label: label,
         contentType: upstream.headers.contentType?.mimeType ?? 'video/mp4',
         storage: storage,
+      );
+    } on TimeoutException {
+      throw const ProviderException(
+        'The provider result download stalled. Clawnsole will retry it.',
       );
     } finally {
       client.close(force: true);
@@ -1835,6 +1864,20 @@ class CompanionApp {
           status: 502,
         );
       }
+      final acceptedAt = DateTime.now().toUtc();
+      generation = generation.copyWith(
+        requestId: requestId,
+        pollingUrl: pollingUrl,
+        status: 'Pending',
+        clearProgress: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(receipt),
+        lastProviderResponseAt: acceptedAt,
+        updatedAt: acceptedAt,
+      );
+      // Keep the provider task recoverable even if the process exits or the
+      // optional balance/cost refresh below loses connectivity.
+      generation = await _upsert(generation);
       final liveAfter = await _balanceSafely(provider, key);
       final realized = resolveProviderCost(
         generation,
@@ -1843,10 +1886,6 @@ class CompanionApp {
       );
       final cost = realized.providerUnits;
       generation = generation.copyWith(
-        requestId: requestId,
-        pollingUrl: pollingUrl,
-        status: 'Pending',
-        clearProgress: true,
         cost: cost,
         clearCost: cost == null,
         realizedCostUsd: realized.usd,
@@ -1857,14 +1896,12 @@ class CompanionApp {
             (creditsBefore != null && cost != null
                 ? (creditsBefore - cost).clamp(0, double.infinity)
                 : null),
-        lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(receipt),
-        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       generation = await _upsert(generation);
       return generation;
     } on Object catch (error) {
+      if (generation.canCheckStatus) return generation;
       generation = generation.copyWith(
         status: 'Error',
         error: generationExceptionMessage(error),
@@ -1924,21 +1961,27 @@ class CompanionApp {
               fallback: status,
             )
           : null;
-      if (status == 'Ready' && resultUrl == null) {
-        status = 'Error';
-        failureMessage =
-            '${providerById(current.provider).name} reported that the generation was ready but did not include a video URL.';
-      }
       var resultAsset = current.resultAsset;
-      if (resultUrl != null && resultAsset == null) {
+      var retentionFailures = current.resultRetentionFailures;
+      String? retentionError;
+      var attemptedRetention = false;
+      if (status == 'Ready' && resultAsset == null && resultUrl == null) {
+        attemptedRetention = true;
+        retentionFailures += 1;
+        retentionError =
+            '${providerById(current.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
+      } else if (resultUrl != null && resultAsset == null) {
+        attemptedRetention = true;
         try {
           resultAsset = await _retainResult(
             resultUrl,
             'clawnsole-${current.localId}.mp4',
             current.storage,
           );
-        } on Object {
-          // The temporary BFL URL remains usable if local retention fails.
+          retentionFailures = 0;
+        } on Object catch (error) {
+          retentionFailures += 1;
+          retentionError = generationExceptionMessage(error);
         }
       }
       final failed = isGenerationFailureStatus(status);
@@ -1953,6 +1996,9 @@ class CompanionApp {
         allowDeterministicQuote: status == 'Ready',
         terminal: terminal,
       );
+      final deliveryAvailability = providerById(
+        current.provider,
+      ).resultDelivery.availability;
       next = current.copyWith(
         status: status,
         progress: status == 'Ready'
@@ -1964,9 +2010,16 @@ class CompanionApp {
         draftCacheUrl: status == 'Ready'
             ? findResultUrl(result, draft: true)
             : null,
-        deliveryExpiresAt: status == 'Ready'
-            ? checkedAt.add(const Duration(minutes: 10))
+        deliveryExpiresAt: status == 'Ready' && deliveryAvailability != null
+            ? current.deliveryExpiresAt ?? checkedAt.add(deliveryAvailability)
             : null,
+        clearDeliveryExpiresAt:
+            status == 'Ready' && deliveryAvailability == null,
+        lastResultRetentionAttemptAt: attemptedRetention ? checkedAt : null,
+        resultRetentionFailures: resultAsset != null ? 0 : retentionFailures,
+        resultRetentionError: retentionError,
+        clearResultRetentionError:
+            resultAsset != null || status != 'Ready' || retentionError == null,
         error: failureMessage,
         clearError: !failed,
         cost: realized.providerUnits,
@@ -2009,6 +2062,13 @@ class CompanionApp {
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
+          lastResultRetentionAttemptAt: current.isReady ? checkedAt : null,
+          resultRetentionFailures: current.isReady
+              ? current.resultRetentionFailures + 1
+              : current.resultRetentionFailures,
+          resultRetentionError: current.isReady
+              ? generationExceptionMessage(error)
+              : null,
           lastProviderStatusCode: providerHttpStatus(error),
           lastProviderResponse: providerErrorResponse(error),
           lastProviderResponseAt: checkedAt,

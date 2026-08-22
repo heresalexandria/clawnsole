@@ -41,7 +41,8 @@ and optional Google Drive sync keep work organized wherever you create.
   draft enhancement, and FLUX Video Upscale finishing at 1.5×–3×
 - Model-aware image, video, and audio references, with timing and placement controls where supported
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
-- Live polling, manual status refresh, surfaced provider errors, and progress
+- App-wide polling, foreground/relaunch recovery, manual status refresh,
+  surfaced provider and result-retrieval errors, and progress
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation quoted and realized USD cost history with provenance
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
@@ -121,7 +122,11 @@ only after every copy is verified in Drive.
 - Base64 request payloads and video blobs are never stored in JSON.
 - Removing history prunes media only when it is no longer used by another
   generation or a saved reference.
-- Provider delivery links may be temporary; completed videos are retained locally first.
+- Provider task receipts are persisted as soon as submission succeeds, before
+  optional balance and cost refreshes. Polling resumes on launch and foreground
+  resume regardless of the visible screen.
+- Provider delivery links may be temporary; completed videos are retained
+  locally first, and interrupted result downloads remain durably retryable.
 - User-supplied provider keys live in OS-secure storage, never in
   `clawnsole.json`, and are uploaded only inside the passphrase-encrypted
   settings vault. They are never returned to the Electron renderer. An optional temporary iOS App

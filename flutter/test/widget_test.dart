@@ -339,6 +339,196 @@ void main() {
     expect(recovered.error, contains('interrupted'));
   });
 
+  test('persists a provider receipt before post-submit accounting', () async {
+    final store = _MemoryLocalDataStore(const StoredData(apiKey: 'key'));
+    final api = _ReceiptOrderingApi(store);
+    final gateway = NativeGateway(store: store, api: api, isIos: false);
+    final now = DateTime.utc(2026, 8, 21, 12);
+
+    final accepted = await gateway.submit(
+      GenerationSubmission(
+        record: Generation(
+          localId: 'receipt-first',
+          status: 'submitting',
+          prompt: 'A slow orbit around a brass radio.',
+          mode: VideoMode.t2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 8,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+          ),
+          createdAt: now,
+          updatedAt: now,
+        ),
+        input: const <String, Object?>{
+          'prompt': 'A slow orbit around a brass radio.',
+          'mode': 't2v',
+          'duration': 8,
+          'resolution': 'hd',
+          'aspect_ratio': '16:9',
+        },
+      ),
+    );
+
+    expect(api.balanceCalls, 2);
+    expect(accepted.requestId, 'provider-receipt');
+    expect(
+      (await store.read()).generations.single.requestId,
+      'provider-receipt',
+    );
+  });
+
+  test(
+    'failed completed-media retention stays durable and retryable',
+    () async {
+      final now = DateTime.utc(2026, 8, 21, 12);
+      final item = Generation(
+        localId: 'retain-result',
+        status: 'Ready',
+        prompt: 'A storm over a glass observatory.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        requestId: 'retain-result',
+        pollingUrl: 'https://api.bfl.ai/v1/get_result?id=retain-result',
+      );
+      final store = _RetentionMemoryStore(
+        StoredData(apiKey: 'key', generations: <Generation>[item]),
+      );
+      var downloads = 0;
+      final gateway = NativeGateway(
+        store: store,
+        api: _ReadyResultApi(),
+        client: MockClient((_) async {
+          downloads += 1;
+          return downloads == 1
+              ? http.Response('offline', 503)
+              : http.Response.bytes(
+                  <int>[1, 2, 3, 4],
+                  200,
+                  headers: <String, String>{'content-type': 'video/mp4'},
+                );
+        }),
+        isIos: false,
+      );
+
+      final unavailable = await gateway.poll(item);
+      expect(unavailable.status, 'Ready');
+      expect(unavailable.resultAsset, isNull);
+      expect(unavailable.resultRetentionFailures, 1);
+      expect(unavailable.resultRetentionError, contains('503'));
+      expect(
+        (await store.read()).generations.single.resultRetentionError,
+        contains('503'),
+      );
+
+      final retained = await gateway.poll(unavailable);
+      expect(retained.resultAsset?.value, 'retained-result');
+      expect(retained.resultRetentionFailures, 0);
+      expect(retained.resultRetentionError, isNull);
+      expect(retained.deliveryExpiresAt, unavailable.deliveryExpiresAt);
+      expect(downloads, 2);
+    },
+  );
+
+  test('provider delivery policies preserve their documented windows', () {
+    expect(
+      bflProvider.resultDelivery.availability,
+      const Duration(minutes: 10),
+    );
+    expect(bflProvider.resultDelivery.keepOpenRecommended, isTrue);
+    expect(ltxProvider.resultDelivery.availability, const Duration(hours: 24));
+    expect(ltxProvider.resultDelivery.keepOpenRecommended, isFalse);
+    expect(artCraftProvider.resultDelivery.availability, isNull);
+    expect(atlasProvider.resultDelivery.availability, isNull);
+  });
+
+  test('at-risk provider submission advises keeping Clawnsole open', () async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: true,
+        connectedProviders: <String>{'bfl'},
+        availableProviders: <String>{'bfl'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.updateForm(
+      (form) => form.prompt = 'A crane crosses a moonlit harbor.',
+    );
+
+    await controller.submit();
+
+    expect(controller.notice, contains('Keep Clawnsole open and online'));
+    expect(controller.notice, contains('retry retrieval'));
+  });
+
+  testWidgets('foreground resume reloads and polls durable work globally', (
+    tester,
+  ) async {
+    final now = DateTime.now().toUtc();
+    final gateway = _ReconciliationMemoryGateway(
+      LocalSnapshot(
+        generations: <Generation>[
+          Generation(
+            localId: 'resume-poll',
+            status: 'Pending',
+            prompt: 'A long-running harbor generation.',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+            pollingUrl: 'https://api.bfl.ai/v1/get_result?id=resume-poll',
+          ),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: true,
+        connectedProviders: const <String>{'bfl'},
+        availableProviders: const <String>{'bfl'},
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final loadsBeforeResume = gateway.loadCalls;
+    final pollsBeforeResume = gateway.pollCalls;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(gateway.loadCalls, greaterThan(loadsBeforeResume));
+    expect(gateway.pollCalls, greaterThan(pollsBeforeResume));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   test('clears stale progress when a provider stops reporting it', () async {
     final now = DateTime.utc(2026, 8, 19, 12);
     final item = Generation(
@@ -426,6 +616,49 @@ void main() {
     expect(find.text('Generation details'), findsOneWidget);
     expect(find.text('503'), findsOneWidget);
     expect(find.text('{"detail":"upstream unavailable"}'), findsOneWidget);
+  });
+
+  testWidgets('completed unsaved media exposes an explicit retrieval retry', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 21, 12);
+    final item = Generation(
+      localId: 'ready-unsaved',
+      status: 'Ready',
+      prompt: 'A recovered film.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      pollingUrl: 'https://api.bfl.ai/v1/get_result?id=ready-unsaved',
+      resultRetentionFailures: 1,
+      resultRetentionError: 'Connection lost during download.',
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: <Widget>[
+              GenerationStatusDetails(item: item),
+              GenerationStatusButton(controller: controller, item: item),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Retry retrieval'), findsOneWidget);
+    expect(find.textContaining('not safely retained'), findsOneWidget);
   });
 
   testWidgets(
@@ -972,7 +1205,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 18);
+    expect(decoded.toJson()['schemaVersion'], 19);
   });
 
   test(
@@ -1168,7 +1401,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 18);
+      expect(decoded.toJson()['schemaVersion'], 19);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -5454,6 +5687,25 @@ class _MemoryGateway implements AppGateway {
   }
 }
 
+class _ReconciliationMemoryGateway extends _MemoryGateway {
+  _ReconciliationMemoryGateway(super.snapshot);
+
+  int loadCalls = 0;
+  int pollCalls = 0;
+
+  @override
+  Future<LocalSnapshot> load() async {
+    loadCalls += 1;
+    return snapshot;
+  }
+
+  @override
+  Future<Generation> poll(Generation generation) async {
+    pollCalls += 1;
+    return generation;
+  }
+}
+
 class _PendingPreferenceWrite {
   const _PendingPreferenceWrite(this.preferences, this.completer);
 
@@ -5579,6 +5831,66 @@ class _MemoryLocalDataStore extends LocalDataStore {
     bytes: data.encode().length,
     records: records,
   );
+}
+
+class _RetentionMemoryStore extends _MemoryLocalDataStore {
+  _RetentionMemoryStore(super.data);
+
+  @override
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+  }) async => AssetReference(
+    kind: 'local',
+    value: 'retained-result',
+    label: label,
+    contentType: contentType,
+    bytes: bytes.length,
+  );
+}
+
+class _ReceiptOrderingApi extends BflApi {
+  _ReceiptOrderingApi(this.store);
+
+  final _MemoryLocalDataStore store;
+  int balanceCalls = 0;
+
+  @override
+  Future<double> getCredits(String apiKey) async {
+    balanceCalls += 1;
+    if (balanceCalls == 2) {
+      expect(store.data.generations.single.requestId, 'provider-receipt');
+      expect(
+        store.data.generations.single.pollingUrl,
+        contains('provider-receipt'),
+      );
+    }
+    return 100;
+  }
+
+  @override
+  Future<Map<String, Object?>> submit(
+    String apiKey,
+    Map<String, Object?> input, {
+    String model = 'flux-3-video',
+  }) async => <String, Object?>{
+    'id': 'provider-receipt',
+    'polling_url': 'https://api.bfl.ai/v1/get_result?id=provider-receipt',
+  };
+}
+
+class _ReadyResultApi extends BflApi {
+  @override
+  Future<double> getCredits(String apiKey) async => 100;
+
+  @override
+  Future<Map<String, Object?>> poll(String apiKey, String pollingUrl) async =>
+      <String, Object?>{
+        'status': 'Ready',
+        'result': <String, Object?>{'sample': 'https://cdn.test/result.mp4'},
+      };
 }
 
 class _RejectedCreditsApi extends BflApi {

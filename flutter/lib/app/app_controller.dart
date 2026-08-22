@@ -304,7 +304,7 @@ class AppController extends ChangeNotifier {
   int _videoPreviewSourceRevision = 0;
   Future<void> _prefetchQueue = Future<void>.value();
   final Set<String> _prefetchedVideoAssets = <String>{};
-  final Set<String> _retentionAttempts = <String>{};
+  bool _reconcilingGenerationWork = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
@@ -900,6 +900,26 @@ class AppController extends ChangeNotifier {
         unawaited(refreshCredits());
       }
     });
+  }
+
+  /// Reloads durable generation receipts and immediately resumes polling.
+  ///
+  /// The app shell calls this when the process returns to the foreground, so
+  /// recovery is independent of whichever product screen is visible and does
+  /// not wait for the next periodic timer tick.
+  Future<void> reconcileGenerationWork() async {
+    if (_reconcilingGenerationWork) return;
+    _reconcilingGenerationWork = true;
+    try {
+      _apply(await gateway.load());
+      await resumeGoogleDrive();
+      if (hasAnyApiKey) await pollWorking();
+    } on Object {
+      // Foreground reconciliation is best effort. The global poll timer keeps
+      // retrying, and individual records retain their last provider failure.
+    } finally {
+      _reconcilingGenerationWork = false;
+    }
   }
 
   void _apply(LocalSnapshot value, {bool restorePreferences = false}) {
@@ -3011,8 +3031,8 @@ class AppController extends ChangeNotifier {
       checksReferenceVideos
           ? 'Checking reference video compatibility before sending…'
           : form.mode == VideoMode.upscale
-          ? 'Upscale sent. Clawnsole will keep an eye on it.'
-          : 'Generation sent. Clawnsole will keep an eye on it.',
+          ? 'Submitting upscale…'
+          : 'Submitting generation…',
     );
     try {
       pending = await gateway.submit(
@@ -3023,9 +3043,12 @@ class AppController extends ChangeNotifier {
         ),
       );
       _replaceInMemory(pending);
-      if (checksReferenceVideos) {
-        showNotice('Generation sent. Clawnsole will keep an eye on it.');
-      }
+      final delivery = providerById(pending.provider).resultDelivery;
+      showNotice(
+        delivery.keepOpenRecommended
+            ? '${providerNameForHistory(pending.provider)} accepted the generation. Keep Clawnsole open and online until the result is saved; Clawnsole will retry retrieval if the connection drops.'
+            : 'Generation submitted. Clawnsole will keep checking it across the app.',
+      );
       final retainedReferences =
           pending.config.references ?? const <MediaReferenceLabel>[];
       for (
@@ -3110,16 +3133,13 @@ class AppController extends ChangeNotifier {
       }
       if (!hasApiKeyFor(item.provider)) return false;
       final needsRetention =
-          item.isReady &&
-          item.resultAsset == null &&
-          !_retentionAttempts.contains(item.localId);
+          item.isResultRetentionDue(now) && item.isStatusCheckDue(now);
       return needsRetention || (item.isWorking && item.isStatusCheckDue(now));
     }).toList();
     if (working.isEmpty) return;
     _polling = true;
     try {
       for (final item in working) {
-        if (item.isReady) _retentionAttempts.add(item.localId);
         try {
           final updated = await gateway.poll(item);
           _replaceInMemory(updated);
@@ -3129,11 +3149,17 @@ class AppController extends ChangeNotifier {
           )) {
             break;
           }
-          if (updated.isReady) {
-            showNotice('Your film is ready to watch and save.');
+          if (item.resultAsset == null && updated.resultAsset != null) {
+            showNotice('Your film is ready and safely saved.');
             if (updated.storage == LibraryStorage.drive) {
               _enqueueVideoPrefetch(updated.resultAsset);
             }
+          } else if (!item.isReady && updated.isReady) {
+            showNotice(
+              updated.resultRetentionError == null
+                  ? 'Your film is ready to watch and save.'
+                  : 'Your film is ready. Clawnsole will keep retrying its download.',
+            );
           } else if (!item.isFailed && updated.isFailed) {
             showNotice(
               'Generation needs attention: ${updated.error ?? updated.statusLabel}',
@@ -3184,7 +3210,11 @@ class AppController extends ChangeNotifier {
       )) {
         return;
       }
-      if (updated.lastCheckError != null) {
+      if (updated.resultRetentionError != null) {
+        showNotice(
+          'Result retrieval failed: ${updated.resultRetentionError} Clawnsole will keep retrying.',
+        );
+      } else if (updated.lastCheckError != null) {
         showNotice('Status check failed: ${updated.lastCheckError}');
       } else if (updated.isReady) {
         showNotice(
