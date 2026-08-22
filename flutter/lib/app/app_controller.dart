@@ -250,8 +250,8 @@ class AppController extends ChangeNotifier {
   /// cache and its prefetching off.
   int localVideoCacheMb = AppPreferences.defaultLocalVideoCacheMb;
 
-  /// Checks and repairs reference videos for provider compatibility before
-  /// they are uploaded.
+  /// Converts unsupported reference images and repairs incompatible reference
+  /// videos before they are uploaded.
   bool autoFixReferenceVideos = AppPreferences.defaultAutoFixReferenceVideos;
 
   /// Visible cost-desk column ids in display order; null keeps the defaults.
@@ -3023,13 +3023,15 @@ class AppController extends ChangeNotifier {
     }
     submitting = true;
     notifyListeners();
-    final checksReferenceVideos =
+    final checksVisualReferences =
         autoFixReferenceVideos &&
-        selectedModel.referenceVideoCompatibilityProfile != null &&
-        form.referenceCount(MediaReferenceKind.video) > 0;
+        (form.keyframes.isNotEmpty ||
+            form.referenceCount(MediaReferenceKind.image) > 0 ||
+            (selectedModel.referenceVideoCompatibilityProfile != null &&
+                form.referenceCount(MediaReferenceKind.video) > 0));
     showNotice(
-      checksReferenceVideos
-          ? 'Checking reference video compatibility before sending…'
+      checksVisualReferences
+          ? 'Checking visual reference compatibility before sending…'
           : form.mode == VideoMode.upscale
           ? 'Submitting upscale…'
           : 'Submitting generation…',

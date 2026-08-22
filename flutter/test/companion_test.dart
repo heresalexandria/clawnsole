@@ -776,6 +776,90 @@ void main() {
     },
   );
 
+  test('companion normalizes image frames without a video profile', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-image-normalization-test.',
+    );
+    final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final originalBytes = Uint8List.fromList(<int>[1, 2, 3]);
+    final derivativeBytes = Uint8List.fromList(<int>[0xff, 0xd8, 0xff, 0xd9]);
+    final originalSource =
+        'data:image/heif;base64,${base64Encode(originalBytes)}';
+    final derivativeSource =
+        'data:image/jpeg;base64,${base64Encode(derivativeBytes)}';
+    final retainedOriginal = await store.writeAsset(
+      originalBytes,
+      label: 'original.heic',
+      contentType: 'image/heif',
+    );
+    final api = _CapturingArtCraftApi();
+    final normalizer = _ChangedReferenceMediaNormalizer(derivativeSource);
+    final application = CompanionApp(
+      store: store,
+      api: BflApi(),
+      providerRouter: ProviderApiRouter(artcraft: api),
+      fallbackApiKeys: const <String, String>{'artcraft': 'secret'},
+      referenceVideoNormalizer: normalizer,
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+    final now = DateTime.utc(2026, 8, 22, 12);
+    final record = Generation(
+      localId: 'companion-image-reference-submit',
+      provider: 'artcraft',
+      model: 'veo_3_fast',
+      status: 'submitting',
+      prompt: 'Animate the frame.',
+      mode: VideoMode.i2v,
+      config: GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 5,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+        keyframes: <KeyframeLabel>[
+          KeyframeLabel(
+            label: 'Original frame',
+            role: KeyframeRole.start,
+            source: retainedOriginal,
+          ),
+        ],
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    try {
+      final response = await http.post(
+        base.resolve('/generations'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'input': <String, Object?>{
+            'mode': 'i2v',
+            'keyframes': <String>[originalSource],
+          },
+          'record': record.toJson(),
+          'autoFixReferenceVideos': true,
+        }),
+      );
+
+      expect(response.statusCode, 201, reason: response.body);
+      expect(normalizer.sources, <String>[originalSource]);
+      expect(api.input['keyframes'], <String>[derivativeSource]);
+      final persisted = (await store.read()).generations.single;
+      final persistedSource = persisted.config.keyframes!.single.source!;
+      expect(persistedSource.value, isNot(retainedOriginal.value));
+      expect(await store.readAsset(persistedSource), derivativeBytes);
+      expect(await store.readAsset(retainedOriginal), originalBytes);
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
   test(
     'companion non-Seedance submit selects generic repair and derivative',
     () async {
@@ -1316,6 +1400,31 @@ class _ChangedReferenceVideoNormalizer
       changedIndexes: const <int>{0},
     );
   }
+}
+
+class _ChangedReferenceMediaNormalizer
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
+  _ChangedReferenceMediaNormalizer(this.derivative);
+
+  final String derivative;
+  List<String> sources = const <String>[];
+
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async {
+    this.sources = List<String>.of(sources);
+    return PreparedReferenceImages(
+      sources: <String>[derivative],
+      changedIndexes: const <int>{0},
+    );
+  }
+
+  @override
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) => throw StateError('Video normalization should not run.');
 }
 
 class _CapturingArtCraftApi extends ArtCraftApi {

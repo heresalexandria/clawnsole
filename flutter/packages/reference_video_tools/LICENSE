@@ -23,7 +23,7 @@ SOFTWARE.
 Clawnsole mobile media-tool notice
 ==================================
 
-The reference-video compatibility feature dynamically links the non-GPL
+The reference-media compatibility feature dynamically links the non-GPL
 FFmpegKit full profile, FFmpeg 8.1.2, and their LGPL-compatible dependencies.
 GPL-only codecs are excluded.
 

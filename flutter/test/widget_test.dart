@@ -1022,7 +1022,7 @@ void main() {
     );
   });
 
-  test('reference video fixes default on and round-trip tolerantly', () {
+  test('visual reference fixes default on and round-trip tolerantly', () {
     expect(
       AppPreferences.fromJson(const <String, Object?>{}).autoFixReferenceVideos,
       isTrue,
@@ -4975,7 +4975,7 @@ void main() {
   });
 
   testWidgets(
-    'video reference normalization appears on Create and remembers off',
+    'visual reference normalization appears on Create and remembers off',
     (tester) async {
       final gateway = _MemoryGateway(
         const LocalSnapshot(
@@ -5015,7 +5015,8 @@ void main() {
 
       controller.addUrlReference(MediaReferenceKind.image);
       await tester.pumpAndSettle();
-      expect(toggle, findsNothing);
+      expect(toggle, findsOneWidget);
+      expect(find.text('Normalize visual references'), findsOneWidget);
 
       controller.addUrlReference(MediaReferenceKind.video);
       await tester.pumpAndSettle();
@@ -5034,13 +5035,19 @@ void main() {
       );
       controller.removeReference(videoReference.id);
       await tester.pumpAndSettle();
+      expect(toggle, findsOneWidget);
+      final imageReference = controller.form.references.singleWhere(
+        (reference) => reference.kind == MediaReferenceKind.image,
+      );
+      controller.removeReference(imageReference.id);
+      await tester.pumpAndSettle();
       expect(toggle, findsNothing);
 
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       controller = AppController(gateway: gateway);
       await controller.initialize();
-      controller.addUrlReference(MediaReferenceKind.video);
+      controller.addUrlReference(MediaReferenceKind.image);
       await tester.pumpWidget(create());
       await tester.pumpAndSettle();
 
@@ -5052,7 +5059,7 @@ void main() {
     },
   );
 
-  testWidgets('video reference normalization follows compact references', (
+  testWidgets('visual reference normalization follows compact references', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(500, 1000));
@@ -5063,7 +5070,7 @@ void main() {
     final controller = AppController()
       ..selectedProviderId = 'artcraft'
       ..selectedModelId = 'minimax_h3';
-    controller.addUrlReference(MediaReferenceKind.video);
+    controller.addUrlReference(MediaReferenceKind.image);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -5089,7 +5096,44 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('reference video normalization is absent from Settings', (
+  testWidgets('visual reference normalization appears for keyframes', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'veo_3_fast';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
+    expect(toggle, findsNothing);
+    controller.addUrlFrame(KeyframeRole.start);
+    await tester.pumpAndSettle();
+    expect(toggle, findsOneWidget);
+    controller.removeFrame(controller.form.keyframes.single.id);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(toggle, findsNothing);
+  });
+
+  testWidgets('visual reference normalization is absent from Settings', (
     tester,
   ) async {
     final controller = AppController();

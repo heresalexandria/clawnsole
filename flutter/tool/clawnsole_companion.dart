@@ -1801,12 +1801,17 @@ class CompanionApp {
       provider,
       generation.model,
     ).referenceVideoCompatibilityProfile;
-    if (autoFixReferenceVideos && referenceVideoProfile != null) {
-      final prepared = await prepareGenerationReferenceVideos(
+    if (autoFixReferenceVideos) {
+      final ReferenceImageNormalizationService imageNormalizer =
+          _referenceVideoNormalizer is ReferenceImageNormalizationService
+          ? _referenceVideoNormalizer as ReferenceImageNormalizationService
+          : const DisabledReferenceVideoNormalizationService();
+      final prepared = await prepareGenerationReferences(
         input: cleanInput,
         config: generation.config,
-        normalizer: _referenceVideoNormalizer,
-        profile: referenceVideoProfile,
+        videoNormalizer: _referenceVideoNormalizer,
+        imageNormalizer: imageNormalizer,
+        videoProfile: referenceVideoProfile,
       );
       cleanInput = prepared.input;
       generation = generation.copyWith(config: prepared.config);

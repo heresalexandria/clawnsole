@@ -13,7 +13,7 @@ ZIMG_SHA256="be89390f13a5c9b2388ce0f44a5e89364a20c1c57ce46d382b1fcc3967057577"
 BUILD_PROFILE="4"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "The packaged reference-video tools are built on macOS." >&2
+  echo "The packaged reference-media tools are built on macOS." >&2
   exit 1
 fi
 
@@ -31,9 +31,15 @@ verify_tools() {
   local build_configuration
   local filters
   local encoders
+  local decoders
+  local demuxers
+  local muxers
   build_configuration="$("$directory/ffmpeg" -hide_banner -buildconf 2>&1)"
   filters="$("$directory/ffmpeg" -hide_banner -filters 2>&1)"
   encoders="$("$directory/ffmpeg" -hide_banner -encoders 2>&1)"
+  decoders="$("$directory/ffmpeg" -hide_banner -decoders 2>&1)"
+  demuxers="$("$directory/ffmpeg" -hide_banner -demuxers 2>&1)"
+  muxers="$("$directory/ffmpeg" -hide_banner -muxers 2>&1)"
   grep -q -- '--disable-gpl' <<<"$build_configuration"
   grep -q -- '--disable-nonfree' <<<"$build_configuration"
   if grep -q -- '--enable-gpl' <<<"$build_configuration"; then
@@ -43,6 +49,10 @@ verify_tools() {
   grep -q '[[:space:]]zscale[[:space:]]' <<<"$filters"
   grep -q '[[:space:]]tonemap[[:space:]]' <<<"$filters"
   grep -q '[[:space:]]h264_videotoolbox[[:space:]]' <<<"$encoders"
+  grep -q '[[:space:]]mjpeg[[:space:]]' <<<"$encoders"
+  grep -q '[[:space:]]hevc[[:space:]]' <<<"$decoders"
+  grep -q '[[:space:]]mov,mp4' <<<"$demuxers"
+  grep -q '[[:space:]]image2[[:space:]]' <<<"$muxers"
   "$directory/ffprobe" -hide_banner -version >/dev/null
   if otool -L "$directory/ffmpeg" "$directory/ffprobe" | \
       grep -Eq '(/opt/homebrew|/usr/local|@rpath)'; then
@@ -193,4 +203,4 @@ https://github.com/sekrit-twc/zimg/releases/tag/release-$ZIMG_VERSION
 https://github.com/heresalexandria/clawnsole/blob/main/electron/scripts/prepare-media-tools
 EOF
 
-echo "Prepared pinned LGPL reference-video tools at $DESTINATION."
+echo "Prepared pinned LGPL reference-media tools at $DESTINATION."

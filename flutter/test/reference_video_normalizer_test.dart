@@ -60,6 +60,116 @@ void main() {
     );
   });
 
+  test('compatible reference images pass through without ffmpeg', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-image-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _ImageBackend();
+    final jpeg = Uint8List.fromList(<int>[0xff, 0xd8, 0xff, 0xd9]);
+    final source = 'data:image/jpeg;base64,${base64Encode(jpeg)}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final result = await normalizer.normalizeImages(<String>[source]);
+
+    expect(result.sources, <String>[source]);
+    expect(result.changedIndexes, isEmpty);
+    expect(backend.ffmpegArguments, isEmpty);
+  });
+
+  test('HEIF reference images are converted to JPEG and cached', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-image-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _ImageBackend();
+    final heif = Uint8List.fromList(<int>[
+      0,
+      0,
+      0,
+      24,
+      ...ascii.encode('ftyp'),
+      ...ascii.encode('heic'),
+      0,
+      0,
+      0,
+      0,
+      ...ascii.encode('mif1'),
+    ]);
+    final source = 'data:image/heif;base64,${base64Encode(heif)}';
+    final untyped =
+        'data:application/octet-stream;base64,${base64Encode(heif)}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final first = await normalizer.normalizeImages(<String>[source, untyped]);
+    final second = await normalizer.normalizeImages(<String>[source]);
+
+    expect(first.changedIndexes, <int>{0, 1});
+    expect(first.sources, everyElement(startsWith('data:image/jpeg;base64,')));
+    expect(second.sources.single, first.sources.first);
+    expect(backend.ffmpegArguments, hasLength(1));
+  });
+
+  test(
+    'image normalization updates frames and creative image references',
+    () async {
+      const retained = AssetReference(
+        kind: 'local',
+        value: 'original.heic',
+        label: 'Original',
+      );
+      final config = GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 5,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+        keyframes: const <KeyframeLabel>[
+          KeyframeLabel(
+            label: 'Opening',
+            role: KeyframeRole.start,
+            seconds: 0,
+            source: retained,
+          ),
+        ],
+        references: const <MediaReferenceLabel>[
+          MediaReferenceLabel(
+            label: 'Style',
+            kind: MediaReferenceKind.image,
+            source: retained,
+            thumbnailAsset: retained,
+          ),
+        ],
+      );
+      final prepared = await prepareGenerationReferences(
+        input: <String, Object?>{
+          'keyframes': <Object?>[
+            <Object?>[0, 'frame-original'],
+          ],
+          'reference_images': <String>['reference-original'],
+        },
+        config: config,
+        videoNormalizer: const DisabledReferenceVideoNormalizationService(),
+        imageNormalizer: _ChangedImageNormalizer(),
+      );
+
+      expect(prepared.input['keyframes'], <Object?>[
+        <Object?>[0, 'image-fixed'],
+      ]);
+      expect(prepared.input['reference_images'], <String>['image-fixed']);
+      expect(prepared.config.keyframes!.single.source, isNull);
+      expect(prepared.config.references!.single.source, isNull);
+      expect(prepared.config.references!.single.thumbnailAsset, isNull);
+    },
+  );
+
   test(
     'canonical references are returned byte-for-byte without ffmpeg',
     () async {
@@ -593,6 +703,111 @@ void main() {
     },
   );
 
+  test(
+    'direct submit normalizes image frames without a video profile',
+    () async {
+      final store = _MemoryStore(
+        const StoredData(apiKeys: <String, String>{'artcraft': 'secret'}),
+      );
+      final api = _CapturingArtCraftApi();
+      final normalizer = _ChangedMediaNormalizer();
+      final gateway = DirectGateway(
+        store: store,
+        providerRouter: ProviderApiRouter(artcraft: api),
+        referenceVideoNormalizer: normalizer,
+      );
+      final now = DateTime.utc(2026, 8, 22);
+      const original = AssetReference(
+        kind: 'local',
+        value: 'original.heic',
+        label: 'Original',
+      );
+      final submitted = await gateway.submit(
+        GenerationSubmission(
+          record: Generation(
+            localId: 'image-reference-submit',
+            provider: 'artcraft',
+            model: 'veo_3_fast',
+            status: 'submitting',
+            prompt: 'Animate the frame',
+            mode: VideoMode.i2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 5,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+              keyframes: <KeyframeLabel>[
+                KeyframeLabel(
+                  label: 'Original',
+                  role: KeyframeRole.start,
+                  source: original,
+                ),
+              ],
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+          input: <String, Object?>{
+            'mode': 'i2v',
+            'keyframes': <String>['image-original'],
+          },
+        ),
+      );
+
+      expect(modelById('artcraft', 'veo_3_fast').maxVideoReferences, 0);
+      expect(api.input['keyframes'], <String>['image-fixed']);
+      expect(store.persistedSources, <String>['image-fixed']);
+      expect(submitted.config.keyframes!.single.source!.value, 'image-fixed');
+    },
+  );
+
+  test('submission toggle bypasses image normalization', () async {
+    final store = _MemoryStore(
+      const StoredData(apiKeys: <String, String>{'artcraft': 'secret'}),
+    );
+    final api = _CapturingArtCraftApi();
+    final gateway = DirectGateway(
+      store: store,
+      providerRouter: ProviderApiRouter(artcraft: api),
+      referenceVideoNormalizer: _FailingMediaNormalizer(),
+    );
+    final now = DateTime.utc(2026, 8, 22);
+    await gateway.submit(
+      GenerationSubmission(
+        record: Generation(
+          localId: 'image-normalization-disabled',
+          provider: 'artcraft',
+          model: 'veo_3_fast',
+          status: 'submitting',
+          prompt: 'Keep the original',
+          mode: VideoMode.i2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 5,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+            keyframes: <KeyframeLabel>[
+              KeyframeLabel(label: 'Original', role: KeyframeRole.start),
+            ],
+          ),
+          createdAt: now,
+          updatedAt: now,
+        ),
+        input: <String, Object?>{
+          'mode': 'i2v',
+          'keyframes': <String>['image-original'],
+        },
+        autoFixReferenceVideos: false,
+      ),
+    );
+
+    expect(api.input['keyframes'], <String>['image-original']);
+  });
+
   test('submission toggle overrides a not-yet-persisted preference', () async {
     final store = _MemoryStore(
       const StoredData(apiKeys: <String, String>{'artcraft': 'secret'}),
@@ -695,6 +910,40 @@ void main() {
     expect(normalized.changedIndexes, <int>{0});
     expect(normalized.sources.single, startsWith('data:video/mp4;base64,'));
   });
+
+  test('packaged tools convert a real HEIF image', () async {
+    final toolsDirectory =
+        Platform.environment['CLAWNSOLE_TEST_MEDIA_TOOLS_DIR'];
+    final heifPath = Platform.environment['CLAWNSOLE_TEST_HEIF_PATH'];
+    if (toolsDirectory == null ||
+        toolsDirectory.isEmpty ||
+        heifPath == null ||
+        heifPath.isEmpty) {
+      return;
+    }
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-real-image-normalizer-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final backend = ProcessReferenceVideoToolBackend(
+      ffmpegPath: '$toolsDirectory${Platform.pathSeparator}ffmpeg',
+      ffprobePath: '$toolsDirectory${Platform.pathSeparator}ffprobe',
+    );
+    final source =
+        'data:image/heif;base64,'
+        '${base64Encode(await File(heifPath).readAsBytes())}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => Directory('${temporary.path}/cache'),
+    );
+
+    final normalized = await normalizer.normalizeImages(<String>[source]);
+
+    expect(normalized.changedIndexes, <int>{0});
+    expect(normalized.sources.single, startsWith('data:image/jpeg;base64,'));
+    final jpeg = base64Decode(normalized.sources.single.split(',').last);
+    expect(jpeg.sublist(0, 3), <int>[0xff, 0xd8, 0xff]);
+  });
 }
 
 class _ChangedNormalizer implements ReferenceVideoNormalizationService {
@@ -719,6 +968,70 @@ class _FailingNormalizer implements ReferenceVideoNormalizationService {
     List<String> sources, {
     required ReferenceVideoCompatibilityProfile profile,
   }) => throw StateError('Normalizer should not run.');
+}
+
+class _ChangedImageNormalizer implements ReferenceImageNormalizationService {
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
+      PreparedReferenceImages(
+        sources: List<String>.filled(sources.length, 'image-fixed'),
+        changedIndexes: Set<int>.from(
+          List<int>.generate(sources.length, (index) => index),
+        ),
+      );
+}
+
+class _ChangedMediaNormalizer
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
+      PreparedReferenceImages(
+        sources: List<String>.filled(sources.length, 'image-fixed'),
+        changedIndexes: Set<int>.from(
+          List<int>.generate(sources.length, (index) => index),
+        ),
+      );
+
+  @override
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) => throw StateError('Video normalization should not run.');
+}
+
+class _FailingMediaNormalizer
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) =>
+      throw StateError('Image normalization should not run.');
+
+  @override
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) => throw StateError('Video normalization should not run.');
+}
+
+class _ImageBackend implements ReferenceVideoToolBackend {
+  final List<List<String>> ffmpegArguments = <List<String>>[];
+
+  @override
+  List<ReferenceVideoEncoderAttempt> get h264EncoderAttempts => const [];
+
+  @override
+  Future<ReferenceVideoToolResult> runFfmpeg(List<String> arguments) async {
+    ffmpegArguments.add(List<String>.of(arguments));
+    await File(arguments.last).writeAsBytes(<int>[0xff, 0xd8, 0xff, 0xd9]);
+    return const ReferenceVideoToolResult(exitCode: 0, output: '');
+  }
+
+  @override
+  Future<ReferenceVideoToolResult> runFfprobe(List<String> arguments) =>
+      throw StateError('Image normalization does not use ffprobe.');
 }
 
 class _FakeBackend implements ReferenceVideoToolBackend {
