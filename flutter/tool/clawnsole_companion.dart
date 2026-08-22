@@ -1768,16 +1768,16 @@ class CompanionApp {
       final bool value => value,
       _ => data.preferences.autoFixReferenceVideos,
     };
-    if (autoFixReferenceVideos &&
-        modelById(
-              provider,
-              generation.model,
-            ).referenceVideoCompatibilityProfile !=
-            null) {
+    final referenceVideoProfile = modelById(
+      provider,
+      generation.model,
+    ).referenceVideoCompatibilityProfile;
+    if (autoFixReferenceVideos && referenceVideoProfile != null) {
       final prepared = await prepareGenerationReferenceVideos(
         input: cleanInput,
         config: generation.config,
         normalizer: _referenceVideoNormalizer,
+        profile: referenceVideoProfile,
       );
       cleanInput = prepared.input;
       generation = generation.copyWith(config: prepared.config);

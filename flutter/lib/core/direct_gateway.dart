@@ -833,14 +833,18 @@ class DirectGateway
         'Add a ${providerById(provider).name} API key before generating.',
       );
     }
+    final referenceVideoProfile = modelById(
+      provider,
+      record.model,
+    ).referenceVideoCompatibilityProfile;
     if ((submission.autoFixReferenceVideos ??
             data.preferences.autoFixReferenceVideos) &&
-        modelById(provider, record.model).referenceVideoCompatibilityProfile !=
-            null) {
+        referenceVideoProfile != null) {
       final prepared = await prepareGenerationReferenceVideos(
         input: input,
         config: record.config,
         normalizer: _referenceVideoNormalizer,
+        profile: referenceVideoProfile,
       );
       input = prepared.input;
       record = record.copyWith(config: prepared.config);

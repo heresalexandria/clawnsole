@@ -13,29 +13,27 @@ import 'package:clawnsole/core/reference_video_normalizer_mobile.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('only Seedance models with video references declare the profile', () {
-    expect(
-      modelById('artcraft', 'seedance_2p0').referenceVideoCompatibilityProfile,
-      ReferenceVideoCompatibilityProfile.seedance,
-    );
-    expect(
-      modelById(
-        'atlas',
-        'bytedance/seedance-2.5/reference-to-video',
-      ).referenceVideoCompatibilityProfile,
-      ReferenceVideoCompatibilityProfile.seedance,
-    );
-    expect(
-      modelById(
-        'atlas',
-        'bytedance/seedance-2.5/text-to-video',
-      ).referenceVideoCompatibilityProfile,
-      isNull,
-    );
-    expect(
-      modelById('artcraft', 'flux_3').referenceVideoCompatibilityProfile,
-      isNull,
-    );
+  test('every video-reference model declares a compatibility profile', () {
+    for (final provider in videoProviders) {
+      for (final model in provider.models) {
+        final profile = model.referenceVideoCompatibilityProfile;
+        final reason = '${provider.id}/${model.id}';
+        if (model.maxVideoReferences == 0) {
+          expect(profile, isNull, reason: reason);
+          continue;
+        }
+        final isSeedance =
+            model.canonicalId.startsWith('seedance-') ||
+            model.id.startsWith('seedance_');
+        expect(
+          profile,
+          isSeedance
+              ? ReferenceVideoCompatibilityProfile.seedance
+              : ReferenceVideoCompatibilityProfile.generic,
+          reason: reason,
+        );
+      }
+    }
   });
 
   test('canvas and framing preserve the script thresholds', () {
@@ -77,13 +75,113 @@ void main() {
         cacheDirectory: () async => cache,
       );
 
-      final result = await normalizer.normalize(<String>[source]);
+      final result = await normalizer.normalize(<String>[
+        source,
+      ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
       expect(result.sources, <String>[source]);
       expect(result.changedIndexes, isEmpty);
       expect(backend.ffmpegArguments, isEmpty);
     },
   );
+
+  test('healthy generic 1080p 24fps references are byte-identical', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _FakeBackend(
+      <Map<String, Object?>>[
+        _canonicalProbe(
+          videoOverrides: const <String, Object?>{
+            'profile': 'Main',
+            'level': 40,
+            'width': 1920,
+            'height': 1080,
+            'r_frame_rate': '24/1',
+            'avg_frame_rate': '24/1',
+            'time_base': '1/24000',
+            'has_b_frames': 2,
+          },
+        ),
+      ],
+      packetOutputs: <String>[
+        _packetCsv(frameCount: 24, keyframes: const <int>{0}, fps: 24),
+      ],
+    );
+    final source =
+        'data:video/mp4;base64,${base64Encode(_minimalFastStartMp4())}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.generic);
+
+    expect(result.sources, <String>[source]);
+    expect(result.changedIndexes, isEmpty);
+    expect(backend.ffmpegArguments, isEmpty);
+  });
+
+  test('generic repairs preserve native resolution, aspect, and fps', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _FakeBackend(
+      <Map<String, Object?>>[
+        _canonicalProbe(
+          videoOverrides: const <String, Object?>{
+            'codec_name': 'hevc',
+            'level': 153,
+            'width': 3840,
+            'height': 2160,
+            'r_frame_rate': '24/1',
+            'avg_frame_rate': '24/1',
+            'time_base': '1/24000',
+          },
+        ),
+        _canonicalProbe(
+          videoOverrides: const <String, Object?>{
+            'profile': 'Main',
+            'level': 51,
+            'width': 3840,
+            'height': 2160,
+            'r_frame_rate': '24/1',
+            'avg_frame_rate': '24/1',
+            'time_base': '1/90000',
+          },
+        ),
+      ],
+      packetOutputs: <String>[
+        _packetCsv(frameCount: 24, keyframes: const <int>{0}, fps: 24),
+        _packetCsv(frameCount: 24, keyframes: const <int>{0}, fps: 24),
+      ],
+    );
+    final source =
+        'data:video/quicktime;base64,${base64Encode(_minimalFastStartMp4())}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.generic);
+
+    expect(result.changedIndexes, <int>{0});
+    final arguments = backend.ffmpegArguments.single;
+    final filter = arguments[arguments.indexOf('-vf') + 1];
+    expect(filter, contains('fps=24/1'));
+    expect(filter, contains('scale=w=3840:h=2160'));
+    expect(filter, contains('force_original_aspect_ratio=decrease'));
+    expect(filter, isNot(contains('crop=')));
+    expect(filter, isNot(contains('pad=')));
+    expect(arguments, containsAllInOrder(<String>['-r', '24/1']));
+    expect(arguments, isNot(contains('-level:v')));
+  });
 
   test(
     'HDR incompatible references use the full compatibility filter',
@@ -108,7 +206,9 @@ void main() {
         cacheDirectory: () async => cache,
       );
 
-      final result = await normalizer.normalize(<String>[source]);
+      final result = await normalizer.normalize(<String>[
+        source,
+      ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
       expect(result.changedIndexes, <int>{0});
       final arguments = backend.ffmpegArguments.single;
@@ -141,7 +241,9 @@ void main() {
       cacheDirectory: () async => cache,
     );
 
-    final result = await normalizer.normalize(<String>[source]);
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(result.changedIndexes, <int>{0});
     expect(backend.ffmpegArguments, hasLength(1));
@@ -168,7 +270,9 @@ void main() {
       cacheDirectory: () async => cache,
     );
 
-    final result = await normalizer.normalize(<String>[source]);
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(result.changedIndexes, <int>{0});
     expect(backend.ffmpegArguments, hasLength(1));
@@ -190,7 +294,9 @@ void main() {
       cacheDirectory: () async => cache,
     );
 
-    final result = await normalizer.normalize(<String>[source]);
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(result.changedIndexes, <int>{0});
     final arguments = backend.ffmpegArguments.single;
@@ -217,7 +323,9 @@ void main() {
       cacheDirectory: () async => cache,
     );
 
-    final result = await normalizer.normalize(<String>[source]);
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(result.changedIndexes, <int>{0});
     expect(
@@ -259,8 +367,12 @@ void main() {
         cacheDirectory: () async => cache,
       );
 
-      final result = await normalizer.normalize(<String>[source]);
-      await normalizer.normalize(<String>[source]);
+      final result = await normalizer.normalize(<String>[
+        source,
+      ], profile: ReferenceVideoCompatibilityProfile.seedance);
+      await normalizer.normalize(<String>[
+        source,
+      ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
       expect(result.changedIndexes, <int>{0});
       expect(
@@ -305,7 +417,9 @@ void main() {
       cacheDirectory: () async => cache,
     );
 
-    await normalizer.normalize(<String>[source]);
+    await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(
       backend.ffmpegArguments.map(
@@ -349,6 +463,7 @@ void main() {
       },
       config: config,
       normalizer: _ChangedNormalizer(),
+      profile: ReferenceVideoCompatibilityProfile.seedance,
     );
 
     expect(prepared.input['reference_videos'], <String>['fixed']);
@@ -358,16 +473,17 @@ void main() {
   });
 
   test(
-    'direct Seedance submit persists and uploads the repaired derivative',
+    'direct non-Seedance submit selects generic repair and derivative',
     () async {
       final store = _MemoryStore(
         const StoredData(apiKeys: <String, String>{'artcraft': 'secret'}),
       );
       final api = _CapturingArtCraftApi();
+      final normalizer = _ChangedNormalizer();
       final gateway = DirectGateway(
         store: store,
         providerRouter: ProviderApiRouter(artcraft: api),
-        referenceVideoNormalizer: _ChangedNormalizer(),
+        referenceVideoNormalizer: normalizer,
       );
       final now = DateTime.utc(2026, 8, 21);
       const original = AssetReference(
@@ -376,9 +492,9 @@ void main() {
         label: 'Original',
       );
       final record = Generation(
-        localId: 'seedance-submit',
+        localId: 'generic-reference-submit',
         provider: 'artcraft',
-        model: 'seedance_2p0',
+        model: 'minimax_h3',
         status: 'submitting',
         prompt: 'Follow the movement',
         mode: VideoMode.i2v,
@@ -412,6 +528,7 @@ void main() {
       );
 
       expect(api.input['reference_videos'], <String>['fixed']);
+      expect(normalizer.profile, ReferenceVideoCompatibilityProfile.generic);
       expect(store.persistedSources, <String>['fixed']);
       expect(submitted.config.references!.single.source!.value, 'fixed');
     },
@@ -506,7 +623,9 @@ void main() {
       cacheDirectory: () async => Directory('${temporary.path}/cache'),
     );
 
-    final normalized = await normalizer.normalize(<String>[source]);
+    final normalized = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
 
     expect(normalized.changedIndexes, <int>{0});
     expect(normalized.sources.single, startsWith('data:video/mp4;base64,'));
@@ -514,18 +633,27 @@ void main() {
 }
 
 class _ChangedNormalizer implements ReferenceVideoNormalizationService {
+  ReferenceVideoCompatibilityProfile? profile;
+
   @override
-  Future<PreparedReferenceVideos> normalize(List<String> sources) async =>
-      const PreparedReferenceVideos(
-        sources: <String>['fixed'],
-        changedIndexes: <int>{0},
-      );
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async {
+    this.profile = profile;
+    return const PreparedReferenceVideos(
+      sources: <String>['fixed'],
+      changedIndexes: <int>{0},
+    );
+  }
 }
 
 class _FailingNormalizer implements ReferenceVideoNormalizationService {
   @override
-  Future<PreparedReferenceVideos> normalize(List<String> sources) =>
-      throw StateError('Normalizer should not run.');
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) => throw StateError('Normalizer should not run.');
 }
 
 class _FakeBackend implements ReferenceVideoToolBackend {
@@ -712,9 +840,12 @@ Uint8List _minimalFastStartMp4() => Uint8List.fromList(<int>[
   ...ascii.encode('mdat'),
 ]);
 
-String _packetCsv({required int frameCount, required Set<int> keyframes}) =>
-    List<String>.generate(frameCount, (index) {
-      final timestamp = (index / 30).toStringAsFixed(6);
-      final flags = keyframes.contains(index) ? 'K_' : '__';
-      return '0,$timestamp,$timestamp,$flags';
-    }).join('\n');
+String _packetCsv({
+  required int frameCount,
+  required Set<int> keyframes,
+  double fps = 30,
+}) => List<String>.generate(frameCount, (index) {
+  final timestamp = (index / fps).toStringAsFixed(6);
+  final flags = keyframes.contains(index) ? 'K_' : '__';
+  return '0,$timestamp,$timestamp,$flags';
+}).join('\n');

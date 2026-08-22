@@ -10,6 +10,7 @@ import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/settings_vault.dart';
@@ -776,7 +777,7 @@ void main() {
   );
 
   test(
-    'companion Seedance submit uploads and persists a repaired derivative',
+    'companion non-Seedance submit selects generic repair and derivative',
     () async {
       final temporary = await Directory.systemTemp.createTemp(
         'clawnsole-reference-normalization-test.',
@@ -812,9 +813,9 @@ void main() {
       final base = Uri.parse('http://127.0.0.1:${server.port}');
       final now = DateTime.utc(2026, 8, 21, 12);
       final record = Generation(
-        localId: 'companion-seedance-submit',
+        localId: 'companion-generic-reference-submit',
         provider: 'artcraft',
-        model: 'seedance_2p0',
+        model: 'minimax_h3',
         status: 'submitting',
         prompt: 'Follow the reference motion.',
         mode: VideoMode.i2v,
@@ -853,6 +854,7 @@ void main() {
 
         expect(response.statusCode, 201, reason: response.body);
         expect(normalizer.sources, <String>[originalSource]);
+        expect(normalizer.profile, ReferenceVideoCompatibilityProfile.generic);
         expect(api.input['reference_videos'], <String>[derivativeSource]);
 
         final persisted = (await store.read()).generations.single;
@@ -1300,10 +1302,15 @@ class _ChangedReferenceVideoNormalizer
 
   final String derivative;
   List<String> sources = const <String>[];
+  ReferenceVideoCompatibilityProfile? profile;
 
   @override
-  Future<PreparedReferenceVideos> normalize(List<String> sources) async {
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async {
     this.sources = List<String>.of(sources);
+    this.profile = profile;
     return PreparedReferenceVideos(
       sources: <String>[derivative],
       changedIndexes: const <int>{0},

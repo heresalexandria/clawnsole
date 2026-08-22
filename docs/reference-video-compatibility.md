@@ -1,10 +1,11 @@
 # Reference video compatibility
 
-Clawnsole checks creative-reference videos for Seedance compatibility at
-submission time. The setting is enabled by default and can be changed under
-Settings → Reference video compatibility. It applies to fresh uploads, saved
-references, generated videos selected as references, and restored generation
-inputs because those paths all converge on the same gateway preflight.
+Clawnsole checks creative-reference videos for provider compatibility at
+submission time. The toggle appears in Create → References whenever a video
+reference is attached. It is enabled by default, and an explicit off choice is
+remembered for future generations. The preflight applies to fresh uploads,
+saved references, generated videos selected as references, and restored
+generation inputs because those paths all converge on the same gateway.
 
 The preflight probes the source before doing any conversion. A byte-for-byte
 compatible MP4 is passed through unchanged. Sources that need repair are
@@ -12,7 +13,14 @@ remuxed, have only their audio repaired, or are fully transcoded as necessary.
 Repaired derivatives are cached by source digest and profile version. Saved
 references and generated originals are never overwritten.
 
-The compatibility profile mirrors `seedance-video-fix`: displayed orientation
+Every model that accepts video references receives a conservative generic
+profile. Healthy MP4 sources keep their original bytes. When repair is needed,
+the generic profile preserves native display geometry, aspect ratio, and sane
+constant frame rates while fixing incompatible codecs or pixel formats,
+rotation and sample-aspect metadata, variable or malformed timing, HDR color,
+audio, and MP4 structure.
+
+Seedance adds the stricter `seedance-video-fix` profile: displayed orientation
 selects a 720x1280, 1280x720, or 720x720 canvas; sources that retain at least
 92 percent of their frame fill and crop while the rest fit and pad; HDR PQ and
 HLG are tone-mapped to BT.709; video requests 30 fps H.264 High
@@ -20,7 +28,7 @@ HLG are tone-mapped to BT.709; video requests 30 fps H.264 High
 is a fast-start `isom` MP4 with zero-based timestamps. Hardware encoders that
 negotiate Baseline or Main H.264 are accepted after the same strict output
 validation. Packet cadence, keyframes, timestamps, codecs, dimensions, color
-metadata, audio, and container structure are validated after repair.
+metadata, audio, and container structure are validated after every repair.
 
 ## Supported targets
 

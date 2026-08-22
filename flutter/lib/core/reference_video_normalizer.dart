@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
 import 'bfl_api.dart';
 import 'models.dart';
+import 'provider_catalog.dart';
 
 const int _maxReferenceVideoBytes = 512 * 1024 * 1024;
 const int _maxNormalizationCacheBytes = 512 * 1024 * 1024;
-const String _normalizationProfileVersion = 'seedance-v1';
 const Duration _referenceVideoConnectTimeout = Duration(seconds: 20);
 const Duration _referenceVideoIdleTimeout = Duration(seconds: 20);
 const Duration _referenceVideoDownloadTimeout = Duration(minutes: 5);
@@ -18,6 +19,12 @@ const Duration _referenceVideoDownloadTimeout = Duration(minutes: 5);
 enum ReferenceVideoNormalizationAction { none, remux, audio, transcode }
 
 enum ReferenceVideoFraming { fill, fit }
+
+String _profileVersion(ReferenceVideoCompatibilityProfile profile) =>
+    switch (profile) {
+      ReferenceVideoCompatibilityProfile.generic => 'generic-v1',
+      ReferenceVideoCompatibilityProfile.seedance => 'seedance-v1',
+    };
 
 class ReferenceVideoCanvas {
   const ReferenceVideoCanvas(this.width, this.height);
@@ -135,7 +142,10 @@ class PreparedReferenceVideos {
 }
 
 abstract interface class ReferenceVideoNormalizationService {
-  Future<PreparedReferenceVideos> normalize(List<String> sources);
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  });
 }
 
 class DisabledReferenceVideoNormalizationService
@@ -143,8 +153,10 @@ class DisabledReferenceVideoNormalizationService
   const DisabledReferenceVideoNormalizationService();
 
   @override
-  Future<PreparedReferenceVideos> normalize(List<String> sources) async =>
-      PreparedReferenceVideos(sources: List<String>.of(sources));
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async => PreparedReferenceVideos(sources: List<String>.of(sources));
 }
 
 class PreparedGenerationReferenceVideos {
@@ -164,13 +176,14 @@ Future<PreparedGenerationReferenceVideos> prepareGenerationReferenceVideos({
   required Map<String, Object?> input,
   required GenerationConfig config,
   required ReferenceVideoNormalizationService normalizer,
+  required ReferenceVideoCompatibilityProfile profile,
 }) async {
   final rawSources = input['reference_videos'];
   if (rawSources is! List<Object?> || rawSources.isEmpty) {
     return PreparedGenerationReferenceVideos(input: input, config: config);
   }
   final sources = rawSources.map((source) => source.toString()).toList();
-  final prepared = await normalizer.normalize(sources);
+  final prepared = await normalizer.normalize(sources, profile: profile);
   if (prepared.changedIndexes.isEmpty) {
     return PreparedGenerationReferenceVideos(input: input, config: config);
   }
@@ -202,23 +215,31 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
   final Map<String, Future<String>> _inFlight = <String, Future<String>>{};
 
   @override
-  Future<PreparedReferenceVideos> normalize(List<String> sources) async {
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async {
     final prepared = <String>[];
     final changed = <int>{};
     for (var index = 0; index < sources.length; index += 1) {
       final original = sources[index];
-      final normalized = await _normalizeOne(original);
+      final normalized = await _normalizeOne(original, profile);
       prepared.add(normalized);
       if (normalized != original) changed.add(index);
     }
     return PreparedReferenceVideos(sources: prepared, changedIndexes: changed);
   }
 
-  Future<String> _normalizeOne(String source) async {
-    final sourceKey = sha256.convert(utf8.encode(source)).toString();
+  Future<String> _normalizeOne(
+    String source,
+    ReferenceVideoCompatibilityProfile profile,
+  ) async {
+    final sourceKey = sha256
+        .convert(utf8.encode('${profile.name}:$source'))
+        .toString();
     final existing = _inFlight[sourceKey];
     if (existing != null) return existing;
-    final operation = _normalizeUncached(source);
+    final operation = _normalizeUncached(source, profile);
     _inFlight[sourceKey] = operation;
     try {
       return await operation;
@@ -227,7 +248,10 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
     }
   }
 
-  Future<String> _normalizeUncached(String source) async {
+  Future<String> _normalizeUncached(
+    String source,
+    ReferenceVideoCompatibilityProfile profile,
+  ) async {
     final cache = await _cacheDirectory();
     await cache.create(recursive: true);
     final working = await cache.createTemp('working-');
@@ -235,12 +259,13 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
       final materialized = await _materialize(source, working);
       final cacheFile = File(
         '${cache.path}${Platform.pathSeparator}'
-        '${materialized.digest}-$_normalizationProfileVersion.mp4',
+        '${materialized.digest}-${_profileVersion(profile)}.mp4',
       );
       if (await cacheFile.exists()) {
         try {
           final cachedProbe = await _probe(
             cacheFile,
+            profile: profile,
             requireHighProfile: false,
           );
           if (cachedProbe.action == ReferenceVideoNormalizationAction.none) {
@@ -253,7 +278,12 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
         await cacheFile.delete();
       }
 
-      final probe = await _probe(materialized.file);
+      final probe = await _probe(
+        materialized.file,
+        profile: profile,
+        requireHighProfile:
+            profile == ReferenceVideoCompatibilityProfile.seedance,
+      );
       if (probe.action == ReferenceVideoNormalizationAction.none) return source;
 
       final temporary = File(
@@ -266,6 +296,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
             input: materialized.file,
             output: temporary,
             probe: probe,
+            profile: profile,
           );
         } else {
           await _encode(
@@ -273,8 +304,13 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
             output: temporary,
             probe: probe,
             action: action,
+            profile: profile,
           );
-          final outputProbe = await _probe(temporary);
+          final outputProbe = await _probe(
+            temporary,
+            profile: profile,
+            requireHighProfile: false,
+          );
           if (outputProbe.action != ReferenceVideoNormalizationAction.none) {
             await temporary.delete();
             action = ReferenceVideoNormalizationAction.transcode;
@@ -282,6 +318,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
               input: materialized.file,
               output: temporary,
               probe: probe,
+              profile: profile,
             );
           }
         }
@@ -384,6 +421,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
 
   Future<_ReferenceVideoProbe> _probe(
     File file, {
+    required ReferenceVideoCompatibilityProfile profile,
     bool requireHighProfile = true,
   }) async {
     final information = await _backend.runFfprobe(<String>[
@@ -425,6 +463,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
     return _ReferenceVideoProbe.from(
       decoded.map((key, value) => MapEntry(key.toString(), value)),
       packets.output,
+      profile: profile,
       fastStart: await _hasFastStart(file),
       requireHighProfile: requireHighProfile,
     );
@@ -435,6 +474,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
     required File output,
     required _ReferenceVideoProbe probe,
     required ReferenceVideoNormalizationAction action,
+    required ReferenceVideoCompatibilityProfile profile,
     ReferenceVideoEncoderAttempt? encoderAttempt,
   }) async {
     final arguments = <String>[
@@ -459,24 +499,26 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
       }
       arguments.addAll(<String>[
         '-vf',
-        probe.videoFilter,
+        probe.videoFilter(profile),
         '-c:v',
         attempt.encoder,
         ..._videoEncoderArguments(attempt.encoder),
         '-profile:v',
         'high',
-        '-level:v',
-        '3.1',
+        if (profile == ReferenceVideoCompatibilityProfile.seedance) ...<String>[
+          '-level:v',
+          '3.1',
+        ],
         '-pix_fmt',
         attempt.inputPixelFormat,
         '-g',
-        '60',
+        '${(probe.outputFrameRate * 2).round()}',
         '-bf',
         '0',
         '-tag:v',
         'avc1',
         '-r',
-        '30',
+        probe.outputFrameRateArgument,
         '-fps_mode',
         'cfr',
       ]);
@@ -507,7 +549,9 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
 
     arguments.addAll(<String>[
       '-video_track_timescale',
-      '30000',
+      profile == ReferenceVideoCompatibilityProfile.seedance
+          ? '30000'
+          : '90000',
       '-colorspace',
       'bt709',
       '-color_primaries',
@@ -549,6 +593,7 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
     required File input,
     required File output,
     required _ReferenceVideoProbe probe,
+    required ReferenceVideoCompatibilityProfile profile,
   }) async {
     Object? lastError;
     for (final attempt in _backend.h264EncoderAttempts) {
@@ -560,13 +605,18 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
           output: output,
           probe: probe,
           action: ReferenceVideoNormalizationAction.transcode,
+          profile: profile,
           encoderAttempt: attempt,
         );
-        // Inputs retain the strict High-profile no-op requirement. Hardware
-        // encoders may legitimately negotiate Baseline or Main despite the
-        // requested profile, so generated outputs use the script-compatible
-        // H.264 check while retaining every other compatibility check.
-        final outputProbe = await _probe(output, requireHighProfile: false);
+        // Seedance inputs retain the script's strict High-profile requirement.
+        // Hardware encoders may legitimately negotiate Baseline or Main, so
+        // generated outputs accept any H.264 profile while retaining the
+        // selected profile's other compatibility checks.
+        final outputProbe = await _probe(
+          output,
+          profile: profile,
+          requireHighProfile: false,
+        );
         if (outputProbe.action == ReferenceVideoNormalizationAction.none) {
           valid = true;
           return;
@@ -639,24 +689,30 @@ class _ReferenceVideoProbe {
   const _ReferenceVideoProbe({
     required this.action,
     required this.canvas,
+    required this.genericCanvas,
     required this.framing,
     required this.hasAudio,
     required this.isHdr,
+    required this.outputFrameRate,
+    required this.outputFrameRateArgument,
   });
 
   final ReferenceVideoNormalizationAction action;
   final ReferenceVideoCanvas canvas;
+  final ReferenceVideoCanvas genericCanvas;
   final ReferenceVideoFraming framing;
   final bool hasAudio;
   final bool isHdr;
+  final double outputFrameRate;
+  final String outputFrameRateArgument;
 
-  String get videoFilter {
+  String videoFilter(ReferenceVideoCompatibilityProfile profile) {
     final hdr = isHdr
         ? 'zscale=t=linear:npl=100,format=gbrpf32le,'
               'zscale=p=bt709,tonemap=tonemap=hable:desat=0,'
               'zscale=t=bt709:m=bt709:r=tv,format=yuv420p,'
         : '';
-    final geometry = framing == ReferenceVideoFraming.fill
+    final seedanceGeometry = framing == ReferenceVideoFraming.fill
         ? 'scale=w=${canvas.width}:h=${canvas.height}:'
               'force_original_aspect_ratio=increase:force_divisible_by=2:'
               'flags=lanczos,crop=${canvas.width}:${canvas.height}:'
@@ -665,14 +721,25 @@ class _ReferenceVideoProbe {
               'force_original_aspect_ratio=decrease:force_divisible_by=2:'
               'flags=lanczos,pad=${canvas.width}:${canvas.height}:'
               '(ow-iw)/2:(oh-ih)/2:color=black';
-    return '${hdr}fps=30,$geometry,setsar=1,'
+    final geometry = switch (profile) {
+      ReferenceVideoCompatibilityProfile.generic =>
+        'scale=w=${genericCanvas.width}:h=${genericCanvas.height}:'
+            'force_original_aspect_ratio=decrease:force_divisible_by=2:'
+            'flags=lanczos',
+      ReferenceVideoCompatibilityProfile.seedance => seedanceGeometry,
+    };
+    final frameRate = profile == ReferenceVideoCompatibilityProfile.seedance
+        ? '30'
+        : outputFrameRateArgument;
+    return '${hdr}fps=$frameRate,$geometry,setsar=1,'
         'setparams=range=limited:color_primaries=bt709:'
-        'color_trc=bt709:colorspace=bt709,setpts=N/(30*TB)';
+        'color_trc=bt709:colorspace=bt709,setpts=N/($frameRate*TB)';
   }
 
   factory _ReferenceVideoProbe.from(
     Map<String, Object?> json,
     String packetCsv, {
+    required ReferenceVideoCompatibilityProfile profile,
     required bool fastStart,
     bool requireHighProfile = true,
   }) {
@@ -696,9 +763,18 @@ class _ReferenceVideoProbe {
     }
     final rotation = _rotation(video);
     final rotated = rotation.abs() == 90 || rotation.abs() == 270;
-    final displayWidth = rotated ? height : width;
-    final displayHeight = rotated ? width : height;
+    final sampleAspectRatio = _ratio(video['sample_aspect_ratio']) ?? 1;
+    final unrotatedDisplayWidth = math.max(
+      1,
+      (width * sampleAspectRatio).round(),
+    );
+    final displayWidth = rotated ? height : unrotatedDisplayWidth;
+    final displayHeight = rotated ? unrotatedDisplayWidth : height;
     final canvas = ReferenceVideoCanvas.forDisplaySize(
+      displayWidth,
+      displayHeight,
+    );
+    final genericCanvas = _genericCanvasForDisplaySize(
       displayWidth,
       displayHeight,
     );
@@ -719,28 +795,56 @@ class _ReferenceVideoProbe {
     );
     final transfer = video['color_transfer']?.toString().toLowerCase() ?? '';
     final isHdr = transfer == 'smpte2084' || transfer == 'arib-std-b67';
-    final exactVideo =
+    final rFrameRate = _frameRate(video['r_frame_rate']);
+    final averageFrameRate = _frameRate(video['avg_frame_rate']);
+    final genericFrameRate = averageFrameRate ?? rFrameRate;
+    final outputFrameRate = switch (profile) {
+      ReferenceVideoCompatibilityProfile.generic => genericFrameRate ?? 30,
+      ReferenceVideoCompatibilityProfile.seedance => 30.0,
+    };
+    final outputFrameRateArgument = switch (profile) {
+      ReferenceVideoCompatibilityProfile.generic
+          when averageFrameRate != null =>
+        video['avg_frame_rate']!.toString(),
+      ReferenceVideoCompatibilityProfile.generic when rFrameRate != null =>
+        video['r_frame_rate']!.toString(),
+      _ => '30',
+    };
+    final commonExactVideo =
         video['codec_name'] == 'h264' &&
         (!requireHighProfile ||
             video['profile']?.toString().toLowerCase() == 'high') &&
-        (video['level'] as num?)?.toInt() == 31 &&
         video['pix_fmt'] == 'yuv420p' &&
-        width == canvas.width &&
-        height == canvas.height &&
         rotation == 0 &&
-        _rateIs30(video['r_frame_rate']) &&
-        _rateIs30(video['avg_frame_rate']) &&
         (video['sample_aspect_ratio'] == null ||
             video['sample_aspect_ratio'] == '1:1') &&
-        (video['has_b_frames'] as num?)?.toInt() == 0 &&
         video['codec_tag_string'] == 'avc1' &&
         video['color_space'] == 'bt709' &&
         video['color_primaries'] == 'bt709' &&
         video['color_transfer'] == 'bt709' &&
-        (video['color_range'] == 'tv' || video['color_range'] == 'mpeg') &&
-        packetInfo.firstIsKeyframe &&
-        packetInfo.isCfr30 &&
-        packetInfo.maximumKeyframeGap <= 2.05;
+        (video['color_range'] == 'tv' || video['color_range'] == 'mpeg');
+    final level = (video['level'] as num?)?.toInt();
+    final exactVideo = switch (profile) {
+      ReferenceVideoCompatibilityProfile.generic =>
+        commonExactVideo &&
+            width == genericCanvas.width &&
+            height == genericCanvas.height &&
+            rFrameRate != null &&
+            averageFrameRate != null &&
+            (rFrameRate - averageFrameRate).abs() < .001 &&
+            packetInfo.matchesFrameRate(averageFrameRate),
+      ReferenceVideoCompatibilityProfile.seedance =>
+        commonExactVideo &&
+            level == 31 &&
+            width == canvas.width &&
+            height == canvas.height &&
+            _rateIs30(video['r_frame_rate']) &&
+            _rateIs30(video['avg_frame_rate']) &&
+            (video['has_b_frames'] as num?)?.toInt() == 0 &&
+            packetInfo.firstIsKeyframe &&
+            packetInfo.matchesFrameRate(30) &&
+            packetInfo.maximumKeyframeGap <= 2.05,
+    };
     final firstAudio = audio.firstOrNull;
     final exactAudio =
         firstAudio == null ||
@@ -769,7 +873,9 @@ class _ReferenceVideoProbe {
         startTime >= 0 &&
         startTime < .001 &&
         !packetInfo.hasNegativeTimestamp &&
-        video['time_base'] == '1/30000' &&
+        (profile == ReferenceVideoCompatibilityProfile.generic
+            ? _validTimeBase(video['time_base'])
+            : video['time_base'] == '1/30000') &&
         videos.length == 1 &&
         audio.length <= 1 &&
         !unexpectedStreams &&
@@ -786,25 +892,79 @@ class _ReferenceVideoProbe {
     return _ReferenceVideoProbe(
       action: action,
       canvas: canvas,
+      genericCanvas: genericCanvas,
       framing: framing,
       hasAudio: firstAudio != null,
       isHdr: isHdr,
+      outputFrameRate: outputFrameRate,
+      outputFrameRateArgument: outputFrameRateArgument,
     );
   }
+}
+
+ReferenceVideoCanvas _genericCanvasForDisplaySize(int width, int height) {
+  int evenDimension(int value) {
+    final positive = math.max(2, value);
+    return positive.isEven ? positive : positive - 1;
+  }
+
+  return ReferenceVideoCanvas(evenDimension(width), evenDimension(height));
+}
+
+double? _ratio(Object? value) {
+  final parts = value?.toString().split(':') ?? const <String>[];
+  if (parts.length != 2) return null;
+  final numerator = double.tryParse(parts[0]);
+  final denominator = double.tryParse(parts[1]);
+  if (numerator == null || denominator == null || denominator <= 0) return null;
+  return numerator / denominator;
+}
+
+double? _frameRate(Object? value) {
+  final source = value?.toString() ?? '';
+  final parts = source.split('/');
+  final rate = parts.length == 2
+      ? (() {
+          final numerator = double.tryParse(parts[0]);
+          final denominator = double.tryParse(parts[1]);
+          return numerator != null && denominator != null && denominator != 0
+              ? numerator / denominator
+              : null;
+        })()
+      : double.tryParse(source);
+  return rate != null && rate >= 1 && rate <= 120 ? rate : null;
+}
+
+bool _validTimeBase(Object? value) {
+  final parts = value?.toString().split('/') ?? const <String>[];
+  if (parts.length != 2) return false;
+  final numerator = int.tryParse(parts[0]);
+  final denominator = int.tryParse(parts[1]);
+  return numerator != null &&
+      denominator != null &&
+      numerator > 0 &&
+      denominator > 0;
 }
 
 class _PacketInfo {
   const _PacketInfo({
     required this.firstIsKeyframe,
     required this.hasNegativeTimestamp,
-    required this.isCfr30,
+    required this.frameDuration,
+    required this.hasConstantFrameDuration,
     required this.maximumKeyframeGap,
   });
 
   final bool firstIsKeyframe;
   final bool hasNegativeTimestamp;
-  final bool isCfr30;
+  final double? frameDuration;
+  final bool hasConstantFrameDuration;
   final double maximumKeyframeGap;
+
+  bool matchesFrameRate(double frameRate) =>
+      hasConstantFrameDuration &&
+      frameDuration != null &&
+      (frameDuration! - (1 / frameRate)).abs() <= .001;
 
   factory _PacketInfo.parse(String source, {required int videoStreamIndex}) {
     var firstIsKeyframe = false;
@@ -812,8 +972,9 @@ class _PacketInfo {
     double? previousKeyframe;
     double? previousVideoTimestamp;
     double? lastVideoTimestamp;
+    double? frameDuration;
     var maximumKeyframeGap = 0.0;
-    var isCfr30 = true;
+    var hasConstantFrameDuration = true;
     var sawPacket = false;
     for (final line in const LineSplitter().convert(source)) {
       final fields = line.split(',');
@@ -831,9 +992,10 @@ class _PacketInfo {
       if (!sawPacket) firstIsKeyframe = flags.contains('K');
       sawPacket = true;
       if (previousVideoTimestamp case final previous?) {
-        final frameDuration = timestamp - previous;
-        if ((frameDuration - (1 / 30)).abs() > .001) {
-          isCfr30 = false;
+        final duration = timestamp - previous;
+        frameDuration ??= duration;
+        if (duration <= 0 || (duration - frameDuration).abs() > .001) {
+          hasConstantFrameDuration = false;
         }
       }
       previousVideoTimestamp = timestamp;
@@ -857,7 +1019,8 @@ class _PacketInfo {
     return _PacketInfo(
       firstIsKeyframe: sawPacket && firstIsKeyframe,
       hasNegativeTimestamp: hasNegativeTimestamp,
-      isCfr30: isCfr30,
+      frameDuration: frameDuration,
+      hasConstantFrameDuration: hasConstantFrameDuration,
       maximumKeyframeGap: maximumKeyframeGap,
     );
   }

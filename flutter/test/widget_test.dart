@@ -4742,51 +4742,137 @@ void main() {
   });
 
   testWidgets(
-    'settings restores and persists automatic reference video fixes',
+    'video reference normalization appears on Create and remembers off',
     (tester) async {
       final gateway = _MemoryGateway(
         const LocalSnapshot(
           generations: <Generation>[],
-          preferences: AppPreferences(autoFixReferenceVideos: false),
+          preferences: AppPreferences(
+            provider: 'artcraft',
+            model: 'minimax_h3',
+          ),
           hasApiKey: false,
           storage: StorageStats(path: 'memory', bytes: 0, records: 0),
         ),
       );
-      final controller = AppController(gateway: gateway);
+      var controller = AppController(gateway: gateway);
       await controller.initialize();
-      await tester.binding.setSurfaceSize(const Size(850, 1600));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(1400, 1600));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
 
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildClawnsoleTheme(Brightness.light),
-          home: Scaffold(
-            body: AnimatedBuilder(
-              animation: controller,
-              builder: (context, _) => SettingsScreen(controller: controller),
-            ),
+      Widget create() => MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
           ),
         ),
       );
+
+      await tester.pumpWidget(create());
       await tester.pumpAndSettle();
 
       final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
-      await tester.ensureVisible(toggle);
-      await tester.pumpAndSettle();
-      expect(controller.autoFixReferenceVideos, isFalse);
-      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
-
-      await tester.tap(toggle);
-      await tester.pumpAndSettle();
-
+      expect(toggle, findsNothing);
       expect(controller.autoFixReferenceVideos, isTrue);
-      expect(gateway.snapshot.preferences.autoFixReferenceVideos, isTrue);
+
+      controller.addUrlReference(MediaReferenceKind.image);
+      await tester.pumpAndSettle();
+      expect(toggle, findsNothing);
+
+      controller.addUrlReference(MediaReferenceKind.video);
+      await tester.pumpAndSettle();
+      expect(toggle, findsOneWidget);
       expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
 
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(controller.autoFixReferenceVideos, isFalse);
+      expect(gateway.snapshot.preferences.autoFixReferenceVideos, isFalse);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+
+      final videoReference = controller.form.references.singleWhere(
+        (reference) => reference.kind == MediaReferenceKind.video,
+      );
+      controller.removeReference(videoReference.id);
+      await tester.pumpAndSettle();
+      expect(toggle, findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      controller = AppController(gateway: gateway);
+      await controller.initialize();
+      controller.addUrlReference(MediaReferenceKind.video);
+      await tester.pumpWidget(create());
+      await tester.pumpAndSettle();
+
+      expect(toggle, findsOneWidget);
+      expect(controller.autoFixReferenceVideos, isFalse);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
       await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
     },
   );
+
+  testWidgets('video reference normalization follows compact references', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(500, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'minimax_h3';
+    controller.addUrlReference(MediaReferenceKind.video);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
+    expect(toggle, findsOneWidget);
+    final videoReference = controller.form.references.single;
+    controller.removeReference(videoReference.id);
+    await tester.pumpAndSettle();
+    expect(toggle, findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('reference video normalization is absent from Settings', (
+    tester,
+  ) async {
+    final controller = AppController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: SettingsScreen(controller: controller)),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('auto-fix-reference-videos')),
+      findsNothing,
+    );
+  });
 
   test('form infers every FLUX 3 generation mode from its inputs', () {
     expect(VideoMode.values, hasLength(5));

@@ -1377,6 +1377,7 @@ class _ReferencesSection extends StatelessWidget {
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
+    final hasVideoReference = form.referenceCount(MediaReferenceKind.video) > 0;
     final taskChips =
         !setAside && !conflicted && model.referenceTasks.length > 1
         ? Wrap(
@@ -1472,6 +1473,10 @@ class _ReferencesSection extends StatelessWidget {
             Text(note, style: noteStyle),
           ],
           if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+          if (hasVideoReference) ...<Widget>[
+            const SizedBox(height: 8),
+            _ReferenceVideoNormalizationToggle(controller: controller),
+          ],
         ],
       );
     }
@@ -1501,6 +1506,10 @@ class _ReferencesSection extends StatelessWidget {
           Text(note, style: noteStyle),
         ],
         if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+        if (hasVideoReference) ...<Widget>[
+          const SizedBox(height: 8),
+          _ReferenceVideoNormalizationToggle(controller: controller),
+        ],
         if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
@@ -1513,6 +1522,27 @@ class _ReferencesSection extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ReferenceVideoNormalizationToggle extends StatelessWidget {
+  const _ReferenceVideoNormalizationToggle({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => SwitchListTile.adaptive(
+    key: const ValueKey('auto-fix-reference-videos'),
+    contentPadding: EdgeInsets.zero,
+    dense: true,
+    value: controller.autoFixReferenceVideos,
+    onChanged: (value) =>
+        unawaited(controller.setAutoFixReferenceVideos(value)),
+    title: const Text('Normalize video references'),
+    subtitle: const Text(
+      'Checks compatibility before upload and repairs only when needed. '
+      'Original files remain unchanged.',
+    ),
+  );
 }
 
 class _ReferenceTile extends StatelessWidget {
