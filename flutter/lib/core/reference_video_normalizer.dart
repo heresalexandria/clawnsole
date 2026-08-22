@@ -11,6 +11,7 @@ import 'models.dart';
 import 'provider_catalog.dart';
 
 const int _maxReferenceVideoBytes = 512 * 1024 * 1024;
+const int _maxReferenceImageBytes = 128 * 1024 * 1024;
 const int _maxNormalizationCacheBytes = 512 * 1024 * 1024;
 const Duration _referenceVideoConnectTimeout = Duration(seconds: 20);
 const Duration _referenceVideoIdleTimeout = Duration(seconds: 20);
@@ -125,7 +126,7 @@ class ProcessReferenceVideoToolBackend implements ReferenceVideoToolBackend {
       );
     } on ProcessException {
       throw StateError(
-        'Reference video compatibility tools are unavailable in this build.',
+        'Reference compatibility tools are unavailable in this build.',
       );
     }
   }
@@ -141,6 +142,16 @@ class PreparedReferenceVideos {
   final Set<int> changedIndexes;
 }
 
+class PreparedReferenceImages {
+  const PreparedReferenceImages({
+    required this.sources,
+    this.changedIndexes = const <int>{},
+  });
+
+  final List<String> sources;
+  final Set<int> changedIndexes;
+}
+
 abstract interface class ReferenceVideoNormalizationService {
   Future<PreparedReferenceVideos> normalize(
     List<String> sources, {
@@ -148,8 +159,14 @@ abstract interface class ReferenceVideoNormalizationService {
   });
 }
 
+abstract interface class ReferenceImageNormalizationService {
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources);
+}
+
 class DisabledReferenceVideoNormalizationService
-    implements ReferenceVideoNormalizationService {
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
   const DisabledReferenceVideoNormalizationService();
 
   @override
@@ -157,6 +174,127 @@ class DisabledReferenceVideoNormalizationService
     List<String> sources, {
     required ReferenceVideoCompatibilityProfile profile,
   }) async => PreparedReferenceVideos(sources: List<String>.of(sources));
+
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
+      PreparedReferenceImages(sources: List<String>.of(sources));
+}
+
+class PreparedGenerationReferences {
+  const PreparedGenerationReferences({
+    required this.input,
+    required this.config,
+  });
+
+  final Map<String, Object?> input;
+  final GenerationConfig config;
+}
+
+String _keyframeImageSource(Object? value) {
+  if (value is String) return value;
+  if (value is List<Object?> && value.length > 1) {
+    return value[1]?.toString() ?? '';
+  }
+  return '';
+}
+
+Object? _replaceKeyframeImageSource(Object? value, String source) {
+  if (value is List<Object?> && value.length > 1) {
+    return <Object?>[value.first, source, ...value.skip(2)];
+  }
+  return source;
+}
+
+/// Normalizes visual guidance before provider mapping. Changed derivatives
+/// deliberately drop retained pointers so persistence saves the compatible
+/// derivative while leaving saved references and generated originals intact.
+Future<PreparedGenerationReferences> prepareGenerationReferences({
+  required Map<String, Object?> input,
+  required GenerationConfig config,
+  required ReferenceVideoNormalizationService videoNormalizer,
+  required ReferenceImageNormalizationService imageNormalizer,
+  ReferenceVideoCompatibilityProfile? videoProfile,
+}) async {
+  var nextInput = input;
+  var nextConfig = config;
+
+  final rawFrames = input['keyframes'];
+  if (rawFrames is List<Object?> && rawFrames.isNotEmpty) {
+    final frameSources = rawFrames.map(_keyframeImageSource).toList();
+    final prepared = await imageNormalizer.normalizeImages(frameSources);
+    if (prepared.changedIndexes.isNotEmpty) {
+      nextInput = Map<String, Object?>.of(nextInput)
+        ..['keyframes'] = rawFrames
+            .asMap()
+            .entries
+            .map(
+              (entry) => _replaceKeyframeImageSource(
+                entry.value,
+                prepared.sources[entry.key],
+              ),
+            )
+            .toList();
+      final frames = nextConfig.keyframes?.asMap().entries.map((entry) {
+        final frame = entry.value;
+        if (!prepared.changedIndexes.contains(entry.key)) return frame;
+        return KeyframeLabel(
+          label: frame.label,
+          role: frame.role,
+          seconds: frame.seconds,
+        );
+      }).toList();
+      nextConfig = nextConfig.copyWith(keyframes: frames);
+    }
+  }
+
+  final rawImages = input['reference_images'];
+  if (rawImages is List<Object?> && rawImages.isNotEmpty) {
+    final sources = rawImages.map((source) => source.toString()).toList();
+    final prepared = await imageNormalizer.normalizeImages(sources);
+    if (prepared.changedIndexes.isNotEmpty) {
+      nextInput = Map<String, Object?>.of(nextInput)
+        ..['reference_images'] = prepared.sources;
+      var imageIndex = 0;
+      final references = nextConfig.references?.map((reference) {
+        if (reference.kind != MediaReferenceKind.image) return reference;
+        final changed = prepared.changedIndexes.contains(imageIndex++);
+        if (!changed) return reference;
+        return MediaReferenceLabel(
+          label: reference.label,
+          kind: reference.kind,
+        );
+      }).toList();
+      nextConfig = nextConfig.copyWith(references: references);
+    }
+  }
+
+  final rawVideos = input['reference_videos'];
+  if (videoProfile != null &&
+      rawVideos is List<Object?> &&
+      rawVideos.isNotEmpty) {
+    final sources = rawVideos.map((source) => source.toString()).toList();
+    final prepared = await videoNormalizer.normalize(
+      sources,
+      profile: videoProfile,
+    );
+    if (prepared.changedIndexes.isNotEmpty) {
+      nextInput = Map<String, Object?>.of(nextInput)
+        ..['reference_videos'] = prepared.sources;
+      var videoIndex = 0;
+      final references = nextConfig.references?.map((reference) {
+        if (reference.kind != MediaReferenceKind.video) return reference;
+        final changed = prepared.changedIndexes.contains(videoIndex++);
+        if (!changed) return reference;
+        return MediaReferenceLabel(
+          label: reference.label,
+          kind: reference.kind,
+        );
+      }).toList();
+      nextConfig = nextConfig.copyWith(references: references);
+    }
+  }
+
+  return PreparedGenerationReferences(input: nextInput, config: nextConfig);
 }
 
 class PreparedGenerationReferenceVideos {
@@ -178,31 +316,23 @@ Future<PreparedGenerationReferenceVideos> prepareGenerationReferenceVideos({
   required ReferenceVideoNormalizationService normalizer,
   required ReferenceVideoCompatibilityProfile profile,
 }) async {
-  final rawSources = input['reference_videos'];
-  if (rawSources is! List<Object?> || rawSources.isEmpty) {
-    return PreparedGenerationReferenceVideos(input: input, config: config);
-  }
-  final sources = rawSources.map((source) => source.toString()).toList();
-  final prepared = await normalizer.normalize(sources, profile: profile);
-  if (prepared.changedIndexes.isEmpty) {
-    return PreparedGenerationReferenceVideos(input: input, config: config);
-  }
-  final nextInput = Map<String, Object?>.of(input)
-    ..['reference_videos'] = prepared.sources;
-  var videoIndex = 0;
-  final references = config.references?.map((reference) {
-    if (reference.kind != MediaReferenceKind.video) return reference;
-    final changed = prepared.changedIndexes.contains(videoIndex++);
-    if (!changed) return reference;
-    return MediaReferenceLabel(label: reference.label, kind: reference.kind);
-  }).toList();
+  final prepared = await prepareGenerationReferences(
+    input: input,
+    config: config,
+    videoNormalizer: normalizer,
+    imageNormalizer: const DisabledReferenceVideoNormalizationService(),
+    videoProfile: profile,
+  );
   return PreparedGenerationReferenceVideos(
-    input: nextInput,
-    config: config.copyWith(references: references),
+    input: prepared.input,
+    config: prepared.config,
   );
 }
 
-class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
+class ReferenceVideoNormalizer
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
   ReferenceVideoNormalizer({
     required ReferenceVideoToolBackend backend,
     required Future<Directory> Function() cacheDirectory,
@@ -213,6 +343,112 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
   final Future<Directory> Function() _cacheDirectory;
 
   final Map<String, Future<String>> _inFlight = <String, Future<String>>{};
+  final Map<String, Future<String>> _imageInFlight = <String, Future<String>>{};
+
+  @override
+  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async {
+    final prepared = <String>[];
+    final changed = <int>{};
+    for (var index = 0; index < sources.length; index += 1) {
+      final original = sources[index];
+      final normalized = await _normalizeImage(original);
+      prepared.add(normalized);
+      if (normalized != original) changed.add(index);
+    }
+    return PreparedReferenceImages(sources: prepared, changedIndexes: changed);
+  }
+
+  Future<String> _normalizeImage(String source) async {
+    if (!_imageSourceNeedsInspection(source)) return source;
+    final sourceKey = sha256.convert(utf8.encode(source)).toString();
+    final existing = _imageInFlight[sourceKey];
+    if (existing != null) return existing;
+    final operation = _normalizeImageUncached(source);
+    _imageInFlight[sourceKey] = operation;
+    try {
+      return await operation;
+    } finally {
+      _imageInFlight.remove(sourceKey);
+    }
+  }
+
+  Future<String> _normalizeImageUncached(String source) async {
+    final cache = await _cacheDirectory();
+    await cache.create(recursive: true);
+    final working = await cache.createTemp('working-image-');
+    try {
+      final materialized = await _materializeImage(source, working);
+      final compatibleMime = _compatibleImageMime(materialized.bytes);
+      if (compatibleMime != null) {
+        final expectedPrefix = 'data:$compatibleMime;base64,';
+        return source.startsWith(expectedPrefix)
+            ? source
+            : '$expectedPrefix${base64Encode(materialized.bytes)}';
+      }
+      final cacheFile = File(
+        '${cache.path}${Platform.pathSeparator}'
+        '${materialized.digest}-image-jpeg-v1.jpg',
+      );
+      if (await cacheFile.exists()) {
+        final bytes = await cacheFile.readAsBytes();
+        if (_isJpeg(bytes)) {
+          await cacheFile.setLastModified(DateTime.now().toUtc());
+          return _imageDataUrl(bytes);
+        }
+        await cacheFile.delete();
+      }
+      final temporary = File(
+        '${cacheFile.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      try {
+        final result = await _backend.runFfmpeg(<String>[
+          '-hide_banner',
+          '-loglevel',
+          'warning',
+          '-nostdin',
+          '-y',
+          '-i',
+          materialized.file.path,
+          '-map',
+          '0:v:0',
+          '-frames:v',
+          '1',
+          '-c:v',
+          'mjpeg',
+          '-q:v',
+          '2',
+          '-pix_fmt',
+          'yuvj420p',
+          '-map_metadata',
+          '-1',
+          '-update',
+          '1',
+          '-f',
+          'image2',
+          temporary.path,
+        ]);
+        final valid =
+            result.succeeded &&
+            await temporary.exists() &&
+            _isJpeg(await temporary.readAsBytes());
+        if (!valid) {
+          final detail = _lastToolLine(result.output);
+          throw StateError(
+            detail.isEmpty
+                ? 'The reference image could not be converted to JPEG.'
+                : 'The reference image could not be converted to JPEG: $detail',
+          );
+        }
+        await temporary.rename(cacheFile.path);
+      } finally {
+        if (await temporary.exists()) await temporary.delete();
+      }
+      await _sweepCache(cache, keep: cacheFile);
+      return _imageDataUrl(await cacheFile.readAsBytes());
+    } finally {
+      if (await working.exists()) await working.delete(recursive: true);
+    }
+  }
 
   @override
   Future<PreparedReferenceVideos> normalize(
@@ -416,6 +652,80 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
     return _MaterializedReferenceVideo(
       file: target,
       digest: digestSink.value.toString(),
+    );
+  }
+
+  Future<_MaterializedReferenceImage> _materializeImage(
+    String source,
+    Directory directory,
+  ) async {
+    final target = File(
+      '${directory.path}${Platform.pathSeparator}reference-image.input',
+    );
+    Uint8List bytes;
+    if (source.startsWith('data:')) {
+      final comma = source.indexOf(',');
+      if (comma < 0) {
+        throw StateError('A reference image upload is malformed.');
+      }
+      final metadata = source.substring(5, comma).split(';');
+      try {
+        bytes = metadata.contains('base64')
+            ? base64Decode(source.substring(comma + 1))
+            : Uint8List.fromList(
+                utf8.encode(Uri.decodeComponent(source.substring(comma + 1))),
+              );
+      } on FormatException {
+        throw StateError('A reference image upload is malformed.');
+      }
+    } else {
+      final url = validatedProviderUrl(source);
+      final client = HttpClient()
+        ..connectionTimeout = _referenceVideoConnectTimeout;
+      try {
+        bytes = await (() async {
+          final request = await client
+              .getUrl(url)
+              .timeout(_referenceVideoConnectTimeout);
+          final response = await request.close().timeout(
+            _referenceVideoConnectTimeout,
+          );
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            throw StateError(
+              'The reference image URL could not be downloaded.',
+            );
+          }
+          if (response.contentLength > _maxReferenceImageBytes) {
+            throw StateError('Reference images must be 128 MB or smaller.');
+          }
+          final output = BytesBuilder(copy: false);
+          var downloaded = 0;
+          await for (final chunk in response.timeout(
+            _referenceVideoIdleTimeout,
+          )) {
+            downloaded += chunk.length;
+            if (downloaded > _maxReferenceImageBytes) {
+              throw StateError('Reference images must be 128 MB or smaller.');
+            }
+            output.add(chunk);
+          }
+          return output.takeBytes();
+        })().timeout(_referenceVideoDownloadTimeout);
+      } on TimeoutException {
+        throw StateError('The reference image download timed out.');
+      } finally {
+        client.close(force: true);
+      }
+    }
+    if (bytes.isEmpty) throw StateError('The reference image is empty.');
+    if (bytes.length > _maxReferenceImageBytes) {
+      throw StateError('Reference images must be 128 MB or smaller.');
+    }
+    await target.writeAsBytes(bytes, flush: true);
+    return _MaterializedReferenceImage(
+      file: target,
+      bytes: bytes,
+      digest: sha256.convert(bytes).toString(),
     );
   }
 
@@ -665,7 +975,10 @@ class ReferenceVideoNormalizer implements ReferenceVideoNormalizationService {
   Future<void> _sweepCache(Directory cache, {required File keep}) async {
     final files = <File>[];
     await for (final entity in cache.list()) {
-      if (entity is File && entity.path.endsWith('.mp4')) files.add(entity);
+      if (entity is File &&
+          (entity.path.endsWith('.mp4') || entity.path.endsWith('.jpg'))) {
+        files.add(entity);
+      }
     }
     files.sort(
       (left, right) =>
@@ -1042,6 +1355,18 @@ class _MaterializedReferenceVideo {
   final String digest;
 }
 
+class _MaterializedReferenceImage {
+  const _MaterializedReferenceImage({
+    required this.file,
+    required this.bytes,
+    required this.digest,
+  });
+
+  final File file;
+  final Uint8List bytes;
+  final String digest;
+}
+
 class _SingleValueSink<T> implements Sink<T> {
   T? value;
 
@@ -1119,6 +1444,61 @@ Future<bool> _hasFastStart(File file) async {
 
 String _dataUrl(Uint8List bytes) =>
     'data:video/mp4;base64,${base64Encode(bytes)}';
+
+String _imageDataUrl(Uint8List bytes) =>
+    'data:image/jpeg;base64,${base64Encode(bytes)}';
+
+bool _imageSourceNeedsInspection(String source) {
+  final lower = source.toLowerCase();
+  if (lower.startsWith('data:image/') ||
+      lower.startsWith('data:application/octet-stream')) {
+    return true;
+  }
+  final uri = Uri.tryParse(source);
+  if (uri?.scheme != 'https') return false;
+  final path = uri!.path.toLowerCase();
+  return const <String>{
+    '.heic',
+    '.heif',
+    '.hif',
+    '.avif',
+    '.tif',
+    '.tiff',
+    '.bmp',
+    '.dng',
+  }.any(path.endsWith);
+}
+
+String? _compatibleImageMime(Uint8List bytes) {
+  if (_isJpeg(bytes)) return 'image/jpeg';
+  if (bytes.length >= 8 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4e &&
+      bytes[3] == 0x47 &&
+      bytes[4] == 0x0d &&
+      bytes[5] == 0x0a &&
+      bytes[6] == 0x1a &&
+      bytes[7] == 0x0a) {
+    return 'image/png';
+  }
+  if (bytes.length >= 6) {
+    final signature = ascii.decode(bytes.sublist(0, 6), allowInvalid: true);
+    if (signature == 'GIF87a' || signature == 'GIF89a') return 'image/gif';
+  }
+  if (bytes.length >= 12 &&
+      ascii.decode(bytes.sublist(0, 4), allowInvalid: true) == 'RIFF' &&
+      ascii.decode(bytes.sublist(8, 12), allowInvalid: true) == 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+bool _isJpeg(List<int> bytes) =>
+    bytes.length >= 3 &&
+    bytes[0] == 0xff &&
+    bytes[1] == 0xd8 &&
+    bytes[2] == 0xff;
 
 String _lastToolLine(String output) {
   final lines = const LineSplitter()

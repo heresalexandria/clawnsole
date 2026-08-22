@@ -1070,10 +1070,15 @@ class _GuidanceInputsSection extends StatelessWidget {
                 ],
               )
             : null;
+        final hasVisualReference =
+            controller.form.keyframes.isNotEmpty ||
+            controller.form.referenceCount(MediaReferenceKind.image) > 0 ||
+            controller.form.referenceCount(MediaReferenceKind.video) > 0;
+        late final Widget sections;
         if (frames != null &&
             references != null &&
             constraints.maxWidth >= 880) {
-          return Row(
+          sections = Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Expanded(child: frames),
@@ -1081,14 +1086,25 @@ class _GuidanceInputsSection extends StatelessWidget {
               Expanded(child: references),
             ],
           );
+        } else {
+          sections = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (frames != null) frames,
+              if (frames != null && references != null)
+                SizedBox(height: compact ? 12 : 16),
+              if (references != null) references,
+            ],
+          );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            if (frames != null) frames,
-            if (frames != null && references != null)
-              SizedBox(height: compact ? 12 : 16),
-            if (references != null) references,
+            sections,
+            if (hasVisualReference) ...<Widget>[
+              const SizedBox(height: 8),
+              _ReferenceNormalizationToggle(controller: controller),
+            ],
           ],
         );
       },
@@ -1377,7 +1393,6 @@ class _ReferencesSection extends StatelessWidget {
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
-    final hasVideoReference = form.referenceCount(MediaReferenceKind.video) > 0;
     final taskChips =
         !setAside && !conflicted && model.referenceTasks.length > 1
         ? Wrap(
@@ -1473,10 +1488,6 @@ class _ReferencesSection extends StatelessWidget {
             Text(note, style: noteStyle),
           ],
           if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-          if (hasVideoReference) ...<Widget>[
-            const SizedBox(height: 8),
-            _ReferenceVideoNormalizationToggle(controller: controller),
-          ],
         ],
       );
     }
@@ -1506,10 +1517,6 @@ class _ReferencesSection extends StatelessWidget {
           Text(note, style: noteStyle),
         ],
         if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-        if (hasVideoReference) ...<Widget>[
-          const SizedBox(height: 8),
-          _ReferenceVideoNormalizationToggle(controller: controller),
-        ],
         if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
@@ -1524,8 +1531,8 @@ class _ReferencesSection extends StatelessWidget {
   }
 }
 
-class _ReferenceVideoNormalizationToggle extends StatelessWidget {
-  const _ReferenceVideoNormalizationToggle({required this.controller});
+class _ReferenceNormalizationToggle extends StatelessWidget {
+  const _ReferenceNormalizationToggle({required this.controller});
 
   final AppController controller;
 
@@ -1537,9 +1544,10 @@ class _ReferenceVideoNormalizationToggle extends StatelessWidget {
     value: controller.autoFixReferenceVideos,
     onChanged: (value) =>
         unawaited(controller.setAutoFixReferenceVideos(value)),
-    title: const Text('Normalize video references'),
+    title: const Text('Normalize visual references'),
     subtitle: const Text(
-      'Checks compatibility before upload and repairs only when needed. '
+      'Converts unsupported image formats and checks video compatibility '
+      'before upload. Repairs run only when needed. '
       'Original files remain unchanged.',
     ),
   );

@@ -855,14 +855,18 @@ class DirectGateway
       provider,
       record.model,
     ).referenceVideoCompatibilityProfile;
-    if ((submission.autoFixReferenceVideos ??
-            data.preferences.autoFixReferenceVideos) &&
-        referenceVideoProfile != null) {
-      final prepared = await prepareGenerationReferenceVideos(
+    if (submission.autoFixReferenceVideos ??
+        data.preferences.autoFixReferenceVideos) {
+      final ReferenceImageNormalizationService imageNormalizer =
+          _referenceVideoNormalizer is ReferenceImageNormalizationService
+          ? _referenceVideoNormalizer as ReferenceImageNormalizationService
+          : const DisabledReferenceVideoNormalizationService();
+      final prepared = await prepareGenerationReferences(
         input: input,
         config: record.config,
-        normalizer: _referenceVideoNormalizer,
-        profile: referenceVideoProfile,
+        videoNormalizer: _referenceVideoNormalizer,
+        imageNormalizer: imageNormalizer,
+        videoProfile: referenceVideoProfile,
       );
       input = prepared.input;
       record = record.copyWith(config: prepared.config);

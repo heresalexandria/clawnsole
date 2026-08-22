@@ -71,6 +71,9 @@ python "$FLUTTER_DIRECTORY/scripts/verify_pe_security.py" \
 build_configuration="$("$DESTINATION/ffmpeg.exe" -hide_banner -buildconf 2>&1)"
 filters="$("$DESTINATION/ffmpeg.exe" -hide_banner -filters 2>&1)"
 encoders="$("$DESTINATION/ffmpeg.exe" -hide_banner -encoders 2>&1)"
+decoders="$("$DESTINATION/ffmpeg.exe" -hide_banner -decoders 2>&1)"
+demuxers="$("$DESTINATION/ffmpeg.exe" -hide_banner -demuxers 2>&1)"
+muxers="$("$DESTINATION/ffmpeg.exe" -hide_banner -muxers 2>&1)"
 if grep -q -- '--enable-gpl' <<<"$build_configuration"; then
   echo "Refusing to package a GPL-enabled FFmpeg build." >&2
   exit 1
@@ -81,6 +84,10 @@ grep -q '[[:space:]]zscale[[:space:]]' <<<"$filters"
 grep -q '[[:space:]]tonemap[[:space:]]' <<<"$filters"
 grep -q '[[:space:]]h264_mf[[:space:]]' <<<"$encoders"
 grep -q '[[:space:]]libopenh264[[:space:]]' <<<"$encoders"
+grep -q '[[:space:]]mjpeg[[:space:]]' <<<"$encoders"
+grep -q '[[:space:]]hevc[[:space:]]' <<<"$decoders"
+grep -q '[[:space:]]mov,mp4' <<<"$demuxers"
+grep -q '[[:space:]]image2[[:space:]]' <<<"$muxers"
 "$DESTINATION/ffprobe.exe" -hide_banner -version >/dev/null
 
-echo "Prepared pinned LGPL Windows reference-video tools at $DESTINATION."
+echo "Prepared pinned LGPL Windows reference-media tools at $DESTINATION."

@@ -1,4 +1,4 @@
-Clawnsole reference-video tools for Windows
+Clawnsole reference-media tools for Windows
 
 This directory contains the pinned x64 LGPL build of FFmpeg 8.1.2 produced by
 BtbN/FFmpeg-Builds at commit 2437e7b868da3c11872367b15f3c613b87c24819.
