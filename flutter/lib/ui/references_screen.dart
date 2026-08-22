@@ -10,6 +10,7 @@ import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'generation_video.dart';
 import 'inline_video.dart';
+import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 
 class ReferencesScreen extends StatelessWidget {
@@ -108,9 +109,12 @@ class _ReferencesHeading extends StatelessWidget {
           if (controller.supportsGoogleDrive)
             DriveRefreshButton(controller: controller, keyPrefix: 'references'),
           PopupMenuButton<MediaReferenceKind>(
-            onSelected: (kind) => unawaited(
-              controller.importSavedReferences(
+            onSelected: (kind) => unawaited(() async {
+              final source = await chooseMediaPickerSource(context, kind);
+              if (source == null) return;
+              await controller.importSavedReferences(
                 kind,
+                source: source,
                 folderId:
                     controller.referenceFolderView ==
                             AppController.libraryFolderAll ||
@@ -118,8 +122,8 @@ class _ReferencesHeading extends StatelessWidget {
                             AppController.libraryFolderUnfiled
                     ? null
                     : controller.referenceFolderView,
-              ),
-            ),
+              );
+            }()),
             itemBuilder: (context) => MediaReferenceKind.values
                 .map(
                   (kind) => PopupMenuItem<MediaReferenceKind>(

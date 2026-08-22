@@ -17,6 +17,7 @@ import 'generation_view_widgets.dart';
 import 'hardware.dart';
 import 'inline_video.dart';
 import 'library_screen.dart';
+import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
@@ -662,7 +663,13 @@ class _ComposerState extends State<_Composer> {
               mediaKind: MediaReferenceKind.video,
               asset: form.videoAsset,
               url: form.videoUrl,
-              onPick: controller.pickVideo,
+              onPick: () async {
+                final source = await chooseMediaPickerSource(
+                  context,
+                  MediaReferenceKind.video,
+                );
+                if (source != null) await controller.pickVideo(source: source);
+              },
               onUrl: controller.updateVideoSourceUrl,
               onDismiss: () {
                 setState(() => _showVideoPanel = false);
@@ -1734,7 +1741,12 @@ class _AddReferenceButton extends StatelessWidget {
             }
           }());
         } else if (choice == 'upload') {
-          unawaited(controller.addMediaReferences(kind));
+          unawaited(() async {
+            final source = await chooseMediaPickerSource(context, kind);
+            if (source != null) {
+              await controller.addMediaReferences(kind, source: source);
+            }
+          }());
         } else {
           controller.addUrlReference(kind);
         }
@@ -1746,7 +1758,7 @@ class _AddReferenceButton extends StatelessWidget {
             children: <Widget>[
               const Icon(Icons.collections_bookmark_outlined, size: 17),
               const SizedBox(width: 9),
-              Text('Choose saved ${kind.pluralLabel}'),
+              Flexible(child: Text('Choose saved ${kind.pluralLabel}')),
             ],
           ),
         ),
@@ -1756,7 +1768,7 @@ class _AddReferenceButton extends StatelessWidget {
             children: <Widget>[
               const Icon(Icons.upload_file_rounded, size: 17),
               const SizedBox(width: 9),
-              Text('Upload ${kind.pluralLabel}'),
+              Flexible(child: Text('Upload ${kind.pluralLabel}')),
             ],
           ),
         ),
@@ -1766,7 +1778,7 @@ class _AddReferenceButton extends StatelessWidget {
             children: <Widget>[
               const Icon(Icons.add_link_rounded, size: 17),
               const SizedBox(width: 9),
-              Text('Paste ${kind.label.toLowerCase()} URL'),
+              Flexible(child: Text('Paste ${kind.label.toLowerCase()} URL')),
             ],
           ),
         ),
@@ -1988,7 +2000,15 @@ class _AddFrameButton extends StatelessWidget {
         tooltip: '',
         onSelected: (choice) {
           if (choice == 'upload') {
-            unawaited(controller.addImageFrame(role));
+            unawaited(() async {
+              final source = await chooseMediaPickerSource(
+                context,
+                MediaReferenceKind.image,
+              );
+              if (source != null) {
+                await controller.addImageFrame(role, source: source);
+              }
+            }());
           } else {
             controller.addUrlFrame(role);
           }
@@ -2000,7 +2020,7 @@ class _AddFrameButton extends StatelessWidget {
               children: <Widget>[
                 Icon(Icons.add_photo_alternate_rounded, size: 17),
                 SizedBox(width: 9),
-                Text('Upload an image'),
+                Flexible(child: Text('Upload an image')),
               ],
             ),
           ),
@@ -2010,7 +2030,7 @@ class _AddFrameButton extends StatelessWidget {
               children: <Widget>[
                 Icon(Icons.add_link_rounded, size: 17),
                 SizedBox(width: 9),
-                Text('Paste an image URL'),
+                Flexible(child: Text('Paste an image URL')),
               ],
             ),
           ),
