@@ -812,8 +812,7 @@ class _ReferenceVideoProbe {
     };
     final commonExactVideo =
         video['codec_name'] == 'h264' &&
-        (!requireHighProfile ||
-            video['profile']?.toString().toLowerCase() == 'high') &&
+        (!requireHighProfile || _isH264HighProfile(video['profile'])) &&
         video['pix_fmt'] == 'yuv420p' &&
         rotation == 0 &&
         (video['sample_aspect_ratio'] == null ||
@@ -849,7 +848,7 @@ class _ReferenceVideoProbe {
     final exactAudio =
         firstAudio == null ||
         (firstAudio['codec_name'] == 'aac' &&
-            firstAudio['profile']?.toString().toLowerCase() == 'lc' &&
+            _isAacLowComplexityProfile(firstAudio['profile']) &&
             firstAudio['sample_rate']?.toString() == '48000' &&
             (firstAudio['channels'] as num?)?.toInt() == 2);
     final format = json['format'] is Map<Object?, Object?>
@@ -900,6 +899,16 @@ class _ReferenceVideoProbe {
       outputFrameRateArgument: outputFrameRateArgument,
     );
   }
+}
+
+bool _isH264HighProfile(Object? value) {
+  final profile = value?.toString().trim().toLowerCase();
+  return profile == 'high' || int.tryParse(profile ?? '') == 100;
+}
+
+bool _isAacLowComplexityProfile(Object? value) {
+  final profile = value?.toString().trim().toLowerCase();
+  return profile == 'lc' || int.tryParse(profile ?? '') == 1;
 }
 
 ReferenceVideoCanvas _genericCanvasForDisplaySize(int width, int height) {

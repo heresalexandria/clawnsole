@@ -85,6 +85,65 @@ void main() {
     },
   );
 
+  test('iOS numeric codec profiles pass post-repair validation', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _FakeBackend(<Map<String, Object?>>[
+      _canonicalProbe(
+        videoOverrides: const <String, Object?>{'codec_name': 'hevc'},
+        additionalStreams: <Map<String, Object?>>[
+          _audioProbe(profile: 1, sampleRate: '44100', channels: 1),
+        ],
+      ),
+      _canonicalProbe(
+        videoOverrides: const <String, Object?>{'profile': 100},
+        additionalStreams: <Map<String, Object?>>[_audioProbe(profile: 1)],
+      ),
+    ]);
+    final source =
+        'data:video/quicktime;base64,${base64Encode(_minimalFastStartMp4())}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
+
+    expect(result.changedIndexes, <int>{0});
+    expect(backend.ffmpegArguments, hasLength(1));
+  });
+
+  test('iOS numeric codec profiles avoid unnecessary repair', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-normalizer-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _FakeBackend(<Map<String, Object?>>[
+      _canonicalProbe(
+        videoOverrides: const <String, Object?>{'profile': 100},
+        additionalStreams: <Map<String, Object?>>[_audioProbe(profile: 1)],
+      ),
+    ]);
+    final source =
+        'data:video/mp4;base64,${base64Encode(_minimalFastStartMp4())}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final result = await normalizer.normalize(<String>[
+      source,
+    ], profile: ReferenceVideoCompatibilityProfile.seedance);
+
+    expect(result.sources, <String>[source]);
+    expect(result.changedIndexes, isEmpty);
+    expect(backend.ffmpegArguments, isEmpty);
+  });
+
   test('healthy generic 1080p 24fps references are byte-identical', () async {
     final cache = await Directory.systemTemp.createTemp(
       'clawnsole-normalizer-',
@@ -582,7 +641,7 @@ void main() {
     expect(api.input['reference_videos'], <String>['original']);
   });
 
-  test('packaged process tools repair and validate a real clip', () async {
+  test('packaged tools repair a real clip with audio', () async {
     final toolsDirectory =
         Platform.environment['CLAWNSOLE_TEST_MEDIA_TOOLS_DIR'];
     if (toolsDirectory == null || toolsDirectory.isEmpty) return;
@@ -603,6 +662,10 @@ void main() {
       'lavfi',
       '-i',
       'testsrc2=size=640x480:rate=24',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=1000:sample_rate=44100',
       '-t',
       '0.5',
       '-c:v',
@@ -611,7 +674,9 @@ void main() {
       '1',
       '-pix_fmt',
       'yuv420p',
-      '-an',
+      '-c:a',
+      'aac',
+      '-shortest',
       sourceFile.path,
     ]);
     expect(generated.succeeded, isTrue, reason: generated.output);
@@ -820,6 +885,19 @@ Map<String, Object?> _canonicalProbe({
     },
   };
 }
+
+Map<String, Object?> _audioProbe({
+  Object profile = 'LC',
+  String sampleRate = '48000',
+  int channels = 2,
+}) => <String, Object?>{
+  'codec_type': 'audio',
+  'index': 1,
+  'codec_name': 'aac',
+  'profile': profile,
+  'sample_rate': sampleRate,
+  'channels': channels,
+};
 
 Uint8List _minimalFastStartMp4() => Uint8List.fromList(<int>[
   0,
