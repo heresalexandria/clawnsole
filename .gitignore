@@ -41,6 +41,7 @@ __pycache__/
 /electron/assets/icon.icns
 /electron/dist/
 /electron/node_modules/
+/flutter/windows/media-tools/
 
 # local machine setup: never commit
 /use_heresalexandria.sh

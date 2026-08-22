@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    echo "The packaged Windows media tools are prepared on Windows." >&2
+    exit 1
+    ;;
+esac
+
+require_command curl
+require_command python
+require_command unzip
+
+if command -v shasum >/dev/null 2>&1; then
+  CHECK_SHA256=(shasum -a 256 --check)
+elif command -v sha256sum >/dev/null 2>&1; then
+  CHECK_SHA256=(sha256sum --check)
+else
+  echo "Clawnsole needs 'shasum' or 'sha256sum' on PATH." >&2
+  exit 1
+fi
+
+RELEASE_TAG="autobuild-2026-08-11-13-11"
+ARCHIVE_NAME="ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-shared-8.1.zip"
+ARCHIVE_SHA256="026f3ba22f0acf4fe58bf4da28a7eb64ffb107b270119684b91e4cace3b577aa"
+CACHE_ROOT="${TMPDIR:-/tmp}/clawnsole-windows-media-$RELEASE_TAG"
+ARCHIVE="$CACHE_ROOT/$ARCHIVE_NAME"
+EXTRACTED="$CACHE_ROOT/extracted"
+SOURCE="$EXTRACTED/${ARCHIVE_NAME%.zip}/bin"
+DESTINATION="$FLUTTER_DIRECTORY/windows/media-tools"
+
+mkdir -p "$CACHE_ROOT"
+if [[ ! -f "$ARCHIVE" ]]; then
+  curl --fail --location --retry 3 --connect-timeout 30 \
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/$RELEASE_TAG/$ARCHIVE_NAME" \
+    --output "$ARCHIVE"
+fi
+echo "$ARCHIVE_SHA256  $ARCHIVE" | "${CHECK_SHA256[@]}"
+
+if [[ ! -x "$SOURCE/ffmpeg.exe" || ! -x "$SOURCE/ffprobe.exe" ]]; then
+  if [[ "$EXTRACTED" != "$CACHE_ROOT/extracted" ]]; then
+    echo "Refusing to clean an unexpected Windows media-tool directory." >&2
+    exit 1
+  fi
+  rm -rf "$EXTRACTED"
+  mkdir -p "$EXTRACTED"
+  unzip -q "$ARCHIVE" -d "$EXTRACTED"
+fi
+
+if [[ "$DESTINATION" != "$FLUTTER_DIRECTORY/windows/media-tools" ]]; then
+  echo "Refusing to replace an unexpected Windows media-tool directory." >&2
+  exit 1
+fi
+rm -rf "$DESTINATION"
+mkdir -p "$DESTINATION"
+cp "$SOURCE/ffmpeg.exe" "$SOURCE/ffprobe.exe" "$SOURCE"/*.dll "$DESTINATION/"
+cp "$EXTRACTED/${ARCHIVE_NAME%.zip}/LICENSE.txt" \
+  "$DESTINATION/FFMPEG-LGPL-3.0.txt"
+cp "$FLUTTER_DIRECTORY/windows/media-tools.README.txt" \
+  "$DESTINATION/README.txt"
+cp "$FLUTTER_DIRECTORY/packages/reference_video_tools/LICENSE" \
+  "$DESTINATION/OPEN-SOURCE-LICENSES.txt"
+
+python "$FLUTTER_DIRECTORY/scripts/verify_pe_security.py" \
+  "$DESTINATION"/*.exe "$DESTINATION"/*.dll
+
+build_configuration="$("$DESTINATION/ffmpeg.exe" -hide_banner -buildconf 2>&1)"
+filters="$("$DESTINATION/ffmpeg.exe" -hide_banner -filters 2>&1)"
+encoders="$("$DESTINATION/ffmpeg.exe" -hide_banner -encoders 2>&1)"
+if grep -q -- '--enable-gpl' <<<"$build_configuration"; then
+  echo "Refusing to package a GPL-enabled FFmpeg build." >&2
+  exit 1
+fi
+grep -q -- '--enable-libzimg' <<<"$build_configuration"
+grep -q -- '--enable-libopenh264' <<<"$build_configuration"
+grep -q '[[:space:]]zscale[[:space:]]' <<<"$filters"
+grep -q '[[:space:]]tonemap[[:space:]]' <<<"$filters"
+grep -q '[[:space:]]h264_mf[[:space:]]' <<<"$encoders"
+grep -q '[[:space:]]libopenh264[[:space:]]' <<<"$encoders"
+"$DESTINATION/ffprobe.exe" -hide_banner -version >/dev/null
+
+echo "Prepared pinned LGPL Windows reference-video tools at $DESTINATION."

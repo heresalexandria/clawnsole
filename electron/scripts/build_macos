@@ -48,6 +48,8 @@ cd "$REPOSITORY_ROOT"
 CLAWNSOLE_PROXY_URL= "$FLUTTER_DIRECTORY/scripts/build_web"
 ARCHITECTURE="${CLAWNSOLE_ELECTRON_ARCH:-$(uname -m)}"
 node "$ELECTRON_DIRECTORY/scripts/prepare-renderer.mjs"
+CLAWNSOLE_MEDIA_TOOLS_ARCH="$ARCHITECTURE" \
+  "$ELECTRON_DIRECTORY/scripts/prepare-media-tools"
 "$ELECTRON_DIRECTORY/scripts/prepare_icon"
 
 case "$ARCHITECTURE" in

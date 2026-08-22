@@ -789,6 +789,25 @@ void main() {
     );
   });
 
+  test('reference video fixes default on and round-trip tolerantly', () {
+    expect(
+      AppPreferences.fromJson(const <String, Object?>{}).autoFixReferenceVideos,
+      isTrue,
+    );
+    expect(
+      AppPreferences.fromJson(const <String, Object?>{
+        'autoFixReferenceVideos': 'not-a-bool',
+      }).autoFixReferenceVideos,
+      isTrue,
+    );
+
+    final restored = AppPreferences.fromJson(
+      const AppPreferences(autoFixReferenceVideos: false).toJson(),
+    );
+    expect(restored.autoFixReferenceVideos, isFalse);
+    expect(restored.toJson()['autoFixReferenceVideos'], isFalse);
+  });
+
   test(
     'round-trips compact history, billing, and durable asset references',
     () {
@@ -4719,6 +4738,139 @@ void main() {
     expect(
       gateway.snapshot.preferences.generationPlaceholderStyle,
       GenerationPlaceholderStyle.cyclone,
+    );
+  });
+
+  testWidgets(
+    'video reference normalization appears on Create and remembers off',
+    (tester) async {
+      final gateway = _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(
+            provider: 'artcraft',
+            model: 'minimax_h3',
+          ),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      var controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await tester.binding.setSurfaceSize(const Size(1400, 1600));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+
+      Widget create() => MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(create());
+      await tester.pumpAndSettle();
+
+      final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
+      expect(toggle, findsNothing);
+      expect(controller.autoFixReferenceVideos, isTrue);
+
+      controller.addUrlReference(MediaReferenceKind.image);
+      await tester.pumpAndSettle();
+      expect(toggle, findsNothing);
+
+      controller.addUrlReference(MediaReferenceKind.video);
+      await tester.pumpAndSettle();
+      expect(toggle, findsOneWidget);
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(controller.autoFixReferenceVideos, isFalse);
+      expect(gateway.snapshot.preferences.autoFixReferenceVideos, isFalse);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+
+      final videoReference = controller.form.references.singleWhere(
+        (reference) => reference.kind == MediaReferenceKind.video,
+      );
+      controller.removeReference(videoReference.id);
+      await tester.pumpAndSettle();
+      expect(toggle, findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      controller = AppController(gateway: gateway);
+      await controller.initialize();
+      controller.addUrlReference(MediaReferenceKind.video);
+      await tester.pumpWidget(create());
+      await tester.pumpAndSettle();
+
+      expect(toggle, findsOneWidget);
+      expect(controller.autoFixReferenceVideos, isFalse);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    },
+  );
+
+  testWidgets('video reference normalization follows compact references', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(500, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'minimax_h3';
+    controller.addUrlReference(MediaReferenceKind.video);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final toggle = find.byKey(const ValueKey('auto-fix-reference-videos'));
+    expect(toggle, findsOneWidget);
+    final videoReference = controller.form.references.single;
+    controller.removeReference(videoReference.id);
+    await tester.pumpAndSettle();
+    expect(toggle, findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('reference video normalization is absent from Settings', (
+    tester,
+  ) async {
+    final controller = AppController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: SettingsScreen(controller: controller)),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('auto-fix-reference-videos')),
+      findsNothing,
     );
   });
 

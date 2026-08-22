@@ -17,6 +17,7 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
@@ -76,6 +77,20 @@ Future<void> main(List<String> arguments) async {
     requestToken: bootstrap.requestToken,
     allowedOrigin: 'http://127.0.0.1:${server.port}',
     videoCache: videoCache,
+    referenceVideoNormalizer: ReferenceVideoNormalizer(
+      backend: ProcessReferenceVideoToolBackend(
+        ffmpegPath: config.mediaToolsDir == null
+            ? 'ffmpeg'
+            : '${config.mediaToolsDir}${Platform.pathSeparator}ffmpeg',
+        ffprobePath: config.mediaToolsDir == null
+            ? 'ffprobe'
+            : '${config.mediaToolsDir}${Platform.pathSeparator}ffprobe',
+      ),
+      cacheDirectory: () async => Directory(
+        '${File(config.dataFile).parent.path}'
+        '${Platform.pathSeparator}reference-video-fixes',
+      ),
+    ),
   );
   stdout.writeln(
     'Clawnsole companion is listening on http://127.0.0.1:${server.port}',
@@ -199,12 +214,14 @@ class CompanionConfig {
     required this.port,
     required this.dataFile,
     this.webRoot,
+    this.mediaToolsDir,
     this.secureBootstrap = false,
   });
 
   final int port;
   final String dataFile;
   final String? webRoot;
+  final String? mediaToolsDir;
   final bool secureBootstrap;
 
   factory CompanionConfig.from(
@@ -214,6 +231,7 @@ class CompanionConfig {
     var port = int.tryParse(environment['CLAWNSOLE_PROXY_PORT'] ?? '') ?? 8787;
     var dataFile = environment['CLAWNSOLE_FLUTTER_DATA_FILE']?.trim() ?? '';
     var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
+    var mediaToolsDir = environment['CLAWNSOLE_MEDIA_TOOLS_DIR']?.trim() ?? '';
     var secureBootstrap = false;
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
@@ -226,6 +244,9 @@ class CompanionConfig {
         webRoot = arguments[++index];
       } else if (arguments[index] == '--secure-bootstrap') {
         secureBootstrap = true;
+      } else if (arguments[index] == '--media-tools-dir' &&
+          index + 1 < arguments.length) {
+        mediaToolsDir = arguments[++index];
       }
     }
     if (dataFile.isEmpty) {
@@ -237,6 +258,9 @@ class CompanionConfig {
       port: port,
       dataFile: File(dataFile).absolute.path,
       webRoot: webRoot.isEmpty ? null : Directory(webRoot).absolute.path,
+      mediaToolsDir: mediaToolsDir.isEmpty
+          ? null
+          : Directory(mediaToolsDir).absolute.path,
       secureBootstrap: secureBootstrap,
     );
   }
@@ -674,6 +698,8 @@ class CompanionApp {
     String requestToken = '',
     String allowedOrigin = '',
     VideoCache? videoCache,
+    ReferenceVideoNormalizationService referenceVideoNormalizer =
+        const DisabledReferenceVideoNormalizationService(),
   }) => CompanionApp.hybrid(
     store: CompanionHybridStore(HybridDataStore(local: store)),
     api: api,
@@ -683,6 +709,7 @@ class CompanionApp {
     requestToken: requestToken,
     allowedOrigin: allowedOrigin,
     videoCache: videoCache,
+    referenceVideoNormalizer: referenceVideoNormalizer,
   );
 
   CompanionApp.hybrid({
@@ -694,13 +721,16 @@ class CompanionApp {
     String requestToken = '',
     String allowedOrigin = '',
     VideoCache? videoCache,
+    ReferenceVideoNormalizationService referenceVideoNormalizer =
+        const DisabledReferenceVideoNormalizationService(),
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _fallbackApiKeys = fallbackApiKeys,
        _webRoot = webRoot,
        _requestToken = requestToken,
        _allowedOrigin = allowedOrigin,
-       _videoCache = videoCache;
+       _videoCache = videoCache,
+       _referenceVideoNormalizer = referenceVideoNormalizer;
 
   final CompanionHybridStore _store;
   final ProviderApiRouter _providers;
@@ -709,6 +739,7 @@ class CompanionApp {
   final String _requestToken;
   final String _allowedOrigin;
   final VideoCache? _videoCache;
+  final ReferenceVideoNormalizationService _referenceVideoNormalizer;
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
 
   Future<void> handle(HttpRequest request) async {
@@ -1720,9 +1751,7 @@ class CompanionApp {
     var generation = Generation.fromJson(
       rawRecord.map((key, value) => MapEntry(key.toString(), value)),
     );
-    final cleanInput = input.map(
-      (key, value) => MapEntry(key.toString(), value),
-    );
+    var cleanInput = input.map((key, value) => MapEntry(key.toString(), value));
     final provider = generation.provider;
     if (provider == 'apple-local') {
       throw StateError(
@@ -1734,6 +1763,24 @@ class CompanionApp {
       throw StateError(
         'Add a ${providerById(provider).name} API key before generating.',
       );
+    }
+    final autoFixReferenceVideos = switch (body['autoFixReferenceVideos']) {
+      final bool value => value,
+      _ => data.preferences.autoFixReferenceVideos,
+    };
+    final referenceVideoProfile = modelById(
+      provider,
+      generation.model,
+    ).referenceVideoCompatibilityProfile;
+    if (autoFixReferenceVideos && referenceVideoProfile != null) {
+      final prepared = await prepareGenerationReferenceVideos(
+        input: cleanInput,
+        config: generation.config,
+        normalizer: _referenceVideoNormalizer,
+        profile: referenceVideoProfile,
+      );
+      cleanInput = prepared.input;
+      generation = generation.copyWith(config: prepared.config);
     }
     generation = generation.copyWith(
       config: await _persistInputs(

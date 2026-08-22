@@ -18,6 +18,8 @@ import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'models.dart';
 import 'provider_api.dart';
+import 'reference_video_normalizer.dart';
+import 'reference_video_normalizer_mobile.dart';
 import 'secure_value_store.dart';
 import 'settings_vault.dart';
 import 'settings_vault_data_store.dart';
@@ -85,6 +87,7 @@ class NativeGateway extends DirectGateway
     SettingsVaultRemote? settingsVaultRemote,
     SettingsVaultCodec? settingsVaultCodec,
     SettingsVaultDataStore? settingsVaultStore,
+    ReferenceVideoNormalizationService? referenceVideoNormalizer,
   }) {
     final localStore = store ?? (hybridStore == null ? LocalDataStore() : null);
     // The video cache lives in the app cache directory: unlike a per-process
@@ -136,6 +139,15 @@ class NativeGateway extends DirectGateway
       iosReviewArtCraftApiKeyId: iosReviewArtCraftApiKeyId,
       providerRouter: providerRouter,
       isIos: isIos,
+      referenceVideoNormalizer:
+          referenceVideoNormalizer ??
+          ReferenceVideoNormalizer(
+            backend: nativeReferenceVideoToolBackend(),
+            cacheDirectory: () async => Directory(
+              '${(await getApplicationCacheDirectory()).path}'
+              '${Platform.pathSeparator}reference-video-fixes',
+            ),
+          ),
     );
   }
 
@@ -158,6 +170,7 @@ class NativeGateway extends DirectGateway
     String? iosReviewArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     bool? isIos,
+    required ReferenceVideoNormalizationService referenceVideoNormalizer,
   }) : _hybrid = hybrid,
        _localStore = localStore,
        _vault = vault,
@@ -188,6 +201,7 @@ class NativeGateway extends DirectGateway
          api: api,
          client: client,
          providerRouter: providerRouter,
+         referenceVideoNormalizer: referenceVideoNormalizer,
          persistenceDescription:
              'Combined local app documents and optional Google Drive library',
        );

@@ -50,6 +50,8 @@ dependencies:
   crypto: ^3.0.7
   fc_native_video_thumbnail: ^2.2.0
   video_player_win: ^3.2.2
+  reference_video_tools:
+    path: packages/reference_video_tools
 
 dev_dependencies:
   flutter_test:

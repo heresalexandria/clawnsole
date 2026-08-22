@@ -250,6 +250,10 @@ class AppController extends ChangeNotifier {
   /// cache and its prefetching off.
   int localVideoCacheMb = AppPreferences.defaultLocalVideoCacheMb;
 
+  /// Checks and repairs reference videos for provider compatibility before
+  /// they are uploaded.
+  bool autoFixReferenceVideos = AppPreferences.defaultAutoFixReferenceVideos;
+
   /// Visible cost-desk column ids in display order; null keeps the defaults.
   List<String>? costDeskColumns;
   String? lastLocalGenerationFolderId;
@@ -921,6 +925,7 @@ class AppController extends ChangeNotifier {
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
       localVideoCacheMb = value.preferences.localVideoCacheMb;
+      autoFixReferenceVideos = value.preferences.autoFixReferenceVideos;
       costDeskColumns = value.preferences.costDeskColumns;
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
@@ -1112,6 +1117,16 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences());
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> setAutoFixReferenceVideos(bool value) async {
+    autoFixReferenceVideos = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(autoFixReferenceVideos: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -2116,6 +2131,7 @@ class AppController extends ChangeNotifier {
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
+    bool? autoFixReferenceVideos,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -2138,6 +2154,8 @@ class AppController extends ChangeNotifier {
         ? null
         : costDeskColumns ?? this.costDeskColumns,
     localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
+    autoFixReferenceVideos:
+        autoFixReferenceVideos ?? this.autoFixReferenceVideos,
   );
 
   int _validDuration(int value) {
@@ -2985,16 +3003,29 @@ class AppController extends ChangeNotifier {
     }
     submitting = true;
     notifyListeners();
+    final checksReferenceVideos =
+        autoFixReferenceVideos &&
+        selectedModel.referenceVideoCompatibilityProfile != null &&
+        form.referenceCount(MediaReferenceKind.video) > 0;
     showNotice(
-      form.mode == VideoMode.upscale
+      checksReferenceVideos
+          ? 'Checking reference video compatibility before sending…'
+          : form.mode == VideoMode.upscale
           ? 'Upscale sent. Clawnsole will keep an eye on it.'
           : 'Generation sent. Clawnsole will keep an eye on it.',
     );
     try {
       pending = await gateway.submit(
-        GenerationSubmission(record: pending, input: _buildInput()),
+        GenerationSubmission(
+          record: pending,
+          input: _buildInput(),
+          autoFixReferenceVideos: autoFixReferenceVideos,
+        ),
       );
       _replaceInMemory(pending);
+      if (checksReferenceVideos) {
+        showNotice('Generation sent. Clawnsole will keep an eye on it.');
+      }
       final retainedReferences =
           pending.config.references ?? const <MediaReferenceLabel>[];
       for (

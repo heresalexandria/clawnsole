@@ -1047,9 +1047,11 @@ class AppPreferences {
     this.lastDriveGenerationFolderId,
     this.costDeskColumns,
     this.localVideoCacheMb = defaultLocalVideoCacheMb,
+    this.autoFixReferenceVideos = defaultAutoFixReferenceVideos,
   });
 
   static const int defaultLocalVideoCacheMb = 100;
+  static const bool defaultAutoFixReferenceVideos = true;
 
   final AppSection activeSection;
   final LibraryFilter libraryFilter;
@@ -1073,6 +1075,10 @@ class AppPreferences {
   /// cache (and its prefetching) off.
   final int localVideoCacheMb;
 
+  /// Whether reference videos should be checked and repaired for provider
+  /// compatibility before upload.
+  final bool autoFixReferenceVideos;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1091,6 +1097,7 @@ class AppPreferences {
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
+    bool? autoFixReferenceVideos,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1114,6 +1121,8 @@ class AppPreferences {
         ? null
         : costDeskColumns ?? this.costDeskColumns,
     localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
+    autoFixReferenceVideos:
+        autoFixReferenceVideos ?? this.autoFixReferenceVideos,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1133,6 +1142,7 @@ class AppPreferences {
       'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
     if (costDeskColumns != null) 'costDeskColumns': costDeskColumns,
     'localVideoCacheMb': localVideoCacheMb,
+    'autoFixReferenceVideos': autoFixReferenceVideos,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
@@ -1178,6 +1188,10 @@ class AppPreferences {
     localVideoCacheMb: switch (json['localVideoCacheMb']) {
       final num value => value.toInt().clamp(0, 1 << 20),
       _ => defaultLocalVideoCacheMb,
+    },
+    autoFixReferenceVideos: switch (json['autoFixReferenceVideos']) {
+      final bool value => value,
+      _ => defaultAutoFixReferenceVideos,
     },
   );
 }
@@ -1778,8 +1792,13 @@ class CostEstimate {
 }
 
 class GenerationSubmission {
-  const GenerationSubmission({required this.record, required this.input});
+  const GenerationSubmission({
+    required this.record,
+    required this.input,
+    this.autoFixReferenceVideos,
+  });
 
   final Generation record;
   final Map<String, Object?> input;
+  final bool? autoFixReferenceVideos;
 }

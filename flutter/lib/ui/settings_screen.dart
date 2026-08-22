@@ -1551,6 +1551,13 @@ class _SettingsSide extends StatelessWidget {
           icon: const Icon(Icons.privacy_tip_outlined, size: 16),
           label: const Text('Privacy policy'),
         ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () =>
+              showLicensePage(context: context, applicationName: 'Clawnsole'),
+          icon: const Icon(Icons.article_outlined, size: 16),
+          label: const Text('Open source licenses'),
+        ),
         const SizedBox(height: 15),
         const _CreatorCard(),
       ],

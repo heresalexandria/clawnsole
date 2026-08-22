@@ -39,6 +39,7 @@ unset CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KE
 
 print_heading "Windows x64 release build"
 prepare_flutter
+"$FLUTTER_DIRECTORY/scripts/prepare_windows_media_tools"
 
 OAUTH_BUILD_ARGUMENTS=()
 if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]]; then

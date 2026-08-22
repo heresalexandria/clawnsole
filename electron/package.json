@@ -40,6 +40,10 @@
       {
         "from": "dist/config",
         "to": "config"
+      },
+      {
+        "from": "dist/media-tools",
+        "to": "media-tools"
       }
     ],
     "directories": {

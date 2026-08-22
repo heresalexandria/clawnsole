@@ -564,6 +564,8 @@ class WebGateway
               'provider': submission.record.provider,
               'input': submission.input,
               'record': submission.record.toJson(),
+              if (submission.autoFixReferenceVideos case final value?)
+                'autoFixReferenceVideos': value,
             }),
           ),
         ),
