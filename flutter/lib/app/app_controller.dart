@@ -16,6 +16,25 @@ import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/video_cache_gateway.dart';
 
+enum MediaPickerSource { library, files }
+
+typedef FilePickerInvocation =
+    Future<FilePickerResult?> Function({
+      required FileType type,
+      required bool allowMultiple,
+      required bool withData,
+    });
+
+Future<FilePickerResult?> _pickFiles({
+  required FileType type,
+  required bool allowMultiple,
+  required bool withData,
+}) => FilePicker.pickFiles(
+  type: type,
+  allowMultiple: allowMultiple,
+  withData: withData,
+);
+
 class PickedAsset {
   const PickedAsset({
     required this.name,
@@ -226,9 +245,12 @@ class GenerationFormState {
 }
 
 class AppController extends ChangeNotifier {
-  AppController({AppGateway? gateway}) : gateway = gateway ?? createGateway();
+  AppController({AppGateway? gateway, FilePickerInvocation? filePicker})
+    : gateway = gateway ?? createGateway(),
+      _filePicker = filePicker ?? _pickFiles;
 
   final AppGateway gateway;
+  final FilePickerInvocation _filePicker;
   final GenerationFormState form = GenerationFormState();
 
   LocalSnapshot? snapshot;
@@ -1940,6 +1962,7 @@ class AppController extends ChangeNotifier {
     MediaReferenceKind kind, {
     String? folderId,
     LibraryStorage? storage,
+    MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
     try {
@@ -1947,7 +1970,7 @@ class AppController extends ChangeNotifier {
         MediaReferenceKind.image => FileType.image,
         MediaReferenceKind.video => FileType.video,
         MediaReferenceKind.audio => FileType.audio,
-      });
+      }, source: source);
       var saved = 0;
       for (final asset in picked) {
         final now = DateTime.now().toUtc();
@@ -2319,15 +2342,39 @@ class AppController extends ChangeNotifier {
 
   Future<PickedAsset?> _pick({
     required FileType type,
-    List<String>? extensions,
+    MediaPickerSource source = MediaPickerSource.library,
   }) async {
-    final result = await FilePicker.pickFiles(
-      type: type,
-      allowedExtensions: extensions,
+    final result = await _filePicker(
+      type: source == MediaPickerSource.files ? FileType.any : type,
+      allowMultiple: false,
       withData: true,
     );
     final file = result?.files.firstOrNull;
     if (file == null) return null;
+    final asset = _assetFromFile(file);
+    _requireExpectedFileType(asset, type, source);
+    return asset;
+  }
+
+  Future<List<PickedAsset>> _pickMany(
+    FileType type, {
+    MediaPickerSource source = MediaPickerSource.library,
+  }) async {
+    final result = await _filePicker(
+      type: source == MediaPickerSource.files ? FileType.any : type,
+      allowMultiple: true,
+      withData: true,
+    );
+    final assets = <PickedAsset>[];
+    for (final file in result?.files ?? const <PlatformFile>[]) {
+      final asset = _assetFromFile(file);
+      _requireExpectedFileType(asset, type, source);
+      assets.add(asset);
+    }
+    return assets;
+  }
+
+  PickedAsset _assetFromFile(PlatformFile file) {
     final bytes = file.bytes;
     if (bytes == null) throw StateError('The selected file could not be read.');
     return PickedAsset(
@@ -2340,31 +2387,101 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<List<PickedAsset>> _pickMany(FileType type) async {
-    final result = await FilePicker.pickFiles(
-      type: type,
-      allowMultiple: true,
-      withData: true,
-    );
-    final assets = <PickedAsset>[];
-    for (final file in result?.files ?? const <PlatformFile>[]) {
-      final bytes = file.bytes;
-      if (bytes == null) {
-        throw StateError('A selected file could not be read.');
-      }
-      assets.add(
-        PickedAsset(
-          name: file.name,
-          bytes: bytes,
-          mimeType:
-              lookupMimeType(file.name, headerBytes: bytes) ??
-              'application/octet-stream',
-          path: file.path,
-        ),
-      );
+  void _requireExpectedFileType(
+    PickedAsset asset,
+    FileType expected,
+    MediaPickerSource source,
+  ) {
+    if (source != MediaPickerSource.files || _matchesType(asset, expected)) {
+      return;
     }
-    return assets;
+    final label = switch (expected) {
+      FileType.image => 'an image',
+      FileType.video => 'a video',
+      FileType.audio => 'an audio',
+      _ => 'a compatible',
+    };
+    throw StateError('Choose $label file from Files.');
   }
+
+  bool _matchesType(PickedAsset asset, FileType expected) {
+    if (expected == FileType.any || expected == FileType.custom) return true;
+    final mimeType = asset.mimeType.toLowerCase();
+    if (expected == FileType.media) {
+      return mimeType.startsWith('image/') ||
+          mimeType.startsWith('video/') ||
+          _matchesExtension(asset.name, FileType.image) ||
+          _matchesExtension(asset.name, FileType.video);
+    }
+    final prefix = switch (expected) {
+      FileType.image => 'image/',
+      FileType.video => 'video/',
+      FileType.audio => 'audio/',
+      _ => '',
+    };
+    return mimeType.startsWith(prefix) ||
+        _matchesExtension(asset.name, expected);
+  }
+
+  bool _matchesExtension(String name, FileType expected) {
+    final separator = name.lastIndexOf('.');
+    if (separator < 0 || separator == name.length - 1) return false;
+    return (_mediaExtensions[expected] ?? const <String>{}).contains(
+      name.substring(separator + 1).toLowerCase(),
+    );
+  }
+
+  static const Map<FileType, Set<String>> _mediaExtensions =
+      <FileType, Set<String>>{
+        FileType.image: <String>{
+          'jpg',
+          'jpeg',
+          'png',
+          'gif',
+          'webp',
+          'heic',
+          'heif',
+          'hif',
+          'avif',
+          'tif',
+          'tiff',
+          'bmp',
+          'dng',
+        },
+        FileType.video: <String>{
+          'mp4',
+          'mov',
+          'm4v',
+          'avi',
+          'mkv',
+          'webm',
+          'mpg',
+          'mpeg',
+          '3gp',
+          '3g2',
+          'ts',
+          'mts',
+          'm2ts',
+          'wmv',
+          'flv',
+          'ogv',
+        },
+        FileType.audio: <String>{
+          'mp3',
+          'm4a',
+          'aac',
+          'wav',
+          'aiff',
+          'aif',
+          'flac',
+          'ogg',
+          'oga',
+          'opus',
+          'wma',
+          'caf',
+          'amr',
+        },
+      };
 
   /// Pinned frames are unavailable because this model takes frames or media
   /// references, never both, and references are already attached.
@@ -2451,10 +2568,13 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addImageFrame(KeyframeRole role) async {
+  Future<void> addImageFrame(
+    KeyframeRole role, {
+    MediaPickerSource source = MediaPickerSource.library,
+  }) async {
     if (!canAddFrame(role)) return;
     try {
-      final asset = await _pick(type: FileType.image);
+      final asset = await _pick(type: FileType.image, source: source);
       if (asset != null) _appendFrame(role, label: asset.name, asset: asset);
     } on Object catch (error) {
       showNotice(_message(error));
@@ -2486,14 +2606,17 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> addMediaReferences(MediaReferenceKind kind) async {
+  Future<void> addMediaReferences(
+    MediaReferenceKind kind, {
+    MediaPickerSource source = MediaPickerSource.library,
+  }) async {
     if (!canAddReference(kind)) return;
     try {
       final picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
         MediaReferenceKind.video => FileType.video,
         MediaReferenceKind.audio => FileType.audio,
-      });
+      }, source: source);
       final available = referenceLimit(kind) - form.referenceCount(kind);
       final totalAvailable = selectedModel.maxTotalReferences == null
           ? available
@@ -2685,9 +2808,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> pickVideo() async {
+  Future<void> pickVideo({
+    MediaPickerSource source = MediaPickerSource.library,
+  }) async {
     try {
-      final asset = await _pick(type: FileType.video);
+      final asset = await _pick(type: FileType.video, source: source);
       if (asset != null) {
         updateForm((value) {
           value.videoAsset = asset;
