@@ -1083,6 +1083,7 @@ class _GenerationCardState extends State<GenerationCard> {
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
                 if (item.error != null ||
+                    item.resultRetentionError != null ||
                     item.lastCheckError != null ||
                     item.lastCheckedAt != null ||
                     item.isLongRunning) ...<Widget>[

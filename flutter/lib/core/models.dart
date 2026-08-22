@@ -666,6 +666,9 @@ class Generation {
     this.draftCacheUrl,
     this.deliveryExpiresAt,
     this.deliveryExpired = false,
+    this.lastResultRetentionAttemptAt,
+    this.resultRetentionFailures = 0,
+    this.resultRetentionError,
     this.estimatedCreditsMin,
     this.estimatedCreditsMax,
     this.estimateBasis,
@@ -713,6 +716,9 @@ class Generation {
   final String? draftCacheUrl;
   final DateTime? deliveryExpiresAt;
   final bool deliveryExpired;
+  final DateTime? lastResultRetentionAttemptAt;
+  final int resultRetentionFailures;
+  final String? resultRetentionError;
   final double? estimatedCreditsMin;
   final double? estimatedCreditsMax;
   final String? estimateBasis;
@@ -753,10 +759,13 @@ class Generation {
   }
 
   bool get isFailed => isGenerationFailureStatus(status);
+  bool get needsResultRetention =>
+      isReady && resultAsset == null && canCheckStatus;
   bool get isStatusUnavailable =>
       isWorking && lastCheckError?.trim().isNotEmpty == true;
   bool get hasProviderDetails =>
       error?.trim().isNotEmpty == true ||
+      resultRetentionError?.trim().isNotEmpty == true ||
       lastCheckError?.trim().isNotEmpty == true ||
       lastProviderResponse?.trim().isNotEmpty == true;
   bool get isLongRunning =>
@@ -772,6 +781,15 @@ class Generation {
       !now.isBefore(
         lastCheckedAt!.add(automaticPollDelay(consecutiveCheckFailures)),
       );
+
+  bool isResultRetentionDue(DateTime now) =>
+      needsResultRetention &&
+      (lastResultRetentionAttemptAt == null ||
+          !now.isBefore(
+            lastResultRetentionAttemptAt!.add(
+              automaticPollDelay(resultRetentionFailures),
+            ),
+          ));
 
   Generation recoverInterruptedSubmission(DateTime now) {
     if (normalizeGenerationStatus(status) != 'submitting' ||
@@ -802,7 +820,13 @@ class Generation {
     AssetReference? timelineThumbnailAsset,
     String? draftCacheUrl,
     DateTime? deliveryExpiresAt,
+    bool clearDeliveryExpiresAt = false,
     bool? deliveryExpired,
+    DateTime? lastResultRetentionAttemptAt,
+    bool clearLastResultRetentionAttemptAt = false,
+    int? resultRetentionFailures,
+    String? resultRetentionError,
+    bool clearResultRetentionError = false,
     double? estimatedCreditsMin,
     double? estimatedCreditsMax,
     String? estimateBasis,
@@ -852,8 +876,18 @@ class Generation {
     timelineThumbnailAsset:
         timelineThumbnailAsset ?? this.timelineThumbnailAsset,
     draftCacheUrl: draftCacheUrl ?? this.draftCacheUrl,
-    deliveryExpiresAt: deliveryExpiresAt ?? this.deliveryExpiresAt,
+    deliveryExpiresAt: clearDeliveryExpiresAt
+        ? null
+        : deliveryExpiresAt ?? this.deliveryExpiresAt,
     deliveryExpired: deliveryExpired ?? this.deliveryExpired,
+    lastResultRetentionAttemptAt: clearLastResultRetentionAttemptAt
+        ? null
+        : lastResultRetentionAttemptAt ?? this.lastResultRetentionAttemptAt,
+    resultRetentionFailures:
+        resultRetentionFailures ?? this.resultRetentionFailures,
+    resultRetentionError: clearResultRetentionError
+        ? null
+        : resultRetentionError ?? this.resultRetentionError,
     estimatedCreditsMin: estimatedCreditsMin ?? this.estimatedCreditsMin,
     estimatedCreditsMax: estimatedCreditsMax ?? this.estimatedCreditsMax,
     estimateBasis: estimateBasis ?? this.estimateBasis,
@@ -909,6 +943,14 @@ class Generation {
     if (deliveryExpiresAt != null)
       'deliveryExpiresAt': deliveryExpiresAt!.toUtc().toIso8601String(),
     if (deliveryExpired) 'deliveryExpired': true,
+    if (lastResultRetentionAttemptAt != null)
+      'lastResultRetentionAttemptAt': lastResultRetentionAttemptAt!
+          .toUtc()
+          .toIso8601String(),
+    if (resultRetentionFailures > 0)
+      'resultRetentionFailures': resultRetentionFailures,
+    if (resultRetentionError != null)
+      'resultRetentionError': resultRetentionError,
     if (estimatedCreditsMin != null) 'estimatedCreditsMin': estimatedCreditsMin,
     if (estimatedCreditsMax != null) 'estimatedCreditsMax': estimatedCreditsMax,
     if (estimateBasis != null) 'estimateBasis': estimateBasis,
@@ -995,6 +1037,12 @@ class Generation {
       json['deliveryExpiresAt'] as String? ?? '',
     ),
     deliveryExpired: json['deliveryExpired'] == true,
+    lastResultRetentionAttemptAt: DateTime.tryParse(
+      json['lastResultRetentionAttemptAt'] as String? ?? '',
+    ),
+    resultRetentionFailures:
+        (json['resultRetentionFailures'] as num?)?.toInt() ?? 0,
+    resultRetentionError: json['resultRetentionError'] as String?,
     estimatedCreditsMin: (json['estimatedCreditsMin'] as num?)?.toDouble(),
     estimatedCreditsMax: (json['estimatedCreditsMax'] as num?)?.toDouble(),
     estimateBasis: json['estimateBasis'] as String?,
@@ -1290,7 +1338,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 18,
+    'schemaVersion': 19,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)

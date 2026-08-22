@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -117,6 +118,23 @@ class DirectGateway
           error: 'Apple Local generation has been retired.',
           updatedAt: now,
         );
+      }
+      if (next.isReady && next.resultAsset == null) {
+        final availability = providerById(
+          next.provider,
+        ).resultDelivery.availability;
+        final expectedExpiry = availability == null
+            ? null
+            : next.lastProviderResponseAt?.add(availability);
+        if (availability == null && next.deliveryExpiresAt != null) {
+          changed = true;
+          next = next.copyWith(clearDeliveryExpiresAt: true);
+        } else if (expectedExpiry != null &&
+            (next.deliveryExpiresAt == null ||
+                next.deliveryExpiresAt!.isBefore(expectedExpiry))) {
+          changed = true;
+          next = next.copyWith(deliveryExpiresAt: expectedExpiry);
+        }
       }
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
@@ -898,6 +916,21 @@ class DirectGateway
           status: 502,
         );
       }
+      final acceptedAt = DateTime.now().toUtc();
+      record = record.copyWith(
+        requestId: requestId,
+        pollingUrl: pollingUrl,
+        status: 'Pending',
+        clearProgress: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(response),
+        lastProviderResponseAt: acceptedAt,
+        updatedAt: acceptedAt,
+      );
+      // The provider receipt is the irreplaceable part of the transaction.
+      // Persist it before optional balance/cost bookkeeping makes another
+      // network request or the app has another opportunity to be suspended.
+      record = await _replaceGeneration(record);
       final liveAfter = await _balanceSafely(provider, key);
       final realized = resolveProviderCost(
         record,
@@ -911,24 +944,23 @@ class DirectGateway
               ? (creditsBefore - cost).clamp(0, double.infinity)
               : null);
       record = record.copyWith(
-        requestId: requestId,
-        pollingUrl: pollingUrl,
-        status: 'Pending',
-        clearProgress: true,
         cost: cost,
         clearCost: cost == null,
         realizedCostUsd: realized.usd,
         realizedCostSource: realized.source,
         creditsBefore: creditsBefore,
         creditsAfter: creditsAfter,
-        lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(response),
-        lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
       return record;
     } on Object catch (error) {
+      if (record.canCheckStatus) {
+        // Submission succeeded and the durable receipt is already present.
+        // A later accounting/storage refresh must never turn a live provider
+        // task into a terminal local error.
+        return record;
+      }
       record = record.copyWith(
         status: 'Error',
         error: generationExceptionMessage(error),
@@ -988,25 +1020,48 @@ class DirectGateway
               fallback: status,
             )
           : null;
-      if (status == 'Ready' && resultUrl == null) {
-        status = 'Error';
-        failureMessage =
-            '${providerById(generation.provider).name} reported that the generation was ready but did not include a video URL.';
-      }
       AssetReference? resultAsset = generation.resultAsset;
-      if (resultUrl != null && resultAsset == null) {
+      var retentionFailures = generation.resultRetentionFailures;
+      String? retentionError;
+      var attemptedRetention = false;
+      if (status == 'Ready' && resultAsset == null && resultUrl == null) {
+        attemptedRetention = true;
+        retentionFailures += 1;
+        retentionError =
+            '${providerById(generation.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
+      } else if (resultUrl != null && resultAsset == null) {
+        attemptedRetention = true;
         try {
-          final response = await _client.get(validatedProviderUrl(resultUrl));
-          if (response.statusCode >= 200 && response.statusCode < 300) {
-            resultAsset = await _store.writeAsset(
-              response.bodyBytes,
-              label: 'clawnsole-${generation.localId}.mp4',
-              contentType: response.headers['content-type'] ?? 'video/mp4',
-              storage: generation.storage,
+          final request = http.Request('GET', validatedProviderUrl(resultUrl));
+          final response = await _client
+              .send(request)
+              .timeout(const Duration(seconds: 30));
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            throw ProviderException(
+              'The provider result download returned HTTP ${response.statusCode}.',
+              status: response.statusCode,
             );
           }
-        } on Object {
-          // The temporary provider URL remains available if local retention fails.
+          final bytes = BytesBuilder(copy: false);
+          await for (final chunk in response.stream.timeout(
+            const Duration(seconds: 30),
+          )) {
+            bytes.add(chunk);
+          }
+          resultAsset = await _store.writeAsset(
+            bytes.takeBytes(),
+            label: 'clawnsole-${generation.localId}.mp4',
+            contentType: response.headers['content-type'] ?? 'video/mp4',
+            storage: generation.storage,
+          );
+          retentionFailures = 0;
+        } on TimeoutException {
+          retentionFailures += 1;
+          retentionError =
+              'The provider result download stalled. Clawnsole will retry it.';
+        } on Object catch (error) {
+          retentionFailures += 1;
+          retentionError = generationExceptionMessage(error);
         }
       }
       final failed = isGenerationFailureStatus(status);
@@ -1022,6 +1077,9 @@ class DirectGateway
         terminal: terminal,
       );
       final reportedProgress = findProviderProgress(payload);
+      final deliveryAvailability = providerById(
+        generation.provider,
+      ).resultDelivery.availability;
       next = generation.copyWith(
         status: status,
         progress: status == 'Ready' ? 100 : reportedProgress,
@@ -1030,9 +1088,17 @@ class DirectGateway
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
         draftCacheUrl: draftUrl,
-        deliveryExpiresAt: status == 'Ready'
-            ? checkedAt.add(const Duration(minutes: 10))
+        deliveryExpiresAt: status == 'Ready' && deliveryAvailability != null
+            ? generation.deliveryExpiresAt ??
+                  checkedAt.add(deliveryAvailability)
             : null,
+        clearDeliveryExpiresAt:
+            status == 'Ready' && deliveryAvailability == null,
+        lastResultRetentionAttemptAt: attemptedRetention ? checkedAt : null,
+        resultRetentionFailures: resultAsset != null ? 0 : retentionFailures,
+        resultRetentionError: retentionError,
+        clearResultRetentionError:
+            resultAsset != null || status != 'Ready' || retentionError == null,
         error: failureMessage,
         clearError: !failed,
         cost: realized.providerUnits,
@@ -1082,6 +1148,13 @@ class DirectGateway
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
+          lastResultRetentionAttemptAt: generation.isReady ? checkedAt : null,
+          resultRetentionFailures: generation.isReady
+              ? generation.resultRetentionFailures + 1
+              : generation.resultRetentionFailures,
+          resultRetentionError: generation.isReady
+              ? generationExceptionMessage(error)
+              : null,
           lastProviderStatusCode: providerHttpStatus(error),
           lastProviderResponse: providerErrorResponse(error),
           lastProviderResponseAt: checkedAt,

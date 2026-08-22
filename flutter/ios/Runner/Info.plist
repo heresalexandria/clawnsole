@@ -39,6 +39,8 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Clawnsole uses the camera when you choose to capture an image for a generation input or video keyframe.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Clawnsole uses selected images as FLUX video keyframes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

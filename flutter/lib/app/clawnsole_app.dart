@@ -49,7 +49,8 @@ class ClawnsoleApp extends StatefulWidget {
   State<ClawnsoleApp> createState() => _ClawnsoleAppState();
 }
 
-class _ClawnsoleAppState extends State<ClawnsoleApp> {
+class _ClawnsoleAppState extends State<ClawnsoleApp>
+    with WidgetsBindingObserver {
   late final AppController controller;
   late final UpdateStatus _updateStatus;
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
@@ -65,6 +66,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     controller = AppController(gateway: widget.gateway);
     _updateStatus = widget.updateStatus ?? UpdateStatus.instance;
     _updateStatus.addListener(_handleUpdateStatus);
@@ -95,11 +97,19 @@ class _ClawnsoleAppState extends State<ClawnsoleApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
     _updateStatus.removeListener(_handleUpdateStatus);
     controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(controller.reconcileGenerationWork());
+    }
   }
 
   void _handleUpdateStatus() {

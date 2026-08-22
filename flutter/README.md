@@ -26,8 +26,9 @@ only macOS desktop lifecycle, packaging, and self-update.
 - Canonical model identities for cross-provider route and cost comparison
 - Exact Atlas route preflight where available, plus quoted-versus-realized
   costs and before/after balances in generation history
-- Live polling, determinate/indeterminate progress, completed-video playback,
-  draft enhancement, reuse, deletion, and device download
+- App-wide polling with foreground/relaunch recovery, determinate/indeterminate
+  progress, completed-video playback, draft enhancement, reuse, deletion, and
+  device download
 - Uncapped compact history plus referenced local inputs/completed videos, storage
   accounting, reload-safe reuse/playback, and granular clear actions
 - Per-provider local keys and a responsive Providers comparison desk
@@ -236,8 +237,12 @@ broker is required if the credential must remain a true secret.
   references are retained in JSON; base64 payloads are never written there.
 - Uploaded and saved references plus generated videos are separate local files,
   enabling preview, playback, search, and full-input reuse after restart.
-- BFL delivery links are treated as ten-minute links and pruned after the result
-  is copied locally.
+- Provider task receipts are written before optional post-submit accounting.
+  Polling and interrupted result retention resume from that durable receipt on
+  launch or foreground resume, independent of the visible screen.
+- BFL delivery links use their ten-minute availability window; LTX links use
+  their documented 24-hour window. Providers without a dependable published
+  window are retried without inventing an expiry.
 - Removing history preserves the References library and prunes only assets no
   longer used by a saved reference or another generation.
 
