@@ -82,6 +82,14 @@ desktop entry points live beside the other Flutter scripts:
 
 - Electron and Flutter versions must remain aligned. Use
   `scripts/release/bump_version.py`; do not bump one package independently.
+- Build every iOS artifact intended for TestFlight or App Store Connect from
+  the repository root with `./scripts/build_ios.sh`. The script reads the
+  Google OAuth values `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`,
+  `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET`, and
+  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID` from the repository `.env`, requires and
+  injects the iOS client ID, and always forces `INCLUDE_IOS_TEST_KEYS=false`.
+  Never ship iOS with provider-specific keys or bypass this entry point with a
+  direct `flutter build ipa` invocation.
 - macOS updater asset names, Windows download asset names, GitHub Actions output
   names, and Electron Builder's `artifactName` form one tested contract.
 - Published macOS bundles must be Developer ID signed, notarized, stapled, and
