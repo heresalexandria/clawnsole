@@ -2578,6 +2578,105 @@ class AppController extends ChangeNotifier {
       (selectedModel.maxTotalReferences == null ||
           form.references.length < selectedModel.maxTotalReferences!);
 
+  VideoModelDefinition? _modelForReferenceAsFirstFrame(
+    MediaReferenceDraft reference,
+  ) {
+    if (reference.kind != MediaReferenceKind.image || form.hasStartFrame) {
+      return null;
+    }
+    final remainingReferences = form.references
+        .where((item) => item.id != reference.id)
+        .toList();
+
+    bool accepts(VideoModelDefinition model) {
+      if (!model.modes.contains(VideoMode.i2v) ||
+          !model.supportsStartFrame ||
+          !model.referenceTasks.contains(form.referenceTask) ||
+          form.keyframes.length + 1 > model.maxKeyframes) {
+        return false;
+      }
+      if (form.keyframes.any(
+        (frame) => switch (frame.role) {
+          KeyframeRole.start => true,
+          KeyframeRole.middle => !model.supportsTimedKeyframes,
+          KeyframeRole.end => !model.supportsEndFrame,
+        },
+      )) {
+        return false;
+      }
+      if (model.framesExclusiveWithReferences &&
+          remainingReferences.isNotEmpty) {
+        return false;
+      }
+      for (final kind in MediaReferenceKind.values) {
+        if (remainingReferences.where((item) => item.kind == kind).length >
+            model.maxReferences(kind)) {
+          return false;
+        }
+      }
+      final totalLimit = model.maxTotalReferences;
+      return totalLimit == null || remainingReferences.length <= totalLimit;
+    }
+
+    if (accepts(selectedModel)) return selectedModel;
+    final sameModelFamily = selectedProvider.models
+        .where((model) => model.canonicalId == selectedModel.canonicalId)
+        .where(accepts)
+        .firstOrNull;
+    return sameModelFamily ??
+        selectedProvider.models.where(accepts).firstOrNull;
+  }
+
+  bool canUseReferenceAsFirstFrame(MediaReferenceDraft reference) =>
+      _modelForReferenceAsFirstFrame(reference) != null;
+
+  /// Moves an image out of creative references and into the provider's
+  /// dedicated opening-frame input, switching to a compatible sibling route
+  /// when a provider exposes frames and references as separate models.
+  Future<bool> useReferenceAsFirstFrame(String referenceId) async {
+    final reference = form.references
+        .where((item) => item.id == referenceId)
+        .firstOrNull;
+    if (reference == null) return false;
+    final targetModel = _modelForReferenceAsFirstFrame(reference);
+    if (targetModel == null) return false;
+    final imageNumber =
+        form.references
+            .takeWhile((item) => item.id != reference.id)
+            .where((item) => item.kind == MediaReferenceKind.image)
+            .length +
+        1;
+    final previousModelId = selectedModelId;
+    form
+      ..prompt = promoteImageReferenceToFirstFrame(
+        form.prompt,
+        number: imageNumber,
+      )
+      ..references = form.references
+          .where((item) => item.id != reference.id)
+          .toList()
+      ..keyframes = <KeyframeDraft>[
+        ...form.keyframes,
+        KeyframeDraft(
+          id: _uid(),
+          label: reference.label,
+          role: KeyframeRole.start,
+          source: reference.source,
+          seconds: 0,
+          asset: reference.asset,
+          retained: reference.retained,
+        ),
+      ];
+    selectedModelId = targetModel.id;
+    _normalizeFormForModel();
+    if (form.requiresFixedDuration) form.autoDuration = false;
+    _invalidateProviderEstimate();
+    notifyListeners();
+    if (selectedModelId != previousModelId) await _persistSelection();
+    showNotice('The image will be sent through the pinned first-frame input.');
+    return true;
+  }
+
   int referenceLimit(MediaReferenceKind kind) =>
       kind == MediaReferenceKind.video &&
           form.referenceTask != MediaReferenceTask.reference

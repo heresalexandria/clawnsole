@@ -3389,6 +3389,91 @@ void main() {
     },
   );
 
+  testWidgets(
+    'creative image first-frame intent is promoted to the pinned input',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1600));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = AppController()
+        ..selectedProviderId = 'artcraft'
+        ..selectedModelId = 'seedance_2p5';
+      controller
+        ..addUrlReference(MediaReferenceKind.image)
+        ..form.prompt =
+            '@Image 1 is the first frame, a sloth leans in near the drink.';
+      final reference = controller.form.references.single;
+      controller.updateReference(reference.id, 'https://cdn.test/portrait.png');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CreateScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining('use First frame for stricter frame-0'),
+        findsOneWidget,
+      );
+      final action = find.byKey(
+        ValueKey('use-reference-as-first-frame-${reference.id}'),
+      );
+      expect(action, findsOneWidget);
+      await tester.tap(action);
+      await tester.pump();
+
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.keyframes, hasLength(1));
+      expect(controller.form.keyframes.single.role, KeyframeRole.start);
+      expect(
+        controller.form.keyframes.single.source,
+        'https://cdn.test/portrait.png',
+      );
+      expect(
+        controller.form.prompt,
+        'the supplied first frame, a sloth leans in near the drink.',
+      );
+      expect(controller.buildInputForTesting()['keyframes'], <String>[
+        'https://cdn.test/portrait.png',
+      ]);
+      expect(
+        controller.buildInputForTesting(),
+        isNot(contains('reference_images')),
+      );
+      controller.dispose();
+    },
+  );
+
+  test(
+    'first-frame promotion selects a provider sibling frame route',
+    () async {
+      final controller = AppController()
+        ..selectedProviderId = 'atlas'
+        ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+      controller
+        ..addUrlReference(MediaReferenceKind.image)
+        ..form.prompt = 'Use @Image 1 as the opening frame, then push in.';
+      final reference = controller.form.references.single;
+      controller.updateReference(reference.id, 'https://cdn.test/opening.png');
+
+      expect(await controller.useReferenceAsFirstFrame(reference.id), isTrue);
+      expect(
+        controller.selectedModelId,
+        'bytedance/seedance-2.5/image-to-video',
+      );
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.keyframes.single.role, KeyframeRole.start);
+      controller.dispose();
+    },
+  );
+
   testWidgets('either-or models set the unused input side aside on Create', (
     tester,
   ) async {

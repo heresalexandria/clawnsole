@@ -658,7 +658,8 @@ const artCraftProvider = VideoProviderDefinition(
       id: 'seedance_2p5',
       canonicalModelId: 'seedance-2.5',
       label: 'Seedance 2.5',
-      description: 'Long-form Seedance with up to 30 reference images.',
+      description:
+          'Long-form Seedance with pinned first/last frames or rich references.',
       aspectRatios: _artCraftRatios,
       resolutions: <VideoResolutionDefinition>[_hd, _sd, _fhd],
       minDuration: 4,
@@ -676,7 +677,8 @@ const artCraftProvider = VideoProviderDefinition(
     _ArtCraftModel(
       id: 'seedance_2p5_u',
       label: 'Seedance 2.5 Ultra',
-      description: 'Long-form Seedance Ultra with extensive references.',
+      description:
+          'Seedance Ultra with pinned first/last frames or rich references.',
       aspectRatios: _artCraftRatios,
       resolutions: <VideoResolutionDefinition>[_hd, _sd, _fhd],
       minDuration: 4,

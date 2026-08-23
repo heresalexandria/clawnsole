@@ -90,4 +90,14 @@ void main() {
       'Match hero.png with @Image 1 and @Video1.',
     );
   });
+
+  test('promoting a creative image leaves a clean first-frame prompt', () {
+    expect(
+      promoteImageReferenceToFirstFrame(
+        '@Image 1 is the first frame, a sloth leans in near @Image 2.',
+        number: 1,
+      ),
+      'the supplied first frame, a sloth leans in near @Image 1.',
+    );
+  });
 }

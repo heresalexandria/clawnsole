@@ -447,6 +447,55 @@ void main() {
   });
 
   test(
+    'ArtCraft Seedance 2.5 keeps pinned frames separate from creative images',
+    () async {
+      final generations = <Map<String, Object?>>[];
+      final api = ArtCraftApi(
+        client: MockClient((request) async {
+          if (request.url.path == '/v1/omni_gen/cost/video') {
+            return http.Response('{"cost_in_credits":10}', 200);
+          }
+          generations.add(
+            (jsonDecode(request.body) as Map<Object?, Object?>).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+          return http.Response(
+            '{"inference_job_token":"jinf_seedance_2p5"}',
+            200,
+          );
+        }),
+      );
+
+      await api.submit('secret', 'seedance_2p5', <String, Object?>{
+        'prompt': 'Animate from the supplied first frame.',
+        'duration': 10,
+        'resolution': 'hd',
+        'aspect_ratio': 'auto',
+        'keyframes': <String>['https://cdn.test/first.png'],
+      });
+      await api.submit('secret', 'seedance_2p5', <String, Object?>{
+        'prompt': 'Keep @Image 1 consistent.',
+        'duration': 10,
+        'resolution': 'hd',
+        'aspect_ratio': '9:16',
+        'reference_images': <String>['https://cdn.test/creative.png'],
+      });
+
+      expect(
+        generations.first['start_frame_image_url'],
+        'https://cdn.test/first.png',
+      );
+      expect(generations.first, isNot(contains('reference_image_urls')));
+      expect(generations.last, isNot(contains('start_frame_image_url')));
+      expect(generations.last['reference_image_urls'], <String>[
+        'https://cdn.test/creative.png',
+      ]);
+      expect(generations.last['prompt'], 'Keep @image1 consistent.');
+    },
+  );
+
+  test(
     'ArtCraft forwards independent image, video, and audio references',
     () async {
       late Map<String, Object?> generation;
