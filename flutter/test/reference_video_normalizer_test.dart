@@ -36,28 +36,12 @@ void main() {
     }
   });
 
-  test('canvas and framing preserve the script thresholds', () {
+  test('canvas selection preserves the compatibility thresholds', () {
     expect(ReferenceVideoCanvas.forDisplaySize(749, 1000).width, 720);
     expect(ReferenceVideoCanvas.forDisplaySize(749, 1000).height, 1280);
     expect(ReferenceVideoCanvas.forDisplaySize(750, 1000).height, 720);
     expect(ReferenceVideoCanvas.forDisplaySize(640, 480).width, 1280);
     expect(ReferenceVideoCanvas.forDisplaySize(1334, 1000).width, 1280);
-    expect(
-      referenceVideoFraming(
-        width: 920,
-        height: 1000,
-        canvas: const ReferenceVideoCanvas(1000, 1000),
-      ),
-      ReferenceVideoFraming.fill,
-    );
-    expect(
-      referenceVideoFraming(
-        width: 919,
-        height: 1000,
-        canvas: const ReferenceVideoCanvas(1000, 1000),
-      ),
-      ReferenceVideoFraming.fit,
-    );
   });
 
   test('compatible reference images pass through without ffmpeg', () async {
@@ -114,6 +98,8 @@ void main() {
     expect(first.sources, everyElement(startsWith('data:image/jpeg;base64,')));
     expect(second.sources.single, first.sources.first);
     expect(backend.ffmpegArguments, hasLength(1));
+    expect(backend.ffmpegArguments.single, isNot(contains('-map')));
+    expect(backend.ffmpegArguments.single.last, contains('image-jpeg-v2'));
   });
 
   test(
@@ -386,6 +372,9 @@ void main() {
       expect(filter, contains('zscale=t=linear:npl=100'));
       expect(filter, contains('tonemap=tonemap=hable:desat=0'));
       expect(filter, contains('fps=30'));
+      expect(filter, contains('force_original_aspect_ratio=decrease'));
+      expect(filter, contains('pad='));
+      expect(filter, isNot(contains('crop=')));
       expect(filter, contains('setsar=1'));
       expect(filter, contains('setparams=range=limited'));
     },
@@ -943,6 +932,50 @@ void main() {
     expect(normalized.sources.single, startsWith('data:image/jpeg;base64,'));
     final jpeg = base64Decode(normalized.sources.single.split(',').last);
     expect(jpeg.sublist(0, 3), <int>[0xff, 0xd8, 0xff]);
+
+    // Tiled iPhone HEIC photos expose each tile as a video stream and the
+    // actual photo as the default presentation group. The normalized JPEG
+    // must retain that presentation size rather than extracting stream 0.
+    final sourceProbe = await backend.runFfprobe(<String>[
+      '-v',
+      'error',
+      '-show_stream_groups',
+      '-of',
+      'json',
+      heifPath,
+    ]);
+    final sourceJson = jsonDecode(sourceProbe.output) as Map<String, Object?>;
+    final defaultGroup =
+        (sourceJson['stream_groups'] as List<Object?>? ?? const <Object?>[])
+            .whereType<Map<String, Object?>>()
+            .where(
+              (group) =>
+                  (group['disposition'] as Map<String, Object?>?)?['default'] ==
+                  1,
+            )
+            .firstOrNull;
+    final component =
+        (defaultGroup?['components'] as List<Object?>? ?? const <Object?>[])
+            .whereType<Map<String, Object?>>()
+            .firstOrNull;
+    if (component != null) {
+      final jpegFile = File('${temporary.path}/normalized.jpg');
+      await jpegFile.writeAsBytes(jpeg);
+      final outputProbe = await backend.runFfprobe(<String>[
+        '-v',
+        'error',
+        '-show_streams',
+        '-of',
+        'json',
+        jpegFile.path,
+      ]);
+      final outputJson = jsonDecode(outputProbe.output) as Map<String, Object?>;
+      final outputStream =
+          (outputJson['streams'] as List<Object?>).single
+              as Map<String, Object?>;
+      expect(outputStream['width'], component['width']);
+      expect(outputStream['height'], component['height']);
+    }
   });
 }
 

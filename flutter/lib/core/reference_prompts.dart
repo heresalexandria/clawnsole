@@ -107,6 +107,29 @@ String detachReferenceFromPrompt(
   return match.group(0)!;
 });
 
+/// Removes a promoted image from creative-reference numbering and leaves a
+/// provider-neutral phrase in its place. The common "@Image 1 is the first
+/// frame" wording is collapsed so the resulting motion prompt stays natural.
+String promoteImageReferenceToFirstFrame(String prompt, {required int number}) {
+  const replacement = 'the supplied first frame';
+  final detached = detachReferenceFromPrompt(
+    prompt,
+    kind: MediaReferenceKind.image,
+    number: number,
+    label: replacement,
+  );
+  return detached.replaceAll(
+    RegExp(
+      r'\bthe supplied first frame\s+'
+      r'(?:(?:is|as|for|should\s+be|must\s+be|use(?:d)?\s+as)\s+)'
+      r'(?:the\s+)?(?:first|initial|opening|start(?:ing)?)\s+'
+      r'(?:frame|image)\b',
+      caseSensitive: false,
+    ),
+    replacement,
+  );
+}
+
 ReferencePromptDialect artCraftReferencePromptDialect(String model) {
   if (model.startsWith('seedance_')) {
     return ReferencePromptDialect.compactAt;

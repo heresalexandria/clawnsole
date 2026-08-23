@@ -1199,8 +1199,8 @@ class _FramesSection extends StatelessWidget {
     final frameLimit = model.supportsTimedKeyframes
         ? '${model.maxKeyframes} frames max · custom timing available'
         : model.supportsEndFrame
-        ? '${model.maxKeyframes} frames max · first + last'
-        : '1 first frame max';
+        ? '${model.maxKeyframes} frames max · first + last · pinned by the provider'
+        : '1 first frame max · pins frame 0';
     final exclusiveInputs = model.maxKeyframes == 1
         ? 'a first frame or creative references'
         : 'first/last frames or creative references';
@@ -1420,6 +1420,8 @@ class _ReferencesSection extends StatelessWidget {
           )
         : null;
     final notes = <String>[
+      if (!setAside && model.maxImageReferences > 0)
+        'Creative images can guide the opening, subject, identity, or style; use First frame for stricter frame-0 conditioning.',
       if (setAside && !conflicted)
         'Frames attached — remove them to add creative references.',
       if (!setAside && form.referenceTask != MediaReferenceTask.reference)
@@ -1555,7 +1557,7 @@ class _ReferenceNormalizationToggle extends StatelessWidget {
     subtitle: const Text(
       'Converts unsupported image formats and checks video compatibility '
       'before upload. Repairs run only when needed. '
-      'Original files remain unchanged.',
+      'Full framing is preserved and original files remain unchanged.',
     ),
   );
 }
@@ -1690,6 +1692,25 @@ class _ReferenceTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
         ),
+        if (controller.canUseReferenceAsFirstFrame(reference)) ...<Widget>[
+          const SizedBox(height: 4),
+          TextButton.icon(
+            key: ValueKey('use-reference-as-first-frame-${reference.id}'),
+            onPressed: () =>
+                unawaited(controller.useReferenceAsFirstFrame(reference.id)),
+            icon: const Icon(Icons.filter_1_rounded, size: 14),
+            label: const Text('Use as first frame'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
         if (reference.asset == null) ...<Widget>[
           const SizedBox(height: 6),
           TextFormField(

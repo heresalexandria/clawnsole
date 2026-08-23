@@ -19,6 +19,8 @@ import '../core/video_cache_gateway.dart';
 
 enum MediaPickerSource { library, files }
 
+enum AppNoticeAction { retryWithVisualNormalization }
+
 typedef FilePickerInvocation =
     Future<FilePickerResult?> Function({
       required FileType type,
@@ -306,6 +308,11 @@ class AppController extends ChangeNotifier {
   String? loadError;
   String? creditError;
   String? notice;
+
+  /// Optional recovery attached to the current notice. Notices without an
+  /// action always clear the previous action so stale buttons cannot survive
+  /// a later status message.
+  AppNoticeAction? noticeAction;
 
   /// Increments with every [showNotice] call so listeners can surface a
   /// repeated identical message instead of deduplicating it forever.
@@ -1023,15 +1030,34 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void showNotice(String message) {
+  void showNotice(String message, {AppNoticeAction? action}) {
     notice = message;
+    noticeAction = action;
     noticeSequence += 1;
     _noticeTimer?.cancel();
     _noticeTimer = Timer(const Duration(seconds: 4), () {
       notice = null;
+      noticeAction = null;
       notifyListeners();
     });
     notifyListeners();
+  }
+
+  String? get noticeActionLabel => switch (noticeAction) {
+    AppNoticeAction.retryWithVisualNormalization => 'Normalize & retry',
+    null => null,
+  };
+
+  Future<void> performNoticeAction() async {
+    final action = noticeAction;
+    if (action == null || submitting) return;
+    noticeAction = null;
+    notifyListeners();
+    switch (action) {
+      case AppNoticeAction.retryWithVisualNormalization:
+        await setAutoFixReferenceVideos(true);
+        await submit();
+    }
   }
 
   /// Surfaces [error] as a cleaned human notice while keeping the raw details
@@ -1046,6 +1072,43 @@ class AppController extends ChangeNotifier {
       .replaceFirst('Bad state: ', '')
       .replaceFirst('ProviderException: ', '')
       .replaceFirst('Exception: ', '');
+
+  bool _isVisualReferenceCompatibilityError(String message) {
+    if (autoFixReferenceVideos ||
+        (form.keyframes.isEmpty &&
+            form.referenceCount(MediaReferenceKind.image) == 0 &&
+            form.referenceCount(MediaReferenceKind.video) == 0)) {
+      return false;
+    }
+    final normalized = message.toLowerCase();
+    final mentionsVisualMedia = const <String>[
+      'reference',
+      'keyframe',
+      'start frame',
+      'end frame',
+      'image',
+      'video',
+      'media',
+      'mime',
+      'codec',
+      'heic',
+      'heif',
+    ].any(normalized.contains);
+    final describesCompatibilityFailure = const <String>[
+      'unsupported',
+      'unpermitted',
+      'not permitted',
+      'not allowed',
+      'incompatible',
+      'invalid mime',
+      'invalid image',
+      'invalid video',
+      'could not decode',
+      'failed to decode',
+      'cannot decode',
+    ].any(normalized.contains);
+    return mentionsVisualMedia && describesCompatibilityFailure;
+  }
 
   Future<void> _savePreferences(AppPreferences preferences) {
     final operation = _preferenceWrites.then((_) async {
@@ -2515,6 +2578,105 @@ class AppController extends ChangeNotifier {
       (selectedModel.maxTotalReferences == null ||
           form.references.length < selectedModel.maxTotalReferences!);
 
+  VideoModelDefinition? _modelForReferenceAsFirstFrame(
+    MediaReferenceDraft reference,
+  ) {
+    if (reference.kind != MediaReferenceKind.image || form.hasStartFrame) {
+      return null;
+    }
+    final remainingReferences = form.references
+        .where((item) => item.id != reference.id)
+        .toList();
+
+    bool accepts(VideoModelDefinition model) {
+      if (!model.modes.contains(VideoMode.i2v) ||
+          !model.supportsStartFrame ||
+          !model.referenceTasks.contains(form.referenceTask) ||
+          form.keyframes.length + 1 > model.maxKeyframes) {
+        return false;
+      }
+      if (form.keyframes.any(
+        (frame) => switch (frame.role) {
+          KeyframeRole.start => true,
+          KeyframeRole.middle => !model.supportsTimedKeyframes,
+          KeyframeRole.end => !model.supportsEndFrame,
+        },
+      )) {
+        return false;
+      }
+      if (model.framesExclusiveWithReferences &&
+          remainingReferences.isNotEmpty) {
+        return false;
+      }
+      for (final kind in MediaReferenceKind.values) {
+        if (remainingReferences.where((item) => item.kind == kind).length >
+            model.maxReferences(kind)) {
+          return false;
+        }
+      }
+      final totalLimit = model.maxTotalReferences;
+      return totalLimit == null || remainingReferences.length <= totalLimit;
+    }
+
+    if (accepts(selectedModel)) return selectedModel;
+    final sameModelFamily = selectedProvider.models
+        .where((model) => model.canonicalId == selectedModel.canonicalId)
+        .where(accepts)
+        .firstOrNull;
+    return sameModelFamily ??
+        selectedProvider.models.where(accepts).firstOrNull;
+  }
+
+  bool canUseReferenceAsFirstFrame(MediaReferenceDraft reference) =>
+      _modelForReferenceAsFirstFrame(reference) != null;
+
+  /// Moves an image out of creative references and into the provider's
+  /// dedicated opening-frame input, switching to a compatible sibling route
+  /// when a provider exposes frames and references as separate models.
+  Future<bool> useReferenceAsFirstFrame(String referenceId) async {
+    final reference = form.references
+        .where((item) => item.id == referenceId)
+        .firstOrNull;
+    if (reference == null) return false;
+    final targetModel = _modelForReferenceAsFirstFrame(reference);
+    if (targetModel == null) return false;
+    final imageNumber =
+        form.references
+            .takeWhile((item) => item.id != reference.id)
+            .where((item) => item.kind == MediaReferenceKind.image)
+            .length +
+        1;
+    final previousModelId = selectedModelId;
+    form
+      ..prompt = promoteImageReferenceToFirstFrame(
+        form.prompt,
+        number: imageNumber,
+      )
+      ..references = form.references
+          .where((item) => item.id != reference.id)
+          .toList()
+      ..keyframes = <KeyframeDraft>[
+        ...form.keyframes,
+        KeyframeDraft(
+          id: _uid(),
+          label: reference.label,
+          role: KeyframeRole.start,
+          source: reference.source,
+          seconds: 0,
+          asset: reference.asset,
+          retained: reference.retained,
+        ),
+      ];
+    selectedModelId = targetModel.id;
+    _normalizeFormForModel();
+    if (form.requiresFixedDuration) form.autoDuration = false;
+    _invalidateProviderEstimate();
+    notifyListeners();
+    if (selectedModelId != previousModelId) await _persistSelection();
+    showNotice('The image will be sent through the pinned first-frame input.');
+    return true;
+  }
+
   int referenceLimit(MediaReferenceKind kind) =>
       kind == MediaReferenceKind.video &&
           form.referenceTask != MediaReferenceTask.reference
@@ -3204,17 +3366,25 @@ class AppController extends ChangeNotifier {
       if (pending.creditsAfter != null) credits = pending.creditsAfter;
     } on Object catch (error) {
       await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
+      final message = _message(error);
       try {
         _apply(await gateway.load());
       } on Object {
         pending = pending.copyWith(
           status: 'Error',
-          error: _message(error),
+          error: message,
           updatedAt: DateTime.now().toUtc(),
         );
         _replaceInMemory(pending);
       }
-      showNotice(_message(error));
+      if (_isVisualReferenceCompatibilityError(message)) {
+        showNotice(
+          '$message Turn on Normalize visual references and try again.',
+          action: AppNoticeAction.retryWithVisualNormalization,
+        );
+      } else {
+        showNotice(message);
+      }
     } finally {
       submitting = false;
       notifyListeners();

@@ -19,12 +19,10 @@ const Duration _referenceVideoDownloadTimeout = Duration(minutes: 5);
 
 enum ReferenceVideoNormalizationAction { none, remux, audio, transcode }
 
-enum ReferenceVideoFraming { fill, fit }
-
 String _profileVersion(ReferenceVideoCompatibilityProfile profile) =>
     switch (profile) {
       ReferenceVideoCompatibilityProfile.generic => 'generic-v1',
-      ReferenceVideoCompatibilityProfile.seedance => 'seedance-v1',
+      ReferenceVideoCompatibilityProfile.seedance => 'seedance-v2',
     };
 
 class ReferenceVideoCanvas {
@@ -41,21 +39,6 @@ class ReferenceVideoCanvas {
     }
     return const ReferenceVideoCanvas(720, 720);
   }
-}
-
-ReferenceVideoFraming referenceVideoFraming({
-  required int width,
-  required int height,
-  required ReferenceVideoCanvas canvas,
-}) {
-  final sourceRatio = width / height;
-  final targetRatio = canvas.width / canvas.height;
-  final retained = sourceRatio < targetRatio
-      ? sourceRatio / targetRatio
-      : targetRatio / sourceRatio;
-  return retained >= .92
-      ? ReferenceVideoFraming.fill
-      : ReferenceVideoFraming.fit;
 }
 
 class ReferenceVideoToolResult {
@@ -387,7 +370,7 @@ class ReferenceVideoNormalizer
       }
       final cacheFile = File(
         '${cache.path}${Platform.pathSeparator}'
-        '${materialized.digest}-image-jpeg-v1.jpg',
+        '${materialized.digest}-image-jpeg-v2.jpg',
       );
       if (await cacheFile.exists()) {
         final bytes = await cacheFile.readAsBytes();
@@ -401,6 +384,9 @@ class ReferenceVideoNormalizer
         '${cacheFile.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
       );
       try {
+        // Let FFmpeg select the default presentation image. Modern iPhone
+        // HEIC files may expose the primary photo as a tiled stream group;
+        // mapping 0:v:0 selects only its first 512 px tile.
         final result = await _backend.runFfmpeg(<String>[
           '-hide_banner',
           '-loglevel',
@@ -409,8 +395,6 @@ class ReferenceVideoNormalizer
           '-y',
           '-i',
           materialized.file.path,
-          '-map',
-          '0:v:0',
           '-frames:v',
           '1',
           '-c:v',
@@ -1003,7 +987,6 @@ class _ReferenceVideoProbe {
     required this.action,
     required this.canvas,
     required this.genericCanvas,
-    required this.framing,
     required this.hasAudio,
     required this.isHdr,
     required this.outputFrameRate,
@@ -1013,7 +996,6 @@ class _ReferenceVideoProbe {
   final ReferenceVideoNormalizationAction action;
   final ReferenceVideoCanvas canvas;
   final ReferenceVideoCanvas genericCanvas;
-  final ReferenceVideoFraming framing;
   final bool hasAudio;
   final bool isHdr;
   final double outputFrameRate;
@@ -1025,15 +1007,11 @@ class _ReferenceVideoProbe {
               'zscale=p=bt709,tonemap=tonemap=hable:desat=0,'
               'zscale=t=bt709:m=bt709:r=tv,format=yuv420p,'
         : '';
-    final seedanceGeometry = framing == ReferenceVideoFraming.fill
-        ? 'scale=w=${canvas.width}:h=${canvas.height}:'
-              'force_original_aspect_ratio=increase:force_divisible_by=2:'
-              'flags=lanczos,crop=${canvas.width}:${canvas.height}:'
-              '(iw-ow)/2:(ih-oh)/2'
-        : 'scale=w=${canvas.width}:h=${canvas.height}:'
-              'force_original_aspect_ratio=decrease:force_divisible_by=2:'
-              'flags=lanczos,pad=${canvas.width}:${canvas.height}:'
-              '(ow-iw)/2:(oh-ih)/2:color=black';
+    final seedanceGeometry =
+        'scale=w=${canvas.width}:h=${canvas.height}:'
+        'force_original_aspect_ratio=decrease:force_divisible_by=2:'
+        'flags=lanczos,pad=${canvas.width}:${canvas.height}:'
+        '(ow-iw)/2:(oh-ih)/2:color=black';
     final geometry = switch (profile) {
       ReferenceVideoCompatibilityProfile.generic =>
         'scale=w=${genericCanvas.width}:h=${genericCanvas.height}:'
@@ -1090,11 +1068,6 @@ class _ReferenceVideoProbe {
     final genericCanvas = _genericCanvasForDisplaySize(
       displayWidth,
       displayHeight,
-    );
-    final framing = referenceVideoFraming(
-      width: displayWidth,
-      height: displayHeight,
-      canvas: canvas,
     );
     final audio = streams
         .where((item) => item['codec_type'] == 'audio')
@@ -1205,7 +1178,6 @@ class _ReferenceVideoProbe {
       action: action,
       canvas: canvas,
       genericCanvas: genericCanvas,
-      framing: framing,
       hasAudio: firstAudio != null,
       isHdr: isHdr,
       outputFrameRate: outputFrameRate,

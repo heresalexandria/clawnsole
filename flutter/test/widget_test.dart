@@ -505,6 +505,81 @@ void main() {
     expect(controller.notice, contains('retry retrieval'));
   });
 
+  testWidgets(
+    'bad visual reference errors offer normalization and retry submission',
+    (tester) async {
+      final gateway = _ReferenceFailureGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(autoFixReferenceVideos: false),
+          hasApiKey: true,
+          connectedProviders: <String>{'bfl'},
+          availableProviders: <String>{'bfl'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+      final controller =
+          // ignore: avoid_dynamic_calls
+          (tester.state(find.byType(ClawnsoleApp)) as dynamic).controller
+              as AppController;
+      expect(controller.autoFixReferenceVideos, isFalse);
+      controller.form
+        ..prompt = 'Animate this portrait.'
+        ..keyframes = <KeyframeDraft>[
+          KeyframeDraft(
+            id: 'heif-frame',
+            label: 'portrait.heic',
+            role: KeyframeRole.start,
+            source: '',
+            seconds: 0,
+            asset: PickedAsset(
+              name: 'portrait.heic',
+              bytes: base64Decode(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE'
+                'QVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+              ),
+              mimeType: 'image/heif',
+            ),
+          ),
+        ];
+
+      await controller.submit();
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        controller.notice,
+        contains('Turn on Normalize visual references and try again.'),
+      );
+      expect(
+        controller.noticeAction,
+        AppNoticeAction.retryWithVisualNormalization,
+      );
+      expect(find.text('Normalize & retry'), findsOneWidget);
+      expect(gateway.normalizationChoices, <bool?>[false]);
+
+      tester.widget<SnackBarAction>(find.byType(SnackBarAction)).onPressed();
+      for (
+        var attempt = 0;
+        attempt < 20 && gateway.normalizationChoices.length < 2;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      expect(controller.autoFixReferenceVideos, isTrue);
+      expect(gateway.snapshot.preferences.autoFixReferenceVideos, isTrue);
+      expect(gateway.normalizationChoices, <bool?>[false, true]);
+      expect(controller.noticeAction, isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('foreground resume reloads and polls durable work globally', (
     tester,
   ) async {
@@ -1189,6 +1264,7 @@ void main() {
   });
 
   test('visual reference fixes default on and round-trip tolerantly', () {
+    expect(const AppPreferences().autoFixReferenceVideos, isTrue);
     expect(
       AppPreferences.fromJson(const <String, Object?>{}).autoFixReferenceVideos,
       isTrue,
@@ -3310,6 +3386,91 @@ void main() {
         await tester.pumpAndSettle();
         controller.dispose();
       }
+    },
+  );
+
+  testWidgets(
+    'creative image first-frame intent is promoted to the pinned input',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1600));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = AppController()
+        ..selectedProviderId = 'artcraft'
+        ..selectedModelId = 'seedance_2p5';
+      controller
+        ..addUrlReference(MediaReferenceKind.image)
+        ..form.prompt =
+            '@Image 1 is the first frame, a sloth leans in near the drink.';
+      final reference = controller.form.references.single;
+      controller.updateReference(reference.id, 'https://cdn.test/portrait.png');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: CreateScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        find.textContaining('use First frame for stricter frame-0'),
+        findsOneWidget,
+      );
+      final action = find.byKey(
+        ValueKey('use-reference-as-first-frame-${reference.id}'),
+      );
+      expect(action, findsOneWidget);
+      await tester.tap(action);
+      await tester.pump();
+
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.keyframes, hasLength(1));
+      expect(controller.form.keyframes.single.role, KeyframeRole.start);
+      expect(
+        controller.form.keyframes.single.source,
+        'https://cdn.test/portrait.png',
+      );
+      expect(
+        controller.form.prompt,
+        'the supplied first frame, a sloth leans in near the drink.',
+      );
+      expect(controller.buildInputForTesting()['keyframes'], <String>[
+        'https://cdn.test/portrait.png',
+      ]);
+      expect(
+        controller.buildInputForTesting(),
+        isNot(contains('reference_images')),
+      );
+      controller.dispose();
+    },
+  );
+
+  test(
+    'first-frame promotion selects a provider sibling frame route',
+    () async {
+      final controller = AppController()
+        ..selectedProviderId = 'atlas'
+        ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+      controller
+        ..addUrlReference(MediaReferenceKind.image)
+        ..form.prompt = 'Use @Image 1 as the opening frame, then push in.';
+      final reference = controller.form.references.single;
+      controller.updateReference(reference.id, 'https://cdn.test/opening.png');
+
+      expect(await controller.useReferenceAsFirstFrame(reference.id), isTrue);
+      expect(
+        controller.selectedModelId,
+        'bytedance/seedance-2.5/image-to-video',
+      );
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.keyframes.single.role, KeyframeRole.start);
+      controller.dispose();
     },
   );
 
@@ -5904,6 +6065,27 @@ class _MemoryGateway implements AppGateway {
   ) async {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
+  }
+}
+
+class _ReferenceFailureGateway extends _MemoryGateway {
+  _ReferenceFailureGateway(super.snapshot);
+
+  final List<bool?> normalizationChoices = <bool?>[];
+
+  @override
+  Future<Generation> submit(GenerationSubmission submission) async {
+    normalizationChoices.add(submission.autoFixReferenceVideos);
+    if (normalizationChoices.length == 1) {
+      throw const ProviderException(
+        'Unpermitted mime type: image/heif.',
+        status: 400,
+      );
+    }
+    return submission.record.copyWith(
+      status: 'Ready',
+      resultUrl: 'https://example.com/result.mp4',
+    );
   }
 }
 
