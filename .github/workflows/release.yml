@@ -59,7 +59,10 @@ jobs:
       - name: Bump Flutter and Electron together
         id: bump
         if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
-        run: python3 scripts/release/bump_version.py "${{ steps.kind.outputs.kind }}"
+        # A local iOS distribution build may prepare the exact next version in
+        # the merged PR. Preserve that synchronized version instead of bumping
+        # it a second time when the release workflow runs.
+        run: python3 scripts/release/bump_version.py "${{ steps.kind.outputs.kind }}" --base-ref HEAD^
 
       - name: Use current synchronized version
         id: current
@@ -68,7 +71,7 @@ jobs:
 
       - name: Commit and push version
         id: push
-        if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
+        if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current' && steps.bump.outputs.changed != 'false'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

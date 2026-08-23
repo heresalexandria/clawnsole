@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,9 +20,9 @@ VERSION_PATTERN = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.M
 SOURCE_VERSION_PATTERN = re.compile(r"const clawnsoleVersion = '(\d+)\.(\d+)\.(\d+)';")
 
 
-def versions() -> tuple[str, int]:
-    package = json.loads(ELECTRON_PACKAGE.read_text())
-    source = FLUTTER_PACKAGE.read_text()
+def parsed_versions(package_source: str, flutter_source: str) -> tuple[str, int]:
+    package = json.loads(package_source)
+    source = flutter_source
     match = VERSION_PATTERN.search(source)
     if not match:
         raise SystemExit("error: flutter/pubspec.yaml has no semantic version and build number")
@@ -32,6 +33,25 @@ def versions() -> tuple[str, int]:
             f"error: Electron is {electron_version}, but Flutter is {flutter_version}"
         )
     return electron_version, int(match.group(4))
+
+
+def versions() -> tuple[str, int]:
+    return parsed_versions(ELECTRON_PACKAGE.read_text(), FLUTTER_PACKAGE.read_text())
+
+
+def versions_at(ref: str) -> tuple[str, int]:
+    def read(path: Path) -> str:
+        relative = path.relative_to(ROOT).as_posix()
+        result = subprocess.run(
+            ["git", "show", f"{ref}:{relative}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
+
+    return parsed_versions(read(ELECTRON_PACKAGE), read(FLUTTER_PACKAGE))
 
 
 def bumped(version: str, kind: str) -> str:
@@ -47,13 +67,15 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
-def emit(version: str, build: int) -> None:
+def emit(version: str, build: int, *, changed: bool | None = None) -> None:
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with Path(output).open("a") as stream:
             stream.write(f"version={version}\n")
             stream.write(f"tag=v{version}\n")
             stream.write(f"build={build}\n")
+            if changed is not None:
+                stream.write(f"changed={'true' if changed else 'false'}\n")
 
 
 def main() -> None:
@@ -62,9 +84,15 @@ def main() -> None:
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--current", action="store_true")
     parser.add_argument("--show", action="store_true")
+    parser.add_argument(
+        "--base-ref",
+        help="treat an exact bump already prepared relative to this Git ref as current",
+    )
     args = parser.parse_args()
     if args.build_only and (args.kind or args.current or args.show):
         parser.error("--build-only cannot be combined with another version action")
+    if args.base_ref and not args.kind:
+        parser.error("--base-ref requires a version bump kind")
 
     current, build = versions()
     if args.show:
@@ -85,6 +113,24 @@ def main() -> None:
         return
     if not args.kind:
         parser.error("a bump kind is required")
+
+    if args.base_ref:
+        base_version, base_build = versions_at(args.base_ref)
+        expected = bumped(base_version, args.kind)
+        if current == expected:
+            if build != base_build + 1:
+                raise SystemExit(
+                    "error: the prepared version must advance the build number exactly once "
+                    f"from {base_version}+{base_build}; found {current}+{build}"
+                )
+            emit(current, build, changed=False)
+            print(f"{current}+{build} (already prepared)")
+            return
+        if current != base_version:
+            raise SystemExit(
+                f"error: expected {base_version} or prepared {expected} relative to "
+                f"{args.base_ref}; found {current}"
+            )
 
     version = bumped(current, args.kind)
     package = json.loads(ELECTRON_PACKAGE.read_text())
@@ -109,7 +155,7 @@ def main() -> None:
     )
     FLUTTER_VERSION_SOURCE.write_text(dart_source)
 
-    emit(version, build + 1)
+    emit(version, build + 1, changed=True)
     print(f"{version}+{build + 1}")
 
 
