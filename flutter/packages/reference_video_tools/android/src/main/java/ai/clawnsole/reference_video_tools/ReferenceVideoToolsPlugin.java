@@ -1,5 +1,11 @@
 package ai.clawnsole.reference_video_tools;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.ColorSpace;
+import android.graphics.ImageDecoder;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -10,6 +16,8 @@ import com.antonkarpenko.ffmpegkit.FFprobeKit;
 import com.antonkarpenko.ffmpegkit.ReturnCode;
 import com.antonkarpenko.ffmpegkit.Session;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -42,6 +50,19 @@ public final class ReferenceVideoToolsPlugin
     public void onMethodCall(
             @NonNull MethodCall call,
             @NonNull MethodChannel.Result result) {
+        if ("convertImageToJpeg".equals(call.method)) {
+            final String inputPath = call.argument("inputPath");
+            final String outputPath = call.argument("outputPath");
+            if (inputPath == null || outputPath == null) {
+                result.error("invalid_arguments", "Image conversion paths are missing.", null);
+                return;
+            }
+            new Thread(
+                    () -> convertImageToJpeg(inputPath, outputPath, result),
+                    "clawnsole-image-conversion")
+                    .start();
+            return;
+        }
         if (!"execute".equals(call.method)) {
             result.notImplemented();
             return;
@@ -73,6 +94,72 @@ public final class ReferenceVideoToolsPlugin
         } catch (Throwable error) {
             result.error("media_tool_failed", error.getMessage(), null);
         }
+    }
+
+    private void convertImageToJpeg(
+            String inputPath,
+            String outputPath,
+            MethodChannel.Result result) {
+        int exitCode = -1;
+        String output = "";
+        Bitmap decoded = null;
+        Bitmap rendered = null;
+        final File destination = new File(outputPath);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                final ImageDecoder.Source source = ImageDecoder.createSource(new File(inputPath));
+                decoded = ImageDecoder.decodeBitmap(source, (decoder, info, ignored) -> {
+                    decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                    decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB));
+                });
+            } else {
+                decoded = BitmapFactory.decodeFile(inputPath);
+            }
+            if (decoded == null || decoded.getWidth() <= 0 || decoded.getHeight() <= 0) {
+                throw new IllegalStateException(
+                        "The primary reference image could not be decoded.");
+            }
+
+            // Render the complete, orientation-correct primary bitmap into an
+            // sRGB canvas of identical dimensions. This never crops or scales.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                rendered = Bitmap.createBitmap(
+                        decoded.getWidth(),
+                        decoded.getHeight(),
+                        Bitmap.Config.ARGB_8888,
+                        true,
+                        ColorSpace.get(ColorSpace.Named.SRGB));
+            } else {
+                rendered = Bitmap.createBitmap(
+                        decoded.getWidth(), decoded.getHeight(), Bitmap.Config.ARGB_8888);
+            }
+            new Canvas(rendered).drawBitmap(decoded, 0, 0, null);
+            try (FileOutputStream stream = new FileOutputStream(destination)) {
+                if (!rendered.compress(Bitmap.CompressFormat.JPEG, 94, stream)) {
+                    throw new IllegalStateException(
+                            "The normalized reference image could not be saved.");
+                }
+                stream.flush();
+            }
+            exitCode = 0;
+        } catch (Throwable error) {
+            destination.delete();
+            output = error.getMessage() == null
+                    ? "The reference image could not be converted to JPEG."
+                    : error.getMessage();
+        } finally {
+            if (rendered != null && rendered != decoded) {
+                rendered.recycle();
+            }
+            if (decoded != null) {
+                decoded.recycle();
+            }
+        }
+
+        final Map<String, Object> response = new HashMap<>();
+        response.put("exitCode", exitCode);
+        response.put("output", output);
+        mainHandler.post(() -> result.success(response));
     }
 
     private void reply(Session session, MethodChannel.Result result) {

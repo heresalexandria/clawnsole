@@ -31,12 +31,13 @@ Future<void> showVideoPlayerModal(
   VideoPlayerController Function(Uri uri)? controllerFactory,
   VideoFrameLoader? frameLoader,
   ValueListenable<double?>? progress,
+  bool forceFullscreen = false,
 }) {
   assert(
     (uri == null) != (deferredUri == null),
     'Provide exactly one of uri or deferredUri.',
   );
-  if (MediaQuery.sizeOf(context).width < 700) {
+  if (forceFullscreen || MediaQuery.sizeOf(context).width < 700) {
     return Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,

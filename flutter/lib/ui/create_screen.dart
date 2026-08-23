@@ -22,6 +22,7 @@ import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
+import 'visual_reference_viewer.dart';
 
 /// Below this window height the Create screen switches to its dense spacing
 /// so the whole composer lands above the fold on a 900px-tall display.
@@ -675,6 +676,7 @@ class _ComposerState extends State<_Composer> {
                 setState(() => _showVideoPanel = false);
                 controller.updateForm((form) {
                   form.videoAsset = null;
+                  form.videoSavedReferenceId = null;
                   form.videoUrl = '';
                   form.videoThumbnailBytes = null;
                   form.videoMetadata = null;
@@ -1554,11 +1556,7 @@ class _ReferenceNormalizationToggle extends StatelessWidget {
     onChanged: (value) =>
         unawaited(controller.setAutoFixReferenceVideos(value)),
     title: const Text('Normalize visual references'),
-    subtitle: const Text(
-      'Converts unsupported image formats and checks video compatibility '
-      'before upload. Repairs run only when needed. '
-      'Full framing is preserved and original files remain unchanged.',
-    ),
+    subtitle: const Text('Converts incompatible images and videos on upload.'),
   );
 }
 
@@ -1593,27 +1591,58 @@ class _ReferenceTile extends StatelessWidget {
               child: SizedBox(
                 height: 76,
                 width: double.infinity,
-                child: MediaThumbnail(
-                  gateway: controller.gateway,
-                  kind: reference.kind,
-                  bytes: reference.asset?.bytes,
-                  mimeType: reference.asset?.mimeType,
-                  localPath: reference.asset?.path,
-                  reference: reference.asset?.retained ?? reference.retained,
-                  thumbnailReference:
-                      reference.thumbnailAsset ??
-                      reference.asset?.thumbnailAsset,
-                  thumbnailBytes:
-                      reference.thumbnailBytes ??
-                      reference.asset?.thumbnailBytes,
-                  source: reference.source,
-                  semanticsLabel: '${reference.label} thumbnail',
-                  onThumbnail: reference.kind == MediaReferenceKind.video
-                      ? (bytes) => controller.rememberReferenceThumbnail(
-                          reference.id,
-                          bytes,
-                        )
-                      : null,
+                child: Semantics(
+                  button: reference.kind != MediaReferenceKind.audio,
+                  label: 'View ${reference.label} full screen',
+                  child: InkWell(
+                    key: ValueKey('view-media-reference-${reference.id}'),
+                    onTap: reference.kind == MediaReferenceKind.audio
+                        ? null
+                        : () => unawaited(
+                            showVisualReferenceViewer(
+                              context,
+                              controller: controller,
+                              kind: reference.kind,
+                              label: reference.label,
+                              bytes: reference.asset?.bytes,
+                              mimeType: reference.asset?.mimeType,
+                              localPath: reference.asset?.path,
+                              reference:
+                                  reference.asset?.retained ??
+                                  reference.retained,
+                              thumbnailReference:
+                                  reference.thumbnailAsset ??
+                                  reference.asset?.thumbnailAsset,
+                              thumbnailBytes:
+                                  reference.thumbnailBytes ??
+                                  reference.asset?.thumbnailBytes,
+                              source: reference.source,
+                            ),
+                          ),
+                    child: MediaThumbnail(
+                      gateway: controller.gateway,
+                      kind: reference.kind,
+                      bytes: reference.asset?.bytes,
+                      mimeType: reference.asset?.mimeType,
+                      localPath: reference.asset?.path,
+                      reference:
+                          reference.asset?.retained ?? reference.retained,
+                      thumbnailReference:
+                          reference.thumbnailAsset ??
+                          reference.asset?.thumbnailAsset,
+                      thumbnailBytes:
+                          reference.thumbnailBytes ??
+                          reference.asset?.thumbnailBytes,
+                      source: reference.source,
+                      semanticsLabel: '${reference.label} thumbnail',
+                      onThumbnail: reference.kind == MediaReferenceKind.video
+                          ? (bytes) => controller.rememberReferenceThumbnail(
+                              reference.id,
+                              bytes,
+                            )
+                          : null,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1879,15 +1908,36 @@ class _FrameTile extends StatelessWidget {
                 child: SizedBox(
                   height: 76,
                   width: double.infinity,
-                  child: frame.asset != null
-                      ? Image.memory(frame.asset!.bytes, fit: BoxFit.cover)
-                      : Uri.tryParse(frame.source)?.scheme == 'https'
-                      ? Image.network(
-                          frame.source,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const _FrameLinkGhost(),
-                        )
-                      : const _FrameLinkGhost(),
+                  child: Semantics(
+                    button: true,
+                    label: 'View ${frame.label} full screen',
+                    child: InkWell(
+                      key: ValueKey('view-keyframe-${frame.id}'),
+                      onTap: () => unawaited(
+                        showVisualReferenceViewer(
+                          context,
+                          controller: controller,
+                          kind: MediaReferenceKind.image,
+                          label: frame.label,
+                          bytes: frame.asset?.bytes,
+                          mimeType: frame.asset?.mimeType,
+                          localPath: frame.asset?.path,
+                          reference: frame.asset?.retained ?? frame.retained,
+                          source: frame.source,
+                        ),
+                      ),
+                      child: frame.asset != null
+                          ? Image.memory(frame.asset!.bytes, fit: BoxFit.cover)
+                          : Uri.tryParse(frame.source)?.scheme == 'https'
+                          ? Image.network(
+                              frame.source,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const _FrameLinkGhost(),
+                            )
+                          : const _FrameLinkGhost(),
+                    ),
+                  ),
                 ),
               ),
               Positioned(
@@ -2178,10 +2228,27 @@ class _SourceEditor extends StatelessWidget {
         const SizedBox(height: 12),
         if (asset != null)
           ListTile(
+            key: ValueKey('view-$title-file-reference'),
             tileColor: context.colors.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(11),
             ),
+            onTap: mediaKind == null
+                ? null
+                : () => unawaited(
+                    showVisualReferenceViewer(
+                      context,
+                      controller: controller,
+                      kind: mediaKind!,
+                      label: asset!.name,
+                      bytes: asset!.bytes,
+                      mimeType: asset!.mimeType,
+                      localPath: asset!.path,
+                      reference: asset!.retained,
+                      thumbnailReference: asset!.thumbnailAsset,
+                      thumbnailBytes: asset!.thumbnailBytes,
+                    ),
+                  ),
             leading: mediaKind == null
                 ? const Icon(Icons.insert_drive_file_rounded)
                 : ClipRRect(
@@ -2238,18 +2305,31 @@ class _SourceEditor extends StatelessWidget {
                   child: SizedBox(
                     width: 160,
                     height: 90,
-                    child: MediaThumbnail(
-                      gateway: controller.gateway,
-                      kind: mediaKind!,
-                      source: url.trim(),
-                      thumbnailBytes: controller.form.videoThumbnailBytes,
-                      semanticsLabel: '$title source thumbnail',
-                      onThumbnail: mediaKind == MediaReferenceKind.video
-                          ? controller.rememberVideoSourceThumbnail
-                          : null,
-                      onVideoMetadata: mediaKind == MediaReferenceKind.video
-                          ? controller.rememberVideoSourceMetadata
-                          : null,
+                    child: InkWell(
+                      key: ValueKey('view-$title-url-reference'),
+                      onTap: () => unawaited(
+                        showVisualReferenceViewer(
+                          context,
+                          controller: controller,
+                          kind: mediaKind!,
+                          label: title,
+                          source: url.trim(),
+                          thumbnailBytes: controller.form.videoThumbnailBytes,
+                        ),
+                      ),
+                      child: MediaThumbnail(
+                        gateway: controller.gateway,
+                        kind: mediaKind!,
+                        source: url.trim(),
+                        thumbnailBytes: controller.form.videoThumbnailBytes,
+                        semanticsLabel: '$title source thumbnail',
+                        onThumbnail: mediaKind == MediaReferenceKind.video
+                            ? controller.rememberVideoSourceThumbnail
+                            : null,
+                        onVideoMetadata: mediaKind == MediaReferenceKind.video
+                            ? controller.rememberVideoSourceMetadata
+                            : null,
+                      ),
                     ),
                   ),
                 ),

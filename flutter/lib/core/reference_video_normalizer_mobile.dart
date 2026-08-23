@@ -19,6 +19,13 @@ ReferenceVideoToolBackend nativeReferenceVideoToolBackend() {
   return const MobileReferenceVideoToolBackend();
 }
 
+ReferenceImageToolBackend? nativeReferenceImageToolBackend() {
+  if (Platform.isIOS || Platform.isAndroid) {
+    return const MobileReferenceImageToolBackend();
+  }
+  return null;
+}
+
 List<ReferenceVideoEncoderAttempt> referenceVideoEncoderAttemptsForPlatform(
   String operatingSystem,
 ) => switch (operatingSystem) {
@@ -64,5 +71,33 @@ class MobileReferenceVideoToolBackend implements ReferenceVideoToolBackend {
       exitCode: result.exitCode,
       output: result.output,
     );
+  }
+}
+
+class MobileReferenceImageToolBackend implements ReferenceImageToolBackend {
+  const MobileReferenceImageToolBackend();
+
+  @override
+  Future<ReferenceVideoToolResult> convertToJpeg({
+    required File input,
+    required File output,
+  }) async {
+    final result = await ReferenceVideoTools.convertImageToJpeg(
+      inputPath: input.path,
+      outputPath: output.path,
+    );
+    final nativeResult = ReferenceVideoToolResult(
+      exitCode: result.exitCode,
+      output: result.output,
+    );
+    if (nativeResult.succeeded) return nativeResult;
+
+    // Keep the pre-existing FFmpeg coverage for formats an older platform
+    // image stack cannot decode (for example AVIF on older OS releases).
+    // HEIC/HEIF normally succeeds above, which avoids FFmpegKit selecting an
+    // auxiliary portrait/depth image instead of the primary photo.
+    return FfmpegReferenceImageToolBackend(
+      const MobileReferenceVideoToolBackend(),
+    ).convertToJpeg(input: input, output: output);
   }
 }

@@ -282,6 +282,15 @@ class HybridDataStore implements DurableDataStore {
           item.storage == LibraryStorage.local &&
           (copyEverything || referenceIds.contains(item.id)),
     );
+    final referenceIdMap = <String, String>{
+      for (final reference in current.savedReferences.where(
+        (item) => item.storage == LibraryStorage.local,
+      ))
+        if (copyEverything ||
+            referenceIds.contains(reference.id) ||
+            remoteReferenceIds.contains('drive-${reference.id}'))
+          reference.id: 'drive-${reference.id}',
+    };
     final folderMap = <String, String>{};
     final driveFolders = <LibraryFolder>[
       ...current.folders.where(
@@ -316,6 +325,7 @@ class HybridDataStore implements DurableDataStore {
         await _copyGeneration(
           generation,
           id: id,
+          referenceIdMap: referenceIdMap,
           folderId: generation.folderId == null
               ? null
               : folderMap[generation.folderId],
@@ -346,6 +356,7 @@ class HybridDataStore implements DurableDataStore {
           favorite: reference.favorite,
           hidden: reference.hidden,
           storage: LibraryStorage.drive,
+          contentDigest: reference.contentDigest,
         ),
       );
       remoteReferenceIds.add(id);
@@ -409,6 +420,7 @@ class HybridDataStore implements DurableDataStore {
   Future<Generation> _copyGeneration(
     Generation source, {
     required String id,
+    Map<String, String> referenceIdMap = const <String, String>{},
     String? folderId,
   }) async {
     final keyframes = <KeyframeLabel>[];
@@ -418,6 +430,9 @@ class HybridDataStore implements DurableDataStore {
           label: frame.label,
           role: frame.role,
           seconds: frame.seconds,
+          referenceId: frame.referenceId == null
+              ? null
+              : referenceIdMap[frame.referenceId] ?? frame.referenceId,
           source: await _copyAsset(frame.source),
         ),
       );
@@ -429,6 +444,9 @@ class HybridDataStore implements DurableDataStore {
         MediaReferenceLabel(
           label: item.label,
           kind: item.kind,
+          referenceId: item.referenceId == null
+              ? null
+              : referenceIdMap[item.referenceId] ?? item.referenceId,
           source: await _copyAsset(item.source),
           thumbnailAsset: await _copyAsset(item.thumbnailAsset),
         ),
@@ -437,6 +455,10 @@ class HybridDataStore implements DurableDataStore {
     final config = source.config.copyWith(
       keyframes: keyframes,
       references: references,
+      sourceReferenceId: source.config.sourceReferenceId == null
+          ? null
+          : referenceIdMap[source.config.sourceReferenceId] ??
+                source.config.sourceReferenceId,
       source: await _copyAsset(source.config.source),
       sourceThumbnailAsset: await _copyAsset(
         source.config.sourceThumbnailAsset,

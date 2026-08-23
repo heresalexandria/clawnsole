@@ -30,4 +30,20 @@ class ReferenceVideoTools {
       output: response?['output']?.toString() ?? '',
     );
   }
+
+  /// Uses the platform image stack to decode the primary still image and
+  /// render it as a full-frame sRGB JPEG.
+  static Future<ReferenceVideoToolInvocation> convertImageToJpeg({
+    required String inputPath,
+    required String outputPath,
+  }) async {
+    final response = await _channel.invokeMapMethod<String, Object?>(
+      'convertImageToJpeg',
+      <String, Object?>{'inputPath': inputPath, 'outputPath': outputPath},
+    );
+    return ReferenceVideoToolInvocation(
+      exitCode: (response?['exitCode'] as num?)?.toInt() ?? -1,
+      output: response?['output']?.toString() ?? '',
+    );
+  }
 }

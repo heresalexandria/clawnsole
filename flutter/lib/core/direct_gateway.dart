@@ -471,6 +471,7 @@ class DirectGateway
       favorite: reference.favorite,
       hidden: reference.hidden,
       storage: reference.storage,
+      contentDigest: reference.contentDigest ?? existing?.contentDigest,
     );
     final references = List<SavedReference>.from(current.savedReferences);
     final index = references.indexWhere((item) => item.id == clean.id);
@@ -774,6 +775,7 @@ class DirectGateway
             label: frame.label,
             role: frame.role,
             seconds: frame.seconds,
+            referenceId: frame.referenceId,
             source: await _store.persistSource(
               index < rawFrames.length ? _keyframeSource(rawFrames[index]) : '',
               label: frame.label,
@@ -803,6 +805,7 @@ class DirectGateway
           MediaReferenceLabel(
             label: media.label,
             kind: media.kind,
+            referenceId: media.referenceId,
             thumbnailAsset: media.thumbnailAsset,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',

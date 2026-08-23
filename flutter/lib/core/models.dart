@@ -213,6 +213,16 @@ class AssetReference {
   );
 }
 
+/// Matches the durable identity of two retained assets without reading their
+/// media bytes. Labels and MIME metadata may legitimately change as an asset
+/// moves through the app, while the store kind and value remain stable.
+bool sameAssetReference(AssetReference? first, AssetReference? second) =>
+    first != null &&
+    second != null &&
+    first.value.isNotEmpty &&
+    first.kind == second.kind &&
+    first.value == second.value;
+
 class GenerationConfig {
   const GenerationConfig({
     required this.aspectRatio,
@@ -227,6 +237,7 @@ class GenerationConfig {
     this.references,
     this.referenceTask = MediaReferenceTask.reference,
     this.sourceLabel,
+    this.sourceReferenceId,
     this.source,
     this.sourceThumbnailAsset,
     this.upscaleFactor = 2,
@@ -246,6 +257,7 @@ class GenerationConfig {
   final List<MediaReferenceLabel>? references;
   final MediaReferenceTask referenceTask;
   final String? sourceLabel;
+  final String? sourceReferenceId;
   final AssetReference? source;
   final AssetReference? sourceThumbnailAsset;
   final double upscaleFactor;
@@ -258,6 +270,7 @@ class GenerationConfig {
     List<KeyframeLabel>? keyframes,
     List<MediaReferenceLabel>? references,
     MediaReferenceTask? referenceTask,
+    String? sourceReferenceId,
     AssetReference? source,
     AssetReference? sourceThumbnailAsset,
     int? frameRate,
@@ -276,6 +289,7 @@ class GenerationConfig {
     references: references ?? this.references,
     referenceTask: referenceTask ?? this.referenceTask,
     sourceLabel: sourceLabel,
+    sourceReferenceId: sourceReferenceId ?? this.sourceReferenceId,
     source: source ?? this.source,
     sourceThumbnailAsset: sourceThumbnailAsset ?? this.sourceThumbnailAsset,
     upscaleFactor: upscaleFactor ?? this.upscaleFactor,
@@ -299,6 +313,7 @@ class GenerationConfig {
     if (referenceTask != MediaReferenceTask.reference)
       'referenceTask': referenceTask.name,
     if (sourceLabel != null) 'sourceLabel': sourceLabel,
+    if (sourceReferenceId != null) 'sourceReferenceId': sourceReferenceId,
     if (source != null) 'source': source!.toJson(),
     if (sourceThumbnailAsset != null)
       'sourceThumbnailAsset': sourceThumbnailAsset!.toJson(),
@@ -357,6 +372,11 @@ class GenerationConfig {
       references: references,
       referenceTask: MediaReferenceTaskValue.parse(json['referenceTask']),
       sourceLabel: json['sourceLabel'] as String?,
+      sourceReferenceId:
+          json['sourceReferenceId'] is String &&
+              (json['sourceReferenceId']! as String).trim().isNotEmpty
+          ? (json['sourceReferenceId']! as String).trim()
+          : null,
       source: json['source'] is Map<Object?, Object?>
           ? AssetReference.fromJson(
               (json['source']! as Map<Object?, Object?>).map(
@@ -385,21 +405,31 @@ class MediaReferenceLabel {
   const MediaReferenceLabel({
     required this.label,
     required this.kind,
+    this.referenceId,
     this.source,
     this.thumbnailAsset,
   });
 
   final String label;
   final MediaReferenceKind kind;
+
+  /// Stable References-library identity for this generation input.
+  ///
+  /// Provider adapters ignore this field. It stays in compact generation
+  /// history so every surface can find the outputs that used a saved
+  /// reference even when normalization retained a different derivative.
+  final String? referenceId;
   final AssetReference? source;
   final AssetReference? thumbnailAsset;
 
   MediaReferenceLabel copyWith({
+    String? referenceId,
     AssetReference? source,
     AssetReference? thumbnailAsset,
   }) => MediaReferenceLabel(
     label: label,
     kind: kind,
+    referenceId: referenceId ?? this.referenceId,
     source: source ?? this.source,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
   );
@@ -407,6 +437,7 @@ class MediaReferenceLabel {
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
     'kind': kind.name,
+    if (referenceId != null) 'referenceId': referenceId,
     if (source != null) 'source': source!.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
   };
@@ -415,6 +446,11 @@ class MediaReferenceLabel {
       MediaReferenceLabel(
         label: json['label'] as String? ?? 'Reference media',
         kind: MediaReferenceKindValue.parse(json['kind']),
+        referenceId:
+            json['referenceId'] is String &&
+                (json['referenceId']! as String).trim().isNotEmpty
+            ? (json['referenceId']! as String).trim()
+            : null,
         source: json['source'] is Map<Object?, Object?>
             ? AssetReference.fromJson(
                 (json['source']! as Map<Object?, Object?>).map(
@@ -437,18 +473,21 @@ class KeyframeLabel {
     required this.label,
     this.role = KeyframeRole.middle,
     this.seconds,
+    this.referenceId,
     this.source,
   });
 
   final String label;
   final KeyframeRole role;
   final double? seconds;
+  final String? referenceId;
   final AssetReference? source;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
     'role': role.name,
     if (seconds != null) 'seconds': seconds,
+    if (referenceId != null) 'referenceId': referenceId,
     if (source != null) 'source': source!.toJson(),
   };
 
@@ -459,6 +498,11 @@ class KeyframeLabel {
     label: json['label'] as String? ?? 'Reference frame',
     role: KeyframeRoleValue.tryParse(json['role']) ?? fallbackRole,
     seconds: (json['seconds'] as num?)?.toDouble(),
+    referenceId:
+        json['referenceId'] is String &&
+            (json['referenceId']! as String).trim().isNotEmpty
+        ? (json['referenceId']! as String).trim()
+        : null,
     source: json['source'] is Map<Object?, Object?>
         ? AssetReference.fromJson(
             (json['source']! as Map<Object?, Object?>).map(
@@ -547,6 +591,7 @@ class SavedReference {
     this.favorite = false,
     this.hidden = false,
     this.storage = LibraryStorage.local,
+    this.contentDigest,
   });
 
   final String id;
@@ -562,6 +607,10 @@ class SavedReference {
   final bool hidden;
   final LibraryStorage storage;
 
+  /// SHA-256 of locally uploaded media, used to make Create auto-imports
+  /// idempotent without storing the media bytes in history JSON.
+  final String? contentDigest;
+
   SavedReference copyWith({
     String? name,
     AssetReference? asset,
@@ -573,6 +622,7 @@ class SavedReference {
     bool? favorite,
     bool? hidden,
     LibraryStorage? storage,
+    String? contentDigest,
   }) => SavedReference(
     id: id,
     name: name ?? this.name,
@@ -586,6 +636,7 @@ class SavedReference {
     favorite: favorite ?? this.favorite,
     hidden: hidden ?? this.hidden,
     storage: storage ?? this.storage,
+    contentDigest: contentDigest ?? this.contentDigest,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -601,6 +652,7 @@ class SavedReference {
     if (favorite) 'favorite': true,
     if (hidden) 'hidden': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
+    if (contentDigest != null) 'contentDigest': contentDigest,
   };
 
   factory SavedReference.fromJson(Map<String, Object?> json) {
@@ -638,6 +690,11 @@ class SavedReference {
         (value) => value.name == json['storage'],
         orElse: () => LibraryStorage.local,
       ),
+      contentDigest:
+          json['contentDigest'] is String &&
+              (json['contentDigest']! as String).trim().isNotEmpty
+          ? (json['contentDigest']! as String).trim()
+          : null,
     );
   }
 }
@@ -1359,7 +1416,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 20,
+    'schemaVersion': 21,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1391,6 +1448,87 @@ class StoredData {
         (json['rejectedIosReviewApiKeyIds'] as Map<Object?, Object?>? ??
                 const {})
             .map((key, value) => MapEntry(key.toString(), value.toString()));
+    final savedReferences =
+        (json['savedReferences'] as List<Object?>? ?? const <Object?>[])
+            .whereType<Map<Object?, Object?>>()
+            .map(
+              (item) => SavedReference.fromJson(
+                item.map((key, value) => MapEntry(key.toString(), value)),
+              ),
+            )
+            .where(
+              (item) =>
+                  item.id.isNotEmpty &&
+                  item.name.isNotEmpty &&
+                  item.asset.value.isNotEmpty,
+            )
+            .toList();
+    final referencesByAsset = <String, SavedReference>{
+      for (final reference in savedReferences)
+        '${reference.asset.kind}:${reference.asset.value}': reference,
+    };
+    final generations = (json['generations'] as List<Object?>? ?? const <Object?>[])
+        .whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => Generation.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .where((item) => item.localId.isNotEmpty)
+        .map((generation) {
+          final references = generation.config.references;
+          final frames = generation.config.keyframes;
+          final referencesLinked =
+              references == null ||
+              references.every((reference) => reference.referenceId != null);
+          final framesLinked =
+              frames == null ||
+              frames.every((frame) => frame.referenceId != null);
+          final sourceReference = generation.config.sourceReferenceId == null
+              ? referencesByAsset['${generation.config.source?.kind}:${generation.config.source?.value}']
+              : null;
+          if (referencesLinked && framesLinked && sourceReference == null) {
+            return generation;
+          }
+          final linkedReferences = references?.map((reference) {
+            if (reference.referenceId != null) return reference;
+            final source = reference.source;
+            if (source == null) return reference;
+            final saved = referencesByAsset['${source.kind}:${source.value}'];
+            if (saved == null || saved.kind != reference.kind) {
+              return reference;
+            }
+            return reference.copyWith(referenceId: saved.id);
+          }).toList();
+          final linkedFrames = frames?.map((frame) {
+            if (frame.referenceId != null) return frame;
+            final source = frame.source;
+            if (source == null) return frame;
+            final saved = referencesByAsset['${source.kind}:${source.value}'];
+            if (saved == null || saved.kind != MediaReferenceKind.image) {
+              return frame;
+            }
+            return KeyframeLabel(
+              label: frame.label,
+              role: frame.role,
+              seconds: frame.seconds,
+              referenceId: saved.id,
+              source: frame.source,
+            );
+          }).toList();
+          return generation.copyWith(
+            config: generation.config.copyWith(
+              references: linkedReferences,
+              keyframes: linkedFrames,
+              sourceReferenceId:
+                  generation.config.sourceReferenceId ??
+                  (sourceReference?.kind == MediaReferenceKind.video
+                      ? sourceReference?.id
+                      : null),
+            ),
+          );
+        })
+        .toList();
     return StoredData(
       apiKey: apiKeys['bfl'] as String? ?? '',
       apiKeys: apiKeys.map(
@@ -1414,30 +1552,8 @@ class StoredData {
           )
           .where((folder) => folder.id.isNotEmpty && folder.name.isNotEmpty)
           .toList(),
-      savedReferences:
-          (json['savedReferences'] as List<Object?>? ?? const <Object?>[])
-              .whereType<Map<Object?, Object?>>()
-              .map(
-                (item) => SavedReference.fromJson(
-                  item.map((key, value) => MapEntry(key.toString(), value)),
-                ),
-              )
-              .where(
-                (item) =>
-                    item.id.isNotEmpty &&
-                    item.name.isNotEmpty &&
-                    item.asset.value.isNotEmpty,
-              )
-              .toList(),
-      generations: (json['generations'] as List<Object?>? ?? const [])
-          .whereType<Map<Object?, Object?>>()
-          .map(
-            (item) => Generation.fromJson(
-              item.map((key, value) => MapEntry(key.toString(), value)),
-            ),
-          )
-          .where((item) => item.localId.isNotEmpty)
-          .toList(),
+      savedReferences: savedReferences,
+      generations: generations,
     );
   }
 
