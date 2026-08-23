@@ -16,6 +16,7 @@ jobs:
     name: select jobs
     runs-on: ubuntu-latest
     outputs:
+      site: ${{ steps.paths.outputs.site }}
       flutter: ${{ steps.paths.outputs.flutter }}
       electron: ${{ steps.paths.outputs.electron }}
       macos: ${{ steps.paths.outputs.macos }}
@@ -31,6 +32,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          site=false
           flutter=false
           electron=false
           macos=false
@@ -48,6 +50,7 @@ jobs:
                 macos=true
                 ;;
               .github/workflows/pr.yml)
+                site=true
                 flutter=true
                 electron=true
                 macos=true
@@ -57,7 +60,10 @@ jobs:
                 macos=true
                 windows=true
                 ;;
-              .github/pull_request_template.md|.github/workflows/labels.yml|.github/workflows/release-label.yml|.gitignore|AGENTS.md|LICENSE|PRIVACY.md|README.md|docs/*|scripts/release/*)
+              docs/*|scripts/check_site_indexing.py)
+                site=true
+                ;;
+              .github/pull_request_template.md|.github/workflows/labels.yml|.github/workflows/release-label.yml|.gitignore|AGENTS.md|LICENSE|PRIVACY.md|README.md|scripts/release/*)
                 ;;
               *)
                 # New product paths should receive full coverage until they are
@@ -71,11 +77,21 @@ jobs:
           done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
           {
+            echo "site=$site"
             echo "flutter=$flutter"
             echo "electron=$electron"
             echo "macos=$macos"
             echo "windows=$windows"
           } >> "$GITHUB_OUTPUT"
+
+  site:
+    name: Site checks
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 scripts/check_site_indexing.py
 
   flutter:
     name: Flutter checks
