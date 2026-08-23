@@ -59,9 +59,13 @@ def emit(version: str, build: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("kind", nargs="?", choices=("major", "minor", "patch"))
+    parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--current", action="store_true")
     parser.add_argument("--show", action="store_true")
     args = parser.parse_args()
+    if args.build_only and (args.kind or args.current or args.show):
+        parser.error("--build-only cannot be combined with another version action")
+
     current, build = versions()
     if args.show:
         print(current)
@@ -69,6 +73,15 @@ def main() -> None:
     if args.current:
         emit(current, build)
         print(f"{current}+{build}")
+        return
+    if args.build_only:
+        source = FLUTTER_PACKAGE.read_text()
+        source = VERSION_PATTERN.sub(
+            f"version: {current}+{build + 1}", source, count=1
+        )
+        FLUTTER_PACKAGE.write_text(source)
+        emit(current, build + 1)
+        print(f"{current}+{build + 1}")
         return
     if not args.kind:
         parser.error("a bump kind is required")
