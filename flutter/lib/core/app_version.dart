@@ -3,4 +3,4 @@
 /// `scripts/release/bump_version.py` rewrites this constant together with
 /// `pubspec.yaml` and the Electron package so every surface reports the same
 /// release.
-const clawnsoleVersion = '0.37.1';
+const clawnsoleVersion = '0.38.0';
