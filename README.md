@@ -84,7 +84,7 @@ root Next.js implementation has also been removed.
 The matching deployable builds are:
 
 ```bash
-./flutter/scripts/build_ios
+./scripts/build_ios.sh
 ./flutter/scripts/build_android
 ./flutter/scripts/build_macos
 ./flutter/scripts/build_windows
@@ -143,17 +143,19 @@ See [Google Drive and encrypted settings sync](docs/google-drive-web.md).
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
 - `electron/`: macOS shell, packaging, checksum-verified GitHub updater
 - `flutter/windows/`: native Windows runner and product metadata
-- `.github/workflows/`: PR checks plus parallel macOS and Windows releases
+- `.github/workflows/`: PR checks plus parallel iOS, macOS, and Windows releases
 
 ## Releases and desktop updates
 
 Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
-drives parallel macOS and Windows release builds. macOS is signed and notarized;
-Windows is currently distributed as an unsigned x64 ZIP. A manual dispatch can
-cut a release without a PR or retry the current synchronized version after a
-recoverable failure. iOS builds are intentionally local-only through
-`./flutter/scripts/build_ios`; GitHub never receives the iOS signing material or
-an IPA.
+drives parallel iOS, macOS, and Windows release builds from one synchronized
+release commit. macOS is signed and notarized; Windows is currently distributed
+as an unsigned x64 ZIP. iOS is signed on an ephemeral GitHub-hosted Mac and
+uploaded directly to App Store Connect. The IPA is never stored as an Actions
+artifact or attached to the GitHub release, and the workflow does not wait for
+Apple's asynchronous processing or review. A manual dispatch can cut a release,
+retry the current synchronized version, or omit iOS when that exact build is
+already present in App Store Connect.
 
 Every surface checks for a newer stable release on startup and every 24 hours
 while running. Native iOS reads the version Apple has actually published in the

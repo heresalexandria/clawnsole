@@ -3,3 +3,4 @@
 GOOGLE_IOS_CLIENT_ID =
 GOOGLE_REVERSED_CLIENT_ID = app.clawnsole.clawnsole.google-drive-disabled
 #include? "GoogleDriveOAuth.xcconfig"
+#include? "CISigning.xcconfig"

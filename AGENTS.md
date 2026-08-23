@@ -82,32 +82,35 @@ desktop entry points live beside the other Flutter scripts:
 
 - Electron and Flutter versions must remain aligned. Use
   `scripts/release/bump_version.py`; do not bump one package independently.
-- For a PR-driven release, never cut the iOS distribution build from the PR
-  branch or from the merged feature commit before the release workflow has
-  applied its label-selected version bump. Merge the PR, wait for the workflow's
-  `Release vX.Y.Z` commit on `main`, sync that exact commit, and verify
-  `python3 scripts/release/bump_version.py --show` prints `X.Y.Z` before running
-  the iOS build. The iOS marketing version must equal the GitHub release version
-  produced by that PR. Do not pre-bump the version in a normally labelled PR;
-  the release workflow owns that bump and would otherwise advance it twice.
+- For a PR-driven release, never cut a fallback iOS distribution build from the
+  PR branch or from the merged feature commit before the release workflow has
+  applied its label-selected version bump. The workflow builds iOS from its
+  `Release vX.Y.Z` commit and verifies the IPA marketing version and build
+  number before uploading it. For a manual fallback, sync that exact commit and
+  verify `python3 scripts/release/bump_version.py --show` prints `X.Y.Z` before
+  building. Do not pre-bump the version in a normally labelled PR; the release
+  workflow owns that bump and would otherwise advance it twice.
 - Build every iOS artifact intended for TestFlight or App Store Connect from
-  the repository root with `./scripts/build_ios.sh`. The script reads the
-  Google OAuth values `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`,
+  the repository root with `./scripts/build_ios.sh`. The script reads existing
+  environment values first, then fills missing Google OAuth values from the
+  repository `.env`: `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`,
   `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET`, and
-  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID` from the repository `.env`, requires and
-  injects the iOS client ID, and always forces `INCLUDE_IOS_TEST_KEYS=false`.
-  Never ship iOS with provider-specific keys or bypass this entry point with a
-  direct `flutter build ipa` invocation.
+  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`. It requires and injects the iOS client ID
+  and always forces `INCLUDE_IOS_TEST_KEYS=false`.
+  CI supplies only the iOS client ID. Never ship iOS with provider-specific keys
+  or bypass this entry point with a direct `flutter build ipa` invocation.
 - macOS updater asset names, Windows download asset names, GitHub Actions output
   names, and Electron Builder's `artifactName` form one tested contract.
 - Published macOS bundles must be Developer ID signed, notarized, stapled, and
   pass Gatekeeper plus strict signature verification before upload.
 - Every published release must contain `SHA256SUMS.txt`. The desktop updater
   refuses unverified downloads.
-- `.github/workflows/release.yml` publishes signed, notarized macOS builds and
-  unsigned Windows x64 ZIPs in parallel. iOS distribution builds and signing
-  material stay local to a configured Mac. Android release jobs can be added
-  later without changing product code.
+- `.github/workflows/release.yml` builds signed iOS, signed/notarized macOS, and
+  unsigned Windows x64 in parallel. The iOS job uploads its IPA directly to App
+  Store Connect and never stores it as an Actions artifact or GitHub Release
+  asset. It stops after upload acceptance and does not poll Apple's processing,
+  TestFlight, review, or release state. Android release jobs can be added later
+  without changing product code.
 
 ## Verification
 

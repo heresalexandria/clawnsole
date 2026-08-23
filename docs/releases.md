@@ -1,14 +1,16 @@
 # Cutting a release
 
-Clawnsole follows the same release shape as Aesthetician: a release decision is
-made on the PR, the shared app version is bumped once, and the tag is created
-only after both desktop builds exist.
+Clawnsole makes the release decision on the PR, bumps the shared app version
+once, and builds every required target from that exact release commit. The tag
+is created only after both desktop builds exist and App Store Connect accepts
+the iOS upload.
 
 ```text
 PR labelled minor -> merge -> bump Flutter and Electron together
-                              -> build macOS DMG + updater ZIP ─┐
-                              -> build Windows x64 ZIP ─────────┤
-                              -> checksum -> publish GitHub release
+                              |-> build signed iOS IPA -> upload to App Store Connect
+                              |-> build macOS DMG + updater ZIP ─┐
+                              |-> build Windows x64 ZIP ─────────┤
+                              `-> checksum -> publish desktop GitHub release
 ```
 
 ## Release labels
@@ -27,7 +29,10 @@ running **Create release labels** from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
 kind directly and is useful for the first release. Select `current` to rebuild
 and publish the already-synchronized version after a recoverable CI or signing
-failure, without creating another version bump.
+failure, without creating another version bump. Manual dispatches include iOS
+by default. Clear **Build and upload iOS to App Store Connect** only when that
+exact semantic version and build number was already accepted by Apple, such as
+when retrying a later desktop or GitHub publishing failure.
 
 ## Required repository setup
 
@@ -35,10 +40,45 @@ Enable **Read and write permissions** under Settings → Actions → General. Th
 workflow commits the synchronized version bump to `main`, so branch protection
 must allow `github-actions[bot]` to make that commit.
 
-iOS is intentionally local-only. GitHub Actions never receives an iOS signing
-certificate or provisioning profile and never builds, stores, or publishes an
-IPA. Use `./flutter/scripts/build_ios` on a configured Mac when an iOS archive is
-needed.
+iOS releases run on GitHub's `macos-26` image so the archive uses Xcode 26 and
+the iOS 26 SDK required by App Store Connect. Create a GitHub environment named
+`app-store-connect`, allow deployments from `main`, and configure these as
+environment secrets. Do not add a required reviewer if uploads should remain
+fully automatic; GitHub does not allocate the macOS runner until any environment
+protection rules are satisfied.
+
+| secret | value |
+|---|---|
+| `IOS_CERTIFICATE_P12` | Apple Distribution certificate and private key (`.p12`), base64 encoded |
+| `IOS_CERTIFICATE_PASSWORD` | password for the iOS `.p12` |
+| `IOS_PROVISIONING_PROFILE` | App Store distribution profile for `app.clawnsole.clawnsole`, base64 encoded |
+| `GOOGLE_IOS_OAUTH_CLIENT_ID` | Google OAuth iOS client ID compiled into the production build |
+| `APP_STORE_CONNECT_KEY_ID` | App Store Connect team API key ID |
+| `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect API issuer UUID |
+| `APP_STORE_CONNECT_API_KEY_P8` | raw contents of the API key's downloaded `AuthKey_*.p8` file |
+
+The existing `APPLE_TEAM_ID` secret is shared by macOS notarization and iOS
+signing and must remain `KMZ785G889`. Generate the App Store Connect team API key
+with the `Developer` role, which is sufficient to upload builds without giving
+the workflow an Account Holder or Admin key. Apple permits downloading the P8
+private key only once, so retain a separate secure backup.
+
+The workflow decodes the certificate and profile into runner-temporary files,
+imports the private key into a randomly protected temporary keychain, validates
+the team, bundle ID, distribution profile, signed IPA, semantic version, and
+build number, then uploads with Apple's `altool`. The P8 key is exposed only to
+the upload step. Cleanup removes the keychain, profile, P8, and IPA even after a
+failure; the hosted runner is then discarded.
+
+The IPA is never sent to `actions/upload-artifact` and never becomes a GitHub
+Release asset. `altool` waits only for the transfer and Apple's immediate upload
+acceptance. App Store processing, TestFlight availability, review submission,
+and public release remain asynchronous Apple-side operations and are not polled,
+so no runner minutes are spent waiting for them.
+
+For a local fallback, sync the workflow-created release commit and run
+`./scripts/build_ios.sh` from the repository root. Do not build the pre-bump
+merged feature commit: its marketing version would not match the GitHub release.
 
 Published macOS builds must be Developer ID signed. Configure:
 
@@ -69,5 +109,6 @@ and the unsigned native Windows x64 build. Release assets can include:
 The macOS ZIP is the Electron updater asset. Windows updates remain a manual ZIP
 download, and the unsigned executable may trigger a Microsoft Defender
 SmartScreen warning. Artifact naming, architecture selection, and digest parsing
-are covered by Electron tests. iOS and Android distribution remain
-outside this workflow.
+are covered by Electron tests. The iOS binary is delivered privately to App
+Store Connect, not published on GitHub. Android distribution remains outside
+this workflow.
