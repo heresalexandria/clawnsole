@@ -146,6 +146,54 @@ abstract interface class ReferenceImageNormalizationService {
   Future<PreparedReferenceImages> normalizeImages(List<String> sources);
 }
 
+/// Converts an unsupported still image into the canonical JPEG form.
+///
+/// Native platforms can use their system image stack here. In particular,
+/// ImageIO understands iPhone HEIC primary images and their auxiliary depth
+/// data, while an embedded FFmpeg command can otherwise auto-select the
+/// auxiliary grayscale image instead of the photo.
+abstract interface class ReferenceImageToolBackend {
+  Future<ReferenceVideoToolResult> convertToJpeg({
+    required File input,
+    required File output,
+  });
+}
+
+class FfmpegReferenceImageToolBackend implements ReferenceImageToolBackend {
+  const FfmpegReferenceImageToolBackend(this._backend);
+
+  final ReferenceVideoToolBackend _backend;
+
+  @override
+  Future<ReferenceVideoToolResult> convertToJpeg({
+    required File input,
+    required File output,
+  }) => _backend.runFfmpeg(<String>[
+    '-hide_banner',
+    '-loglevel',
+    'warning',
+    '-nostdin',
+    '-y',
+    '-i',
+    input.path,
+    '-frames:v',
+    '1',
+    '-c:v',
+    'mjpeg',
+    '-q:v',
+    '2',
+    '-pix_fmt',
+    'yuvj420p',
+    '-map_metadata',
+    '-1',
+    '-update',
+    '1',
+    '-f',
+    'image2',
+    output.path,
+  ]);
+}
+
 class DisabledReferenceVideoNormalizationService
     implements
         ReferenceVideoNormalizationService,
@@ -224,6 +272,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
           label: frame.label,
           role: frame.role,
           seconds: frame.seconds,
+          referenceId: frame.referenceId,
         );
       }).toList();
       nextConfig = nextConfig.copyWith(keyframes: frames);
@@ -245,6 +294,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
         return MediaReferenceLabel(
           label: reference.label,
           kind: reference.kind,
+          referenceId: reference.referenceId,
         );
       }).toList();
       nextConfig = nextConfig.copyWith(references: references);
@@ -271,6 +321,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
         return MediaReferenceLabel(
           label: reference.label,
           kind: reference.kind,
+          referenceId: reference.referenceId,
         );
       }).toList();
       nextConfig = nextConfig.copyWith(references: references);
@@ -318,11 +369,14 @@ class ReferenceVideoNormalizer
         ReferenceImageNormalizationService {
   ReferenceVideoNormalizer({
     required ReferenceVideoToolBackend backend,
+    ReferenceImageToolBackend? imageBackend,
     required Future<Directory> Function() cacheDirectory,
   }) : _backend = backend,
+       _imageBackend = imageBackend ?? FfmpegReferenceImageToolBackend(backend),
        _cacheDirectory = cacheDirectory;
 
   final ReferenceVideoToolBackend _backend;
+  final ReferenceImageToolBackend _imageBackend;
   final Future<Directory> Function() _cacheDirectory;
 
   final Map<String, Future<String>> _inFlight = <String, Future<String>>{};
@@ -370,7 +424,7 @@ class ReferenceVideoNormalizer
       }
       final cacheFile = File(
         '${cache.path}${Platform.pathSeparator}'
-        '${materialized.digest}-image-jpeg-v2.jpg',
+        '${materialized.digest}-image-jpeg-v3.jpg',
       );
       if (await cacheFile.exists()) {
         final bytes = await cacheFile.readAsBytes();
@@ -384,33 +438,10 @@ class ReferenceVideoNormalizer
         '${cacheFile.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
       );
       try {
-        // Let FFmpeg select the default presentation image. Modern iPhone
-        // HEIC files may expose the primary photo as a tiled stream group;
-        // mapping 0:v:0 selects only its first 512 px tile.
-        final result = await _backend.runFfmpeg(<String>[
-          '-hide_banner',
-          '-loglevel',
-          'warning',
-          '-nostdin',
-          '-y',
-          '-i',
-          materialized.file.path,
-          '-frames:v',
-          '1',
-          '-c:v',
-          'mjpeg',
-          '-q:v',
-          '2',
-          '-pix_fmt',
-          'yuvj420p',
-          '-map_metadata',
-          '-1',
-          '-update',
-          '1',
-          '-f',
-          'image2',
-          temporary.path,
-        ]);
+        final result = await _imageBackend.convertToJpeg(
+          input: materialized.file,
+          output: temporary,
+        );
         final valid =
             result.succeeded &&
             await temporary.exists() &&

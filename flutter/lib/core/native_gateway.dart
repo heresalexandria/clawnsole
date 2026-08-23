@@ -143,6 +143,7 @@ class NativeGateway extends DirectGateway
           referenceVideoNormalizer ??
           ReferenceVideoNormalizer(
             backend: nativeReferenceVideoToolBackend(),
+            imageBackend: nativeReferenceImageToolBackend(),
             cacheDirectory: () async => Directory(
               '${(await getApplicationCacheDirectory()).path}'
               '${Platform.pathSeparator}reference-video-fixes',

@@ -904,7 +904,7 @@ void main() {
 
     expect(encoded, isNot(contains('secret')));
     expect(decoded.apiKeys, isEmpty);
-    expect(decoded.toJson()['schemaVersion'], 20);
+    expect(decoded.toJson()['schemaVersion'], 21);
     final legacy = StoredData.decode(
       '{"schemaVersion":16,"apiKeys":{"bfl":"old-bfl","ltx":"old-ltx"},"generations":[]}',
     );

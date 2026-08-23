@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
@@ -16,6 +17,8 @@ import '../core/provider_catalog.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/video_cache_gateway.dart';
+
+String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
 enum MediaPickerSource { library, files }
 
@@ -82,6 +85,7 @@ class KeyframeDraft {
     required this.seconds,
     this.asset,
     this.retained,
+    this.savedReferenceId,
   });
 
   final String id;
@@ -91,19 +95,28 @@ class KeyframeDraft {
   final double seconds;
   final PickedAsset? asset;
   final AssetReference? retained;
+  final String? savedReferenceId;
 
   String get requestSource => asset?.dataUrl ?? source.trim();
 
-  KeyframeDraft copyWith({String? label, String? source, double? seconds}) =>
-      KeyframeDraft(
-        id: id,
-        label: label ?? this.label,
-        role: role,
-        source: source ?? this.source,
-        seconds: seconds ?? this.seconds,
-        asset: asset,
-        retained: source == null ? retained : null,
-      );
+  KeyframeDraft copyWith({
+    String? label,
+    String? source,
+    double? seconds,
+    String? savedReferenceId,
+    bool clearSavedReferenceId = false,
+  }) => KeyframeDraft(
+    id: id,
+    label: label ?? this.label,
+    role: role,
+    source: source ?? this.source,
+    seconds: seconds ?? this.seconds,
+    asset: asset,
+    retained: source == null ? retained : null,
+    savedReferenceId: clearSavedReferenceId
+        ? null
+        : savedReferenceId ?? this.savedReferenceId,
+  );
 }
 
 class MediaReferenceDraft {
@@ -139,6 +152,7 @@ class MediaReferenceDraft {
     Uint8List? thumbnailBytes,
     bool clearThumbnailBytes = false,
     String? savedReferenceId,
+    bool clearSavedReferenceId = false,
   }) => MediaReferenceDraft(
     id: id,
     label: label ?? this.label,
@@ -152,7 +166,9 @@ class MediaReferenceDraft {
     thumbnailBytes: clearThumbnailBytes
         ? null
         : thumbnailBytes ?? this.thumbnailBytes,
-    savedReferenceId: savedReferenceId ?? this.savedReferenceId,
+    savedReferenceId: clearSavedReferenceId
+        ? null
+        : savedReferenceId ?? this.savedReferenceId,
   );
 }
 
@@ -197,6 +213,7 @@ class GenerationFormState {
   List<MediaReferenceDraft> references = <MediaReferenceDraft>[];
   MediaReferenceTask referenceTask = MediaReferenceTask.reference;
   PickedAsset? videoAsset;
+  String? videoSavedReferenceId;
   String videoUrl = '';
   Uint8List? videoThumbnailBytes;
   VideoSourceMetadata? videoMetadata;
@@ -362,6 +379,49 @@ class AppController extends ChangeNotifier {
       generations.where((item) => !item.hidden).toList();
   List<SavedReference> get savedReferences =>
       snapshot?.savedReferences ?? const <SavedReference>[];
+
+  SavedReference? _savedReferenceForInput({
+    String? referenceId,
+    required MediaReferenceKind kind,
+    AssetReference? asset,
+  }) => savedReferences
+      .where(
+        (reference) =>
+            reference.kind == kind &&
+            (reference.id == referenceId ||
+                sameAssetReference(reference.asset, asset)),
+      )
+      .firstOrNull;
+
+  /// Generated videos whose durable input metadata points at [reference].
+  /// Asset matching keeps pre-v21 history useful; new records retain the
+  /// reference id even when normalization stores a different derivative.
+  List<Generation> generationsUsingReference(SavedReference reference) {
+    final values = generations.where((generation) {
+      if (generation.outputKind != GenerationOutputKind.video) return false;
+      if (generation.config.sourceReferenceId == reference.id ||
+          sameAssetReference(generation.config.source, reference.asset)) {
+        return true;
+      }
+      if (generation.config.keyframes?.any(
+            (frame) =>
+                frame.referenceId == reference.id ||
+                sameAssetReference(frame.source, reference.asset),
+          ) ==
+          true) {
+        return true;
+      }
+      return generation.config.references?.any(
+            (media) =>
+                media.referenceId == reference.id ||
+                sameAssetReference(media.source, reference.asset),
+          ) ==
+          true;
+    }).toList();
+    values.sort((first, second) => second.createdAt.compareTo(first.createdAt));
+    return values;
+  }
+
   List<VideoProviderDefinition> get providers {
     final available = snapshot?.availableProviders ?? const <String>{};
     if (available.isEmpty) {
@@ -814,6 +874,7 @@ class AppController extends ChangeNotifier {
                     label: frame.label,
                     role: frame.role,
                     seconds: form.usesTimedKeyframes ? frame.seconds : null,
+                    referenceId: frame.savedReferenceId,
                     source:
                         frame.asset?.retained ??
                         frame.retained ??
@@ -828,6 +889,7 @@ class AppController extends ChangeNotifier {
                   (item) => MediaReferenceLabel(
                     label: item.label,
                     kind: item.kind,
+                    referenceId: item.savedReferenceId,
                     source:
                         item.asset?.retained ??
                         item.retained ??
@@ -853,6 +915,10 @@ class AppController extends ChangeNotifier {
               (form.videoUrl.trim().isEmpty ? null : form.videoUrl.trim()),
         _ => null,
       },
+      sourceReferenceId:
+          form.mode == VideoMode.v2v || form.mode == VideoMode.upscale
+          ? form.videoSavedReferenceId
+          : null,
       source: switch (form.mode) {
         VideoMode.v2v => _reference(
           form.videoAsset,
@@ -2207,6 +2273,117 @@ class AppController extends ChangeNotifier {
     MediaReferenceKind.audio => 'audio/mpeg',
   };
 
+  PickedAsset _withSavedReference(
+    PickedAsset asset,
+    SavedReference reference,
+  ) => PickedAsset(
+    name: asset.name,
+    bytes: asset.bytes,
+    mimeType: asset.mimeType,
+    path: asset.path,
+    retained: reference.asset,
+    thumbnailAsset: reference.thumbnailAsset ?? asset.thumbnailAsset,
+    thumbnailBytes: asset.thumbnailBytes,
+  );
+
+  /// Retains Create uploads in References before they enter a generation.
+  /// Content hashes make repeated uploads idempotent, while a one-time byte
+  /// comparison links legacy saved references that predate those hashes.
+  Future<SavedReference?> _autoSaveVisualReference(
+    MediaReferenceKind kind,
+    PickedAsset asset,
+  ) async {
+    if (kind == MediaReferenceKind.audio ||
+        snapshot == null ||
+        gateway is! ReferenceLibraryGateway) {
+      return null;
+    }
+    // Videos can be hundreds of megabytes, so keep content-addressing off the
+    // UI isolate on native platforms.
+    final digest = await compute(_sha256Digest, asset.bytes);
+    SavedReference? existing = savedReferences
+        .where(
+          (reference) =>
+              reference.kind == kind && reference.contentDigest == digest,
+        )
+        .firstOrNull;
+    if (existing == null) {
+      for (final candidate in savedReferences.where(
+        (reference) =>
+            reference.kind == kind &&
+            reference.contentDigest == null &&
+            reference.asset.bytes == asset.bytes.length,
+      )) {
+        try {
+          final bytes = await gateway.readAsset(candidate.asset);
+          if (await compute(_sha256Digest, bytes) == digest) {
+            existing = candidate;
+            break;
+          }
+        } on Object {
+          // An unavailable legacy asset cannot be the upload we just read.
+        }
+      }
+    }
+    final library = gateway as ReferenceLibraryGateway;
+    if (existing != null) {
+      if (existing.contentDigest == null) {
+        _apply(
+          await library.saveReference(existing.copyWith(contentDigest: digest)),
+        );
+        return savedReferences
+            .where((reference) => reference.id == existing!.id)
+            .firstOrNull;
+      }
+      return existing;
+    }
+    final now = DateTime.now().toUtc();
+    final cleanName = asset.name.trim().isEmpty
+        ? '${kind.label} reference'
+        : asset.name.trim();
+    final reference = SavedReference(
+      id: 'reference-${kind.name}-${digest.substring(0, 24)}',
+      name: cleanName.length <= 80 ? cleanName : cleanName.substring(0, 80),
+      kind: kind,
+      asset: AssetReference(
+        kind: 'remote',
+        value: '',
+        label: asset.name,
+        contentType: asset.mimeType,
+        bytes: asset.bytes.length,
+      ),
+      thumbnailAsset: _previewForStorage(
+        asset.thumbnailAsset,
+        effectiveStorage,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      storage: effectiveStorage,
+      contentDigest: digest,
+    );
+    _apply(await library.saveReference(reference, source: asset.dataUrl));
+    return savedReferences
+        .where((candidate) => candidate.id == reference.id)
+        .firstOrNull;
+  }
+
+  Future<SavedReference?> _retainCreateUpload(
+    MediaReferenceKind kind,
+    PickedAsset asset,
+  ) async {
+    try {
+      return await _autoSaveVisualReference(kind, asset);
+    } on Object catch (error) {
+      // A library/storage problem should not make an otherwise valid provider
+      // reference unusable for the current generation.
+      showNotice(
+        'Reference added, but it could not be saved to References. '
+        '${_message(error)}',
+      );
+      return null;
+    }
+  }
+
   void updateForm(void Function(GenerationFormState value) update) {
     update(form);
     _selectCompatibleModel();
@@ -2665,6 +2842,7 @@ class AppController extends ChangeNotifier {
           seconds: 0,
           asset: reference.asset,
           retained: reference.retained,
+          savedReferenceId: reference.savedReferenceId,
         ),
       ];
     selectedModelId = targetModel.id;
@@ -2711,6 +2889,8 @@ class AppController extends ChangeNotifier {
     KeyframeRole role, {
     required String label,
     PickedAsset? asset,
+    AssetReference? retained,
+    String? savedReferenceId,
   }) {
     if (!canAddFrame(role)) return;
     form.keyframes = <KeyframeDraft>[
@@ -2722,6 +2902,8 @@ class AppController extends ChangeNotifier {
         source: '',
         seconds: _suggestedFrameTime(role),
         asset: asset,
+        retained: retained,
+        savedReferenceId: savedReferenceId,
       ),
     ];
     _selectCompatibleModel();
@@ -2741,7 +2923,19 @@ class AppController extends ChangeNotifier {
     if (!canAddFrame(role)) return;
     try {
       final asset = await _pick(type: FileType.image, source: source);
-      if (asset != null) _appendFrame(role, label: asset.name, asset: asset);
+      if (asset != null) {
+        final saved = await _retainCreateUpload(
+          MediaReferenceKind.image,
+          asset,
+        );
+        _appendFrame(
+          role,
+          label: asset.name,
+          asset: saved == null ? asset : _withSavedReference(asset, saved),
+          retained: saved?.asset,
+          savedReferenceId: saved?.id,
+        );
+      }
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -2754,6 +2948,8 @@ class AppController extends ChangeNotifier {
     MediaReferenceKind kind, {
     required String label,
     PickedAsset? asset,
+    AssetReference? retained,
+    String? savedReferenceId,
   }) {
     if (!canAddReference(kind)) return;
     form.references = <MediaReferenceDraft>[
@@ -2764,6 +2960,8 @@ class AppController extends ChangeNotifier {
         kind: kind,
         source: '',
         asset: asset,
+        retained: retained,
+        savedReferenceId: savedReferenceId,
       ),
     ];
     _selectCompatibleModel();
@@ -2789,7 +2987,14 @@ class AppController extends ChangeNotifier {
           : selectedModel.maxTotalReferences! - form.references.length;
       final accepted = available < totalAvailable ? available : totalAvailable;
       for (final asset in picked.take(accepted)) {
-        _appendReference(kind, label: asset.name, asset: asset);
+        final saved = await _retainCreateUpload(kind, asset);
+        _appendReference(
+          kind,
+          label: asset.name,
+          asset: saved == null ? asset : _withSavedReference(asset, saved),
+          retained: saved?.asset,
+          savedReferenceId: saved?.id,
+        );
       }
       if (picked.length > accepted) {
         final totalLimit = selectedModel.maxTotalReferences;
@@ -2816,6 +3021,7 @@ class AppController extends ChangeNotifier {
         label: source.trim().isNotEmpty ? source : null,
         clearThumbnailAsset: true,
         clearThumbnailBytes: true,
+        clearSavedReferenceId: true,
       );
     }).toList();
     _invalidateProviderEstimate();
@@ -2823,10 +3029,18 @@ class AppController extends ChangeNotifier {
   }
 
   void rememberReferenceThumbnail(String id, Uint8List bytes) {
+    String? savedReferenceId;
     form.references = form.references.map((item) {
       if (item.id != id || item.thumbnailBytes != null) return item;
+      savedReferenceId = item.savedReferenceId;
       return item.copyWith(thumbnailBytes: bytes);
     }).toList();
+    final saved = savedReferences
+        .where((reference) => reference.id == savedReferenceId)
+        .firstOrNull;
+    if (saved != null && saved.thumbnailAsset == null) {
+      unawaited(cacheReferencePreview(saved, bytes));
+    }
   }
 
   void rememberVideoSourceThumbnail(Uint8List bytes) {
@@ -2834,6 +3048,12 @@ class AppController extends ChangeNotifier {
     if (asset != null) {
       if (asset.thumbnailBytes != null) return;
       form.videoAsset = asset.copyWithThumbnail(thumbnailBytes: bytes);
+      final saved = savedReferences
+          .where((reference) => reference.id == form.videoSavedReferenceId)
+          .firstOrNull;
+      if (saved != null && saved.thumbnailAsset == null) {
+        unawaited(cacheReferencePreview(saved, bytes));
+      }
       return;
     }
     form.videoThumbnailBytes ??= bytes;
@@ -2854,6 +3074,7 @@ class AppController extends ChangeNotifier {
       if (value.videoUrl != source) {
         value.videoThumbnailBytes = null;
         value.videoMetadata = null;
+        value.videoSavedReferenceId = null;
       }
       value.videoUrl = source;
     });
@@ -2960,6 +3181,7 @@ class AppController extends ChangeNotifier {
         source: source,
         label: source?.trim().isNotEmpty == true ? source : null,
         seconds: seconds,
+        clearSavedReferenceId: source != null,
       );
     }).toList();
     _invalidateProviderEstimate();
@@ -2980,8 +3202,15 @@ class AppController extends ChangeNotifier {
     try {
       final asset = await _pick(type: FileType.video, source: source);
       if (asset != null) {
+        final saved = await _retainCreateUpload(
+          MediaReferenceKind.video,
+          asset,
+        );
         updateForm((value) {
-          value.videoAsset = asset;
+          value.videoAsset = saved == null
+              ? asset
+              : _withSavedReference(asset, saved);
+          value.videoSavedReferenceId = saved?.id;
           value.videoThumbnailBytes = null;
           value.videoMetadata = null;
         });
@@ -4287,6 +4516,11 @@ class AppController extends ChangeNotifier {
     final retainedFrames = <KeyframeDraft>[];
     for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
       final reference = frame.source;
+      final saved = _savedReferenceForInput(
+        referenceId: frame.referenceId,
+        kind: MediaReferenceKind.image,
+        asset: reference,
+      );
       PickedAsset? asset;
       if (reference?.isLocal == true) {
         try {
@@ -4316,6 +4550,7 @@ class AppController extends ChangeNotifier {
               },
           asset: asset,
           retained: reference,
+          savedReferenceId: saved?.id ?? frame.referenceId,
         ),
       );
     }
@@ -4323,6 +4558,11 @@ class AppController extends ChangeNotifier {
     for (final media
         in item.config.references ?? const <MediaReferenceLabel>[]) {
       final reference = media.source;
+      final saved = _savedReferenceForInput(
+        referenceId: media.referenceId,
+        kind: media.kind,
+        asset: reference,
+      );
       PickedAsset? asset;
       Uint8List? thumbnailBytes;
       if (media.thumbnailAsset != null) {
@@ -4352,10 +4592,16 @@ class AppController extends ChangeNotifier {
           retained: reference,
           thumbnailAsset: media.thumbnailAsset,
           thumbnailBytes: asset?.thumbnailBytes ?? thumbnailBytes,
+          savedReferenceId: saved?.id ?? media.referenceId,
         ),
       );
     }
     PickedAsset? retainedSource;
+    final savedSource = _savedReferenceForInput(
+      referenceId: item.config.sourceReferenceId,
+      kind: MediaReferenceKind.video,
+      asset: item.config.source,
+    );
     if ((item.mode == VideoMode.v2v ||
             item.mode == VideoMode.draftEnhance ||
             item.mode == VideoMode.upscale) &&
@@ -4417,6 +4663,10 @@ class AppController extends ChangeNotifier {
       ..videoAsset =
           item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
           ? retainedSource
+          : null
+      ..videoSavedReferenceId =
+          item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
+          ? savedSource?.id ?? item.config.sourceReferenceId
           : null
       ..videoUrl =
           (item.mode == VideoMode.v2v || item.mode == VideoMode.upscale) &&

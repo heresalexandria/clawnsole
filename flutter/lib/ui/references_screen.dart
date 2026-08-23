@@ -8,10 +8,10 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
-import 'generation_video.dart';
-import 'inline_video.dart';
+import 'formatters.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
+import 'visual_reference_viewer.dart';
 
 class ReferencesScreen extends StatelessWidget {
   const ReferencesScreen({required this.controller, super.key});
@@ -180,16 +180,9 @@ class _ReferenceResults extends StatefulWidget {
 
 class _ReferenceResultsState extends State<_ReferenceResults> {
   final Set<String> selectedIds = <String>{};
-  final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
   bool selecting = false;
 
   AppController get controller => widget.controller;
-
-  @override
-  void dispose() {
-    _inlinePlayback.dispose();
-    super.dispose();
-  }
 
   void _setSelecting(bool value) => setState(() {
     selecting = value;
@@ -208,125 +201,122 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
         .toList();
     final selectedAreHidden =
         selected.isNotEmpty && selected.every((item) => item.hidden);
-    return InlineVideoRegistryScope(
-      registry: _inlinePlayback,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _ReferenceToolbar(
-            controller: controller,
-            selecting: selecting,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _ReferenceToolbar(
+          controller: controller,
+          selecting: selecting,
+          selectedCount: selected.length,
+          onSelectingChanged: _setSelecting,
+        ),
+        if (DriveReconnectNotice.needed(controller)) ...<Widget>[
+          const SizedBox(height: 12),
+          DriveReconnectNotice(controller: controller, subject: 'references'),
+        ],
+        if (selecting) ...<Widget>[
+          const SizedBox(height: 10),
+          _ReferenceBulkActions(
             selectedCount: selected.length,
-            onSelectingChanged: _setSelecting,
+            allVisibleSelected:
+                filtered.isNotEmpty &&
+                filtered.every((item) => selectedIds.contains(item.id)),
+            onSelectAll: () => setState(() {
+              final ids = filtered.map((item) => item.id).toSet();
+              if (ids.every(selectedIds.contains)) {
+                selectedIds.removeAll(ids);
+              } else {
+                selectedIds.addAll(ids);
+              }
+            }),
+            onMove: selected.isEmpty
+                ? null
+                : () async {
+                    final moved = await _showReferenceMoveDialog(
+                      context,
+                      controller,
+                      selectedIds,
+                    );
+                    if (moved && mounted) _setSelecting(false);
+                  },
+            onVisibility: selected.isEmpty
+                ? null
+                : () async {
+                    final saved = await controller.setReferencesHidden(
+                      selectedIds,
+                      !selectedAreHidden,
+                    );
+                    if (saved && mounted) _setSelecting(false);
+                  },
+            visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
+            onDone: () => _setSelecting(false),
           ),
-          if (DriveReconnectNotice.needed(controller)) ...<Widget>[
-            const SizedBox(height: 12),
-            DriveReconnectNotice(controller: controller, subject: 'references'),
-          ],
-          if (selecting) ...<Widget>[
-            const SizedBox(height: 10),
-            _ReferenceBulkActions(
-              selectedCount: selected.length,
-              allVisibleSelected:
-                  filtered.isNotEmpty &&
-                  filtered.every((item) => selectedIds.contains(item.id)),
-              onSelectAll: () => setState(() {
-                final ids = filtered.map((item) => item.id).toSet();
-                if (ids.every(selectedIds.contains)) {
-                  selectedIds.removeAll(ids);
-                } else {
-                  selectedIds.addAll(ids);
-                }
-              }),
-              onMove: selected.isEmpty
-                  ? null
-                  : () async {
-                      final moved = await _showReferenceMoveDialog(
-                        context,
-                        controller,
-                        selectedIds,
-                      );
-                      if (moved && mounted) _setSelecting(false);
-                    },
-              onVisibility: selected.isEmpty
-                  ? null
-                  : () async {
-                      final saved = await controller.setReferencesHidden(
-                        selectedIds,
-                        !selectedAreHidden,
-                      );
-                      if (saved && mounted) _setSelecting(false);
-                    },
-              visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
-              onDone: () => _setSelecting(false),
-            ),
-          ],
-          const SizedBox(height: 18),
-          if (filtered.isEmpty)
-            _ReferenceEmpty(controller: controller)
-          else
-            LayoutBuilder(
-              builder: (context, grid) {
-                final columns = grid.maxWidth >= 1120
-                    ? 4
-                    : grid.maxWidth >= 760
-                    ? 3
-                    : grid.maxWidth >= 480
-                    ? 2
-                    : 1;
-                const gap = 16.0;
-                final width = (grid.maxWidth - gap * (columns - 1)) / columns;
-                return Wrap(
-                  spacing: gap,
-                  runSpacing: gap,
-                  children: filtered
-                      .map(
-                        (item) => SizedBox(
-                          width: width,
-                          child: Stack(
-                            children: <Widget>[
-                              _ReferenceCard(
-                                controller: controller,
-                                reference: item,
-                              ),
-                              if (selecting)
-                                Positioned(
-                                  top: 8,
-                                  left: 8,
-                                  child: Material(
-                                    elevation: 7,
-                                    color: context.colors.surface,
-                                    borderRadius: BorderRadius.circular(9),
-                                    child: IconButton(
-                                      key: ValueKey(
-                                        'select-reference-${item.id}',
-                                      ),
-                                      tooltip: selectedIds.contains(item.id)
-                                          ? 'Deselect ${item.name}'
-                                          : 'Select ${item.name}',
-                                      onPressed: () => _toggle(item.id),
-                                      icon: Icon(
-                                        selectedIds.contains(item.id)
-                                            ? Icons.check_box_rounded
-                                            : Icons
-                                                  .check_box_outline_blank_rounded,
-                                        color: selectedIds.contains(item.id)
-                                            ? context.tokens.brass
-                                            : null,
-                                      ),
+        ],
+        const SizedBox(height: 18),
+        if (filtered.isEmpty)
+          _ReferenceEmpty(controller: controller)
+        else
+          LayoutBuilder(
+            builder: (context, grid) {
+              final columns = grid.maxWidth >= 1120
+                  ? 4
+                  : grid.maxWidth >= 760
+                  ? 3
+                  : grid.maxWidth >= 480
+                  ? 2
+                  : 1;
+              const gap = 16.0;
+              final width = (grid.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: filtered
+                    .map(
+                      (item) => SizedBox(
+                        width: width,
+                        child: Stack(
+                          children: <Widget>[
+                            _ReferenceCard(
+                              controller: controller,
+                              reference: item,
+                            ),
+                            if (selecting)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: Material(
+                                  elevation: 7,
+                                  color: context.colors.surface,
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: IconButton(
+                                    key: ValueKey(
+                                      'select-reference-${item.id}',
+                                    ),
+                                    tooltip: selectedIds.contains(item.id)
+                                        ? 'Deselect ${item.name}'
+                                        : 'Select ${item.name}',
+                                    onPressed: () => _toggle(item.id),
+                                    icon: Icon(
+                                      selectedIds.contains(item.id)
+                                          ? Icons.check_box_rounded
+                                          : Icons
+                                                .check_box_outline_blank_rounded,
+                                      color: selectedIds.contains(item.id)
+                                          ? context.tokens.brass
+                                          : null,
                                     ),
                                   ),
                                 ),
-                            ],
-                          ),
+                              ),
+                          ],
                         ),
-                      )
-                      .toList(),
-                );
-              },
-            ),
-        ],
-      ),
+                      ),
+                    )
+                    .toList(),
+              );
+            },
+          ),
+      ],
     );
   }
 }
@@ -534,42 +524,6 @@ class _ReferenceCardState extends State<_ReferenceCard> {
   AppController get controller => widget.controller;
   SavedReference get reference => widget.reference;
 
-  Future<void> _download(VideoSaveDestination destination) async {
-    try {
-      await controller.saveReferenceVideo(reference, destination: destination);
-    } on Object catch (error) {
-      controller.showErrorNotice(error);
-    }
-  }
-
-  Future<void> _play(BuildContext context) async {
-    // The player opens immediately and resolves the delivery inside it, so a
-    // cold Drive download animates the loading placeholder with progress.
-    final delivery = controller.referenceMediaDelivery(reference);
-    // The hosting full-size card plays the film in place; narrow viewports
-    // keep the fullscreen route.
-    final inline = InlineVideoPlayback.of(context);
-    if (inline != null) {
-      inline(
-        InlineVideoRequest(
-          deferredUri: delivery.uri,
-          progress: delivery.progress,
-          onDownload: _download,
-          supportsPhotos: controller.supportsPhotoLibrarySave,
-        ),
-      );
-      return;
-    }
-    await showVideoPlayerModal(
-      context,
-      deferredUri: delivery.uri,
-      progress: delivery.progress,
-      supportsPhotos: controller.supportsPhotoLibrarySave,
-      initialAspectRatio: _videoAspect ?? 16 / 9,
-      onDownload: _download,
-    );
-  }
-
   void _onVideoMetadata(VideoSourceMetadata metadata) {
     if (!metadata.isUsable) return;
     final aspect = metadata.width / metadata.height;
@@ -599,22 +553,42 @@ class _ReferenceCardState extends State<_ReferenceCard> {
         children: <Widget>[
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-            child: isVideo
-                ? InlineVideoMediaBox(
-                    playbackId: reference.id,
-                    aspectRatio: _videoAspect ?? 16 / 9,
-                    preview: Builder(
-                      builder: (previewContext) => Semantics(
-                        button: true,
-                        label: 'Play ${reference.name}',
-                        child: InkWell(
-                          onTap: () => unawaited(_play(previewContext)),
-                          child: thumbnail,
+            child: AspectRatio(
+              aspectRatio: isVideo ? _videoAspect ?? 16 / 9 : 16 / 9,
+              child: Semantics(
+                button: reference.kind != MediaReferenceKind.audio,
+                label: 'View ${reference.name} full screen',
+                child: InkWell(
+                  key: ValueKey('view-saved-reference-${reference.id}'),
+                  onTap: reference.kind == MediaReferenceKind.audio
+                      ? null
+                      : () => unawaited(
+                          showSavedReferenceViewer(
+                            context,
+                            controller,
+                            reference,
+                          ),
                         ),
-                      ),
-                    ),
-                  )
-                : AspectRatio(aspectRatio: 16 / 9, child: thumbnail),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      thumbnail,
+                      if (isVideo)
+                        const Center(
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            size: 46,
+                            color: Colors.white,
+                            shadows: <Shadow>[
+                              Shadow(color: Colors.black54, blurRadius: 12),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(13, 12, 8, 12),
@@ -655,6 +629,13 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                       ],
                     ],
                   ),
+                ),
+                TextButton(
+                  key: ValueKey('reference-details-${reference.id}'),
+                  onPressed: () => unawaited(
+                    showReferenceDetails(context, controller, reference),
+                  ),
+                  child: const Text('Details'),
                 ),
                 IconButton(
                   tooltip: reference.favorite
@@ -755,6 +736,255 @@ class _ReferenceCardState extends State<_ReferenceCard> {
       ),
     );
   }
+}
+
+Future<void> showReferenceDetails(
+  BuildContext context,
+  AppController controller,
+  SavedReference reference,
+) => Navigator.of(context).push<void>(
+  MaterialPageRoute<void>(
+    builder: (context) =>
+        ReferenceDetailsScreen(controller: controller, reference: reference),
+  ),
+);
+
+class ReferenceDetailsScreen extends StatelessWidget {
+  const ReferenceDetailsScreen({
+    required this.controller,
+    required this.reference,
+    super.key,
+  });
+
+  final AppController controller;
+  final SavedReference reference;
+
+  @override
+  Widget build(BuildContext context) {
+    final usages = controller.generationsUsingReference(reference);
+    final folder = reference.folderId == null
+        ? null
+        : controller.folderPath(
+            reference.folderId!,
+            collection: LibraryCollection.references,
+          );
+    return Scaffold(
+      key: ValueKey('reference-details-screen-${reference.id}'),
+      appBar: AppBar(title: const Text('Reference details')),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(
+          MediaQuery.sizeOf(context).width < 620 ? 16 : 28,
+        ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1120),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  reference.name,
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${reference.kind.label} · ${reference.storage.label}'
+                  '${folder == null ? '' : ' · $folder'}',
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+                const SizedBox(height: 18),
+                SurfaceCard(
+                  padding: EdgeInsets.zero,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Semantics(
+                      button: reference.kind != MediaReferenceKind.audio,
+                      label: 'View ${reference.name} full screen',
+                      child: InkWell(
+                        key: ValueKey(
+                          'view-reference-details-media-${reference.id}',
+                        ),
+                        onTap: reference.kind == MediaReferenceKind.audio
+                            ? null
+                            : () => unawaited(
+                                showSavedReferenceViewer(
+                                  context,
+                                  controller,
+                                  reference,
+                                ),
+                              ),
+                        child: SizedBox(
+                          height: 360,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: <Widget>[
+                              ColoredBox(
+                                color: Colors.black,
+                                child: MediaThumbnail(
+                                  gateway: controller.gateway,
+                                  kind: reference.kind,
+                                  reference: reference.asset,
+                                  thumbnailReference: reference.thumbnailAsset,
+                                  fit: BoxFit.contain,
+                                  semanticsLabel:
+                                      '${reference.name} reference preview',
+                                  onThumbnail:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? (bytes) => unawaited(
+                                          controller.cacheReferencePreview(
+                                            reference,
+                                            bytes,
+                                          ),
+                                        )
+                                      : null,
+                                ),
+                              ),
+                              if (reference.kind == MediaReferenceKind.video)
+                                const Center(
+                                  child: Icon(
+                                    Icons.play_circle_fill_rounded,
+                                    size: 64,
+                                    color: Colors.white,
+                                    shadows: <Shadow>[
+                                      Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 14,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SurfaceCard(
+                  child: Wrap(
+                    spacing: 24,
+                    runSpacing: 12,
+                    children: <Widget>[
+                      _ReferenceDetailFact(
+                        label: 'Added',
+                        value: formatTimestamp(reference.createdAt),
+                      ),
+                      _ReferenceDetailFact(
+                        label: 'Updated',
+                        value: formatTimestamp(reference.updatedAt),
+                      ),
+                      if (reference.tags.isNotEmpty)
+                        _ReferenceDetailFact(
+                          label: 'Tags',
+                          value: reference.tags
+                              .map((tag) => '#$tag')
+                              .join('  '),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  usages.length == 1
+                      ? 'Used in 1 generation'
+                      : 'Used in ${usages.length} generations',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                const SizedBox(height: 10),
+                if (usages.isEmpty)
+                  SurfaceCard(
+                    child: Text(
+                      'No saved generations use this reference yet.',
+                      style: TextStyle(color: context.colors.onSurfaceVariant),
+                    ),
+                  )
+                else
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final columns = constraints.maxWidth >= 840 ? 2 : 1;
+                      const gap = 16.0;
+                      final width =
+                          (constraints.maxWidth - gap * (columns - 1)) /
+                          columns;
+                      return Wrap(
+                        spacing: gap,
+                        runSpacing: gap,
+                        children: usages
+                            .map(
+                              (item) => SizedBox(
+                                width: width,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: <Widget>[
+                                    ActivityCard(
+                                      controller: controller,
+                                      item: item,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    OutlinedButton.icon(
+                                      key: ValueKey(
+                                        'reference-generation-details-${item.localId}',
+                                      ),
+                                      onPressed: () => unawaited(
+                                        showGenerationDetails(
+                                          context,
+                                          item,
+                                          progressEstimate: controller
+                                              .generationProgress(item),
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.receipt_long_rounded,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'View generation details',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReferenceDetailFact extends StatelessWidget {
+  const _ReferenceDetailFact({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 360),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            color: context.tokens.brass,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(value),
+      ],
+    ),
+  );
 }
 
 class _ReferenceEmpty extends StatelessWidget {
@@ -2001,6 +2231,34 @@ class _ReferenceCandidateCard extends StatelessWidget {
                           compact: true,
                         ),
                       ),
+                      if (item.kind != MediaReferenceKind.audio)
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Material(
+                            color: scheme.surface.withValues(alpha: .9),
+                            shape: const CircleBorder(),
+                            child: IconButton(
+                              key: ValueKey('view-reference-picker-${item.id}'),
+                              tooltip: 'View ${item.name} full screen',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => unawaited(
+                                showVisualReferenceViewer(
+                                  context,
+                                  controller: controller,
+                                  kind: item.kind,
+                                  label: item.name,
+                                  reference: item.asset,
+                                  thumbnailReference: item.thumbnailAsset,
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.fullscreen_rounded,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),

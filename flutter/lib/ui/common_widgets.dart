@@ -21,6 +21,7 @@ import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
+import 'visual_reference_viewer.dart';
 
 class StorageBadge extends StatelessWidget {
   const StorageBadge({required this.storage, super.key, this.compact = false});
@@ -754,53 +755,70 @@ class _MediaReferenceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: '${media.kind.label} reference · ${media.label}',
-    child: Container(
-      height: 44,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: context.colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: context.colors.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          SizedBox.square(
-            dimension: 42,
-            child: MediaThumbnail(
-              gateway: controller.gateway,
-              kind: media.kind,
-              reference: media.source,
-              thumbnailReference: media.thumbnailAsset,
-              semanticsLabel: '${media.label} reference thumbnail',
-              onThumbnail:
-                  media.kind == MediaReferenceKind.video && media.source != null
-                  ? (bytes) => unawaited(
-                      controller.cacheGenerationInputPreview(
-                        item,
-                        media.source!,
-                        bytes,
-                      ),
-                    )
-                  : null,
-            ),
-          ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 110),
-            child: Text(
-              media.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
+    message: '${media.kind.label} reference · ${media.label} — tap to view',
+    child: InkWell(
+      key: ValueKey('view-generation-reference-${item.localId}-${media.label}'),
+      borderRadius: BorderRadius.circular(8),
+      onTap: media.kind == MediaReferenceKind.audio
+          ? null
+          : () => unawaited(
+              showVisualReferenceViewer(
+                context,
+                controller: controller,
+                kind: media.kind,
+                label: media.label,
+                reference: media.source,
+                thumbnailReference: media.thumbnailAsset,
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-        ],
+      child: Container(
+        height: 44,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: context.colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: context.colors.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            SizedBox.square(
+              dimension: 42,
+              child: MediaThumbnail(
+                gateway: controller.gateway,
+                kind: media.kind,
+                reference: media.source,
+                thumbnailReference: media.thumbnailAsset,
+                semanticsLabel: '${media.label} reference thumbnail',
+                onThumbnail:
+                    media.kind == MediaReferenceKind.video &&
+                        media.source != null
+                    ? (bytes) => unawaited(
+                        controller.cacheGenerationInputPreview(
+                          item,
+                          media.source!,
+                          bytes,
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 110),
+              child: Text(
+                media.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+        ),
       ),
     ),
   );
@@ -916,7 +934,14 @@ class _SourceReferenceChip extends StatelessWidget {
     child: InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: () => unawaited(
-        showSourceReferenceSheet(context, controller, source, mode),
+        showVisualReferenceViewer(
+          context,
+          controller: controller,
+          kind: MediaReferenceKind.video,
+          label: source.label,
+          reference: source,
+          thumbnailReference: thumbnailAsset,
+        ),
       ),
       child: Container(
         height: 44,
@@ -981,6 +1006,15 @@ Future<void> showReferenceFrameViewer(
   KeyframeLabel frame,
 ) {
   final source = frame.source;
+  if (source != null) {
+    return showVisualReferenceViewer(
+      context,
+      controller: controller,
+      kind: MediaReferenceKind.image,
+      label: frame.label,
+      reference: source,
+    );
+  }
   final timing = frame.seconds == null
       ? null
       : 'at ${frame.seconds!.toStringAsFixed(frame.seconds! % 1 == 0 ? 0 : 1)} s';
@@ -2100,21 +2134,38 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
         label: 'Saved generation',
       );
     }
-    return MediaThumbnail(
-      gateway: widget.controller.gateway,
-      kind: media.$1,
-      reference: media.$2,
-      thumbnailReference: media.$3,
-      semanticsLabel: 'Generation input thumbnail',
-      onThumbnail: media.$1 == MediaReferenceKind.video
-          ? (bytes) => unawaited(
-              widget.controller.cacheGenerationInputPreview(
-                widget.item,
-                media.$2,
-                bytes,
-              ),
-            )
-          : null,
+    return Semantics(
+      button: true,
+      label: 'View generation input full screen',
+      child: InkWell(
+        key: ValueKey('view-generation-input-${widget.item.localId}'),
+        onTap: () => unawaited(
+          showVisualReferenceViewer(
+            context,
+            controller: widget.controller,
+            kind: media.$1,
+            label: media.$2.label,
+            reference: media.$2,
+            thumbnailReference: media.$3,
+          ),
+        ),
+        child: MediaThumbnail(
+          gateway: widget.controller.gateway,
+          kind: media.$1,
+          reference: media.$2,
+          thumbnailReference: media.$3,
+          semanticsLabel: 'Generation input thumbnail',
+          onThumbnail: media.$1 == MediaReferenceKind.video
+              ? (bytes) => unawaited(
+                  widget.controller.cacheGenerationInputPreview(
+                    widget.item,
+                    media.$2,
+                    bytes,
+                  ),
+                )
+              : null,
+        ),
+      ),
     );
   }
 }

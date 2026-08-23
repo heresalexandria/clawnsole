@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/artcraft_api.dart';
@@ -99,8 +100,48 @@ void main() {
     expect(second.sources.single, first.sources.first);
     expect(backend.ffmpegArguments, hasLength(1));
     expect(backend.ffmpegArguments.single, isNot(contains('-map')));
-    expect(backend.ffmpegArguments.single.last, contains('image-jpeg-v2'));
+    expect(backend.ffmpegArguments.single.last, contains('image-jpeg-v3'));
   });
+
+  test(
+    'an injected platform image backend replaces ffmpeg conversion',
+    () async {
+      final cache = await Directory.systemTemp.createTemp(
+        'clawnsole-native-image-normalizer-',
+      );
+      addTearDown(() => cache.delete(recursive: true));
+      final ffmpeg = _ImageBackend();
+      final platform = _ImageConverterBackend();
+      final heif = Uint8List.fromList(<int>[
+        0,
+        0,
+        0,
+        24,
+        ...ascii.encode('ftyp'),
+        ...ascii.encode('heic'),
+        0,
+        0,
+        0,
+        0,
+        ...ascii.encode('mif1'),
+      ]);
+      final normalizer = ReferenceVideoNormalizer(
+        backend: ffmpeg,
+        imageBackend: platform,
+        cacheDirectory: () async => cache,
+      );
+
+      final normalized = await normalizer.normalizeImages(<String>[
+        'data:image/heif;base64,${base64Encode(heif)}',
+      ]);
+
+      expect(normalized.changedIndexes, <int>{0});
+      expect(normalized.sources.single, startsWith('data:image/jpeg;base64,'));
+      expect(platform.inputs, hasLength(1));
+      expect(platform.outputs.single, contains('image-jpeg-v3.jpg.tmp-$pid-'));
+      expect(ffmpeg.ffmpegArguments, isEmpty);
+    },
+  );
 
   test(
     'image normalization updates frames and creative image references',
@@ -122,6 +163,7 @@ void main() {
             label: 'Opening',
             role: KeyframeRole.start,
             seconds: 0,
+            referenceId: 'opening-reference',
             source: retained,
           ),
         ],
@@ -129,6 +171,7 @@ void main() {
           MediaReferenceLabel(
             label: 'Style',
             kind: MediaReferenceKind.image,
+            referenceId: 'style-reference',
             source: retained,
             thumbnailAsset: retained,
           ),
@@ -151,7 +194,12 @@ void main() {
       ]);
       expect(prepared.input['reference_images'], <String>['image-fixed']);
       expect(prepared.config.keyframes!.single.source, isNull);
+      expect(
+        prepared.config.keyframes!.single.referenceId,
+        'opening-reference',
+      );
       expect(prepared.config.references!.single.source, isNull);
+      expect(prepared.config.references!.single.referenceId, 'style-reference');
       expect(prepared.config.references!.single.thumbnailAsset, isNull);
     },
   );
@@ -975,6 +1023,40 @@ void main() {
               as Map<String, Object?>;
       expect(outputStream['width'], component['width']);
       expect(outputStream['height'], component['height']);
+
+      // The supplied iPhone HEIC also contains large grayscale portrait/depth
+      // auxiliaries. Guard against selecting one by requiring real RGB chroma
+      // in the converted pixels, not merely the primary image dimensions.
+      final rgbFile = File('${temporary.path}/normalized.rgb');
+      final decoded = await backend.runFfmpeg(<String>[
+        '-v',
+        'error',
+        '-y',
+        '-i',
+        jpegFile.path,
+        '-vf',
+        'scale=32:32:flags=area',
+        '-frames:v',
+        '1',
+        '-pix_fmt',
+        'rgb24',
+        '-f',
+        'rawvideo',
+        rgbFile.path,
+      ]);
+      expect(decoded.succeeded, isTrue, reason: decoded.output);
+      final rgb = await rgbFile.readAsBytes();
+      expect(rgb.length, 32 * 32 * 3);
+      var channelDifference = 0;
+      for (var index = 0; index < rgb.length; index += 3) {
+        final red = rgb[index];
+        final green = rgb[index + 1];
+        final blue = rgb[index + 2];
+        channelDifference +=
+            <int>[red, green, blue].reduce(math.max) -
+            <int>[red, green, blue].reduce(math.min);
+      }
+      expect(channelDifference / (rgb.length / 3), greaterThan(5));
     }
   });
 }
@@ -1065,6 +1147,22 @@ class _ImageBackend implements ReferenceVideoToolBackend {
   @override
   Future<ReferenceVideoToolResult> runFfprobe(List<String> arguments) =>
       throw StateError('Image normalization does not use ffprobe.');
+}
+
+class _ImageConverterBackend implements ReferenceImageToolBackend {
+  final List<String> inputs = <String>[];
+  final List<String> outputs = <String>[];
+
+  @override
+  Future<ReferenceVideoToolResult> convertToJpeg({
+    required File input,
+    required File output,
+  }) async {
+    inputs.add(input.path);
+    outputs.add(output.path);
+    await output.writeAsBytes(<int>[0xff, 0xd8, 0xff, 0xd9]);
+    return const ReferenceVideoToolResult(exitCode: 0, output: '');
+  }
 }
 
 class _FakeBackend implements ReferenceVideoToolBackend {

@@ -1519,7 +1519,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 20);
+    expect(decoded.toJson()['schemaVersion'], 21);
   });
 
   test(
@@ -1715,7 +1715,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 20);
+      expect(decoded.toJson()['schemaVersion'], 21);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -3863,6 +3863,10 @@ void main() {
       find.byKey(const ValueKey('media-thumbnail-video-frame')),
       findsNWidgets(3),
     );
+    expect(
+      find.byKey(const ValueKey('view-reference-picker-saved-video-1')),
+      findsOneWidget,
+    );
     expect(find.text('0/2 selected'), findsOneWidget);
 
     final first = find.byKey(
@@ -5416,6 +5420,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(toggle, findsOneWidget);
       expect(find.text('Normalize visual references'), findsOneWidget);
+      expect(
+        find.text('Converts incompatible images and videos on upload.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Repairs run only when needed'), findsNothing);
 
       controller.addUrlReference(MediaReferenceKind.video);
       await tester.pumpAndSettle();
@@ -5548,6 +5557,184 @@ void main() {
       find.byKey(const ValueKey('auto-fix-reference-videos')),
       findsNothing,
     );
+  });
+
+  testWidgets('Create visual reference opens a fullscreen viewer', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'atlas'
+      ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+    controller.form.references = const <MediaReferenceDraft>[
+      MediaReferenceDraft(
+        id: 'fullscreen-image',
+        label: 'Portrait reference',
+        kind: MediaReferenceKind.image,
+        source: 'https://cdn.test/portrait.png',
+      ),
+    ];
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pump();
+
+    final open = find.byKey(
+      const ValueKey('view-media-reference-fullscreen-image'),
+    );
+    await tester.ensureVisible(open);
+    final openRect = tester.getRect(open);
+    await tester.tapAt(Offset(openRect.center.dx, openRect.bottom - 12));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('visual-reference-viewer')),
+      findsOneWidget,
+    );
+    expect(find.text('Portrait reference'), findsOneWidget);
+  });
+
+  testWidgets('reference details lists generations and media opens fullscreen', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 23);
+    final imageBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    const asset = AssetReference(
+      kind: 'local',
+      value: 'portrait-reference-asset',
+      label: 'portrait.png',
+      contentType: 'image/png',
+    );
+    final reference = SavedReference(
+      id: 'portrait-reference',
+      name: 'Portrait reference',
+      kind: MediaReferenceKind.image,
+      asset: asset,
+      createdAt: now,
+      updatedAt: now,
+      tags: const <String>['character'],
+    );
+    final generation = Generation(
+      localId: 'used-generation',
+      status: 'Ready',
+      prompt: 'Animate the portrait',
+      mode: VideoMode.i2v,
+      config: const GenerationConfig(
+        aspectRatio: '9:16',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+        references: <MediaReferenceLabel>[
+          MediaReferenceLabel(
+            label: 'Portrait reference',
+            kind: MediaReferenceKind.image,
+            source: asset,
+          ),
+        ],
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final snapshot = LocalSnapshot(
+      generations: <Generation>[generation],
+      savedReferences: <SavedReference>[reference],
+      preferences: const AppPreferences(),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+    );
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        snapshot,
+        assets: <String, Uint8List>{'portrait-reference-asset': imageBytes},
+      ),
+    )..snapshot = snapshot;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: ReferencesScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('reference-details-portrait-reference')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('reference-details-screen-portrait-reference')),
+      findsOneWidget,
+    );
+    expect(find.text('Used in 1 generation'), findsOneWidget);
+    expect(find.text('Animate the portrait'), findsOneWidget);
+    expect(
+      find.byKey(
+        const ValueKey(
+          'view-generation-reference-used-generation-Portrait reference',
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey('view-reference-details-media-portrait-reference'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('visual-reference-viewer')),
+      findsOneWidget,
+    );
+    Navigator.of(
+      tester.element(find.byKey(const ValueKey('visual-reference-viewer'))),
+    ).pop();
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey(
+          'view-generation-reference-used-generation-Portrait reference',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('visual-reference-viewer')),
+      findsOneWidget,
+    );
+    Navigator.of(
+      tester.element(find.byKey(const ValueKey('visual-reference-viewer'))),
+    ).pop();
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey('reference-generation-details-used-generation'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Generation details'), findsOneWidget);
   });
 
   test('form infers every FLUX 3 generation mode from its inputs', () {
