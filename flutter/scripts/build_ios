@@ -23,6 +23,12 @@ if [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+PRODUCTION_BUILD=false
+if [[ "${1:-}" == "--production" ]]; then
+  PRODUCTION_BUILD=true
+  shift
+fi
+
 print_heading "iOS deployable build"
 prepare_flutter
 require_command xcrun
@@ -33,7 +39,19 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
-load_clawnsole_review_credentials
+if [[ "$PRODUCTION_BUILD" == true ]]; then
+  for argument in "$@"; do
+    case "$argument" in
+      --dart-define | --dart-define=* | --dart-define-from-file | --dart-define-from-file=*)
+        echo "Production iOS builds do not accept custom Dart defines." >&2
+        exit 1
+        ;;
+    esac
+  done
+  INCLUDE_IOS_TEST_KEYS=false
+else
+  load_clawnsole_review_credentials
+fi
 prepare_clawnsole_review_defines
 prepare_google_ios_oauth
 trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
