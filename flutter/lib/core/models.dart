@@ -1143,8 +1143,9 @@ class AppPreferences {
   /// cache (and its prefetching) off.
   final int localVideoCacheMb;
 
-  /// Whether reference videos should be checked and repaired for provider
-  /// compatibility before upload.
+  /// Whether visual references should be checked and repaired for provider
+  /// compatibility before upload. The legacy field name is retained for
+  /// settings compatibility.
   final bool autoFixReferenceVideos;
 
   AppPreferences copyWith({

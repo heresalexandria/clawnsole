@@ -227,6 +227,8 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
         if (controller.notice != null &&
             controller.noticeSequence != _lastNoticeSequence) {
           _lastNoticeSequence = controller.noticeSequence;
+          final action = controller.noticeAction;
+          final actionLabel = controller.noticeActionLabel;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!context.mounted || controller.notice == null) return;
             ScaffoldMessenger.of(context)
@@ -243,6 +245,13 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
                       Expanded(child: Text(controller.notice!)),
                     ],
                   ),
+                  action: action == null || actionLabel == null
+                      ? null
+                      : SnackBarAction(
+                          label: actionLabel,
+                          onPressed: () =>
+                              unawaited(controller.performNoticeAction()),
+                        ),
                 ),
               );
           });

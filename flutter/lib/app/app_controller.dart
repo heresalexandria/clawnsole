@@ -19,6 +19,8 @@ import '../core/video_cache_gateway.dart';
 
 enum MediaPickerSource { library, files }
 
+enum AppNoticeAction { retryWithVisualNormalization }
+
 typedef FilePickerInvocation =
     Future<FilePickerResult?> Function({
       required FileType type,
@@ -306,6 +308,11 @@ class AppController extends ChangeNotifier {
   String? loadError;
   String? creditError;
   String? notice;
+
+  /// Optional recovery attached to the current notice. Notices without an
+  /// action always clear the previous action so stale buttons cannot survive
+  /// a later status message.
+  AppNoticeAction? noticeAction;
 
   /// Increments with every [showNotice] call so listeners can surface a
   /// repeated identical message instead of deduplicating it forever.
@@ -1023,15 +1030,34 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void showNotice(String message) {
+  void showNotice(String message, {AppNoticeAction? action}) {
     notice = message;
+    noticeAction = action;
     noticeSequence += 1;
     _noticeTimer?.cancel();
     _noticeTimer = Timer(const Duration(seconds: 4), () {
       notice = null;
+      noticeAction = null;
       notifyListeners();
     });
     notifyListeners();
+  }
+
+  String? get noticeActionLabel => switch (noticeAction) {
+    AppNoticeAction.retryWithVisualNormalization => 'Normalize & retry',
+    null => null,
+  };
+
+  Future<void> performNoticeAction() async {
+    final action = noticeAction;
+    if (action == null || submitting) return;
+    noticeAction = null;
+    notifyListeners();
+    switch (action) {
+      case AppNoticeAction.retryWithVisualNormalization:
+        await setAutoFixReferenceVideos(true);
+        await submit();
+    }
   }
 
   /// Surfaces [error] as a cleaned human notice while keeping the raw details
@@ -1046,6 +1072,43 @@ class AppController extends ChangeNotifier {
       .replaceFirst('Bad state: ', '')
       .replaceFirst('ProviderException: ', '')
       .replaceFirst('Exception: ', '');
+
+  bool _isVisualReferenceCompatibilityError(String message) {
+    if (autoFixReferenceVideos ||
+        (form.keyframes.isEmpty &&
+            form.referenceCount(MediaReferenceKind.image) == 0 &&
+            form.referenceCount(MediaReferenceKind.video) == 0)) {
+      return false;
+    }
+    final normalized = message.toLowerCase();
+    final mentionsVisualMedia = const <String>[
+      'reference',
+      'keyframe',
+      'start frame',
+      'end frame',
+      'image',
+      'video',
+      'media',
+      'mime',
+      'codec',
+      'heic',
+      'heif',
+    ].any(normalized.contains);
+    final describesCompatibilityFailure = const <String>[
+      'unsupported',
+      'unpermitted',
+      'not permitted',
+      'not allowed',
+      'incompatible',
+      'invalid mime',
+      'invalid image',
+      'invalid video',
+      'could not decode',
+      'failed to decode',
+      'cannot decode',
+    ].any(normalized.contains);
+    return mentionsVisualMedia && describesCompatibilityFailure;
+  }
 
   Future<void> _savePreferences(AppPreferences preferences) {
     final operation = _preferenceWrites.then((_) async {
@@ -3204,17 +3267,25 @@ class AppController extends ChangeNotifier {
       if (pending.creditsAfter != null) credits = pending.creditsAfter;
     } on Object catch (error) {
       await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
+      final message = _message(error);
       try {
         _apply(await gateway.load());
       } on Object {
         pending = pending.copyWith(
           status: 'Error',
-          error: _message(error),
+          error: message,
           updatedAt: DateTime.now().toUtc(),
         );
         _replaceInMemory(pending);
       }
-      showNotice(_message(error));
+      if (_isVisualReferenceCompatibilityError(message)) {
+        showNotice(
+          '$message Turn on Normalize visual references and try again.',
+          action: AppNoticeAction.retryWithVisualNormalization,
+        );
+      } else {
+        showNotice(message);
+      }
     } finally {
       submitting = false;
       notifyListeners();
