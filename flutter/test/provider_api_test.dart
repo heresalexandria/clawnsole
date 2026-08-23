@@ -520,12 +520,12 @@ void main() {
     );
 
     expect(result['status'], 'Ready');
-    expect(result['progress'], 100);
+    expect(result['progress'], isNull);
     expect(result['result'], isA<Map<String, Object?>>());
   });
 
   test(
-    'ArtCraft maps nested percentage strings while a job is running',
+    'ArtCraft does not promote its binary percentage while a job is running',
     () async {
       final api = ArtCraftApi(
         client: MockClient(
@@ -534,7 +534,7 @@ void main() {
               'state': <String, Object?>{
                 'status': <String, Object?>{
                   'status': 'started',
-                  'progressPercentage': '37.5%',
+                  'progressPercentage': '0%',
                 },
               },
             }),
@@ -549,7 +549,8 @@ void main() {
       );
 
       expect(result['status'], 'Pending');
-      expect(result['progress'], 37.5);
+      expect(result['progress'], isNull);
+      expect(findProviderProgress(result), 0);
     },
   );
 
@@ -843,7 +844,7 @@ void main() {
     },
   );
 
-  test('schema 18 strips provider keys while legacy files still decode', () {
+  test('schema 20 strips provider keys while legacy files still decode', () {
     final encoded = const StoredData()
         .withApiKey('bfl', 'bfl-secret')
         .withApiKey('ltx', 'ltx-secret')
@@ -854,7 +855,7 @@ void main() {
 
     expect(encoded, isNot(contains('secret')));
     expect(decoded.apiKeys, isEmpty);
-    expect(decoded.toJson()['schemaVersion'], 19);
+    expect(decoded.toJson()['schemaVersion'], 20);
     final legacy = StoredData.decode(
       '{"schemaVersion":16,"apiKeys":{"bfl":"old-bfl","ltx":"old-ltx"},"generations":[]}',
     );

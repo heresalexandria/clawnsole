@@ -7,6 +7,7 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/app_version.dart';
+import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/generation_status.dart';
@@ -375,9 +376,14 @@ void main() {
 
     expect(api.balanceCalls, 2);
     expect(accepted.requestId, 'provider-receipt');
+    expect(accepted.providerAcceptedAt, isNotNull);
     expect(
       (await store.read()).generations.single.requestId,
       'provider-receipt',
+    );
+    expect(
+      (await store.read()).generations.single.providerAcceptedAt,
+      accepted.providerAcceptedAt,
     );
   });
 
@@ -387,7 +393,7 @@ void main() {
       final now = DateTime.utc(2026, 8, 21, 12);
       final item = Generation(
         localId: 'retain-result',
-        status: 'Ready',
+        status: 'Pending',
         prompt: 'A storm over a glass observatory.',
         mode: VideoMode.t2v,
         config: const GenerationConfig(
@@ -425,6 +431,7 @@ void main() {
 
       final unavailable = await gateway.poll(item);
       expect(unavailable.status, 'Ready');
+      expect(unavailable.providerCompletedAt, isNotNull);
       expect(unavailable.resultAsset, isNull);
       expect(unavailable.resultRetentionFailures, 1);
       expect(unavailable.resultRetentionError, contains('503'));
@@ -438,6 +445,7 @@ void main() {
       expect(retained.resultRetentionFailures, 0);
       expect(retained.resultRetentionError, isNull);
       expect(retained.deliveryExpiresAt, unavailable.deliveryExpiresAt);
+      expect(retained.providerCompletedAt, unavailable.providerCompletedAt);
       expect(downloads, 2);
     },
   );
@@ -452,6 +460,25 @@ void main() {
     expect(ltxProvider.resultDelivery.keepOpenRecommended, isFalse);
     expect(artCraftProvider.resultDelivery.availability, isNull);
     expect(atlasProvider.resultDelivery.availability, isNull);
+  });
+
+  test('only provider routes with trustworthy API progress opt in', () {
+    expect(
+      progressReportingFor('bfl', 'flux-3-video'),
+      ProviderProgressReporting.reported,
+    );
+    expect(
+      progressReportingFor('artcraft', 'seedance_2p5'),
+      ProviderProgressReporting.none,
+    );
+    expect(
+      progressReportingFor('atlas', 'bytedance/seedance-2.5/text-to-video'),
+      ProviderProgressReporting.none,
+    );
+    expect(
+      progressReportingFor('ltx', 'ltx-2-3-fast'),
+      ProviderProgressReporting.none,
+    );
   });
 
   test('at-risk provider submission advises keeping Clawnsole open', () async {
@@ -564,6 +591,51 @@ void main() {
     expect((await store.read()).generations.single.progress, isNull);
   });
 
+  test(
+    'discards progress fields from provider routes that did not opt in',
+    () async {
+      final now = DateTime.utc(2026, 8, 23, 12, 34);
+      final item = Generation(
+        localId: 'untrusted-progress',
+        provider: 'artcraft',
+        model: 'seedance_2p5',
+        status: 'Pending',
+        progress: 41,
+        prompt: 'A sloth reviews a number with no supporting methodology.',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 5,
+          resolution: 'sd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        pollingUrl:
+            'https://api.storyteller.ai/v1/omni_api/job_status/job/jinf_test',
+      );
+      final store = _MemoryLocalDataStore(
+        StoredData(
+          apiKeys: const <String, String>{'artcraft': 'key'},
+          generations: <Generation>[item],
+        ),
+      );
+      final gateway = NativeGateway(
+        store: store,
+        providerRouter: ProviderApiRouter(artcraft: _ZeroProgressArtCraftApi()),
+        isIos: false,
+      );
+
+      final updated = await gateway.poll(item);
+
+      expect(updated.progress, isNull);
+      expect(updated.lastProviderResponse, contains('progress_percentage'));
+      expect((await store.read()).generations.single.progress, isNull);
+    },
+  );
+
   testWidgets('shows a failed status check as recoverable, not in progress', (
     tester,
   ) async {
@@ -616,6 +688,49 @@ void main() {
     expect(find.text('Generation details'), findsOneWidget);
     expect(find.text('503'), findsOneWidget);
     expect(find.text('{"detail":"upstream unavailable"}'), findsOneWidget);
+  });
+
+  testWidgets('full generation details show the measured provider timeline', (
+    tester,
+  ) async {
+    final acceptedAt = DateTime.utc(2026, 8, 23, 12);
+    final item = Generation(
+      localId: 'timed-generation',
+      provider: 'artcraft',
+      model: 'seedance_2p5',
+      status: 'Ready',
+      prompt: 'A sloth completes one measurable task.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 5,
+        resolution: 'sd',
+        generateAudio: false,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: acceptedAt.subtract(const Duration(seconds: 1)),
+      updatedAt: acceptedAt.add(const Duration(minutes: 2, seconds: 7)),
+      providerAcceptedAt: acceptedAt,
+      providerCompletedAt: acceptedAt.add(
+        const Duration(minutes: 2, seconds: 7),
+      ),
+      lastProviderResponse: '{"status":"Ready"}',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: GenerationDetailsButton(item: item)),
+      ),
+    );
+    await tester.tap(find.text('View details'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Generation details'), findsOneWidget);
+    expect(find.text('Provider accepted'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('Generation time'), findsOneWidget);
+    expect(find.text('2m 7s'), findsOneWidget);
   });
 
   testWidgets('completed unsaved media exposes an explicit retrieval retry', (
@@ -715,6 +830,57 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('replaces untrusted ArtCraft zero with benchmark progress', (
+    tester,
+  ) async {
+    final now = DateTime.now().toUtc();
+    final acceptedAt = now.subtract(const Duration(seconds: 56));
+    final item = Generation(
+      localId: 'artcraft-zero-progress',
+      provider: 'artcraft',
+      model: 'seedance_2p5',
+      status: 'Pending',
+      progress: 0,
+      prompt: 'A sloth waits for the progress bar to develop professionally.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 5,
+        resolution: 'sd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: acceptedAt,
+      updatedAt: acceptedAt,
+      providerAcceptedAt: acceptedAt,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            child: ActivityCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('RENDERING — EST.'), findsOneWidget);
+    expect(find.text('RENDERING — 0%'), findsNothing);
+    expect(
+      tester
+          .widgetList<LinearProgressIndicator>(
+            find.byType(LinearProgressIndicator),
+          )
+          .map((indicator) => indicator.value),
+      everyElement(isNotNull),
+    );
+  });
 
   testWidgets('applies the Cyclone preference across dense render paths', (
     tester,
@@ -1102,6 +1268,8 @@ void main() {
             ),
             createdAt: now,
             updatedAt: now,
+            providerAcceptedAt: now.subtract(const Duration(minutes: 3)),
+            providerCompletedAt: now.subtract(const Duration(seconds: 12)),
             estimatedCreditsMin: 136,
             estimatedCreditsMax: 136,
             creditsBefore: 500,
@@ -1168,6 +1336,14 @@ void main() {
         '{"detail":"try again"}',
       );
       expect(decoded.generations.single.lastProviderResponseAt, now);
+      expect(
+        decoded.generations.single.providerAcceptedAt,
+        now.subtract(const Duration(minutes: 3)),
+      );
+      expect(
+        decoded.generations.single.providerCompletedAt,
+        now.subtract(const Duration(seconds: 12)),
+      );
       expect(decoded.rejectedIosReviewApiKeyId, isEmpty);
       expect(original.encode(), isNot(contains('data:image')));
     },
@@ -1205,7 +1381,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 19);
+    expect(decoded.toJson()['schemaVersion'], 20);
   });
 
   test(
@@ -1401,7 +1577,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 19);
+      expect(decoded.toJson()['schemaVersion'], 20);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -5948,6 +6124,20 @@ class _StatusWithoutProgressApi extends BflApi {
   @override
   Future<Map<String, Object?>> poll(String apiKey, String pollingUrl) async =>
       <String, Object?>{'status': 'Pending'};
+}
+
+class _ZeroProgressArtCraftApi extends ArtCraftApi {
+  @override
+  Future<Map<String, Object?>> poll(String key, String pollingUrl) async =>
+      <String, Object?>{
+        'status': 'Pending',
+        'state': <String, Object?>{
+          'status': <String, Object?>{
+            'status': 'started',
+            'progress_percentage': 0,
+          },
+        },
+      };
 }
 
 class _MemoryShellUpdater implements ShellUpdater {

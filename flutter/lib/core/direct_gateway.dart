@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'bfl_api.dart';
 import 'durable_data_store.dart';
 import 'generation_status.dart';
+import 'generation_timing.dart';
 import 'gateway.dart';
 import 'models.dart';
 import 'pricing.dart';
@@ -926,6 +927,7 @@ class DirectGateway
         pollingUrl: pollingUrl,
         status: 'Pending',
         clearProgress: true,
+        providerAcceptedAt: acceptedAt,
         lastProviderStatusCode: 200,
         lastProviderResponse: compactProviderResponse(response),
         lastProviderResponseAt: acceptedAt,
@@ -1080,14 +1082,20 @@ class DirectGateway
         allowDeterministicQuote: status == 'Ready',
         terminal: terminal,
       );
-      final reportedProgress = findProviderProgress(payload);
-      final deliveryAvailability = providerById(
-        generation.provider,
-      ).resultDelivery.availability;
+      final provider = providerById(generation.provider);
+      final reportedProgress =
+          progressReportingFor(generation.provider, generation.model) ==
+              ProviderProgressReporting.reported
+          ? findProviderProgress(payload)
+          : null;
+      final deliveryAvailability = provider.resultDelivery.availability;
       next = generation.copyWith(
         status: status,
-        progress: status == 'Ready' ? 100 : reportedProgress,
-        clearProgress: status != 'Ready' && reportedProgress == null,
+        progress: reportedProgress,
+        clearProgress: reportedProgress == null,
+        providerCompletedAt: status == 'Ready' && !generation.isReady
+            ? providerGenerationCompletedAt(payload) ?? checkedAt
+            : null,
         resultUrl: resultUrl,
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : generation.deliveryExpired,
@@ -1127,7 +1135,11 @@ class DirectGateway
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
       if (payload != null && isGenerationFailureStatus(providerStatus)) {
-        final reportedProgress = findProviderProgress(payload);
+        final reportedProgress =
+            progressReportingFor(generation.provider, generation.model) ==
+                ProviderProgressReporting.reported
+            ? findProviderProgress(payload)
+            : null;
         next = generation.copyWith(
           status: providerStatus,
           progress: reportedProgress,

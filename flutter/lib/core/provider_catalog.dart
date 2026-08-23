@@ -2,6 +2,13 @@ import 'models.dart';
 
 enum ReferenceVideoCompatibilityProfile { generic, seedance }
 
+/// Whether a provider/model route supplies a meaningful completion percentage.
+///
+/// Unknown routes deliberately default to [none]. A progress-shaped response
+/// field is not enough to opt in: some aggregators report 0 for the entire run
+/// and jump directly to 100 when the result is ready.
+enum ProviderProgressReporting { none, reported }
+
 class VideoResolutionDefinition {
   const VideoResolutionDefinition(this.id, this.label, this.detail);
 
@@ -77,6 +84,7 @@ class VideoModelDefinition {
     this.supportsFrameRate = false,
     this.supportsSeed = false,
     this.outputKind = GenerationOutputKind.video,
+    this.progressReporting,
   });
 
   final String id;
@@ -124,6 +132,9 @@ class VideoModelDefinition {
   /// The wire API accepts a reproducible random seed for this model.
   final bool supportsSeed;
   final GenerationOutputKind outputKind;
+
+  /// Overrides the provider-wide progress contract for this model route.
+  final ProviderProgressReporting? progressReporting;
 
   String get canonicalId => canonicalModelId ?? id;
 
@@ -225,6 +236,7 @@ class VideoProviderDefinition {
     this.requiresApiKey = true,
     this.isLocal = false,
     this.resultDelivery = const ProviderResultDelivery(),
+    this.progressReporting = ProviderProgressReporting.none,
   });
 
   final String id;
@@ -238,6 +250,7 @@ class VideoProviderDefinition {
   final bool requiresApiKey;
   final bool isLocal;
   final ProviderResultDelivery resultDelivery;
+  final ProviderProgressReporting progressReporting;
 
   VideoModelDefinition get defaultModel => models.first;
   String get model => defaultModel.id;
@@ -357,6 +370,7 @@ const bflProvider = VideoProviderDefinition(
   docsUrl: 'https://docs.bfl.ai/flux_3/flux3_video',
   pricingUrl: 'https://bfl.ai/pricing',
   pricingSource: 'Published credits · converted at \$0.01/credit',
+  progressReporting: ProviderProgressReporting.reported,
   resultDelivery: ProviderResultDelivery(
     availability: Duration(minutes: 10),
     keepOpenRecommended: true,
@@ -1427,6 +1441,33 @@ String canonicalModelIdFor(String providerId, String modelId) {
           .firstOrNull
           ?.canonicalId ??
       baseModelId;
+}
+
+ProviderProgressReporting progressReportingFor(
+  String providerId,
+  String modelId,
+) {
+  final provider = videoProviders
+      .where((candidate) => candidate.id == providerId)
+      .firstOrNull;
+  if (provider == null) return ProviderProgressReporting.none;
+  final baseModelId = modelId.split(':').first;
+  final model = provider.models
+      .where((candidate) => candidate.id == baseModelId)
+      .firstOrNull;
+  return model?.progressReporting ?? provider.progressReporting;
+}
+
+/// Returns only a percentage whose provider/model contract is trusted.
+///
+/// Keeping this check next to the catalog also hides stale persisted values
+/// immediately, before the next provider poll has a chance to clear them.
+double? trustedGenerationProgress(Generation generation) {
+  if (progressReportingFor(generation.provider, generation.model) !=
+      ProviderProgressReporting.reported) {
+    return null;
+  }
+  return generation.progress?.clamp(0, 100).toDouble();
 }
 
 List<ProviderModelPrice> publishedProviderPrices(String providerId) {

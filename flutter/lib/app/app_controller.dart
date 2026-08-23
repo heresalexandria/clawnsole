@@ -8,6 +8,7 @@ import 'package:mime/mime.dart';
 import '../core/bfl_api.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
+import '../core/generation_timing.dart';
 import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
@@ -347,6 +348,9 @@ class AppController extends ChangeNotifier {
   int get videoPreviewSourceRevision => _videoPreviewSourceRevision;
 
   List<Generation> get generations => snapshot?.generations ?? const [];
+
+  GenerationProgressEstimate generationProgress(Generation generation) =>
+      generationProgressEstimate(generation, generations);
   List<Generation> get visibleGenerations =>
       generations.where((item) => !item.hidden).toList();
   List<SavedReference> get savedReferences =>

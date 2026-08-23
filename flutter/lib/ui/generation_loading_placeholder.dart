@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../core/generation_timing.dart';
 import '../core/models.dart';
 
 double generationAspectRatio(String value) {
@@ -22,20 +23,29 @@ class GenerationLoadingPlaceholder extends StatelessWidget {
   const GenerationLoadingPlaceholder({
     required this.item,
     this.style = GenerationPlaceholderStyle.broadcastStatic,
+    this.progressEstimate,
     super.key,
   });
 
   final Generation item;
   final GenerationPlaceholderStyle style;
+  final GenerationProgressEstimate? progressEstimate;
 
   @override
   Widget build(BuildContext context) {
-    final progress = item.progress?.clamp(0, 100).toDouble();
+    final estimate =
+        progressEstimate ?? generationProgressEstimate(item, const []);
+    final progress = estimate.percentage;
+    final estimated = estimate.isEstimated;
     final semanticsLabel = progress == null
         ? 'Rendering video'
+        : estimated
+        ? 'Rendering video, estimated ${progress.round()}% complete'
         : 'Rendering video, ${progress.round()}% complete';
     final statusLabel = progress == null
         ? 'RENDERING'
+        : estimated
+        ? 'RENDERING — EST. ${progress.round()}%'
         : 'RENDERING — ${progress.round()}%';
     return RepaintBoundary(
       child: Semantics(

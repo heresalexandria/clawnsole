@@ -221,14 +221,9 @@ class ArtCraftApi {
       _ => rawStatus,
     };
     final failure = details['maybe_failure_category']?.toString();
-    final progress =
-        findProviderProgress(details) ??
-        findProviderProgress(state) ??
-        findProviderProgress(body);
     return <String, Object?>{
       ...body,
       'status': status,
-      if (progress != null) 'progress': progress,
       if (state['maybe_result'] != null) 'result': state['maybe_result'],
       if (status == 'Error')
         'error': failure?.trim().isNotEmpty == true

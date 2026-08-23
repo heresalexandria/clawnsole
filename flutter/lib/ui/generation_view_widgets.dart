@@ -321,6 +321,8 @@ class _DenseGenerationPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
     final generatingVideo = !hasMedia && item.isWorking && !item.isImage;
+    final progressEstimate = controller.generationProgress(item);
+    final progress = progressEstimate.percentage;
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -330,6 +332,7 @@ class _DenseGenerationPreview extends StatelessWidget {
           GenerationLoadingPlaceholder(
             item: item,
             style: controller.generationPlaceholderStyle,
+            progressEstimate: progressEstimate,
           )
         else
           GenerationInputPreview(controller: controller, item: item),
@@ -339,7 +342,7 @@ class _DenseGenerationPreview extends StatelessWidget {
             left: 0,
             right: 0,
             child: LinearProgressIndicator(
-              value: item.progress == null ? null : item.progress! / 100,
+              value: progress == null ? null : progress / 100,
               minHeight: 4,
               backgroundColor: Colors.white24,
               color: ClawnsoleColors.brassBright,
@@ -433,7 +436,13 @@ class GenerationActionsMenu extends StatelessWidget {
             case _DenseGenerationAction.checkStatus:
               unawaited(controller.checkStatus(item));
             case _DenseGenerationAction.details:
-              unawaited(showGenerationDetails(context, item));
+              unawaited(
+                showGenerationDetails(
+                  context,
+                  item,
+                  progressEstimate: controller.generationProgress(item),
+                ),
+              );
             case _DenseGenerationAction.delete:
               onDelete?.call();
           }
