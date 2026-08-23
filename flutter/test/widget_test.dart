@@ -1203,6 +1203,68 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('cached preview loading keeps moving and estimates progress', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _DelayedAssetGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    final item = _deliveredGeneration(
+      'animated-loader',
+      thumbnail: 'animated-loader-thumb.png',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: ActivityCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Caching preview'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    final progressHost = find.byKey(
+      const ValueKey('media-loading-estimated-progress'),
+    );
+    final progress = find.descendant(
+      of: progressHost,
+      matching: find.byType(LinearProgressIndicator),
+    );
+    expect(progress, findsOneWidget);
+    final before = tester.widget<LinearProgressIndicator>(progress).value!;
+
+    await tester.pump(const Duration(milliseconds: 250));
+    final after = tester.widget<LinearProgressIndicator>(progress).value!;
+    expect(after, greaterThan(before));
+    expect(after, lessThanOrEqualTo(.9));
+
+    gateway.completeAsset(frame);
+    await tester.pumpAndSettle();
+    expect(find.text('Caching preview'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('generation-video-filmstrip')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
   testWidgets('keeps Cyclone available as a generation placeholder', (
     tester,
   ) async {
@@ -6066,6 +6128,17 @@ class _MemoryGateway implements AppGateway {
     photoLibraryBytes = bytes;
     photoLibraryFileName = fileName;
   }
+}
+
+class _DelayedAssetGateway extends _MemoryGateway {
+  _DelayedAssetGateway(super.snapshot);
+
+  final Completer<Uint8List> _asset = Completer<Uint8List>();
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) => _asset.future;
+
+  void completeAsset(Uint8List bytes) => _asset.complete(bytes);
 }
 
 class _ReferenceFailureGateway extends _MemoryGateway {

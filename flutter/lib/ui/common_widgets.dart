@@ -7,9 +7,11 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/generation_timing.dart';
+import '../core/loading_timing.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/shell_bridge.dart';
+import 'estimated_progress_bar.dart';
 import 'formatters.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
@@ -874,12 +876,17 @@ class _ReferenceThumbState extends State<_ReferenceThumb> {
                           fit: BoxFit.cover,
                           gaplessPlayback: true,
                         )
-                      : Icon(
-                          snapshot.hasError
-                              ? Icons.broken_image_outlined
-                              : Icons.image_outlined,
+                      : snapshot.hasError
+                      ? Icon(
+                          Icons.broken_image_outlined,
                           size: 16,
                           color: ghostForeground,
+                        )
+                      : const Center(
+                          child: SizedBox.square(
+                            dimension: 14,
+                            child: CircularProgressIndicator(strokeWidth: 1.7),
+                          ),
                         ),
                 ),
         ),
@@ -1597,6 +1604,7 @@ class _GenerationMediaState extends State<GenerationMedia> {
             return const _MediaPlaceholder(
               icon: Icons.hourglass_bottom_rounded,
               label: 'Loading image',
+              loading: true,
             );
           }
           return Image.memory(snapshot.data!, fit: BoxFit.contain);
@@ -1613,14 +1621,27 @@ class _GenerationMediaState extends State<GenerationMedia> {
 
 final Map<String, Future<Uint8List>> _previewAssetBytes =
     <String, Future<Uint8List>>{};
-final Map<String, Future<_GeneratedVideoPreview?>> _previewJobs =
-    <String, Future<_GeneratedVideoPreview?>>{};
+final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
+    <String, _GeneratedVideoPreviewJob>{};
+final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
 
 class _GeneratedVideoPreview {
   const _GeneratedVideoPreview({required this.thumbnail, this.timeline});
 
   final Uint8List thumbnail;
   final Uint8List? timeline;
+}
+
+class _GeneratedVideoPreviewJob {
+  const _GeneratedVideoPreviewJob({
+    required this.future,
+    required this.startedAt,
+    required this.expectedDuration,
+  });
+
+  final Future<_GeneratedVideoPreview?> future;
+  final DateTime startedAt;
+  final Duration expectedDuration;
 }
 
 class _CachedVideoPreview extends StatefulWidget {
@@ -1641,6 +1662,8 @@ class _CachedVideoPreview extends StatefulWidget {
 class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   Future<_GeneratedVideoPreview?>? _preview;
   late int _sourceRevision;
+  late DateTime _previewStartedAt;
+  late Duration _previewExpectedDuration;
 
   String get _jobKey =>
       '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
@@ -1662,16 +1685,32 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
     return job;
   }
 
-  Future<_GeneratedVideoPreview?> _previewJob(String key) {
+  _GeneratedVideoPreviewJob _previewJob(String key) {
     final existing = _previewJobs[key];
     if (existing != null) return existing;
-    late final Future<_GeneratedVideoPreview?> job;
-    job = _generateAndCache().then((preview) {
+    final startedAt = DateTime.now();
+    final stopwatch = Stopwatch()..start();
+    final expectedDuration = _previewTimings.expected(
+      LoadingOperation.generationPreviewBuild,
+    );
+    late final _GeneratedVideoPreviewJob job;
+    final future = _generateAndCache().then((preview) {
+      stopwatch.stop();
       if (preview == null && identical(_previewJobs[key], job)) {
         _previewJobs.remove(key);
+      } else if (preview != null) {
+        _previewTimings.record(
+          LoadingOperation.generationPreviewBuild,
+          stopwatch.elapsed,
+        );
       }
       return preview;
     });
+    job = _GeneratedVideoPreviewJob(
+      future: future,
+      startedAt: startedAt,
+      expectedDuration: expectedDuration,
+    );
     _previewJobs[key] = job;
     return job;
   }
@@ -1680,6 +1719,11 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
     _sourceRevision = widget.controller.videoPreviewSourceRevision;
     final thumbnail = widget.item.thumbnailAsset;
     if (thumbnail != null) {
+      _previewStartedAt = DateTime.now();
+      _previewExpectedDuration = _previewTimings.expected(
+        LoadingOperation.generationPreviewRead,
+      );
+      final stopwatch = Stopwatch()..start();
       _preview = Future<_GeneratedVideoPreview?>(() async {
         try {
           final thumbnailBytes = await _read(thumbnail);
@@ -1692,17 +1736,27 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
               // A missing timeline strip must not hide the main thumbnail.
             }
           }
-          return _GeneratedVideoPreview(
+          final preview = _GeneratedVideoPreview(
             thumbnail: thumbnailBytes,
             timeline: timelineBytes,
           );
+          stopwatch.stop();
+          _previewTimings.record(
+            LoadingOperation.generationPreviewRead,
+            stopwatch.elapsed,
+          );
+          return preview;
         } on Object {
-          return await _previewJob('$_jobKey:regenerate');
+          final job = _previewJob('$_jobKey:regenerate');
+          return await job.future;
         }
       });
       return;
     }
-    _preview = _previewJob(_jobKey);
+    final job = _previewJob(_jobKey);
+    _previewStartedAt = job.startedAt;
+    _previewExpectedDuration = job.expectedDuration;
+    _preview = job.future;
   }
 
   Future<_GeneratedVideoPreview?> _generateAndCache() async {
@@ -1819,6 +1873,9 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
             label: snapshot.connectionState == ConnectionState.done
                 ? 'Tap to play video'
                 : 'Caching preview',
+            loading: snapshot.connectionState != ConnectionState.done,
+            expectedDuration: _previewExpectedDuration,
+            startedAt: _previewStartedAt,
           ),
         );
       }
@@ -2063,10 +2120,19 @@ class _GenerationInputPreviewState extends State<GenerationInputPreview> {
 }
 
 class _MediaPlaceholder extends StatelessWidget {
-  const _MediaPlaceholder({required this.icon, required this.label});
+  const _MediaPlaceholder({
+    required this.icon,
+    required this.label,
+    this.loading = false,
+    this.expectedDuration,
+    this.startedAt,
+  });
 
   final IconData icon;
   final String label;
+  final bool loading;
+  final Duration? expectedDuration;
+  final DateTime? startedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -2074,25 +2140,53 @@ class _MediaPlaceholder extends StatelessWidget {
     final foreground = dark
         ? ClawnsoleColors.creamMuted
         : context.colors.onSurfaceVariant;
-    return Container(
-      color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, color: foreground, size: 28),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(color: foreground, fontSize: 11.5),
+    final duration = expectedDuration;
+    final start = startedAt;
+    return Semantics(
+      label: label,
+      liveRegion: loading,
+      child: Container(
+        color: dark ? ClawnsoleColors.plumInk : context.colors.surfaceContainer,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (loading)
+                SizedBox.square(
+                  dimension: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.3,
+                    color: foreground,
+                  ),
+                )
+              else
+                Icon(icon, color: foreground, size: 28),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: foreground, fontSize: 11.5),
+                ),
               ),
-            ),
-          ],
+              if (loading && duration != null && start != null) ...<Widget>[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: 84,
+                  child: EstimatedProgressBar(
+                    key: const ValueKey('media-loading-estimated-progress'),
+                    expectedDuration: duration,
+                    startedAt: start,
+                    color: foreground,
+                    backgroundColor: foreground.withValues(alpha: .18),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

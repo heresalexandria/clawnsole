@@ -480,8 +480,17 @@ class _StorageSectionState extends State<_StorageSection> {
                   onPressed: controller.dataRelocationBusy
                       ? null
                       : () => unawaited(_changeLocation()),
-                  icon: const Icon(Icons.drive_folder_upload_rounded, size: 17),
-                  label: const Text('Change location…'),
+                  icon: controller.dataRelocationBusy
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.drive_folder_upload_rounded, size: 17),
+                  label: Text(
+                    controller.dataRelocationBusy
+                        ? 'Moving library…'
+                        : 'Change location…',
+                  ),
                 ),
             ],
           ),
@@ -507,6 +516,7 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
   static const List<int> _caps = <int>[0, 50, 100, 250, 500, 1024];
 
   Future<int>? _usage;
+  bool _updating = false;
 
   AppController get controller => widget.controller;
 
@@ -529,13 +539,31 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
   };
 
   Future<void> _setCap(int megabytes) async {
-    await controller.setLocalVideoCacheMb(megabytes);
-    if (mounted) setState(_refreshUsage);
+    setState(() => _updating = true);
+    try {
+      await controller.setLocalVideoCacheMb(megabytes);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updating = false;
+          _refreshUsage();
+        });
+      }
+    }
   }
 
   Future<void> _clear() async {
-    await controller.clearVideoCache();
-    if (mounted) setState(_refreshUsage);
+    setState(() => _updating = true);
+    try {
+      await controller.clearVideoCache();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _updating = false;
+          _refreshUsage();
+        });
+      }
+    }
   }
 
   @override
@@ -571,9 +599,11 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
                 ),
               )
               .toList(),
-          onChanged: (cap) {
-            if (cap != null) unawaited(_setCap(cap));
-          },
+          onChanged: _updating
+              ? null
+              : (cap) {
+                  if (cap != null) unawaited(_setCap(cap));
+                },
         ),
         if (controller.supportsVideoCache) ...<Widget>[
           const SizedBox(height: 8),
@@ -582,21 +612,46 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
               Expanded(
                 child: FutureBuilder<int>(
                   future: _usage,
-                  builder: (context, snapshot) => Text(
-                    'Cached now: ${formatBytes(snapshot.data ?? 0)}',
-                    key: const ValueKey('local-video-cache-usage'),
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
+                  builder: (context, snapshot) {
+                    final loading =
+                        _updating ||
+                        snapshot.connectionState != ConnectionState.done;
+                    return Row(
+                      key: const ValueKey('local-video-cache-usage'),
+                      children: <Widget>[
+                        if (loading) ...<Widget>[
+                          const SizedBox.square(
+                            dimension: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.6),
+                          ),
+                          const SizedBox(width: 7),
+                        ],
+                        Text(
+                          loading
+                              ? _updating
+                                    ? 'Updating cache…'
+                                    : 'Measuring cache…'
+                              : 'Cached now: ${formatBytes(snapshot.data ?? 0)}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ),
               TextButton.icon(
                 key: const ValueKey('local-video-cache-clear'),
-                onPressed: () => unawaited(_clear()),
-                icon: const Icon(Icons.delete_sweep_rounded, size: 16),
-                label: const Text('Clear'),
+                onPressed: _updating ? null : () => unawaited(_clear()),
+                icon: _updating
+                    ? const SizedBox.square(
+                        dimension: 13,
+                        child: CircularProgressIndicator(strokeWidth: 1.7),
+                      )
+                    : const Icon(Icons.delete_sweep_rounded, size: 16),
+                label: Text(_updating ? 'Updating…' : 'Clear'),
               ),
             ],
           ),
@@ -698,12 +753,20 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                   ],
                 ),
               ),
-              Icon(
-                connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
-                color: connected
-                    ? context.colors.primary
-                    : context.colors.onSurfaceVariant,
-              ),
+              if (widget.controller.googleDriveBusy)
+                const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2.2),
+                )
+              else
+                Icon(
+                  connected
+                      ? Icons.cloud_done_rounded
+                      : Icons.cloud_off_rounded,
+                  color: connected
+                      ? context.colors.primary
+                      : context.colors.onSurfaceVariant,
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -742,8 +805,15 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                   onPressed: widget.controller.googleDriveBusy
                       ? null
                       : widget.controller.refreshGoogleDrive,
-                  icon: const Icon(Icons.sync_rounded, size: 18),
-                  label: const Text('Refresh'),
+                  icon: widget.controller.googleDriveBusy
+                      ? const SizedBox.square(
+                          dimension: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded, size: 18),
+                  label: Text(
+                    widget.controller.googleDriveBusy ? 'Working…' : 'Refresh',
+                  ),
                 ),
                 OutlinedButton.icon(
                   onPressed: widget.controller.googleDriveBusy

@@ -456,7 +456,13 @@ class GenerationActionsMenu extends StatelessWidget {
             enabled: !copying,
             child: Row(
               children: <Widget>[
-                Icon(_denseGenerationActionIcon(action), size: 18),
+                if (copying)
+                  const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Icon(_denseGenerationActionIcon(action), size: 18),
                 const SizedBox(width: 10),
                 Text(
                   copying
