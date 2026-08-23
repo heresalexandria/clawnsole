@@ -651,6 +651,8 @@ class Generation {
     required this.config,
     required this.createdAt,
     required this.updatedAt,
+    this.providerAcceptedAt,
+    this.providerCompletedAt,
     this.provider = 'bfl',
     this.model = 'flux-3-video',
     this.canonicalModelId,
@@ -709,6 +711,8 @@ class Generation {
   final GenerationConfig config;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? providerAcceptedAt;
+  final DateTime? providerCompletedAt;
   final String? resultUrl;
   final AssetReference? resultAsset;
   final AssetReference? thumbnailAsset;
@@ -764,6 +768,8 @@ class Generation {
   bool get isStatusUnavailable =>
       isWorking && lastCheckError?.trim().isNotEmpty == true;
   bool get hasProviderDetails =>
+      providerAcceptedAt != null ||
+      providerCompletedAt != null ||
       error?.trim().isNotEmpty == true ||
       resultRetentionError?.trim().isNotEmpty == true ||
       lastCheckError?.trim().isNotEmpty == true ||
@@ -814,6 +820,8 @@ class Generation {
     double? progress,
     bool clearProgress = false,
     DateTime? updatedAt,
+    DateTime? providerAcceptedAt,
+    DateTime? providerCompletedAt,
     String? resultUrl,
     AssetReference? resultAsset,
     AssetReference? thumbnailAsset,
@@ -870,6 +878,8 @@ class Generation {
     config: config ?? this.config,
     createdAt: createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    providerAcceptedAt: providerAcceptedAt ?? this.providerAcceptedAt,
+    providerCompletedAt: providerCompletedAt ?? this.providerCompletedAt,
     resultUrl: resultUrl ?? this.resultUrl,
     resultAsset: resultAsset ?? this.resultAsset,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
@@ -934,6 +944,10 @@ class Generation {
     'config': config.toJson(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    if (providerAcceptedAt != null)
+      'providerAcceptedAt': providerAcceptedAt!.toUtc().toIso8601String(),
+    if (providerCompletedAt != null)
+      'providerCompletedAt': providerCompletedAt!.toUtc().toIso8601String(),
     if (resultUrl != null) 'resultUrl': resultUrl,
     if (resultAsset != null) 'resultAsset': resultAsset!.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
@@ -1009,6 +1023,12 @@ class Generation {
     updatedAt:
         DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
         DateTime.now().toUtc(),
+    providerAcceptedAt: DateTime.tryParse(
+      json['providerAcceptedAt'] as String? ?? '',
+    ),
+    providerCompletedAt: DateTime.tryParse(
+      json['providerCompletedAt'] as String? ?? '',
+    ),
     resultUrl: json['resultUrl'] as String?,
     resultAsset: json['resultAsset'] is Map<Object?, Object?>
         ? AssetReference.fromJson(
@@ -1338,7 +1358,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 19,
+    'schemaVersion': 20,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)

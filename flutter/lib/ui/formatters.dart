@@ -43,3 +43,13 @@ String relativeTime(DateTime value) {
 
 String formatTimestamp(DateTime value) =>
     DateFormat('MMM d, y · h:mm:ss a').format(value.toLocal());
+
+String formatElapsedDuration(Duration value) {
+  final totalSeconds = value.inSeconds.clamp(0, 24 * 60 * 60 * 365);
+  final hours = totalSeconds ~/ 3600;
+  final minutes = totalSeconds.remainder(3600) ~/ 60;
+  final seconds = totalSeconds.remainder(60);
+  if (hours > 0) return '${hours}h ${minutes}m ${seconds}s';
+  if (minutes > 0) return '${minutes}m ${seconds}s';
+  return '${seconds}s';
+}

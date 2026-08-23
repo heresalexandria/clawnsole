@@ -950,6 +950,8 @@ class _GenerationCardState extends State<GenerationCard> {
     final folder = widget.controller.folderById(item.folderId);
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
     final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;
+    final progressEstimate = widget.controller.generationProgress(item);
+    final progress = progressEstimate.percentage;
     final preview = Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -959,6 +961,7 @@ class _GenerationCardState extends State<GenerationCard> {
           GenerationLoadingPlaceholder(
             item: item,
             style: widget.controller.generationPlaceholderStyle,
+            progressEstimate: progressEstimate,
           )
         else
           GenerationInputPreview(controller: widget.controller, item: item),
@@ -984,7 +987,7 @@ class _GenerationCardState extends State<GenerationCard> {
             left: 0,
             right: 0,
             child: LinearProgressIndicator(
-              value: item.progress == null ? null : item.progress! / 100,
+              value: progress == null ? null : progress / 100,
               minHeight: 5,
               backgroundColor: Colors.white24,
               color: ClawnsoleColors.brassBright,

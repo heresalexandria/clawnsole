@@ -82,6 +82,14 @@ desktop entry points live beside the other Flutter scripts:
 
 - Electron and Flutter versions must remain aligned. Use
   `scripts/release/bump_version.py`; do not bump one package independently.
+- For a PR-driven release, never cut the iOS distribution build from the PR
+  branch or from the merged feature commit before the release workflow has
+  applied its label-selected version bump. Merge the PR, wait for the workflow's
+  `Release vX.Y.Z` commit on `main`, sync that exact commit, and verify
+  `python3 scripts/release/bump_version.py --show` prints `X.Y.Z` before running
+  the iOS build. The iOS marketing version must equal the GitHub release version
+  produced by that PR. Do not pre-bump the version in a normally labelled PR;
+  the release workflow owns that bump and would otherwise advance it twice.
 - Build every iOS artifact intended for TestFlight or App Store Connect from
   the repository root with `./scripts/build_ios.sh`. The script reads the
   Google OAuth values `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`,

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import '../core/generation_timing.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/shell_bridge.dart';
@@ -1337,114 +1338,162 @@ class GenerationStatusButton extends StatelessWidget {
 }
 
 class GenerationDetailsButton extends StatelessWidget {
-  const GenerationDetailsButton({required this.item, super.key});
+  const GenerationDetailsButton({
+    required this.item,
+    super.key,
+    this.progressEstimate,
+  });
 
   final Generation item;
+  final GenerationProgressEstimate? progressEstimate;
 
   @override
   Widget build(BuildContext context) {
     if (!item.hasProviderDetails) return const SizedBox.shrink();
     return OutlinedButton.icon(
-      onPressed: () => showGenerationDetails(context, item),
+      onPressed: () => showGenerationDetails(
+        context,
+        item,
+        progressEstimate: progressEstimate,
+      ),
       icon: const Icon(Icons.receipt_long_rounded, size: 15),
       label: const Text('View details'),
     );
   }
 }
 
-Future<void> showGenerationDetails(BuildContext context, Generation item) =>
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Generation details'),
-        content: SizedBox(
-          width: 620,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _GenerationDetailLine(label: 'State', value: item.statusLabel),
-                _GenerationDetailLine(
-                  label: 'Provider',
-                  value: item.provider.toUpperCase(),
-                ),
-                _GenerationDetailLine(label: 'Model', value: item.model),
-                if (item.requestId != null)
-                  _GenerationDetailLine(
-                    label: 'Request ID',
-                    value: item.requestId!,
-                  ),
-                if (item.lastProviderStatusCode != null)
-                  _GenerationDetailLine(
-                    label: 'HTTP status',
-                    value: item.lastProviderStatusCode.toString(),
-                  ),
-                if (item.lastProviderResponseAt != null)
-                  _GenerationDetailLine(
-                    label: 'Response received',
-                    value: formatTimestamp(item.lastProviderResponseAt!),
-                  ),
-                if (item.error != null) ...<Widget>[
-                  const SizedBox(height: 14),
-                  const Eyebrow('Error', icon: Icons.error_outline_rounded),
-                  const SizedBox(height: 7),
-                  SelectableText(item.error!),
-                ],
-                if (item.resultRetentionError != null) ...<Widget>[
-                  const SizedBox(height: 14),
-                  const Eyebrow(
-                    'Last result-retrieval error',
-                    icon: Icons.cloud_download_outlined,
-                  ),
-                  const SizedBox(height: 7),
-                  SelectableText(item.resultRetentionError!),
-                ],
-                if (item.lastCheckError != null) ...<Widget>[
-                  const SizedBox(height: 14),
-                  const Eyebrow(
-                    'Last status-check error',
-                    icon: Icons.sync_problem_rounded,
-                  ),
-                  const SizedBox(height: 7),
-                  SelectableText(item.lastCheckError!),
-                ],
-                if (item.lastProviderResponse != null) ...<Widget>[
-                  const SizedBox(height: 14),
-                  const Eyebrow(
-                    'Provider response',
-                    icon: Icons.data_object_rounded,
-                  ),
-                  const SizedBox(height: 7),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: context.colors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: context.colors.outlineVariant),
-                    ),
-                    child: SelectableText(
-                      item.lastProviderResponse!,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
+Future<void> showGenerationDetails(
+  BuildContext context,
+  Generation item, {
+  GenerationProgressEstimate? progressEstimate,
+}) => showDialog<void>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: const Text('Generation details'),
+    content: SizedBox(
+      width: 620,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            _GenerationDetailLine(label: 'State', value: item.statusLabel),
+            _GenerationDetailLine(
+              label: 'Provider',
+              value: item.provider.toUpperCase(),
             ),
-          ),
+            _GenerationDetailLine(label: 'Model', value: item.model),
+            _GenerationDetailLine(
+              label: 'Submitted',
+              value: formatTimestamp(item.createdAt),
+            ),
+            if (item.providerAcceptedAt != null)
+              _GenerationDetailLine(
+                label: 'Provider accepted',
+                value: formatTimestamp(item.providerAcceptedAt!),
+              ),
+            if (item.providerCompletedAt != null)
+              _GenerationDetailLine(
+                label: 'Completed',
+                value: formatTimestamp(item.providerCompletedAt!),
+              ),
+            if (observedGenerationDuration(item) case final elapsed?)
+              _GenerationDetailLine(
+                label: 'Generation time',
+                value: formatElapsedDuration(elapsed),
+              ),
+            if (item.isWorking && progressEstimate?.expectedDuration != null)
+              _GenerationDetailLine(
+                label: 'Estimated total',
+                value: formatElapsedDuration(
+                  progressEstimate!.expectedDuration!,
+                ),
+              ),
+            if (item.isWorking &&
+                progressEstimate != null &&
+                progressEstimate.isEstimated)
+              _GenerationDetailLine(
+                label: 'Estimate basis',
+                value:
+                    progressEstimate.basis == GenerationProgressBasis.historical
+                    ? '${progressEstimate.sampleCount} similar personal ${progressEstimate.sampleCount == 1 ? 'generation' : 'generations'} + benchmark'
+                    : 'Built-in Seedance 2.5 benchmark',
+              ),
+            if (item.requestId != null)
+              _GenerationDetailLine(
+                label: 'Request ID',
+                value: item.requestId!,
+              ),
+            if (item.lastProviderStatusCode != null)
+              _GenerationDetailLine(
+                label: 'HTTP status',
+                value: item.lastProviderStatusCode.toString(),
+              ),
+            if (item.lastProviderResponseAt != null)
+              _GenerationDetailLine(
+                label: 'Response received',
+                value: formatTimestamp(item.lastProviderResponseAt!),
+              ),
+            if (item.error != null) ...<Widget>[
+              const SizedBox(height: 14),
+              const Eyebrow('Error', icon: Icons.error_outline_rounded),
+              const SizedBox(height: 7),
+              SelectableText(item.error!),
+            ],
+            if (item.resultRetentionError != null) ...<Widget>[
+              const SizedBox(height: 14),
+              const Eyebrow(
+                'Last result-retrieval error',
+                icon: Icons.cloud_download_outlined,
+              ),
+              const SizedBox(height: 7),
+              SelectableText(item.resultRetentionError!),
+            ],
+            if (item.lastCheckError != null) ...<Widget>[
+              const SizedBox(height: 14),
+              const Eyebrow(
+                'Last status-check error',
+                icon: Icons.sync_problem_rounded,
+              ),
+              const SizedBox(height: 7),
+              SelectableText(item.lastCheckError!),
+            ],
+            if (item.lastProviderResponse != null) ...<Widget>[
+              const SizedBox(height: 14),
+              const Eyebrow(
+                'Provider response',
+                icon: Icons.data_object_rounded,
+              ),
+              const SizedBox(height: 7),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: context.colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: context.colors.outlineVariant),
+                ),
+                child: SelectableText(
+                  item.lastProviderResponse!,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
-        actions: <Widget>[
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Done'),
-          ),
-        ],
       ),
-    );
+    ),
+    actions: <Widget>[
+      FilledButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Done'),
+      ),
+    ],
+  ),
+);
 
 class _GenerationDetailLine extends StatelessWidget {
   const _GenerationDetailLine({required this.label, required this.value});
@@ -2172,6 +2221,8 @@ class ActivityCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
     final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;
+    final progressEstimate = controller.generationProgress(item);
+    final progress = progressEstimate.percentage;
     final preview = Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -2181,6 +2232,7 @@ class ActivityCard extends StatelessWidget {
           GenerationLoadingPlaceholder(
             item: item,
             style: controller.generationPlaceholderStyle,
+            progressEstimate: progressEstimate,
           )
         else
           GenerationInputPreview(controller: controller, item: item),
@@ -2246,7 +2298,7 @@ class ActivityCard extends StatelessWidget {
                 if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: item.progress == null ? null : item.progress! / 100,
+                    value: progress == null ? null : progress / 100,
                     minHeight: 5,
                     borderRadius: BorderRadius.circular(99),
                     backgroundColor: context.colors.surfaceContainerHigh,
