@@ -724,10 +724,25 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                       PopupMenuItem(
                         value: 'copy',
                         enabled: !controller.isCopyingReference(reference.id),
-                        child: Text(
-                          controller.isCopyingReference(reference.id)
-                              ? 'Copying to Google Drive…'
-                              : 'Copy to Google Drive',
+                        child: Row(
+                          children: <Widget>[
+                            if (controller.isCopyingReference(
+                              reference.id,
+                            )) ...<Widget>[
+                              const SizedBox.square(
+                                dimension: 15,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                            ],
+                            Text(
+                              controller.isCopyingReference(reference.id)
+                                  ? 'Copying to Google Drive…'
+                                  : 'Copy to Google Drive',
+                            ),
+                          ],
                         ),
                       ),
                     const PopupMenuItem(value: 'delete', child: Text('Delete')),
