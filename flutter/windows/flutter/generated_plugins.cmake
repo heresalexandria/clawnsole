@@ -6,8 +6,9 @@ list(APPEND FLUTTER_PLUGIN_LIST
   fc_native_video_thumbnail
   flutter_secure_storage_windows
   gal
+  media_kit_libs_windows_video
+  media_kit_video
   url_launcher_windows
-  video_player_win
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
