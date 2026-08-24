@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:clawnsole/app/app_controller.dart';
@@ -39,6 +38,7 @@ import 'package:clawnsole/ui/update_available_chip.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -1414,6 +1414,7 @@ void main() {
                 MediaReferenceLabel(
                   label: 'motion.mp4',
                   kind: MediaReferenceKind.video,
+                  promptName: 'Alexandria',
                   source: AssetReference(
                     kind: 'local',
                     value: 'asset-motion',
@@ -1470,6 +1471,10 @@ void main() {
       expect(
         decoded.generations.single.config.referenceTask,
         MediaReferenceTask.edit,
+      );
+      expect(
+        decoded.generations.single.config.references!.first.promptName,
+        'Alexandria',
       );
       expect(
         decoded.generations.single.config.keyframes!.single.role,
@@ -2698,6 +2703,90 @@ void main() {
     });
     controller.dispose();
   });
+
+  test(
+    'reuse restores references from saved ids when history lacks sources',
+    () async {
+      final now = DateTime.utc(2026, 8, 23);
+      SavedReference saved(String id, String name) => SavedReference(
+        id: id,
+        name: name,
+        kind: MediaReferenceKind.video,
+        asset: AssetReference(
+          kind: 'local',
+          value: id,
+          label: '$id.mp4',
+          contentType: 'video/mp4',
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final first = saved('saved-motion-one', 'First motion');
+      final second = saved('saved-motion-two', 'Second motion');
+      final generation = Generation(
+        localId: 'reuse-missing-reference-sources',
+        provider: 'atlas',
+        model: 'bytedance/seedance-2.5/reference-to-video',
+        status: 'Ready',
+        prompt: 'Blend @Video 1 with @Video 2.',
+        mode: VideoMode.i2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+          references: <MediaReferenceLabel>[
+            MediaReferenceLabel(
+              label: 'first.mp4',
+              kind: MediaReferenceKind.video,
+              promptName: 'Video 1',
+              referenceId: 'saved-motion-one',
+            ),
+            MediaReferenceLabel(
+              label: 'second.mp4',
+              kind: MediaReferenceKind.video,
+              promptName: 'Video 2',
+              referenceId: 'saved-motion-two',
+            ),
+          ],
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final gateway = _MemoryGateway(
+        LocalSnapshot(
+          generations: <Generation>[generation],
+          savedReferences: <SavedReference>[first, second],
+          preferences: const AppPreferences(),
+          hasApiKey: true,
+          connectedProviders: const <String>{'atlas'},
+          storage: const StorageStats(path: 'memory', bytes: 2, records: 3),
+        ),
+        assets: <String, Uint8List>{
+          first.asset.value: Uint8List.fromList(<int>[1]),
+          second.asset.value: Uint8List.fromList(<int>[2]),
+        },
+      );
+      final controller = AppController(gateway: gateway);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      await controller.reuse(generation);
+
+      expect(controller.form.references, hasLength(2));
+      expect(
+        controller.form.references.map((reference) => reference.asset?.bytes),
+        everyElement(hasLength(1)),
+      );
+      expect(controller.validate(), isNull);
+      expect(
+        controller.buildInputForTesting()['reference_videos'],
+        everyElement(startsWith('data:video/mp4;base64,')),
+      );
+    },
+  );
 
   testWidgets('Reuse inputs replaces the visible prompt on desktop', (
     tester,
@@ -4018,12 +4107,14 @@ void main() {
         label: 'hero.png',
         kind: MediaReferenceKind.image,
         source: 'https://cdn.test/hero.png',
+        promptName: 'Image 1',
       ),
       MediaReferenceDraft(
         id: 'video-reference',
         label: 'camera-move.mp4',
         kind: MediaReferenceKind.video,
         source: 'https://cdn.test/camera-move.mp4',
+        promptName: 'Video 1',
       ),
     ];
     addTearDown(controller.dispose);
@@ -4045,8 +4136,17 @@ void main() {
       find.byKey(const ValueKey('prompt-reference-suggestions')),
       findsOneWidget,
     );
-    expect(find.text('@Image 1'), findsOneWidget);
-    expect(find.text('@Video 1'), findsOneWidget);
+    final suggestions = find.byKey(
+      const ValueKey('prompt-reference-suggestions'),
+    );
+    expect(
+      find.descendant(of: suggestions, matching: find.text('@Image 1')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: suggestions, matching: find.text('@Video 1')),
+      findsOneWidget,
+    );
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('prompt-reference-suggestions')),
@@ -4055,7 +4155,9 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(const ValueKey('prompt-reference-video1')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
 
     final editable = tester.widget<EditableText>(
@@ -4106,10 +4208,124 @@ void main() {
         label: 'location.png',
         kind: MediaReferenceKind.image,
         source: 'https://cdn.test/location.png',
+        promptName: 'Image 2',
       ),
     ];
     controller.removeReference('image-reference');
-    expect(controller.form.prompt, 'Use hero.png, then @Image 1.');
+    expect(controller.form.prompt, 'Use @Image 1, then @Image 2.');
+  });
+
+  test('reference names keep gaps and new references fill the lowest gap', () {
+    final controller = AppController()
+      ..selectedProviderId = 'atlas'
+      ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video';
+    addTearDown(controller.dispose);
+
+    controller
+      ..addUrlReference(MediaReferenceKind.video)
+      ..addUrlReference(MediaReferenceKind.video);
+    final first = controller.form.references.first;
+    final second = controller.form.references.last;
+    expect(controller.referencePromptName(first), 'Video 1');
+    expect(controller.referencePromptName(second), 'Video 2');
+    controller.form.prompt = 'Keep @Video 1 and @Video 2 in sync.';
+
+    controller.removeReference(first.id);
+    expect(controller.form.prompt, 'Keep @Video 1 and @Video 2 in sync.');
+    expect(controller.referencePromptName(second), 'Video 2');
+
+    controller.addUrlReference(MediaReferenceKind.video);
+    expect(
+      controller.form.references.map(controller.referencePromptName),
+      <String>['Video 2', 'Video 1'],
+    );
+    controller.addUrlReference(MediaReferenceKind.video);
+    expect(
+      controller.referencePromptName(controller.form.references.last),
+      'Video 3',
+    );
+  });
+
+  testWidgets('Create reference chips rename tags and reject reserved names', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1400));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'atlas'
+      ..selectedModelId = 'bytedance/seedance-2.5/reference-to-video'
+      ..addUrlReference(MediaReferenceKind.video);
+    final reference = controller.form.references.single;
+    controller
+      ..updateReference(reference.id, 'https://cdn.test/motion.mp4')
+      ..form.prompt = 'Follow @Video 1.';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(
+      find.byKey(ValueKey('rename-media-reference-${reference.id}')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey('prompt-reference-name-field')),
+      'Alexandria',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-prompt-reference-name')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      controller.referencePromptName(controller.form.references.single),
+      'Alexandria',
+    );
+    expect(controller.form.prompt, 'Follow @Alexandria.');
+
+    final prompt = find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    await tester.enterText(prompt, 'Use @Ale');
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('prompt-reference-suggestions')),
+        matching: find.text('@Alexandria'),
+      ),
+      findsOneWidget,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(controller.form.prompt, 'Use @Alexandria');
+
+    await tester.tap(
+      find.byKey(ValueKey('rename-media-reference-${reference.id}')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey('prompt-reference-name-field')),
+      'Video 4',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-prompt-reference-name')));
+    await tester.pump();
+    expect(find.textContaining('reserved for new uploads'), findsOneWidget);
+    Navigator.pop(tester.element(find.byType(AlertDialog)));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 5));
   });
 
   testWidgets('saved video picker renders selectable thumbnail cards', (

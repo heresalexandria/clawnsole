@@ -57,6 +57,33 @@ void main() {
     );
   });
 
+  test('translates custom authoring names to their provider ordinals', () {
+    const custom = <PromptReferenceMention>[
+      PromptReferenceMention(
+        kind: MediaReferenceKind.video,
+        number: 1,
+        name: 'Video 2',
+      ),
+      PromptReferenceMention(
+        kind: MediaReferenceKind.video,
+        number: 2,
+        name: 'Alexandria',
+      ),
+    ];
+
+    expect(
+      translateReferencePrompt(
+        'Track @Video 2, then frame @Alexandria. Leave @Video 1 alone.',
+        dialect: ReferencePromptDialect.compactAt,
+        available: custom,
+      ),
+      'Track @video1, then frame @video2. Leave @Video 1 alone.',
+    );
+    expect(isReservedReferenceName('video1'), isTrue);
+    expect(isReservedReferenceName('Video 17'), isTrue);
+    expect(isReservedReferenceName('Alexandria'), isFalse);
+  });
+
   test(
     'selects documented provider dialects without changing unknown models',
     () {

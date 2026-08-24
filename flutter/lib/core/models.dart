@@ -404,6 +404,7 @@ class MediaReferenceLabel {
   const MediaReferenceLabel({
     required this.label,
     required this.kind,
+    this.promptName,
     this.referenceId,
     this.source,
     this.thumbnailAsset,
@@ -412,6 +413,7 @@ class MediaReferenceLabel {
 
   final String label;
   final MediaReferenceKind kind;
+  final String? promptName;
 
   /// Stable References-library identity for this generation input.
   ///
@@ -424,6 +426,7 @@ class MediaReferenceLabel {
   final double? durationSeconds;
 
   MediaReferenceLabel copyWith({
+    String? promptName,
     String? referenceId,
     AssetReference? source,
     AssetReference? thumbnailAsset,
@@ -431,6 +434,7 @@ class MediaReferenceLabel {
   }) => MediaReferenceLabel(
     label: label,
     kind: kind,
+    promptName: promptName ?? this.promptName,
     referenceId: referenceId ?? this.referenceId,
     source: source ?? this.source,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
@@ -440,6 +444,7 @@ class MediaReferenceLabel {
   Map<String, Object?> toJson() => <String, Object?>{
     'label': label,
     'kind': kind.name,
+    if (promptName != null) 'promptName': promptName,
     if (referenceId != null) 'referenceId': referenceId,
     if (source != null) 'source': source!.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
@@ -450,6 +455,11 @@ class MediaReferenceLabel {
       MediaReferenceLabel(
         label: json['label'] as String? ?? 'Reference media',
         kind: MediaReferenceKindValue.parse(json['kind']),
+        promptName:
+            json['promptName'] is String &&
+                (json['promptName']! as String).trim().isNotEmpty
+            ? (json['promptName']! as String).trim()
+            : null,
         referenceId:
             json['referenceId'] is String &&
                 (json['referenceId']! as String).trim().isNotEmpty

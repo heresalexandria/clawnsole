@@ -294,6 +294,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
         return MediaReferenceLabel(
           label: reference.label,
           kind: reference.kind,
+          promptName: reference.promptName,
           referenceId: reference.referenceId,
         );
       }).toList();
@@ -321,6 +322,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
         return MediaReferenceLabel(
           label: reference.label,
           kind: reference.kind,
+          promptName: reference.promptName,
           referenceId: reference.referenceId,
         );
       }).toList();

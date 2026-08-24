@@ -23,14 +23,20 @@ class PromptReferenceOption {
 class _ReferencePromptEditingController extends TextEditingController {
   _ReferencePromptEditingController({
     required super.text,
-    required Set<String> tags,
-  }) : _attachedTags = tags;
+    required List<PromptReferenceMention> mentions,
+  }) : _attachedMentions = mentions;
 
-  Set<String> _attachedTags;
+  List<PromptReferenceMention> _attachedMentions;
 
-  void updateTags(Set<String> tags) {
-    if (setEquals(_attachedTags, tags)) return;
-    _attachedTags = tags;
+  void updateMentions(List<PromptReferenceMention> mentions) {
+    final current = _attachedMentions
+        .map((mention) => '${mention.normalized}:${mention.authoringName}')
+        .toSet();
+    final next = mentions
+        .map((mention) => '${mention.normalized}:${mention.authoringName}')
+        .toSet();
+    if (setEquals(current, next)) return;
+    _attachedMentions = mentions;
     notifyListeners();
   }
 
@@ -40,13 +46,10 @@ class _ReferencePromptEditingController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    final mentionRanges = promptReferenceMatches(text)
-        .where((match) {
-          final mention = parsePromptReferenceMention(match.group(0)!);
-          return mention != null && _attachedTags.contains(mention.normalized);
-        })
-        .map((match) => (start: match.start, end: match.end))
-        .toList();
+    final mentionRanges = promptReferenceMatches(
+      text,
+      available: _attachedMentions,
+    ).map((match) => (start: match.start, end: match.end)).toList();
     final composing = value.composing;
     final hasComposing =
         withComposing &&
@@ -115,13 +118,14 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   late final FocusNode _focusNode;
   _PromptMentionQuery? _query;
   List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
+  int? _highlightedSuggestion;
 
   @override
   void initState() {
     super.initState();
     _controller = _ReferencePromptEditingController(
       text: widget.prompt,
-      tags: _tags(widget.references),
+      mentions: _mentions(widget.references),
     )..addListener(_refreshSuggestions);
     _focusNode = FocusNode();
   }
@@ -129,7 +133,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   @override
   void didUpdateWidget(covariant ReferencePromptField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _controller.updateTags(_tags(widget.references));
+    _controller.updateMentions(_mentions(widget.references));
     if (oldWidget.formRevision != widget.formRevision ||
         (_controller.text != widget.prompt &&
             oldWidget.prompt != widget.prompt)) {
@@ -142,8 +146,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     }
   }
 
-  Set<String> _tags(List<PromptReferenceOption> references) =>
-      references.map((reference) => reference.mention.normalized).toSet();
+  List<PromptReferenceMention> _mentions(
+    List<PromptReferenceOption> references,
+  ) => references.map((reference) => reference.mention).toList();
 
   void _refreshSuggestions() {
     _preserveAncestorScrollForSelectAll();
@@ -151,7 +156,10 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     final suggestions = query == null
         ? const <PromptReferenceOption>[]
         : widget.references.where((reference) {
-            return reference.mention.normalized.startsWith(query.normalized);
+            final name = reference.mention.authoringName
+                .replaceAll(' ', '')
+                .toLowerCase();
+            return name.startsWith(query.normalized);
           }).toList();
     if (!mounted ||
         (_query == query && _sameOptions(_suggestions, suggestions))) {
@@ -160,6 +168,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     setState(() {
       _query = query;
       _suggestions = suggestions;
+      _highlightedSuggestion = null;
     });
   }
 
@@ -233,6 +242,34 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     return null;
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || _suggestions.isEmpty) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+        event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _highlightedSuggestion = _highlightedSuggestion == null
+              ? 0
+              : (_highlightedSuggestion! + 1) % _suggestions.length;
+        } else {
+          _highlightedSuggestion = _highlightedSuggestion == null
+              ? _suggestions.length - 1
+              : (_highlightedSuggestion! - 1) % _suggestions.length;
+        }
+      });
+      return KeyEventResult.handled;
+    }
+    if ((event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        _highlightedSuggestion != null) {
+      _select(_suggestions[_highlightedSuggestion!]);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   void dispose() {
     _controller
@@ -244,33 +281,37 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
 
   @override
   Widget build(BuildContext context) {
-    final promptField = Actions(
-      actions: <Type, Action<Intent>>{
-        // EditableText normally asks every ancestor Scrollable to reveal the
-        // selection endpoint after Select All. The prompt has its own internal
-        // scroller, so that request only makes the surrounding Create screen
-        // jump. Preserve the selection behavior without propagating a reveal.
-        SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
-          onInvoke: _selectAllWithoutRevealing,
-        ),
-      },
-      child: TextFormField(
-        controller: _controller,
-        focusNode: _focusNode,
-        autofocus: widget.autofocus,
-        expands: widget.expands,
-        minLines: widget.expands ? null : 4,
-        maxLines: widget.expands ? null : 10,
-        maxLength: widget.maxLength ?? 50000,
-        maxLengthEnforcement: MaxLengthEnforcement.enforced,
-        style: const TextStyle(fontSize: 14.5, height: 1.5),
-        onChanged: widget.onChanged,
-        decoration: InputDecoration(
-          hintText: widget.references.isEmpty
-              ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
-              : 'A single continuous shot… type @ to mention an attached reference.',
-          counterText: '',
-          alignLabelWithHint: true,
+    final promptField = Focus(
+      onKeyEvent: _handleKeyEvent,
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          // EditableText normally asks every ancestor Scrollable to reveal the
+          // selection endpoint after Select All. The prompt has its own
+          // internal scroller, so that request only makes the surrounding
+          // Create screen jump. Preserve the selection behavior without
+          // propagating a reveal.
+          SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+            onInvoke: _selectAllWithoutRevealing,
+          ),
+        },
+        child: TextFormField(
+          controller: _controller,
+          focusNode: _focusNode,
+          autofocus: widget.autofocus,
+          expands: widget.expands,
+          minLines: widget.expands ? null : 4,
+          maxLines: widget.expands ? null : 10,
+          maxLength: widget.maxLength ?? 50000,
+          maxLengthEnforcement: MaxLengthEnforcement.enforced,
+          style: const TextStyle(fontSize: 14.5, height: 1.5),
+          onChanged: widget.onChanged,
+          decoration: InputDecoration(
+            hintText: widget.references.isEmpty
+                ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
+                : 'A single continuous shot… type @ to mention an attached reference.',
+            counterText: '',
+            alignLabelWithHint: true,
+          ),
         ),
       ),
     );
@@ -301,52 +342,59 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
                 shrinkWrap: true,
                 padding: EdgeInsets.zero,
                 children: _suggestions
+                    .asMap()
+                    .entries
                     .map(
-                      (option) => InkWell(
-                        key: ValueKey(
-                          'prompt-reference-${option.mention.normalized}',
-                        ),
-                        onTap: () => _select(option),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 9,
+                      (entry) => ColoredBox(
+                        color: _highlightedSuggestion == entry.key
+                            ? context.colors.primaryContainer
+                            : Colors.transparent,
+                        child: InkWell(
+                          key: ValueKey(
+                            'prompt-reference-${entry.value.mention.normalized}',
                           ),
-                          child: Row(
-                            children: <Widget>[
-                              Icon(
-                                switch (option.mention.kind) {
-                                  MediaReferenceKind.image =>
-                                    Icons.image_rounded,
-                                  MediaReferenceKind.video =>
-                                    Icons.video_library_rounded,
-                                  MediaReferenceKind.audio =>
-                                    Icons.graphic_eq_rounded,
-                                },
-                                size: 18,
-                                color: context.colors.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                option.mention.canonical,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
+                          onTap: () => _select(entry.value),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 9,
+                            ),
+                            child: Row(
+                              children: <Widget>[
+                                Icon(
+                                  switch (entry.value.mention.kind) {
+                                    MediaReferenceKind.image =>
+                                      Icons.image_rounded,
+                                    MediaReferenceKind.video =>
+                                      Icons.video_library_rounded,
+                                    MediaReferenceKind.audio =>
+                                      Icons.graphic_eq_rounded,
+                                  },
+                                  size: 18,
+                                  color: context.colors.primary,
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  option.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: context.colors.onSurfaceVariant,
+                                const SizedBox(width: 10),
+                                Text(
+                                  entry.value.mention.canonical,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    entry.value.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: context.colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -393,12 +441,15 @@ _PromptMentionQuery? _mentionQuery(
   final start = beforeCaret.lastIndexOf('@');
   if (start < 0) return null;
   final candidate = beforeCaret.substring(start);
-  if (!RegExp(r'^@[A-Za-z]*(?: ?[0-9]*)?$').hasMatch(candidate)) return null;
-  final exact = parsePromptReferenceMention(candidate);
-  if (exact != null &&
-      references.any(
-        (reference) => reference.mention.normalized == exact.normalized,
-      )) {
+  if (candidate.substring(1).contains('@') ||
+      candidate.contains('\n') ||
+      candidate.contains('\r')) {
+    return null;
+  }
+  if (references.any(
+    (reference) =>
+        reference.mention.canonical.toLowerCase() == candidate.toLowerCase(),
+  )) {
     return null;
   }
   return _PromptMentionQuery(

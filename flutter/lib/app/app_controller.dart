@@ -125,6 +125,7 @@ class MediaReferenceDraft {
     required this.label,
     required this.kind,
     required this.source,
+    this.promptName,
     this.asset,
     this.retained,
     this.thumbnailAsset,
@@ -137,6 +138,7 @@ class MediaReferenceDraft {
   final String label;
   final MediaReferenceKind kind;
   final String source;
+  final String? promptName;
   final PickedAsset? asset;
   final AssetReference? retained;
   final AssetReference? thumbnailAsset;
@@ -148,6 +150,7 @@ class MediaReferenceDraft {
 
   MediaReferenceDraft copyWith({
     String? label,
+    String? promptName,
     String? source,
     AssetReference? thumbnailAsset,
     bool clearThumbnailAsset = false,
@@ -162,6 +165,7 @@ class MediaReferenceDraft {
     label: label ?? this.label,
     kind: kind,
     source: source ?? this.source,
+    promptName: promptName ?? this.promptName,
     asset: asset,
     retained: source == null ? retained : null,
     thumbnailAsset: clearThumbnailAsset
@@ -386,6 +390,103 @@ class AppController extends ChangeNotifier {
       generations.where((item) => !item.hidden).toList();
   List<SavedReference> get savedReferences =>
       snapshot?.savedReferences ?? const <SavedReference>[];
+
+  String referencePromptName(MediaReferenceDraft reference) {
+    final assigned = reference.promptName?.trim() ?? '';
+    if (assigned.isNotEmpty) return assigned;
+    final number =
+        form.references
+            .takeWhile((candidate) => candidate.id != reference.id)
+            .where((candidate) => candidate.kind == reference.kind)
+            .length +
+        1;
+    return '${reference.kind.label} $number';
+  }
+
+  List<PromptReferenceMention> get formPromptReferenceMentions {
+    final counts = <MediaReferenceKind, int>{};
+    return form.references.map((reference) {
+      final number = (counts[reference.kind] ?? 0) + 1;
+      counts[reference.kind] = number;
+      return PromptReferenceMention(
+        kind: reference.kind,
+        number: number,
+        name: referencePromptName(reference),
+      );
+    }).toList();
+  }
+
+  String _nextReferencePromptName(MediaReferenceKind kind) {
+    final used = form.references
+        .map(referencePromptName)
+        .map((name) => name.toLowerCase())
+        .toSet();
+    var number = 1;
+    while (used.contains('${kind.label} $number'.toLowerCase())) {
+      number += 1;
+    }
+    return '${kind.label} $number';
+  }
+
+  String? referenceNameProblem(
+    String value, {
+    String? excludeDraftId,
+    String? excludeSavedReferenceId,
+    bool allowReserved = false,
+  }) {
+    final clean = value.trim();
+    if (clean.isEmpty || clean.length > 80) {
+      return 'Reference names must be between 1 and 80 characters.';
+    }
+    if (clean.contains('@') || clean.contains('\n') || clean.contains('\r')) {
+      return 'Enter a name without @ or line breaks.';
+    }
+    if (!allowReserved && isReservedReferenceName(clean)) {
+      return 'Names like Image 1, Video 1, and Audio 1 are reserved for new uploads.';
+    }
+    final normalized = clean.toLowerCase();
+    final savedCollision = savedReferences.any(
+      (reference) =>
+          reference.id != excludeSavedReferenceId &&
+          reference.name.trim().toLowerCase() == normalized,
+    );
+    final draftCollision = form.references.any(
+      (reference) =>
+          reference.id != excludeDraftId &&
+          reference.savedReferenceId != excludeSavedReferenceId &&
+          referencePromptName(reference).toLowerCase() == normalized,
+    );
+    if (savedCollision || draftCollision) {
+      return 'Reference names must be unique.';
+    }
+    return null;
+  }
+
+  String _uniqueSavedReferenceName(
+    String preferred, {
+    String? excludeSavedReferenceId,
+  }) {
+    var base = preferred.trim();
+    if (base.isEmpty) base = 'Reference';
+    if (base.length > 80) base = base.substring(0, 80).trimRight();
+    final used = savedReferences
+        .where((reference) => reference.id != excludeSavedReferenceId)
+        .map((reference) => reference.name.trim().toLowerCase())
+        .toSet();
+    var candidate = base;
+    var number = 2;
+    while (used.contains(candidate.toLowerCase()) ||
+        isReservedReferenceName(candidate)) {
+      final suffix = ' $number';
+      final maximumBaseLength = 80 - suffix.length;
+      final shortened = base.length <= maximumBaseLength
+          ? base
+          : base.substring(0, maximumBaseLength).trimRight();
+      candidate = '$shortened$suffix';
+      number += 1;
+    }
+    return candidate;
+  }
 
   SavedReference? _savedReferenceForInput({
     String? referenceId,
@@ -914,6 +1015,7 @@ class AppController extends ChangeNotifier {
                   (item) => MediaReferenceLabel(
                     label: item.label,
                     kind: item.kind,
+                    promptName: referencePromptName(item),
                     referenceId: item.savedReferenceId,
                     source:
                         item.asset?.retained ??
@@ -1986,11 +2088,27 @@ class AppController extends ChangeNotifier {
       showNotice('Saved references are unavailable on this build.');
       return null;
     }
-    final clean = name.trim();
-    if (clean.isEmpty || clean.length > 80) {
-      showNotice('Reference names must be between 1 and 80 characters.');
+    final requestedName = name.trim();
+    final usesUploadFilename =
+        requestedName == draft.label.trim() &&
+        isReservedReferenceName(referencePromptName(draft));
+    final problem = usesUploadFilename
+        ? null
+        : referenceNameProblem(
+            requestedName,
+            excludeDraftId: draft.id,
+            excludeSavedReferenceId: draft.savedReferenceId,
+          );
+    if (problem != null) {
+      showNotice(problem);
       return null;
     }
+    final clean = usesUploadFilename
+        ? _uniqueSavedReferenceName(
+            requestedName,
+            excludeSavedReferenceId: draft.savedReferenceId,
+          )
+        : requestedName;
     final now = DateTime.now().toUtc();
     final id =
         draft.savedReferenceId ??
@@ -2060,6 +2178,7 @@ class AppController extends ChangeNotifier {
           source: savedReference.asset.isLocal
               ? ''
               : savedReference.asset.value,
+          promptName: item.promptName,
           asset: asset == null
               ? null
               : PickedAsset(
@@ -2093,8 +2212,12 @@ class AppController extends ChangeNotifier {
   }) async {
     if (gateway is! ReferenceLibraryGateway) return false;
     final clean = name.trim();
-    if (clean.isEmpty || clean.length > 80) {
-      showNotice('Reference names must be between 1 and 80 characters.');
+    final problem = referenceNameProblem(
+      clean,
+      excludeSavedReferenceId: reference.id,
+    );
+    if (problem != null) {
+      showNotice(problem);
       return false;
     }
     try {
@@ -2109,6 +2232,24 @@ class AppController extends ChangeNotifier {
           ),
         ),
       );
+      if (reference.name != clean) {
+        form.prompt = renameReferenceInPrompt(
+          form.prompt,
+          oldName: reference.name,
+          newName: clean,
+        );
+        form.references = form.references.map((draft) {
+          if (draft.savedReferenceId != reference.id) return draft;
+          final oldPromptName = referencePromptName(draft);
+          form.prompt = renameReferenceInPrompt(
+            form.prompt,
+            oldName: oldPromptName,
+            newName: clean,
+          );
+          return draft.copyWith(promptName: clean);
+        }).toList();
+      }
+      notifyListeners();
       showNotice('Reference updated.');
       return true;
     } on Object catch (error) {
@@ -2147,7 +2288,7 @@ class AppController extends ChangeNotifier {
         }
         final reference = SavedReference(
           id: 'reference-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
-          name: asset.name,
+          name: _uniqueSavedReferenceName(asset.name),
           kind: kind,
           asset: AssetReference(
             kind: 'remote',
@@ -2243,6 +2384,26 @@ class AppController extends ChangeNotifier {
         .take(available);
     try {
       for (final candidate in selected) {
+        if (!candidate.generated &&
+            form.references.any(
+              (reference) => reference.savedReferenceId == candidate.id,
+            )) {
+          showNotice('“${candidate.name}” is already attached.');
+          continue;
+        }
+        final promptName = candidate.generated
+            ? _nextReferencePromptName(kind)
+            : candidate.name.trim();
+        final nameProblem = candidate.generated
+            ? null
+            : referenceNameProblem(
+                promptName,
+                excludeSavedReferenceId: candidate.id,
+              );
+        if (nameProblem != null) {
+          showNotice(nameProblem);
+          continue;
+        }
         PickedAsset? picked;
         Uint8List? thumbnailBytes;
         var source = candidate.asset.isLocal ? '' : candidate.asset.value;
@@ -2273,6 +2434,7 @@ class AppController extends ChangeNotifier {
             label: candidate.name,
             kind: kind,
             source: source,
+            promptName: promptName,
             asset: picked,
             retained: candidate.asset,
             thumbnailAsset: _previewForStorage(
@@ -2367,9 +2529,10 @@ class AppController extends ChangeNotifier {
     final cleanName = asset.name.trim().isEmpty
         ? '${kind.label} reference'
         : asset.name.trim();
+    final uniqueName = _uniqueSavedReferenceName(cleanName);
     final reference = SavedReference(
       id: 'reference-${kind.name}-${digest.substring(0, 24)}',
-      name: cleanName.length <= 80 ? cleanName : cleanName.substring(0, 80),
+      name: uniqueName,
       kind: kind,
       asset: AssetReference(
         kind: 'remote',
@@ -2866,6 +3029,7 @@ class AppController extends ChangeNotifier {
       ..prompt = promoteImageReferenceToFirstFrame(
         form.prompt,
         number: imageNumber,
+        authoringName: referencePromptName(reference),
       )
       ..references = form.references
           .where((item) => item.id != reference.id)
@@ -2997,6 +3161,7 @@ class AppController extends ChangeNotifier {
         label: label,
         kind: kind,
         source: '',
+        promptName: _nextReferencePromptName(kind),
         asset: asset,
         retained: retained,
         savedReferenceId: savedReferenceId,
@@ -3143,23 +3308,59 @@ class AppController extends ChangeNotifier {
         .where((reference) => reference.id == id)
         .firstOrNull;
     if (removed == null) return;
-    final number =
-        form.references
-            .takeWhile((reference) => reference.id != id)
-            .where((reference) => reference.kind == removed.kind)
-            .length +
-        1;
-    form.prompt = detachReferenceFromPrompt(
-      form.prompt,
-      kind: removed.kind,
-      number: number,
-      label: removed.label,
-    );
     form.references = form.references.where((item) => item.id != id).toList();
     _selectCompatibleModel();
     _normalizeFormForModel();
     _invalidateProviderEstimate();
     notifyListeners();
+  }
+
+  Future<bool> renameDraftReference(String id, String name) async {
+    final draft = form.references
+        .where((reference) => reference.id == id)
+        .firstOrNull;
+    if (draft == null) return false;
+    final clean = name.trim();
+    final oldName = referencePromptName(draft);
+    if (clean == oldName) return true;
+    final problem = referenceNameProblem(
+      clean,
+      excludeDraftId: draft.id,
+      excludeSavedReferenceId: draft.savedReferenceId,
+    );
+    if (problem != null) {
+      showNotice(problem);
+      return false;
+    }
+    try {
+      final saved = savedReferences
+          .where((reference) => reference.id == draft.savedReferenceId)
+          .firstOrNull;
+      if (saved != null && gateway is ReferenceLibraryGateway) {
+        _apply(
+          await (gateway as ReferenceLibraryGateway).saveReference(
+            saved.copyWith(name: clean, updatedAt: DateTime.now().toUtc()),
+          ),
+        );
+      }
+      form.prompt = renameReferenceInPrompt(
+        form.prompt,
+        oldName: oldName,
+        newName: clean,
+      );
+      form.references = form.references.map((reference) {
+        return reference.id == id
+            ? reference.copyWith(promptName: clean)
+            : reference;
+      }).toList();
+      formRevision += 1;
+      notifyListeners();
+      showNotice('Reference renamed to “$clean”.');
+      return true;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return false;
+    }
   }
 
   void setExactTiming(bool value) {
@@ -3602,10 +3803,19 @@ class AppController extends ChangeNotifier {
             .map((item) => item.requestSource)
             .toList(),
     };
+    final promptNames = <String, List<String>>{
+      for (final kind in MediaReferenceKind.values)
+        kind.name: form.references
+            .where((item) => item.kind == kind)
+            .map(referencePromptName)
+            .toList(),
+    };
     if (form.mode == VideoMode.i2v) {
       return <String, Object?>{
         ...common,
         'mode': 'i2v',
+        if (form.references.isNotEmpty)
+          referencePromptNamesInputKey: promptNames,
         if (selectedModel.referenceTasks.length > 1)
           'reference_task': form.referenceTask.name,
         if (frames.isNotEmpty) 'keyframes': frames,
@@ -4687,12 +4897,13 @@ class AppController extends ChangeNotifier {
     }
     final retainedFrames = <KeyframeDraft>[];
     for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
-      final reference = frame.source;
+      final storedReference = frame.source;
       final saved = _savedReferenceForInput(
         referenceId: frame.referenceId,
         kind: MediaReferenceKind.image,
-        asset: reference,
+        asset: storedReference,
       );
+      final reference = storedReference ?? saved?.asset;
       PickedAsset? asset;
       if (reference?.isLocal == true) {
         try {
@@ -4727,14 +4938,18 @@ class AppController extends ChangeNotifier {
       );
     }
     final retainedReferences = <MediaReferenceDraft>[];
+    final restoredReferenceCounts = <MediaReferenceKind, int>{};
     for (final media
         in item.config.references ?? const <MediaReferenceLabel>[]) {
-      final reference = media.source;
+      final promptNumber = (restoredReferenceCounts[media.kind] ?? 0) + 1;
+      restoredReferenceCounts[media.kind] = promptNumber;
+      final storedReference = media.source;
       final saved = _savedReferenceForInput(
         referenceId: media.referenceId,
         kind: media.kind,
-        asset: reference,
+        asset: storedReference,
       );
+      final reference = storedReference ?? saved?.asset;
       PickedAsset? asset;
       Uint8List? thumbnailBytes;
       if (media.thumbnailAsset != null) {
@@ -4760,6 +4975,7 @@ class AppController extends ChangeNotifier {
           label: media.label,
           kind: media.kind,
           source: reference?.kind == 'remote' ? reference!.value : '',
+          promptName: media.promptName ?? '${media.kind.label} $promptNumber',
           asset: asset,
           retained: reference,
           thumbnailAsset: media.thumbnailAsset,
@@ -4774,13 +4990,14 @@ class AppController extends ChangeNotifier {
       kind: MediaReferenceKind.video,
       asset: item.config.source,
     );
+    final durableSource = item.config.source ?? savedSource?.asset;
     if ((item.mode == VideoMode.v2v ||
             item.mode == VideoMode.draftEnhance ||
             item.mode == VideoMode.upscale) &&
-        item.config.source?.isLocal == true) {
+        durableSource?.isLocal == true) {
       try {
         retainedSource = await _retainedAsset(
-          item.config.source!,
+          durableSource!,
           thumbnailAsset: item.config.sourceThumbnailAsset,
         );
       } on Object {
@@ -4842,16 +5059,15 @@ class AppController extends ChangeNotifier {
           : null
       ..videoUrl =
           (item.mode == VideoMode.v2v || item.mode == VideoMode.upscale) &&
-              item.config.source?.kind == 'remote'
-          ? item.config.source!.value
+              durableSource?.kind == 'remote'
+          ? durableSource!.value
           : ''
       ..videoThumbnailBytes = sourceThumbnailBytes
       ..videoMetadata = null
       ..draftAsset = item.mode == VideoMode.draftEnhance ? retainedSource : null
       ..draftUrl =
-          item.mode == VideoMode.draftEnhance &&
-              item.config.source?.kind == 'remote'
-          ? item.config.source!.value
+          item.mode == VideoMode.draftEnhance && durableSource?.kind == 'remote'
+          ? durableSource!.value
           : '';
     _selectCompatibleModel();
     _normalizeFormForModel();

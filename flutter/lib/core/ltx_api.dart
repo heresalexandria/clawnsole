@@ -83,7 +83,7 @@ class LtxApi {
           referenceAudios.length,
           MediaReferenceKind.audio,
         ),
-      ]),
+      ], names: referencePromptNamesFromInput(input)),
     );
     final payload = <String, Object?>{
       'model': model,

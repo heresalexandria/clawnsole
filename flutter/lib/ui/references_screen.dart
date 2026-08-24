@@ -599,11 +599,25 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        reference.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      InkWell(
+                        key: ValueKey('rename-saved-reference-${reference.id}'),
+                        borderRadius: BorderRadius.circular(5),
+                        onTap: () => unawaited(
+                          showReferenceMetadataDialog(
+                            context,
+                            controller,
+                            reference: reference,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            reference.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 5),
                       Text(

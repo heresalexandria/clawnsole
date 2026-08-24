@@ -307,7 +307,7 @@ class ArtCraftApi {
           referenceAudios.length,
           MediaReferenceKind.audio,
         ),
-      ]),
+      ], names: referencePromptNamesFromInput(input)),
     );
     return <String, Object?>{
       'model': model,
