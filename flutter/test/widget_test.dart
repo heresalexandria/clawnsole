@@ -14,6 +14,7 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/local_data_store.dart';
 import 'package:clawnsole/core/ltx_api.dart';
+import 'package:clawnsole/core/media_cache_gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
@@ -1293,6 +1294,111 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
+  });
+
+  testWidgets('restored disk preview paints without a relaunch loader', (
+    tester,
+  ) async {
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final item = _deliveredGeneration(
+      'restored-preview',
+      thumbnail: 'restored-preview-thumb.png',
+    );
+    final snapshot = LocalSnapshot(
+      generations: <Generation>[item],
+      preferences: const AppPreferences(),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+    );
+    final gateway = _CacheRestoringGateway(
+      snapshot,
+      assets: <String, Uint8List>{'restored-preview-thumb.png': frame},
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 640,
+            child: ActivityCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Loading preview'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    expect(gateway.cacheReads, 1);
+    expect(gateway.assetReads, 0);
+
+    await tester.pumpAndSettle();
+    controller.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('reference library reveals cached media in 20-item pages', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 24, 12);
+    final references = List<SavedReference>.generate(
+      21,
+      (index) => SavedReference(
+        id: 'paged-reference-$index',
+        name: 'Reference $index',
+        kind: MediaReferenceKind.audio,
+        asset: AssetReference(
+          kind: 'local',
+          value: 'paged-reference-$index.mp3',
+          label: 'Reference $index.mp3',
+          contentType: 'audio/mpeg',
+        ),
+        createdAt: now.subtract(Duration(minutes: index)),
+        updatedAt: now.subtract(Duration(minutes: index)),
+      ),
+    );
+    final snapshot = LocalSnapshot(
+      generations: const <Generation>[],
+      savedReferences: references,
+      preferences: const AppPreferences(),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 21),
+    );
+    final controller = AppController(gateway: _MemoryGateway(snapshot))
+      ..snapshot = snapshot;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ReferencesScreen(controller: controller)),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('view-saved-reference-paged-reference-19')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('view-saved-reference-paged-reference-20')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('references-load-more')), findsOneWidget);
+
+    final loadMore = find.byKey(const ValueKey('references-load-more'));
+    await tester.ensureVisible(loadMore);
+    await tester.tap(loadMore);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('view-saved-reference-paged-reference-20')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('keeps Cyclone available as a generation placeholder', (
@@ -5750,7 +5856,9 @@ void main() {
     }
   });
 
-  testWidgets('recent work shows at most the newest 100 items', (tester) async {
+  testWidgets('recent work initially builds only its newest 20 items', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final gateway = _MemoryGateway(
@@ -5768,15 +5876,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(CompactGenerationRow), findsNWidgets(100));
+    expect(find.byType(CompactGenerationRow), findsNWidgets(20));
     expect(
-      find.byKey(const ValueKey('generation-compact-view-generation-99')),
+      find.byKey(const ValueKey('generation-compact-view-generation-19')),
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('generation-compact-view-generation-100')),
+      find.byKey(const ValueKey('generation-compact-view-generation-20')),
       findsNothing,
     );
+    expect(find.byKey(const ValueKey('recent-work-load-more')), findsOneWidget);
   });
 
   testWidgets('recent work dense views hide status badges', (tester) async {
@@ -6877,6 +6986,26 @@ class _DelayedAssetGateway extends _MemoryGateway {
   Future<Uint8List> readAsset(AssetReference reference) => _asset.future;
 
   void completeAsset(Uint8List bytes) => _asset.complete(bytes);
+}
+
+class _CacheRestoringGateway extends _MemoryGateway
+    implements MediaCacheGateway {
+  _CacheRestoringGateway(super.snapshot, {required super.assets});
+
+  int cacheReads = 0;
+  int assetReads = 0;
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) async {
+    cacheReads += 1;
+    return assets[reference.value];
+  }
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    assetReads += 1;
+    return super.readAsset(reference);
+  }
 }
 
 class _ReferenceFailureGateway extends _MemoryGateway {

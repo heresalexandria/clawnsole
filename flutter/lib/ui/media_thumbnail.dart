@@ -351,6 +351,10 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     }
     return FutureBuilder<_VideoThumbnailResult?>(
       future: thumbnail,
+      initialData:
+          widget.thumbnailBytes != null && widget.thumbnailBytes!.isNotEmpty
+          ? _VideoThumbnailResult(widget.thumbnailBytes!)
+          : null,
       builder: (context, snapshot) {
         final result = snapshot.data;
         if (result == null || result.bytes.isEmpty) {

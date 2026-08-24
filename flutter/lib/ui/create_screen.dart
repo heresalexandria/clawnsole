@@ -27,36 +27,99 @@ import 'visual_reference_viewer.dart';
 /// so the whole composer lands above the fold on a 900px-tall display.
 bool _isShort(BuildContext context) => MediaQuery.sizeOf(context).height < 950;
 
-class CreateScreen extends StatelessWidget {
+class CreateScreen extends StatefulWidget {
   const CreateScreen({required this.controller, super.key});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final short = _isShort(context);
-      final pad = constraints.maxWidth < 620 ? 16.0 : (short ? 20.0 : 28.0);
-      return SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(pad, short ? 10 : pad, pad, pad),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1440),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                _CreateHeading(controller: controller),
-                SizedBox(height: short ? 8 : 18),
-                _Composer(controller: controller),
-                SizedBox(height: short ? 12 : 24),
-                _RecentWork(controller: controller),
-              ],
+  State<CreateScreen> createState() => _CreateScreenState();
+}
+
+class _CreateScreenState extends State<CreateScreen> {
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
+  int _itemLimit = _pageSize;
+  bool _pageAdvancePending = false;
+  GenerationViewMode? _viewMode;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_loadMoreNearEnd);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _loadMoreNearEnd() {
+    if (_scrollController.position.extentAfter < 720) _loadMore();
+  }
+
+  void _loadMore() {
+    final items = controller.visibleGenerations;
+    if (_pageAdvancePending || _itemLimit >= items.length) return;
+    _pageAdvancePending = true;
+    final previousLimit = _itemLimit;
+    setState(() => _itemLimit += _pageSize);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pageAdvancePending = false;
+    });
+    controller.prefetchListedVideos(
+      items
+          .skip(previousLimit)
+          .take(_pageSize)
+          .where((item) => !item.isImage)
+          .map((item) => item.resultAsset),
+    );
+  }
+
+  void _syncListingPage() {
+    if (_viewMode == controller.recentWorkViewMode) return;
+    _viewMode = controller.recentWorkViewMode;
+    _itemLimit = _pageSize;
+    _pageAdvancePending = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _syncListingPage();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final short = _isShort(context);
+        final pad = constraints.maxWidth < 620 ? 16.0 : (short ? 20.0 : 28.0);
+        return SingleChildScrollView(
+          controller: _scrollController,
+          padding: EdgeInsets.fromLTRB(pad, short ? 10 : pad, pad, pad),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  _CreateHeading(controller: controller),
+                  SizedBox(height: short ? 8 : 18),
+                  _Composer(controller: controller),
+                  SizedBox(height: short ? 12 : 24),
+                  _RecentWork(
+                    controller: controller,
+                    itemLimit: _itemLimit,
+                    onLoadMore: _loadMore,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 class _CreateHeading extends StatelessWidget {
@@ -3974,17 +4037,21 @@ class _ComposerFooter extends StatelessWidget {
 }
 
 class _RecentWork extends StatefulWidget {
-  const _RecentWork({required this.controller});
+  const _RecentWork({
+    required this.controller,
+    required this.itemLimit,
+    required this.onLoadMore,
+  });
 
   final AppController controller;
+  final int itemLimit;
+  final VoidCallback onLoadMore;
 
   @override
   State<_RecentWork> createState() => _RecentWorkState();
 }
 
 class _RecentWorkState extends State<_RecentWork> {
-  static const int _itemLimit = 100;
-
   final InlineVideoRegistry _inlinePlayback = InlineVideoRegistry();
 
   AppController get controller => widget.controller;
@@ -4099,7 +4166,7 @@ class _RecentWorkState extends State<_RecentWork> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: controller.visibleGenerations
-                .take(_itemLimit)
+                .take(widget.itemLimit)
                 .map(
                   (item) => Padding(
                     padding: const EdgeInsets.only(bottom: 9),
@@ -4124,7 +4191,7 @@ class _RecentWorkState extends State<_RecentWork> {
                 spacing: GenerationCardGrid.gap,
                 runSpacing: GenerationCardGrid.gap,
                 children: controller.visibleGenerations
-                    .take(_itemLimit)
+                    .take(widget.itemLimit)
                     .map(
                       (item) => SizedBox(
                         width: layout.tileWidth,
@@ -4145,6 +4212,20 @@ class _RecentWorkState extends State<_RecentWork> {
               );
             },
           ),
+        if (widget.itemLimit <
+            controller.visibleGenerations.length) ...<Widget>[
+          const SizedBox(height: 14),
+          Center(
+            child: TextButton.icon(
+              key: const ValueKey('recent-work-load-more'),
+              onPressed: widget.onLoadMore,
+              icon: const Icon(Icons.expand_more_rounded),
+              label: Text(
+                'Load ${((controller.visibleGenerations.length - widget.itemLimit).clamp(0, 20))} more',
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 2),
         SurfaceCard(
           color: context.colors.surfaceContainer,

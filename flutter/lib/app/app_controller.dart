@@ -11,6 +11,7 @@ import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
 import '../core/google_drive.dart';
+import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
@@ -362,6 +363,9 @@ class AppController extends ChangeNotifier {
   int _videoPreviewSourceRevision = 0;
   Future<void> _prefetchQueue = Future<void>.value();
   final Set<String> _prefetchedVideoAssets = <String>{};
+  final Map<String, Uint8List> _restoredAssetBytes = <String, Uint8List>{};
+  final Map<String, Future<Uint8List>> _assetReadJobs =
+      <String, Future<Uint8List>>{};
   bool _reconcilingGenerationWork = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -595,6 +599,8 @@ class AppController extends ChangeNotifier {
   bool get supportsSettingsVault => gateway is SettingsVaultGateway;
   VideoCacheGateway? get _videoCacheGateway =>
       gateway is VideoCacheGateway ? gateway as VideoCacheGateway : null;
+  MediaCacheGateway? get _mediaCacheGateway =>
+      gateway is MediaCacheGateway ? gateway as MediaCacheGateway : null;
   bool get supportsVideoCache => gateway is VideoCacheGateway;
   SettingsVaultStatus get settingsVaultStatus =>
       snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
@@ -1101,6 +1107,7 @@ class AppController extends ChangeNotifier {
       // interactive. Otherwise an early tab change can persist preferences
       // against the local-only startup snapshot while Drive is reconnecting.
       await resumeGoogleDrive();
+      await _restoreCachedFirstPage();
       if (generations.isNotEmpty) {
         await _restoreGenerationSettings(generations.first);
       }
@@ -1323,6 +1330,8 @@ class AppController extends ChangeNotifier {
 
   Future<void> navigate(AppSection value) async {
     section = value;
+    _scheduleListingPrefetch();
+    await _restoreCachedFirstPage();
     notifyListeners();
     try {
       await _savePreferences(_preferences(activeSection: value));
@@ -1446,6 +1455,8 @@ class AppController extends ChangeNotifier {
       if (clamped == 0) {
         _prefetchDebounce?.cancel();
         _prefetchedVideoAssets.clear();
+        _restoredAssetBytes.clear();
+        _assetReadJobs.clear();
         await _videoCacheGateway?.clearVideoCache();
       } else {
         _scheduleListingPrefetch();
@@ -1462,6 +1473,8 @@ class AppController extends ChangeNotifier {
   Future<void> clearVideoCache() async {
     try {
       _prefetchedVideoAssets.clear();
+      _restoredAssetBytes.clear();
+      _assetReadJobs.clear();
       await _videoCacheGateway?.clearVideoCache();
       notifyListeners();
     } on Object catch (error) {
@@ -1480,24 +1493,127 @@ class AppController extends ChangeNotifier {
     _prefetchRevision += 1;
     final revision = _prefetchRevision;
     _prefetchDebounce?.cancel();
+    if (section != AppSection.create &&
+        section != AppSection.library &&
+        section != AppSection.references) {
+      return;
+    }
     _prefetchDebounce = Timer(const Duration(milliseconds: 900), () {
       if (revision != _prefetchRevision) return;
-      final candidates =
-          (section == AppSection.library
-                  ? filteredGenerations
-                  : visibleGenerations)
-              .where(
-                (item) =>
-                    item.isReady &&
-                    !item.isImage &&
-                    item.storage == LibraryStorage.drive &&
-                    item.resultAsset?.kind == 'drive',
-              )
-              .take(_listingPrefetchCount);
-      for (final item in candidates) {
-        _enqueueVideoPrefetch(item.resultAsset, revision: revision);
+      final assets = section == AppSection.references
+          ? filteredSavedReferences
+                .where(
+                  (item) =>
+                      item.kind == MediaReferenceKind.video &&
+                      item.storage == LibraryStorage.drive,
+                )
+                .map((item) => item.asset)
+          : (section == AppSection.library
+                    ? filteredGenerations
+                    : visibleGenerations)
+                .where(
+                  (item) =>
+                      item.isReady &&
+                      !item.isImage &&
+                      item.storage == LibraryStorage.drive,
+                )
+                .map((item) => item.resultAsset);
+      for (final asset in assets.take(_listingPrefetchCount)) {
+        _enqueueVideoPrefetch(asset, revision: revision);
       }
     });
+  }
+
+  /// Warms full Drive videos newly revealed by a progressive listing page.
+  /// Thumbnail reads happen naturally as those cards are built; limiting the
+  /// full-film work prevents one scroll from consuming the entire cache.
+  void prefetchListedVideos(Iterable<AssetReference?> assets) {
+    for (final asset
+        in assets
+            .whereType<AssetReference>()
+            .where((asset) => asset.kind == 'drive')
+            .take(_listingPrefetchCount)) {
+      _enqueueVideoPrefetch(asset);
+    }
+  }
+
+  String _assetCacheKey(AssetReference reference) =>
+      '${reference.kind}:${reference.value}';
+
+  /// Synchronously available retained bytes restored before first paint.
+  Uint8List? cachedAssetBytes(AssetReference? reference) =>
+      reference == null ? null : _restoredAssetBytes[_assetCacheKey(reference)];
+
+  /// Reads retained preview bytes once per process and remembers them for
+  /// synchronous reuse by every card that references the same immutable id.
+  Future<Uint8List> readPreviewAsset(AssetReference reference) {
+    final key = _assetCacheKey(reference);
+    final restored = _restoredAssetBytes[key];
+    if (restored != null) return Future<Uint8List>.value(restored);
+    final existing = _assetReadJobs[key];
+    if (existing != null) return existing;
+    late final Future<Uint8List> job;
+    job = gateway
+        .readAsset(reference)
+        .then((bytes) {
+          _restoredAssetBytes[key] = bytes;
+          return bytes;
+        })
+        .catchError((Object error) {
+          if (identical(_assetReadJobs[key], job)) _assetReadJobs.remove(key);
+          throw error;
+        });
+    _assetReadJobs[key] = job;
+    return job;
+  }
+
+  /// Restores only the first page and only from local storage. Cache misses
+  /// remain misses until a card is actually viewed, at which point its normal
+  /// read path downloads and persists the Drive asset.
+  Future<void> _restoreCachedFirstPage() async {
+    final cache = _mediaCacheGateway;
+    if (cache == null) return;
+    final references = <String, AssetReference>{};
+    void add(AssetReference? reference) {
+      if (reference != null) {
+        references[_assetCacheKey(reference)] = reference;
+      }
+    }
+
+    if (section == AppSection.create || section == AppSection.library) {
+      final generationPage = section == AppSection.library
+          ? filteredGenerations
+          : visibleGenerations;
+      for (final item in generationPage.take(20)) {
+        if (item.isImage) {
+          add(item.resultAsset);
+        } else {
+          add(item.thumbnailAsset);
+        }
+      }
+    } else if (section == AppSection.references) {
+      for (final item in filteredSavedReferences.take(20)) {
+        if (item.kind == MediaReferenceKind.image) {
+          add(item.asset);
+        } else if (item.kind == MediaReferenceKind.video) {
+          add(item.thumbnailAsset);
+        }
+      }
+    } else {
+      return;
+    }
+    await Future.wait(
+      references.entries.map((entry) async {
+        if (_restoredAssetBytes.containsKey(entry.key)) return;
+        try {
+          final bytes = await cache.cachedAssetBytes(entry.value);
+          if (bytes == null || bytes.isEmpty) return;
+          _restoredAssetBytes[entry.key] = bytes;
+        } on Object {
+          // Cache inspection is best effort and must not delay app recovery.
+        }
+      }),
+    );
   }
 
   /// Serially fills the video cache in the background. [revision] cancels a

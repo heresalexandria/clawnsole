@@ -1164,6 +1164,14 @@ void main() {
       final base = Uri.parse('http://127.0.0.1:${server.port}');
 
       try {
+        // Cache-only startup restoration reports a miss without touching
+        // Drive. It must never silently turn app launch into a download.
+        final coldCache = await http.get(
+          base.resolve('/asset-cache?id=drive-film-two'),
+        );
+        expect(coldCache.statusCode, 404);
+        expect(drive.streamDownloads, 0);
+
         // A cold open-from-zero request fills the cache exactly once while
         // answering the range, and allows private browser caching.
         final first = await http.get(
@@ -1186,6 +1194,15 @@ void main() {
         expect(seek.headers['content-range'], 'bytes 2-5/8');
         expect(drive.streamDownloads, 1);
         expect(drive.rangeReads, 0);
+
+        // Relaunch restoration can now read the same bytes strictly from the
+        // durable cache, without a second upstream request.
+        final warmCache = await http.get(
+          base.resolve('/asset-cache?id=drive-film-one'),
+        );
+        expect(warmCache.statusCode, 200);
+        expect(warmCache.bodyBytes, filmOne);
+        expect(drive.streamDownloads, 1);
 
         // A cold seek on an uncached film answers straight from Drive's Range
         // support instead of waiting behind a full download.

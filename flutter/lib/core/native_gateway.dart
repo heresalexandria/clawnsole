@@ -16,6 +16,7 @@ import 'google_drive_auth.dart';
 import 'google_drive_store.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
+import 'media_cache_gateway.dart';
 import 'models.dart';
 import 'provider_api.dart';
 import 'reference_video_normalizer.dart';
@@ -63,6 +64,7 @@ class NativeGateway extends DirectGateway
         GoogleDriveGateway,
         SettingsVaultGateway,
         DataLocationGateway,
+        MediaCacheGateway,
         VideoCacheGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
@@ -259,6 +261,18 @@ class NativeGateway extends DirectGateway
 
   @override
   Future<void> clearVideoCache() => _videoCache.clear();
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) async {
+    try {
+      if (reference.kind != 'drive') return _hybrid.readAsset(reference);
+      if (!_videoCache.enabled) return null;
+      final cached = await _videoCache.lookup(reference.value);
+      return cached?.readAsBytes();
+    } on Object {
+      return null;
+    }
+  }
 
   @override
   Future<Uri?> cachedVideoAssetUri(AssetReference reference) =>
