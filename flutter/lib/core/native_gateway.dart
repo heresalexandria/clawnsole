@@ -265,10 +265,12 @@ class NativeGateway extends DirectGateway
   @override
   Future<Uint8List?> cachedAssetBytes(AssetReference reference) async {
     try {
-      if (reference.kind != 'drive') return _hybrid.readAsset(reference);
+      if (reference.kind != 'drive') {
+        return await _hybrid.readAsset(reference);
+      }
       if (!_videoCache.enabled) return null;
       final cached = await _videoCache.lookup(reference.value);
-      return cached?.readAsBytes();
+      return cached == null ? null : await cached.readAsBytes();
     } on Object {
       return null;
     }
