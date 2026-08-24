@@ -110,13 +110,8 @@ private struct AppleLocalRequest: Sendable {
     }
   }
 
-  func promptForFrame(_ index: Int) -> String {
-    guard mode == .sequence else { return prompt }
-    return """
-      (prompt)
-
-      Create frame (index + 1) of (frameCount) in one continuous visual sequence, at second (index + 1). Keep the same subjects, appearance, composition, setting, palette, lighting, and camera. Advance the action by one clear step. Return one finished image, never a storyboard, collage, caption, or logo.
-      """
+  func directionForFrame(_ index: Int) -> String {
+    "Frame \(index + 1) of \(frameCount). Keep the same subject, setting, style, lighting, and camera. Advance the action one step. Return one image, not a storyboard, collage, caption, or logo."
   }
 }
 
@@ -177,10 +172,13 @@ private struct AppleLocalGenerator: Sendable {
         AppleLocalProgress(
           status: "Pending",
           progress: 4 + (Double(index) / Double(request.frameCount)) * 90,
-          message: "Generating image (index + 1) of (request.frameCount)"
+          message: "Generating image \(index + 1) of \(request.frameCount)"
         )
       )
-      var concepts = [ImagePlaygroundConcept.text(request.promptForFrame(index))]
+      var concepts = [ImagePlaygroundConcept.text(request.prompt)]
+      if request.mode == .sequence {
+        concepts.append(.text(request.directionForFrame(index)))
+      }
       if let previousImage { concepts.append(.image(previousImage)) }
       var generated: CGImage?
       let images = creator.images(for: concepts, style: style, limit: 1)
@@ -376,7 +374,8 @@ private struct AppleLocalGenerator: Sendable {
       throw AppleLocalError.invalidRequest("A generated image could not be decoded.")
     }
     var buffer: CVPixelBuffer?
-    let result = pool == nil
+    let result =
+      pool == nil
       ? CVPixelBufferCreate(
         nil,
         width,

@@ -297,6 +297,7 @@ class AppController extends ChangeNotifier {
   final ProviderCatalogClient _providerCatalogClient;
   final bool _mobileTestBuild;
   final GenerationFormState form = GenerationFormState();
+  final List<MediaReferenceDraft> _disabledReferences = <MediaReferenceDraft>[];
 
   LocalSnapshot? snapshot;
   AppSection section = AppSection.create;
@@ -3048,6 +3049,7 @@ class AppController extends ChangeNotifier {
 
   void _normalizeFormForModel() {
     final model = selectedModel;
+    _reconcileReferencesForModel(model);
     form.upscale = model.isUpscaler;
     if (!model.supportsAutoDuration) form.autoDuration = false;
     if (!model.supportsAudio) form.generateAudio = false;
@@ -3074,6 +3076,33 @@ class AppController extends ChangeNotifier {
     if (!ratios.contains(form.aspectRatio)) {
       form.aspectRatio = ratios.contains('16:9') ? '16:9' : ratios.first;
     }
+  }
+
+  /// Keeps incompatible creative references out of mode inference, request
+  /// validation, pricing, and provider payloads while preserving the Create
+  /// draft in case the user switches back to a reference-capable model.
+  void _reconcileReferencesForModel(VideoModelDefinition model) {
+    if (!model.supportsMediaReferences) {
+      if (form.references.isEmpty) return;
+      final disabledById = <String, MediaReferenceDraft>{
+        for (final reference in _disabledReferences) reference.id: reference,
+        for (final reference in form.references) reference.id: reference,
+      };
+      _disabledReferences
+        ..clear()
+        ..addAll(disabledById.values);
+      form.references = <MediaReferenceDraft>[];
+      return;
+    }
+    if (_disabledReferences.isEmpty) return;
+    final activeIds = form.references.map((reference) => reference.id).toSet();
+    form.references = <MediaReferenceDraft>[
+      ..._disabledReferences.where(
+        (reference) => !activeIds.contains(reference.id),
+      ),
+      ...form.references,
+    ];
+    _disabledReferences.clear();
   }
 
   Future<PickedAsset?> _pick({
@@ -5352,6 +5381,7 @@ class AppController extends ChangeNotifier {
         ? item.config.referenceTask
         : MediaReferenceTask.reference;
     if (_disposed) return;
+    _disabledReferences.clear();
     form
       ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
           ? item.prompt
