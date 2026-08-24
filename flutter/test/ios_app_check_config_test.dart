@@ -30,6 +30,7 @@ void main() {
     );
     expect(debugConfig, contains('GOOGLE_IOS_CLIENT_ID ='));
     expect(releaseConfig, contains('GOOGLE_IOS_CLIENT_ID ='));
+    expect(releaseConfig, contains('#include? "CISigning.xcconfig"'));
     expect(buildHelpers, contains('GOOGLE_IOS_CLIENT_ID = %s'));
   });
 

@@ -10,6 +10,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Environment:"
   echo "  CLAWNSOLE_IOS_EXPORT_METHOD  app-store, ad-hoc, development, or enterprise"
   echo "                                (default: app-store)"
+  echo "  CLAWNSOLE_IOS_EXPORT_OPTIONS path to an ExportOptions.plist; overrides"
+  echo "                                CLAWNSOLE_IOS_EXPORT_METHOD"
   echo "  INCLUDE_IOS_TEST_KEYS                   true to compile App Review keys"
   echo "                                          (default: false)"
   echo "  CLAWNSOLE_IOS_REVIEW_BFL_API_KEY       App Review BFL key"
@@ -39,6 +41,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 EXPORT_METHOD="${CLAWNSOLE_IOS_EXPORT_METHOD:-app-store}"
+EXPORT_OPTIONS="${CLAWNSOLE_IOS_EXPORT_OPTIONS:-}"
 if [[ "$PRODUCTION_BUILD" == true ]]; then
   for argument in "$@"; do
     case "$argument" in
@@ -56,10 +59,16 @@ prepare_clawnsole_review_defines
 prepare_google_ios_oauth
 trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
 
-IOS_BUILD_ARGUMENTS=(
-  --release
-  --export-method "$EXPORT_METHOD"
-)
+IOS_BUILD_ARGUMENTS=(--release)
+if [[ -n "$EXPORT_OPTIONS" ]]; then
+  if [[ ! -f "$EXPORT_OPTIONS" ]]; then
+    echo "CLAWNSOLE_IOS_EXPORT_OPTIONS does not exist: $EXPORT_OPTIONS" >&2
+    exit 1
+  fi
+  IOS_BUILD_ARGUMENTS+=(--export-options-plist "$EXPORT_OPTIONS")
+else
+  IOS_BUILD_ARGUMENTS+=(--export-method "$EXPORT_METHOD")
+fi
 if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
   IOS_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
 fi
