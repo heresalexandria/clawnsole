@@ -670,7 +670,7 @@ class NativeGateway extends DirectGateway
         lastProviderResponseAt: acceptedAt,
         updatedAt: acceptedAt,
       );
-      return _replaceAppleLocalGeneration(record);
+      return await _replaceAppleLocalGeneration(record);
     } on Object catch (error) {
       record = record.copyWith(
         status: 'Error',
@@ -749,7 +749,7 @@ class NativeGateway extends DirectGateway
         lastProviderResponseAt: checkedAt,
         updatedAt: checkedAt,
       );
-      return _replaceAppleLocalGeneration(next);
+      return await _replaceAppleLocalGeneration(next);
     } on Object catch (error) {
       final next = generation.copyWith(
         lastCheckedAt: checkedAt,
