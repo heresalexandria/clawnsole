@@ -45,6 +45,8 @@
 	<string>Clawnsole uses selected images as FLUX video keyframes.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clawnsole saves generated videos to your Photos library when you choose Save to Photos.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Clawnsole's media picker may access location metadata attached to photos and videos while you choose generation inputs. Clawnsole does not request your current location.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIFileSharingEnabled</key>
