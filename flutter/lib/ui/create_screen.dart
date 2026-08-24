@@ -567,6 +567,26 @@ class _ComposerState extends State<_Composer> {
 
   AppController get controller => widget.controller;
 
+  Future<void> _showFullscreenPrompt({required bool upscaling}) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: .58),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (context, _, _) =>
+          _FullscreenPromptEditor(controller: controller, upscaling: upscaling),
+      transitionBuilder: (context, animation, _, child) => FadeTransition(
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
+        child: child,
+      ),
+    );
+    // CreateScreen is also used without an AnimatedBuilder in focused widget
+    // tests and development harnesses. Refresh the inline editor after the
+    // modal closes so it always reflects the text entered there.
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_seenRevision != controller.formRevision) {
@@ -618,6 +638,14 @@ class _ComposerState extends State<_Composer> {
             FieldLabel(
               upscaling ? 'Detail guidance · optional' : 'Direction',
               icon: Icons.edit_note_rounded,
+              trailing: IconButton(
+                key: const ValueKey('prompt-fullscreen-button'),
+                tooltip: 'Expand prompt to full screen',
+                visualDensity: VisualDensity.compact,
+                onPressed: () =>
+                    unawaited(_showFullscreenPrompt(upscaling: upscaling)),
+                icon: const Icon(Icons.fullscreen_rounded),
+              ),
             ),
             const SizedBox(height: 7),
             ReferencePromptField(
@@ -753,6 +781,73 @@ class _ComposerState extends State<_Composer> {
           SizedBox(height: short ? 8 : 12),
           _ComposerFooter(controller: controller),
         ],
+      ),
+    );
+  }
+}
+
+class _FullscreenPromptEditor extends StatelessWidget {
+  const _FullscreenPromptEditor({
+    required this.controller,
+    required this.upscaling,
+  });
+
+  final AppController controller;
+  final bool upscaling;
+
+  @override
+  Widget build(BuildContext context) {
+    final horizontalPadding = MediaQuery.sizeOf(context).width < 620
+        ? 14.0
+        : 24.0;
+    return Material(
+      key: const ValueKey('prompt-fullscreen-editor'),
+      type: MaterialType.transparency,
+      child: AppBackdrop(
+        child: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              12,
+              horizontalPadding,
+              16,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                FieldLabel(
+                  upscaling ? 'Detail guidance · optional' : 'Direction',
+                  icon: Icons.edit_note_rounded,
+                  trailing: IconButton(
+                    key: const ValueKey('prompt-fullscreen-minimize'),
+                    tooltip: 'Minimize prompt',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.fullscreen_exit_rounded),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ReferencePromptField(
+                    key: ValueKey(
+                      'generation-prompt-fullscreen-'
+                      '${controller.formRevision}',
+                    ),
+                    prompt: controller.form.prompt,
+                    formRevision: controller.formRevision,
+                    references: _promptReferenceOptions(
+                      controller.form.references,
+                    ),
+                    expands: true,
+                    autofocus: true,
+                    onChanged: (value) =>
+                        controller.updateForm((form) => form.prompt = value),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show setEquals;
 
@@ -89,6 +91,8 @@ class ReferencePromptField extends StatefulWidget {
     required this.formRevision,
     required this.references,
     required this.onChanged,
+    this.expands = false,
+    this.autofocus = false,
     super.key,
   });
 
@@ -96,6 +100,8 @@ class ReferencePromptField extends StatefulWidget {
   final int formRevision;
   final List<PromptReferenceOption> references;
   final ValueChanged<String> onChanged;
+  final bool expands;
+  final bool autofocus;
 
   @override
   State<ReferencePromptField> createState() => _ReferencePromptFieldState();
@@ -137,6 +143,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       references.map((reference) => reference.mention.normalized).toSet();
 
   void _refreshSuggestions() {
+    _preserveAncestorScrollForSelectAll();
     final query = _mentionQuery(_controller.value, widget.references);
     final suggestions = query == null
         ? const <PromptReferenceOption>[]
@@ -151,6 +158,40 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       _query = query;
       _suggestions = suggestions;
     });
+  }
+
+  void _preserveAncestorScrollForSelectAll() {
+    final selection = _controller.selection;
+    if (_controller.text.isEmpty ||
+        selection.baseOffset != 0 ||
+        selection.extentOffset != _controller.text.length) {
+      return;
+    }
+    final position = Scrollable.maybeOf(context)?.position;
+    if (position == null || !position.hasPixels) return;
+    unawaited(_restoreScrollAfterSelectionReveal(position, position.pixels));
+  }
+
+  Future<void> _restoreScrollAfterSelectionReveal(
+    ScrollPosition position,
+    double offset,
+  ) async {
+    // Platform-native context menus can bypass Flutter's SelectAllTextIntent
+    // and send a selection update through the text input connection. The first
+    // frame lets EditableText attach its reveal animation; the second reaches
+    // its first tick so jumpTo can cancel it before it moves the page.
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !position.hasPixels || !position.hasContentDimensions) {
+      return;
+    }
+    final target = offset.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    // jumpTo also cancels EditableText's in-flight ancestor reveal animation
+    // when its first tick has not moved the position yet.
+    position.jumpTo(target);
   }
 
   bool _sameOptions(
@@ -181,6 +222,14 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     _focusNode.requestFocus();
   }
 
+  Object? _selectAllWithoutRevealing(SelectAllTextIntent intent) {
+    _controller.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _controller.text.length,
+    );
+    return null;
+  }
+
   @override
   void dispose() {
     _controller
@@ -191,14 +240,24 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      TextFormField(
+  Widget build(BuildContext context) {
+    final promptField = Actions(
+      actions: <Type, Action<Intent>>{
+        // EditableText normally asks every ancestor Scrollable to reveal the
+        // selection endpoint after Select All. The prompt has its own internal
+        // scroller, so that request only makes the surrounding Create screen
+        // jump. Preserve the selection behavior without propagating a reveal.
+        SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+          onInvoke: _selectAllWithoutRevealing,
+        ),
+      },
+      child: TextFormField(
         controller: _controller,
         focusNode: _focusNode,
-        minLines: 4,
-        maxLines: 10,
+        autofocus: widget.autofocus,
+        expands: widget.expands,
+        minLines: widget.expands ? null : 4,
+        maxLines: widget.expands ? null : 10,
         maxLength: 50000,
         style: const TextStyle(fontSize: 14.5, height: 1.5),
         onChanged: widget.onChanged,
@@ -210,85 +269,92 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           alignLabelWithHint: true,
         ),
       ),
-      if (_suggestions.isNotEmpty) ...<Widget>[
-        const SizedBox(height: 6),
-        Container(
-          key: const ValueKey('prompt-reference-suggestions'),
-          decoration: BoxDecoration(
-            color: context.colors.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: context.colors.outlineVariant),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: Colors.black.withValues(alpha: .08),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 260),
-            child: ListView(
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              children: _suggestions
-                  .map(
-                    (option) => InkWell(
-                      key: ValueKey(
-                        'prompt-reference-${option.mention.normalized}',
-                      ),
-                      onTap: () => _select(option),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 9,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (widget.expands) Expanded(child: promptField) else promptField,
+        if (_suggestions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          Container(
+            key: const ValueKey('prompt-reference-suggestions'),
+            decoration: BoxDecoration(
+              color: context.colors.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: context.colors.outlineVariant),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: .08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                children: _suggestions
+                    .map(
+                      (option) => InkWell(
+                        key: ValueKey(
+                          'prompt-reference-${option.mention.normalized}',
                         ),
-                        child: Row(
-                          children: <Widget>[
-                            Icon(
-                              switch (option.mention.kind) {
-                                MediaReferenceKind.image => Icons.image_rounded,
-                                MediaReferenceKind.video =>
-                                  Icons.video_library_rounded,
-                                MediaReferenceKind.audio =>
-                                  Icons.graphic_eq_rounded,
-                              },
-                              size: 18,
-                              color: context.colors.primary,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              option.mention.canonical,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                        onTap: () => _select(option),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 9,
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                switch (option.mention.kind) {
+                                  MediaReferenceKind.image =>
+                                    Icons.image_rounded,
+                                  MediaReferenceKind.video =>
+                                    Icons.video_library_rounded,
+                                  MediaReferenceKind.audio =>
+                                    Icons.graphic_eq_rounded,
+                                },
+                                size: 18,
+                                color: context.colors.primary,
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                option.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: context.colors.onSurfaceVariant,
+                              const SizedBox(width: 10),
+                              Text(
+                                option.mention.canonical,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  option.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: context.colors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                  .toList(),
+                    )
+                    .toList(),
+              ),
             ),
           ),
-        ),
+        ],
       ],
-    ],
-  );
+    );
+  }
 }
 
 class _PromptMentionQuery {
