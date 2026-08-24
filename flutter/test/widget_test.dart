@@ -1660,7 +1660,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 21);
+    expect(decoded.toJson()['schemaVersion'], 22);
   });
 
   test(
@@ -1856,7 +1856,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 21);
+      expect(decoded.toJson()['schemaVersion'], 22);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -2365,6 +2365,7 @@ void main() {
       final controller = AppController(gateway: gateway);
 
       await controller.initialize();
+      await Future<void>.delayed(Duration.zero);
 
       expect(controller.form.prompt, isEmpty);
       expect(controller.form.mode, VideoMode.i2v);
@@ -5713,6 +5714,51 @@ void main() {
     expect(controller.generations.single.storage, LibraryStorage.drive);
   });
 
+  test('startup opens from local state before Drive reconciliation', () async {
+    final resume = Completer<LocalSnapshot?>();
+    final gateway = _ResumableDriveGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      configured: true,
+      resumed: null,
+      resumeFuture: resume.future,
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+
+    expect(controller.loading, isFalse);
+    expect(gateway.resumeCalls, 1);
+    expect(resume.isCompleted, isFalse);
+
+    await controller.setRecentWorkViewMode(GenerationViewMode.compact);
+
+    resume.complete(
+      LocalSnapshot(
+        generations: <Generation>[
+          _viewModeGeneration(0).copyWith(storage: LibraryStorage.drive),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.generations, hasLength(1));
+    expect(
+      controller.recentWorkViewMode,
+      GenerationViewMode.compact,
+      reason: 'background reconciliation must not overwrite a newer local edit',
+    );
+  });
+
   test('startup does not resume Drive for never-connected libraries', () async {
     final gateway = _ResumableDriveGateway(
       const LocalSnapshot(
@@ -6745,11 +6791,13 @@ class _ResumableDriveGateway extends _MemoryGateway
     required this.configured,
     required this.resumed,
     this.refreshed,
+    this.resumeFuture,
   });
 
   final bool configured;
   final LocalSnapshot? resumed;
   final LocalSnapshot? refreshed;
+  final Future<LocalSnapshot?>? resumeFuture;
   int resumeCalls = 0;
   int refreshCalls = 0;
   bool _connected = false;
@@ -6769,7 +6817,7 @@ class _ResumableDriveGateway extends _MemoryGateway
   @override
   Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async {
     resumeCalls += 1;
-    final value = resumed;
+    final value = resumeFuture == null ? resumed : await resumeFuture;
     if (value == null) return null;
     _connected = true;
     snapshot = value;

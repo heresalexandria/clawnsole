@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -6,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'bfl_api.dart';
+import 'asset_extensions.dart';
 import 'data_location.dart';
 import 'direct_gateway.dart';
 import 'directory_reveal.dart';
@@ -103,12 +105,21 @@ class NativeGateway extends DirectGateway
         '${Platform.pathSeparator}video-cache',
       ),
     );
+    final thumbnailCache = VideoCache(
+      directory: () async => Directory(
+        '${(await getApplicationCacheDirectory()).path}'
+        '${Platform.pathSeparator}thumbnail-cache',
+      ),
+    );
     final hybrid =
         hybridStore ??
         HybridDataStore(
           local: localStore!,
           drive: GoogleDriveStore(
-            presenter: IoGoogleDriveAssetPresenter(cache: videoCache),
+            presenter: IoGoogleDriveAssetPresenter(
+              videoCache: videoCache,
+              thumbnailCache: thumbnailCache,
+            ),
           ),
         );
     final vault =
@@ -128,6 +139,7 @@ class NativeGateway extends DirectGateway
       localStore: localStore,
       vault: vault,
       videoCache: videoCache,
+      thumbnailCache: thumbnailCache,
       driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
       api: api,
       client: client,
@@ -159,6 +171,7 @@ class NativeGateway extends DirectGateway
     required HybridDataStore hybrid,
     required SettingsVaultDataStore vault,
     required VideoCache videoCache,
+    required VideoCache thumbnailCache,
     required GoogleDriveAuthorizer driveAuthorizer,
     LocalDataStore? localStore,
     BflApi? api,
@@ -178,6 +191,7 @@ class NativeGateway extends DirectGateway
        _localStore = localStore,
        _vault = vault,
        _videoCache = videoCache,
+       _thumbnailCache = thumbnailCache,
        _driveAuthorizer = driveAuthorizer,
        _iosReviewKeys = <String, String>{
          'bfl': (iosReviewApiKey ?? _configuredIosReviewApiKey).trim(),
@@ -213,6 +227,7 @@ class NativeGateway extends DirectGateway
   final LocalDataStore? _localStore;
   final SettingsVaultDataStore _vault;
   final VideoCache _videoCache;
+  final VideoCache _thumbnailCache;
   final GoogleDriveAuthorizer _driveAuthorizer;
   final Map<
     String,
@@ -234,9 +249,12 @@ class NativeGateway extends DirectGateway
   /// never surface: the cache is a best-effort speed-up, not user data.
   Future<void> _applyVideoCachePreference(AppPreferences preferences) async {
     try {
-      await _videoCache.setMaxBytes(
-        preferences.localVideoCacheMb * 1024 * 1024,
-      );
+      await Future.wait(<Future<void>>[
+        _videoCache.setMaxBytes(preferences.localVideoCacheMb * 1024 * 1024),
+        _thumbnailCache.setMaxBytes(
+          preferences.localThumbnailCacheMb * 1024 * 1024,
+        ),
+      ]);
     } on Object {
       // Ignored: the next successful write or sweep restores the invariant.
     }
@@ -245,7 +263,10 @@ class NativeGateway extends DirectGateway
   @override
   Future<LocalSnapshot> load() async {
     final snapshot = await super.load();
-    await _applyVideoCachePreference(snapshot.preferences);
+    // Cache maintenance is local best-effort work and must never extend the
+    // splash-screen critical path. setMaxBytes adopts each cap immediately;
+    // any LRU sweep finishes after first paint.
+    unawaited(_applyVideoCachePreference(snapshot.preferences));
     return snapshot;
   }
 
@@ -260,7 +281,13 @@ class NativeGateway extends DirectGateway
   Future<int> videoCacheUsedBytes() => _videoCache.usedBytes();
 
   @override
+  Future<int> thumbnailCacheUsedBytes() => _thumbnailCache.usedBytes();
+
+  @override
   Future<void> clearVideoCache() => _videoCache.clear();
+
+  @override
+  Future<void> clearThumbnailCache() => _thumbnailCache.clear();
 
   @override
   Future<Uint8List?> cachedAssetBytes(AssetReference reference) async {
@@ -268,8 +295,11 @@ class NativeGateway extends DirectGateway
       if (reference.kind != 'drive') {
         return await _hybrid.readAsset(reference);
       }
-      if (!_videoCache.enabled) return null;
-      final cached = await _videoCache.lookup(reference.value);
+      final cache = isRetainedVideoAsset(reference.contentType, reference.label)
+          ? _videoCache
+          : _thumbnailCache;
+      if (!cache.enabled) return null;
+      final cached = await cache.lookup(reference.value);
       return cached == null ? null : await cached.readAsBytes();
     } on Object {
       return null;

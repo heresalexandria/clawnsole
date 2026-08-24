@@ -44,10 +44,18 @@ Future<void> main(List<String> arguments) async {
       '${File(config.dataFile).parent.path}${Platform.pathSeparator}video-cache',
     ),
   );
+  final thumbnailCache = VideoCache(
+    directory: () async => Directory(
+      '${File(config.dataFile).parent.path}${Platform.pathSeparator}thumbnail-cache',
+    ),
+  );
   final hybrid = HybridDataStore(
     local: localStore,
     drive: GoogleDriveStore(
-      presenter: IoGoogleDriveAssetPresenter(cache: videoCache),
+      presenter: IoGoogleDriveAssetPresenter(
+        videoCache: videoCache,
+        thumbnailCache: thumbnailCache,
+      ),
     ),
   );
   final secureStore = deviceKey == null
@@ -81,6 +89,7 @@ Future<void> main(List<String> arguments) async {
     requestToken: bootstrap.requestToken,
     allowedOrigin: 'http://127.0.0.1:${server.port}',
     videoCache: videoCache,
+    thumbnailCache: thumbnailCache,
     referenceVideoNormalizer: ReferenceVideoNormalizer(
       backend: ProcessReferenceVideoToolBackend(
         ffmpegPath: config.mediaToolsDir == null
@@ -702,6 +711,7 @@ class CompanionApp {
     String requestToken = '',
     String allowedOrigin = '',
     VideoCache? videoCache,
+    VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
   }) => CompanionApp.hybrid(
@@ -713,6 +723,7 @@ class CompanionApp {
     requestToken: requestToken,
     allowedOrigin: allowedOrigin,
     videoCache: videoCache,
+    thumbnailCache: thumbnailCache,
     referenceVideoNormalizer: referenceVideoNormalizer,
   );
 
@@ -725,6 +736,7 @@ class CompanionApp {
     String requestToken = '',
     String allowedOrigin = '',
     VideoCache? videoCache,
+    VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
   }) : _store = store,
@@ -734,6 +746,7 @@ class CompanionApp {
        _requestToken = requestToken,
        _allowedOrigin = allowedOrigin,
        _videoCache = videoCache,
+       _thumbnailCache = thumbnailCache,
        _referenceVideoNormalizer = referenceVideoNormalizer;
 
   final CompanionHybridStore _store;
@@ -743,6 +756,7 @@ class CompanionApp {
   final String _requestToken;
   final String _allowedOrigin;
   final VideoCache? _videoCache;
+  final VideoCache? _thumbnailCache;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
 
@@ -931,6 +945,19 @@ class CompanionApp {
       }
       if (request.method == 'DELETE' && path == '/video-cache') {
         await _videoCache?.clear();
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
+      }
+      if (request.method == 'GET' && path == '/thumbnail-cache') {
+        final cache = await _syncedThumbnailCache(await _store.read());
+        return await _json(request.response, 200, <String, Object?>{
+          'usedBytes': cache == null ? 0 : await cache.usedBytes(),
+          'capBytes': cache?.maxBytes ?? 0,
+        });
+      }
+      if (request.method == 'DELETE' && path == '/thumbnail-cache') {
+        await _thumbnailCache?.clear();
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
         });
@@ -1538,6 +1565,11 @@ class CompanionApp {
 
   Future<LocalSnapshot> _snapshot() async {
     var data = await _store.read();
+    // Apply persisted caps immediately, but keep maintenance sweeps off the
+    // startup response path. setMaxBytes updates the active bound before its
+    // first asynchronous filesystem pass, so newly generated media already
+    // honors the setting while old files are trimmed in the background.
+    _applyCachePreferences(data);
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = data.generations.map((item) {
@@ -2157,11 +2189,26 @@ class CompanionApp {
     return cache;
   }
 
-  bool _isVideoAsset(AssetReference reference) => const <String>{
-    '.mp4',
-    '.mov',
-    '.webm',
-  }.contains(retainedAssetExtension(reference.contentType, reference.label));
+  Future<VideoCache?> _syncedThumbnailCache(StoredData data) async {
+    final cache = _thumbnailCache;
+    if (cache == null) return null;
+    await cache.setMaxBytes(
+      data.preferences.localThumbnailCacheMb * 1024 * 1024,
+    );
+    return cache;
+  }
+
+  void _applyCachePreferences(StoredData data) {
+    for (final operation in <Future<VideoCache?>>[
+      _syncedVideoCache(data),
+      _syncedThumbnailCache(data),
+    ]) {
+      unawaited(operation.then<void>((_) {}, onError: (Object _) {}));
+    }
+  }
+
+  bool _isVideoAsset(AssetReference reference) =>
+      isRetainedVideoAsset(reference.contentType, reference.label);
 
   Future<void> _asset(HttpRequest request) async {
     final id = request.uri.queryParameters['id'];
@@ -2223,7 +2270,9 @@ class CompanionApp {
         await _store.readAsset(reference),
       );
     }
-    final cache = await _syncedVideoCache(data);
+    final cache = _isVideoAsset(reference)
+        ? await _syncedVideoCache(data)
+        : await _syncedThumbnailCache(data);
     final file = cache?.enabled == true
         ? await cache!.lookup(reference.value)
         : null;
@@ -2238,8 +2287,10 @@ class CompanionApp {
 
   /// Serves a Drive-stored film from the local disk cache, filling the cache
   /// exactly once on a miss. A cold request for a later byte range is
-  /// answered directly from Drive's Range support instead of waiting behind
-  /// the full download.
+  /// answered directly from Drive's Range support while the full file is also
+  /// materialized in the background. Browser players commonly begin with a
+  /// tiny or nonzero range, so range playback must still warm the durable
+  /// cache for the next open and the next process launch.
   Future<void> _driveVideoAsset(
     HttpRequest request,
     AssetReference reference,
@@ -2252,6 +2303,7 @@ class CompanionApp {
     final opensAtZero =
         range == null || (range.rawStart == 0 && range.rawEnd == null);
     if (!opensAtZero && knownSize != null && knownSize > 0) {
+      _queueDriveVideoFill(reference, cache);
       final resolved = _resolveByteRange(range, knownSize);
       if (resolved == null) {
         return _rangeNotSatisfiable(request, knownSize);
@@ -2306,6 +2358,19 @@ class CompanionApp {
     return operation;
   }
 
+  void _queueDriveVideoFill(AssetReference reference, VideoCache cache) {
+    unawaited(
+      _fillDriveVideo(reference, cache).then<void>(
+        (_) {},
+        onError: (Object error) {
+          stderr.writeln(
+            'Video cache fill failed for ${reference.value}: $error',
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _prefetchVideo(HttpRequest request) async {
     final body = await _bodyMap(request);
     final id = body['id']?.toString() ?? '';
@@ -2326,19 +2391,11 @@ class CompanionApp {
         _isVideoAsset(reference) &&
         cache != null &&
         cache.enabled;
-    if (queued) {
-      unawaited(
-        _fillDriveVideo(reference, cache).then<void>(
-          (_) {},
-          onError: (Object error) {
-            stderr.writeln('Video prefetch failed for $id: $error');
-          },
-        ),
-      );
-    }
-    return _json(request.response, 202, <String, Object?>{
+    if (queued) await _fillDriveVideo(reference, cache);
+    return _json(request.response, 200, <String, Object?>{
       'ok': true,
       'queued': queued,
+      'cached': queued,
     });
   }
 
