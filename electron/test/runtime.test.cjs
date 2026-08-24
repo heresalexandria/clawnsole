@@ -56,6 +56,11 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
   assert.equal(isAllowedExternalUrl("https://console.ltx.io/"), true);
   assert.equal(isAllowedExternalUrl("https://docs.ltx.io/pricing"), true);
   assert.equal(isAllowedExternalUrl("https://app.getartcraft.com/"), true);
+  assert.equal(isAllowedExternalUrl("https://app.runwayml.com/"), true);
+  assert.equal(
+    isAllowedExternalUrl("https://docs.dev.runwayml.com/guides/models/"),
+    true,
+  );
   assert.equal(
     isAllowedExternalUrl("https://storyteller-docs.netlify.app/"),
     true,
@@ -78,6 +83,7 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
   assert.equal(isAllowedExternalUrl("http://bfl.ai/pricing"), false);
   assert.equal(isAllowedExternalUrl("http://heresalexandria.com/"), false);
   assert.equal(isAllowedExternalUrl("https://bfl.ai.example.com"), false);
+  assert.equal(isAllowedExternalUrl("https://app.runwayml.com.example.com"), false);
   assert.equal(
     isAllowedExternalUrl("https://app.getartcraft.com.example.com"),
     false,

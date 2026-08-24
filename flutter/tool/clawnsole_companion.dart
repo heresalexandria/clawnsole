@@ -72,6 +72,10 @@ Future<void> main(List<String> arguments) async {
       'ltx': Platform.environment['LTX_API_KEY']?.trim() ?? '',
       'artcraft': Platform.environment['ARTCRAFT_KEY']?.trim() ?? '',
       'atlas': Platform.environment['ATLAS_CLOUD_KEY']?.trim() ?? '',
+      'runway':
+          Platform.environment['RUNWAY_KEY']?.trim() ??
+          Platform.environment['RUNWAYML_API_SECRET']?.trim() ??
+          '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
     requestToken: bootstrap.requestToken,
@@ -1589,7 +1593,13 @@ class CompanionApp {
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
-      availableProviders: const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
+      availableProviders: const <String>{
+        'bfl',
+        'ltx',
+        'artcraft',
+        'atlas',
+        'runway',
+      },
       settingsVault:
           _store.vault?.settingsVaultStatus ??
           const SettingsVaultStatus.unavailable(),
@@ -1873,11 +1883,20 @@ class CompanionApp {
         );
       }
       final acceptedAt = DateTime.now().toUtc();
+      final receiptEstimate = (receipt['estimated_credits'] as num?)
+          ?.toDouble();
       generation = generation.copyWith(
         requestId: requestId,
         pollingUrl: pollingUrl,
         status: 'Pending',
         clearProgress: true,
+        estimatedCreditsMax: receiptEstimate,
+        estimateBasis: receiptEstimate == null
+            ? null
+            : 'provider submission receipt · maximum charge',
+        quotedCostUsdMax: receiptEstimate == null
+            ? null
+            : creditsToUsd(receiptEstimate),
         lastProviderStatusCode: 200,
         lastProviderResponse: compactProviderResponse(receipt),
         lastProviderResponseAt: acceptedAt,

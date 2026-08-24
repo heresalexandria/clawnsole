@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../core/gateway.dart';
 import '../core/models.dart';
+import 'media_duration_loader.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
 
@@ -14,6 +15,8 @@ final Map<String, Future<Uint8List?>> _videoThumbnailJobs =
     <String, Future<Uint8List?>>{};
 final Map<String, Future<VideoSourceMetadata?>> _videoMetadataJobs =
     <String, Future<VideoSourceMetadata?>>{};
+final Map<String, Future<double?>> _mediaDurationJobs =
+    <String, Future<double?>>{};
 
 /// A single preview surface for picked, retained, Drive, and remote media.
 ///
@@ -34,8 +37,10 @@ class MediaThumbnail extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.frameLoader,
     this.metadataLoader,
+    this.durationLoader,
     this.onThumbnail,
     this.onVideoMetadata,
+    this.onMediaDuration,
     this.semanticsLabel,
   });
 
@@ -51,8 +56,10 @@ class MediaThumbnail extends StatefulWidget {
   final BoxFit fit;
   final VideoFrameLoader? frameLoader;
   final VideoMetadataLoader? metadataLoader;
+  final MediaDurationLoader? durationLoader;
   final ValueChanged<Uint8List>? onThumbnail;
   final ValueChanged<VideoSourceMetadata>? onVideoMetadata;
+  final ValueChanged<double>? onMediaDuration;
   final String? semanticsLabel;
 
   @override
@@ -112,6 +119,9 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     } else if (widget.kind == MediaReferenceKind.video) {
       _videoThumbnail = _loadVideoThumbnail();
       if (widget.onVideoMetadata != null) unawaited(_loadVideoMetadata());
+    } else if (widget.kind == MediaReferenceKind.audio &&
+        widget.onMediaDuration != null) {
+      unawaited(_loadMediaDuration());
     }
   }
 
@@ -172,7 +182,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<Uint8List?> _generateVideoThumbnail() async {
-    final uri = await _videoUri();
+    final uri = await _mediaUri();
     if (uri == null) return null;
     return (widget.frameLoader ?? loadVideoFrame)(
       uri,
@@ -181,7 +191,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<void> _loadVideoMetadata() async {
-    final uri = await _videoUri();
+    final uri = await _mediaUri();
     if (uri == null) return;
     final key = _fingerprint;
     var job = _videoMetadataJobs[key];
@@ -209,7 +219,36 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     widget.onVideoMetadata?.call(metadata);
   }
 
-  Future<Uri?> _videoUri() async {
+  Future<void> _loadMediaDuration() async {
+    final uri = await _mediaUri();
+    if (uri == null) return;
+    final key = _fingerprint;
+    var job = _mediaDurationJobs[key];
+    if (job == null) {
+      late final Future<double?> created;
+      created = (widget.durationLoader ?? loadMediaDuration)(uri)
+          .then((duration) {
+            if (duration == null &&
+                identical(_mediaDurationJobs[key], created)) {
+              _mediaDurationJobs.remove(key);
+            }
+            return duration;
+          })
+          .catchError((Object error) {
+            if (identical(_mediaDurationJobs[key], created)) {
+              _mediaDurationJobs.remove(key);
+            }
+            return null;
+          });
+      _mediaDurationJobs[key] = created;
+      job = created;
+    }
+    final duration = await job;
+    if (!mounted || duration == null) return;
+    widget.onMediaDuration?.call(duration);
+  }
+
+  Future<Uri?> _mediaUri() async {
     final path = widget.localPath?.trim() ?? '';
     if (path.isNotEmpty) {
       final parsed = Uri.tryParse(path);
@@ -230,7 +269,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     final bytes = widget.bytes;
     if (bytes != null && bytes.isNotEmpty) {
       return Uri.parse(
-        'data:${widget.mimeType ?? 'video/mp4'};base64,${base64Encode(bytes)}',
+        'data:${widget.mimeType ?? (widget.kind == MediaReferenceKind.audio ? 'audio/mpeg' : 'video/mp4')};base64,${base64Encode(bytes)}',
       );
     }
     return null;

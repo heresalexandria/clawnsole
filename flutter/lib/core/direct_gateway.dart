@@ -56,7 +56,13 @@ class DirectGateway
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
     this.persistenceDescription = 'Durable Clawnsole data store',
-    this.availableProviders = const <String>{'bfl', 'ltx', 'artcraft', 'atlas'},
+    this.availableProviders = const <String>{
+      'bfl',
+      'ltx',
+      'artcraft',
+      'atlas',
+      'runway',
+    },
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _client = client ?? http.Client(),
@@ -925,12 +931,21 @@ class DirectGateway
         );
       }
       final acceptedAt = DateTime.now().toUtc();
+      final receiptEstimate = (response['estimated_credits'] as num?)
+          ?.toDouble();
       record = record.copyWith(
         requestId: requestId,
         pollingUrl: pollingUrl,
         status: 'Pending',
         clearProgress: true,
         providerAcceptedAt: acceptedAt,
+        estimatedCreditsMax: receiptEstimate,
+        estimateBasis: receiptEstimate == null
+            ? null
+            : 'provider submission receipt · maximum charge',
+        quotedCostUsdMax: receiptEstimate == null
+            ? null
+            : creditsToUsd(receiptEstimate),
         lastProviderStatusCode: 200,
         lastProviderResponse: compactProviderResponse(response),
         lastProviderResponseAt: acceptedAt,

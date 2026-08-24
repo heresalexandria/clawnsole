@@ -393,9 +393,8 @@ class GenerationConfig {
             )
           : null,
       upscaleFactor: (json['upscaleFactor'] as num?)?.toDouble() ?? 2,
-      upscaleCreativity: (json['upscaleCreativity'] as num?)?.toInt() == 0
-          ? 0
-          : 1,
+      upscaleCreativity: ((json['upscaleCreativity'] as num?)?.toInt() ?? 1)
+          .clamp(0, 100),
       seed: (json['seed'] as num?)?.toInt(),
     );
   }
@@ -408,6 +407,7 @@ class MediaReferenceLabel {
     this.referenceId,
     this.source,
     this.thumbnailAsset,
+    this.durationSeconds,
   });
 
   final String label;
@@ -421,17 +421,20 @@ class MediaReferenceLabel {
   final String? referenceId;
   final AssetReference? source;
   final AssetReference? thumbnailAsset;
+  final double? durationSeconds;
 
   MediaReferenceLabel copyWith({
     String? referenceId,
     AssetReference? source,
     AssetReference? thumbnailAsset,
+    double? durationSeconds,
   }) => MediaReferenceLabel(
     label: label,
     kind: kind,
     referenceId: referenceId ?? this.referenceId,
     source: source ?? this.source,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
+    durationSeconds: durationSeconds ?? this.durationSeconds,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -440,6 +443,7 @@ class MediaReferenceLabel {
     if (referenceId != null) 'referenceId': referenceId,
     if (source != null) 'source': source!.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
+    if (durationSeconds != null) 'durationSeconds': durationSeconds,
   };
 
   factory MediaReferenceLabel.fromJson(Map<String, Object?> json) =>
@@ -465,6 +469,7 @@ class MediaReferenceLabel {
                 ),
               )
             : null,
+        durationSeconds: (json['durationSeconds'] as num?)?.toDouble(),
       );
 }
 

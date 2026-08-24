@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/services.dart';
 
 import '../app/app_theme.dart';
 import '../core/models.dart';
@@ -93,6 +94,7 @@ class ReferencePromptField extends StatefulWidget {
     required this.onChanged,
     this.expands = false,
     this.autofocus = false,
+    this.maxLength,
     super.key,
   });
 
@@ -102,6 +104,7 @@ class ReferencePromptField extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final bool expands;
   final bool autofocus;
+  final int? maxLength;
 
   @override
   State<ReferencePromptField> createState() => _ReferencePromptFieldState();
@@ -258,7 +261,8 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
         expands: widget.expands,
         minLines: widget.expands ? null : 4,
         maxLines: widget.expands ? null : 10,
-        maxLength: 50000,
+        maxLength: widget.maxLength ?? 50000,
+        maxLengthEnforcement: MaxLengthEnforcement.enforced,
         style: const TextStyle(fontSize: 14.5, height: 1.5),
         onChanged: widget.onChanged,
         decoration: InputDecoration(

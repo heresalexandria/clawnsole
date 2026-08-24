@@ -4,6 +4,7 @@ import 'bfl_api.dart';
 import 'ltx_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
+import 'runway_api.dart';
 
 class ProviderApiRouter {
   ProviderApiRouter({
@@ -11,21 +12,25 @@ class ProviderApiRouter {
     LtxApi? ltx,
     ArtCraftApi? artcraft,
     AtlasCloudApi? atlas,
+    RunwayApi? runway,
   }) : bfl = bfl ?? BflApi(),
        ltx = ltx ?? LtxApi(),
        artcraft = artcraft ?? ArtCraftApi(),
-       atlas = atlas ?? AtlasCloudApi();
+       atlas = atlas ?? AtlasCloudApi(),
+       runway = runway ?? RunwayApi();
 
   final BflApi bfl;
   final LtxApi ltx;
   final ArtCraftApi artcraft;
   final AtlasCloudApi atlas;
+  final RunwayApi runway;
 
   Future<ProviderAccountStatus> verify(String provider, String key) async =>
       switch (provider) {
         'ltx' => ltx.verify(key),
         'artcraft' => artcraft.verify(key),
         'atlas' => atlas.verify(key),
+        'runway' => runway.verify(key),
         _ => ProviderAccountStatus(
           provider: 'bfl',
           balance: await bfl.getCredits(key),
@@ -42,6 +47,7 @@ class ProviderApiRouter {
     'ltx' => ltx.submit(key, model, input),
     'artcraft' => artcraft.submit(key, model, input),
     'atlas' => atlas.submit(key, model, input),
+    'runway' => runway.submit(key, model, input),
     _ => bfl.submit(key, input, model: model),
   };
 
@@ -53,6 +59,7 @@ class ProviderApiRouter {
     'ltx' => ltx.poll(key, pollingUrl),
     'artcraft' => artcraft.poll(key, pollingUrl),
     'atlas' => atlas.poll(key, pollingUrl),
+    'runway' => runway.poll(key, pollingUrl),
     _ => bfl.poll(key, pollingUrl),
   };
 
@@ -60,6 +67,7 @@ class ProviderApiRouter {
       switch (provider) {
         'atlas' => atlas.listVideoModels(key),
         'artcraft' => artcraft.listVideoModels(),
+        'runway' => runway.listVideoModels(),
         _ => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
         ),

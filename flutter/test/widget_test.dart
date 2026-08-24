@@ -102,6 +102,36 @@ void main() {
     );
   });
 
+  testWidgets('audio media thumbnail reports provider-limit duration', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    double? duration;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaThumbnail(
+          gateway: gateway,
+          kind: MediaReferenceKind.audio,
+          source: 'https://cdn.test/reference.mp3',
+          durationLoader: (uri) async {
+            expect(uri, Uri.parse('https://cdn.test/reference.mp3'));
+            return 4.2;
+          },
+          onMediaDuration: (value) => duration = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(duration, 4.2);
+  });
+
   test('duration defaults to manual and model capabilities gate Auto', () {
     final controller = AppController();
 
@@ -2362,6 +2392,162 @@ void main() {
     grok.dispose();
   });
 
+  test('Runway form enforces prompt, source, and reference limits', () {
+    final controller = AppController()
+      ..snapshot = const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        connectedProviders: <String>{'runway'},
+        availableProviders: <String>{'runway'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      )
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = List<String>.filled(1001, 'x').join();
+    expect(controller.validate(), contains('up to 1000 characters'));
+
+    controller
+      ..selectedModelId = 'act_two'
+      ..form.prompt = '';
+    controller.updateForm(
+      (form) => form
+        ..videoUrl = 'https://cdn.test/performance.mp4'
+        ..videoMetadata = const VideoSourceMetadata(
+          width: 1280,
+          height: 720,
+          durationSeconds: 31,
+        ),
+    );
+    controller.addUrlReference(MediaReferenceKind.image);
+    controller.updateReference(
+      controller.form.references.single.id,
+      'https://cdn.test/character.png',
+    );
+    expect(controller.validate(), contains('up to 30 seconds'));
+
+    controller.form.videoMetadata = const VideoSourceMetadata(
+      width: 1280,
+      height: 720,
+      durationSeconds: 12,
+    );
+    expect(controller.validate(), isNull);
+    expect(controller.buildInputForTesting()['reference_images'], <String>[
+      'https://cdn.test/character.png',
+    ]);
+    expect(controller.currentConfig.duration, 'source');
+    expect(controller.currentConfig.references, hasLength(1));
+    expect(
+      controller.currentConfig.references!.single.source?.value,
+      'https://cdn.test/character.png',
+    );
+    controller.dispose();
+  });
+
+  test('Runway validates measured audio reference duration', () {
+    final controller = AppController()
+      ..snapshot = const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        connectedProviders: <String>{'runway'},
+        availableProviders: <String>{'runway'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      )
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'grok_imagine_1_5'
+      ..form.prompt = 'A three-toed sloth joins the slowcial movement.';
+    controller.addUrlReference(MediaReferenceKind.image);
+    controller.updateReference(
+      controller.form.references.single.id,
+      'https://cdn.test/sloth.png',
+    );
+    controller.addUrlReference(MediaReferenceKind.audio);
+    final audio = controller.form.references.singleWhere(
+      (item) => item.kind == MediaReferenceKind.audio,
+    );
+    controller.updateReference(audio.id, 'https://cdn.test/brief.mp3');
+
+    controller.rememberReferenceDuration(audio.id, 2);
+    expect(controller.validate(), contains('at least 3 seconds'));
+    controller.rememberReferenceDuration(audio.id, 16);
+    expect(controller.validate(), contains('up to 15 seconds'));
+    controller.rememberReferenceDuration(audio.id, 10);
+    expect(controller.validate(), isNull);
+    controller.dispose();
+  });
+
+  test('Runway Magnific uses target resolution instead of a scale factor', () {
+    final controller = AppController()
+      ..snapshot = const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        connectedProviders: <String>{'runway'},
+        availableProviders: <String>{'runway'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      )
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'magnific_video_upscaler_creative';
+    controller.form
+      ..upscale = true
+      ..videoUrl = 'https://cdn.test/source.mov'
+      ..resolution = 'qhd'
+      ..upscaleCreativity = 60
+      ..videoMetadata = const VideoSourceMetadata(
+        width: 3840,
+        height: 2160,
+        durationSeconds: 30,
+      );
+
+    expect(controller.validate(), isNull);
+    expect(controller.buildInputForTesting(), <String, Object?>{
+      'mode': 'upscale',
+      'input_video': 'https://cdn.test/source.mov',
+      'upscale_factor': 2.0,
+      'creativity': 60,
+      'resolution': 'qhd',
+      'safety_tolerance': 2,
+    });
+    controller.dispose();
+  });
+
+  test('Runway Aleph timestamps source guidance against source duration', () {
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'aleph2';
+    controller.form
+      ..videoUrl = 'https://cdn.test/source.mp4'
+      ..videoMetadata = const VideoSourceMetadata(
+        width: 1280,
+        height: 720,
+        durationSeconds: 12,
+      );
+    controller.addUrlFrame(KeyframeRole.start);
+    controller.updateFrame(
+      controller.form.keyframes.single.id,
+      source: 'https://cdn.test/start.png',
+    );
+    controller.addUrlFrame(KeyframeRole.end);
+    controller.updateFrame(
+      controller.form.keyframes
+          .singleWhere((frame) => frame.role == KeyframeRole.end)
+          .id,
+      source: 'https://cdn.test/end.png',
+    );
+
+    expect(controller.form.usesTimedKeyframes, isFalse);
+    expect(controller.buildInputForTesting()['keyframes'], <Object?>[
+      <Object?>[0.0, 'https://cdn.test/start.png'],
+      <Object?>[12.0, 'https://cdn.test/end.png'],
+    ]);
+    expect(controller.currentConfig.duration, 'source');
+    expect(controller.currentConfig.exactTiming, isTrue);
+    expect(controller.currentConfig.keyframes, hasLength(2));
+    expect(controller.currentConfig.keyframes!.last.seconds, 12);
+    controller.dispose();
+  });
+
   test('reuse recreates the exact stored request for every mode', () async {
     final gateway = _MemoryGateway(
       const LocalSnapshot(
@@ -3753,7 +3939,10 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.binding.setSurfaceSize(null);
     });
-    final controller = AppController()..form.prompt = 'Original direction';
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = 'Original direction';
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(
@@ -3763,6 +3952,17 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+
+    final inlinePrompt = find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    expect(
+      find.byKey(const ValueKey('prompt-character-limit')),
+      findsOneWidget,
+    );
+    await tester.enterText(inlinePrompt, List<String>.filled(1001, 'x').join());
+    await tester.pump();
+    expect(controller.form.prompt.length, 1000);
 
     await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-button')));
     await tester.pumpAndSettle();
@@ -3776,6 +3976,12 @@ void main() {
     expect(fullscreen, findsOneWidget);
     expect(tester.getSize(fullscreen), viewport);
     expect(tester.getSize(fullscreenPrompt).height, greaterThan(600));
+    await tester.enterText(
+      fullscreenPrompt,
+      List<String>.filled(1001, 'y').join(),
+    );
+    await tester.pump();
+    expect(controller.form.prompt.length, 1000);
     expect(
       find.byKey(const ValueKey('prompt-fullscreen-minimize')),
       findsOneWidget,
@@ -3789,9 +3995,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(fullscreen, findsNothing);
 
-    final inlinePrompt = find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
-    );
     final inlineEditable = tester.widget<EditableText>(
       find.descendant(of: inlinePrompt, matching: find.byType(EditableText)),
     );
