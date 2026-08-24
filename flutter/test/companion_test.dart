@@ -1087,12 +1087,15 @@ void main() {
       expect(generations.single['storage'], 'drive');
       expect(drive.assets.values.single, <int>[1, 2, 3]);
 
-      // The local file lost its records but keeps the Drive linkage, and
-      // the now-unreferenced retained asset was pruned from disk.
+      // The local file keeps a Drive metadata mirror and linkage while the
+      // now-unreferenced local media bytes are pruned from disk.
       final persisted = StoredData.decode(
         File('${temporary.path}/clawnsole.json').readAsStringSync(),
       );
-      expect(persisted.generations, isEmpty);
+      expect(persisted.generations.map((item) => item.localId), <String>[
+        'drive-generation-one',
+      ]);
+      expect(persisted.generations.single.storage, LibraryStorage.drive);
       expect(persisted.driveFolderName, 'Portable Studio');
       final assetsDirectory = Directory('${temporary.path}/assets');
       expect(
@@ -1168,6 +1171,14 @@ void main() {
       final base = Uri.parse('http://127.0.0.1:${server.port}');
 
       try {
+        // Cache-only startup restoration reports a miss without touching
+        // Drive. It must never silently turn app launch into a download.
+        final coldCache = await http.get(
+          base.resolve('/asset-cache?id=drive-film-two'),
+        );
+        expect(coldCache.statusCode, 404);
+        expect(drive.streamDownloads, 0);
+
         // A cold open-from-zero request fills the cache exactly once while
         // answering the range, and allows private browser caching.
         final first = await http.get(
@@ -1191,8 +1202,17 @@ void main() {
         expect(drive.streamDownloads, 1);
         expect(drive.rangeReads, 0);
 
-        // A cold seek on an uncached film answers straight from Drive's Range
-        // support instead of waiting behind a full download.
+        // Relaunch restoration can now read the same bytes strictly from the
+        // durable cache, without a second upstream request.
+        final warmCache = await http.get(
+          base.resolve('/asset-cache?id=drive-film-one'),
+        );
+        expect(warmCache.statusCode, 200);
+        expect(warmCache.bodyBytes, filmOne);
+        expect(drive.streamDownloads, 1);
+
+        // A cold seek answers straight from Drive's Range support while also
+        // warming the complete film for the next playback and relaunch.
         final coldSeek = await http.get(
           base.resolve('/assets?id=drive-film-two&kind=drive'),
           headers: const <String, String>{'Range': 'bytes=1-3'},
@@ -1201,29 +1221,33 @@ void main() {
         expect(coldSeek.bodyBytes, filmTwo.sublist(1, 4));
         expect(coldSeek.headers['content-range'], 'bytes 1-3/6');
         expect(drive.rangeReads, 1);
-        expect(drive.streamDownloads, 1);
+        final rangeFillDeadline = DateTime.now().add(
+          const Duration(seconds: 5),
+        );
+        while (await cache.lookup('drive-film-two') == null &&
+            DateTime.now().isBefore(rangeFillDeadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        expect(await cache.lookup('drive-film-two'), isNotNull);
+        expect(drive.streamDownloads, 2);
 
         final usage = await http.get(base.resolve('/video-cache'));
         final usagePayload = jsonDecode(usage.body) as Map<String, Object?>;
-        expect(usagePayload['usedBytes'], filmOne.length);
+        expect(usagePayload['usedBytes'], filmOne.length + filmTwo.length);
         expect(usagePayload['capBytes'], 100 * 1024 * 1024);
 
-        // Prefetch queues a background fill for the second film.
+        // Explicit prefetch waits until the film is durably cached and is a
+        // no-op for an item already warmed by playback.
         final prefetch = await http.post(
           base.resolve('/video-cache/prefetch'),
           headers: const <String, String>{'Content-Type': 'application/json'},
           body: jsonEncode(<String, Object?>{'id': 'drive-film-two'}),
         );
-        expect(prefetch.statusCode, 202);
+        expect(prefetch.statusCode, 200);
         expect(
           (jsonDecode(prefetch.body) as Map<String, Object?>)['queued'],
           true,
         );
-        final deadline = DateTime.now().add(const Duration(seconds: 5));
-        while (await cache.lookup('drive-film-two') == null &&
-            DateTime.now().isBefore(deadline)) {
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-        }
         expect(await cache.lookup('drive-film-two'), isNotNull);
         expect(drive.streamDownloads, 2);
 

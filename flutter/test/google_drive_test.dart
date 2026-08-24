@@ -85,6 +85,37 @@ void main() {
     expect(merged.apiKeys, isEmpty);
   });
 
+  test('Drive merge resolves concurrent edits by updated timestamp', () {
+    final created = DateTime.utc(2026, 8, 19, 12);
+    final base = LibraryFolder(
+      id: 'folder-one',
+      name: 'Original',
+      createdAt: created,
+      updatedAt: created,
+      storage: LibraryStorage.drive,
+    );
+    final local = base.copyWith(
+      name: 'Older local edit',
+      updatedAt: created.add(const Duration(minutes: 1)),
+    );
+    final remote = base.copyWith(
+      name: 'Newer remote edit',
+      updatedAt: created.add(const Duration(minutes: 2)),
+    );
+
+    final merged = mergeGoogleDriveData(
+      base: StoredData(folders: <LibraryFolder>[base]),
+      next: StoredData(folders: <LibraryFolder>[local]),
+      remote: StoredData(folders: <LibraryFolder>[remote]),
+    );
+
+    expect(merged.folders.single.name, 'Newer remote edit');
+    expect(
+      merged.folders.single.updatedAt,
+      created.add(const Duration(minutes: 2)),
+    );
+  });
+
   test('Drive folder lookup is app-scoped and authenticated', () async {
     late http.Request observed;
     final api = GoogleDriveApi(
@@ -676,16 +707,35 @@ void main() {
         after.generations.every((item) => item.storage == LibraryStorage.drive),
         isTrue,
       );
-      // The local file keeps device secrets and the Drive linkage so the
-      // connection resumes on the next launch, but no library records.
-      expect(local.data.generations, isEmpty);
-      expect(local.data.savedReferences, isEmpty);
-      expect(local.data.folders, isEmpty);
+      // The local file keeps device secrets, Drive linkage, and a compact
+      // Drive metadata mirror so the next launch can render while offline.
+      expect(local.data.generations.map((item) => item.localId), <String>[
+        'drive-local-generation',
+      ]);
+      expect(local.data.savedReferences.map((item) => item.id), <String>[
+        'drive-local-reference',
+      ]);
+      expect(
+        local.data.generations.every(
+          (item) => item.storage == LibraryStorage.drive,
+        ),
+        isTrue,
+      );
       expect(local.data.driveFolderName, 'Shared Studio');
       expect(local.data.driveFolderId, 'drive-root');
       expect(local.data.apiKeyFor('bfl'), 'device-secret');
       expect(local.assets, isEmpty);
       expect(drive.assets.values, hasLength(2));
+
+      final relaunched = HybridDataStore(
+        local: local,
+        drive: _MemoryDriveStore(const StoredData()),
+      );
+      final offline = await relaunched.read();
+      expect(offline.generations.map((item) => item.localId), <String>[
+        'drive-local-generation',
+      ]);
+      expect(offline.generations.single.storage, LibraryStorage.drive);
 
       // A second migration is a no-op rather than an error.
       final again = await hybrid.moveLocalToDrive();
@@ -704,8 +754,18 @@ void main() {
 
       await expectLater(hybrid.moveLocalToDrive(), throwsStateError);
 
-      expect(local.data.generations, hasLength(1));
-      expect(local.data.savedReferences, hasLength(1));
+      expect(
+        local.data.generations.where(
+          (item) => item.storage == LibraryStorage.local,
+        ),
+        hasLength(1),
+      );
+      expect(
+        local.data.savedReferences.where(
+          (item) => item.storage == LibraryStorage.local,
+        ),
+        hasLength(1),
+      );
       expect(local.assets, isNotEmpty);
     },
   );

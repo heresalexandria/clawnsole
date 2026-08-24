@@ -44,3 +44,9 @@ String retainedAssetExtension(String? contentType, String label) {
     },
   };
 }
+
+bool isRetainedVideoAsset(String? contentType, String label) => const <String>{
+  '.mp4',
+  '.mov',
+  '.webm',
+}.contains(retainedAssetExtension(contentType, label));

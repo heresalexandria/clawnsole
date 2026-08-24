@@ -96,9 +96,11 @@ class SettingsVaultKdfParameters {
 class VaultCredentialRecord {
   VaultCredentialRecord({
     required this.value,
+    DateTime? createdAt,
     required DateTime updatedAt,
     required this.deviceId,
-  }) : updatedAt = updatedAt.toUtc() {
+  }) : createdAt = (createdAt ?? updatedAt).toUtc(),
+       updatedAt = updatedAt.toUtc() {
     _validateDeviceId(deviceId);
     if (value != null) {
       if (value!.isEmpty ||
@@ -109,6 +111,7 @@ class VaultCredentialRecord {
   }
 
   final String? value;
+  final DateTime createdAt;
   final DateTime updatedAt;
   final String deviceId;
 
@@ -116,6 +119,7 @@ class VaultCredentialRecord {
 
   Map<String, Object?> toJson() => <String, Object?>{
     'value': value,
+    'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
     'deviceId': deviceId,
   };
@@ -129,6 +133,7 @@ class VaultCredentialRecord {
     }
     return VaultCredentialRecord(
       value: json['value'] as String?,
+      createdAt: _optionalDate(json['createdAt']),
       updatedAt: _requiredDate(json['updatedAt'], 'credential updatedAt'),
       deviceId: _requiredString(json['deviceId'], 'credential deviceId'),
     );
@@ -139,19 +144,23 @@ class VaultCredentialRecord {
 class VaultPreferencesRecord {
   VaultPreferencesRecord({
     required Map<String, Object?> value,
+    DateTime? createdAt,
     required DateTime updatedAt,
     required this.deviceId,
   }) : value = _copyJsonMap(value),
+       createdAt = (createdAt ?? updatedAt).toUtc(),
        updatedAt = updatedAt.toUtc() {
     _validateDeviceId(deviceId);
   }
 
   final Map<String, Object?> value;
+  final DateTime createdAt;
   final DateTime updatedAt;
   final String deviceId;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'value': value,
+    'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
     'deviceId': deviceId,
   };
@@ -165,6 +174,7 @@ class VaultPreferencesRecord {
     }
     return VaultPreferencesRecord(
       value: _stringMap(value, 'preferences value'),
+      createdAt: _optionalDate(json['createdAt']),
       updatedAt: _requiredDate(json['updatedAt'], 'preferences updatedAt'),
       deviceId: _requiredString(json['deviceId'], 'preferences deviceId'),
     );
@@ -1125,6 +1135,11 @@ int _requiredInt(Object? value, String name) {
     throw SettingsVaultFormatException('The $name must be an integer.');
   }
   return value;
+}
+
+DateTime? _optionalDate(Object? value) {
+  if (value == null) return null;
+  return _requiredDate(value, 'createdAt');
 }
 
 DateTime _requiredDate(Object? value, String name) {

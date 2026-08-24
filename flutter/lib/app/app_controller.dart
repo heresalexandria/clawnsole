@@ -11,6 +11,7 @@ import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
 import '../core/google_drive.dart';
+import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
@@ -312,9 +313,12 @@ class AppController extends ChangeNotifier {
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
 
-  /// Size cap in megabytes for cached Drive previews and videos; 0 turns the
-  /// cache and video prefetching off.
+  /// Size cap in megabytes for cached Drive videos; 0 turns full-film caching
+  /// and prefetching off.
   int localVideoCacheMb = AppPreferences.defaultLocalVideoCacheMb;
+
+  /// Independent size cap for Drive previews and thumbnails.
+  int localThumbnailCacheMb = AppPreferences.defaultLocalThumbnailCacheMb;
 
   /// Converts unsupported reference images and repairs incompatible reference
   /// videos before they are uploaded.
@@ -359,6 +363,7 @@ class AppController extends ChangeNotifier {
   Timer? _pollTimer;
   Timer? _creditTimer;
   Future<void> _preferenceWrites = Future<void>.value();
+  int _preferenceRevision = 0;
   Future<bool>? _creditRefreshFuture;
   Timer? _estimateTimer;
   String? _estimateSignature;
@@ -372,6 +377,9 @@ class AppController extends ChangeNotifier {
   int _videoPreviewSourceRevision = 0;
   Future<void> _prefetchQueue = Future<void>.value();
   final Set<String> _prefetchedVideoAssets = <String>{};
+  final Map<String, Uint8List> _restoredAssetBytes = <String, Uint8List>{};
+  final Map<String, Future<Uint8List>> _assetReadJobs =
+      <String, Future<Uint8List>>{};
   bool _reconcilingGenerationWork = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -609,6 +617,8 @@ class AppController extends ChangeNotifier {
   bool get supportsSettingsVault => gateway is SettingsVaultGateway;
   VideoCacheGateway? get _videoCacheGateway =>
       gateway is VideoCacheGateway ? gateway as VideoCacheGateway : null;
+  MediaCacheGateway? get _mediaCacheGateway =>
+      gateway is MediaCacheGateway ? gateway as MediaCacheGateway : null;
   bool get supportsVideoCache => gateway is VideoCacheGateway;
   SettingsVaultStatus get settingsVaultStatus =>
       snapshot?.settingsVault ?? const SettingsVaultStatus.unavailable();
@@ -1113,16 +1123,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    var opened = false;
     try {
       await _restoreProviderCatalogCache();
       _apply(await gateway.load(), restorePreferences: true);
-      // Finish the silent Drive reattachment before making the app
-      // interactive. Otherwise an early tab change can persist preferences
-      // against the local-only startup snapshot while Drive is reconnecting.
-      await resumeGoogleDrive();
-      if (generations.isNotEmpty) {
-        await _restoreGenerationSettings(generations.first);
-      }
       if (selectedProvider.requiresApiKey && hasApiKey) {
         unawaited(refreshCredits());
       }
@@ -1131,6 +1135,7 @@ class AppController extends ChangeNotifier {
         unawaited(refreshProviderModels(provider.id));
       }
       _invalidateProviderEstimate();
+      opened = true;
     } on Object catch (error) {
       loadError = _message(error);
     } finally {
@@ -1140,6 +1145,15 @@ class AppController extends ChangeNotifier {
     // Catalog refresh is deliberately background work: cached or bundled
     // definitions make startup immediately usable even when Pages is down.
     unawaited(refreshProviderCatalog());
+    if (opened) {
+      final preferenceRevision = _preferenceRevision;
+      // Neither local cache inspection nor Drive authorization belongs on the
+      // splash-screen critical path. The local snapshot is authoritative for
+      // first paint; cache restoration and remote reconciliation fold in
+      // asynchronously after the studio is interactive.
+      unawaited(_restoreLocalStartupPresentation());
+      unawaited(_reconcileDriveAfterStartup(preferenceRevision));
+    }
     _pollTimer = Timer.periodic(
       const Duration(seconds: 4),
       (_) => unawaited(pollWorking()),
@@ -1236,6 +1250,33 @@ class AppController extends ChangeNotifier {
     _invalidateProviderEstimate();
   }
 
+  Future<void> _restoreLocalStartupPresentation() async {
+    try {
+      await _restoreCachedFirstPage();
+      if (_disposed) return;
+      if (generations.isNotEmpty) {
+        await _restoreGenerationSettings(generations.first, cacheOnly: true);
+      } else {
+        notifyListeners();
+      }
+    } on Object {
+      // Local presentation restore is best effort and must never become an
+      // unhandled asynchronous startup failure.
+    }
+  }
+
+  Future<void> _reconcileDriveAfterStartup(int preferenceRevision) async {
+    await resumeGoogleDrive(
+      restorePreferences: true,
+      expectedPreferenceRevision: preferenceRevision,
+    );
+    if (_disposed) return;
+    await _restoreCachedFirstPage();
+    if (_disposed) return;
+    _scheduleListingPrefetch();
+    notifyListeners();
+  }
+
   /// Reloads durable generation receipts and immediately resumes polling.
   ///
   /// The app shell calls this when the process returns to the foreground, so
@@ -1279,6 +1320,7 @@ class AppController extends ChangeNotifier {
       referenceStorageFilter = value.preferences.referenceStorageFilter;
       generationPlaceholderStyle = value.preferences.generationPlaceholderStyle;
       localVideoCacheMb = value.preferences.localVideoCacheMb;
+      localThumbnailCacheMb = value.preferences.localThumbnailCacheMb;
       autoFixReferenceVideos = value.preferences.autoFixReferenceVideos;
       costDeskColumns = value.preferences.costDeskColumns;
       defaultStorage = supportsLocalLibrary
@@ -1412,6 +1454,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _savePreferences(AppPreferences preferences) {
+    _preferenceRevision += 1;
     final operation = _preferenceWrites.then((_) async {
       try {
         _apply(await gateway.setPreferences(preferences));
@@ -1430,6 +1473,8 @@ class AppController extends ChangeNotifier {
 
   Future<void> navigate(AppSection value) async {
     section = value;
+    _scheduleListingPrefetch();
+    await _restoreCachedFirstPage();
     notifyListeners();
     try {
       await _savePreferences(_preferences(activeSection: value));
@@ -1566,10 +1611,43 @@ class AppController extends ChangeNotifier {
   Future<int> videoCacheUsedBytes() async =>
       await _videoCacheGateway?.videoCacheUsedBytes() ?? 0;
 
+  Future<void> setLocalThumbnailCacheMb(int value) async {
+    final clamped = value.clamp(0, 1 << 20);
+    localThumbnailCacheMb = clamped;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(localThumbnailCacheMb: clamped));
+      if (clamped == 0) {
+        _restoredAssetBytes.clear();
+        _assetReadJobs.clear();
+        await _videoCacheGateway?.clearThumbnailCache();
+      } else {
+        unawaited(_restoreCachedFirstPage().then((_) => notifyListeners()));
+      }
+      notifyListeners();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<int> thumbnailCacheUsedBytes() async =>
+      await _videoCacheGateway?.thumbnailCacheUsedBytes() ?? 0;
+
   Future<void> clearVideoCache() async {
     try {
       _prefetchedVideoAssets.clear();
       await _videoCacheGateway?.clearVideoCache();
+      notifyListeners();
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> clearThumbnailCache() async {
+    try {
+      _restoredAssetBytes.clear();
+      _assetReadJobs.clear();
+      await _videoCacheGateway?.clearThumbnailCache();
       notifyListeners();
     } on Object catch (error) {
       showNotice(_message(error));
@@ -1587,24 +1665,127 @@ class AppController extends ChangeNotifier {
     _prefetchRevision += 1;
     final revision = _prefetchRevision;
     _prefetchDebounce?.cancel();
+    if (section != AppSection.create &&
+        section != AppSection.library &&
+        section != AppSection.references) {
+      return;
+    }
     _prefetchDebounce = Timer(const Duration(milliseconds: 900), () {
       if (revision != _prefetchRevision) return;
-      final candidates =
-          (section == AppSection.library
-                  ? filteredGenerations
-                  : visibleGenerations)
-              .where(
-                (item) =>
-                    item.isReady &&
-                    !item.isImage &&
-                    item.storage == LibraryStorage.drive &&
-                    item.resultAsset?.kind == 'drive',
-              )
-              .take(_listingPrefetchCount);
-      for (final item in candidates) {
-        _enqueueVideoPrefetch(item.resultAsset, revision: revision);
+      final assets = section == AppSection.references
+          ? filteredSavedReferences
+                .where(
+                  (item) =>
+                      item.kind == MediaReferenceKind.video &&
+                      item.storage == LibraryStorage.drive,
+                )
+                .map((item) => item.asset)
+          : (section == AppSection.library
+                    ? filteredGenerations
+                    : visibleGenerations)
+                .where(
+                  (item) =>
+                      item.isReady &&
+                      !item.isImage &&
+                      item.storage == LibraryStorage.drive,
+                )
+                .map((item) => item.resultAsset);
+      for (final asset in assets.take(_listingPrefetchCount)) {
+        _enqueueVideoPrefetch(asset, revision: revision);
       }
     });
+  }
+
+  /// Warms full Drive videos newly revealed by a progressive listing page.
+  /// Thumbnail reads happen naturally as those cards are built; limiting the
+  /// full-film work prevents one scroll from consuming the entire cache.
+  void prefetchListedVideos(Iterable<AssetReference?> assets) {
+    for (final asset
+        in assets
+            .whereType<AssetReference>()
+            .where((asset) => asset.kind == 'drive')
+            .take(_listingPrefetchCount)) {
+      _enqueueVideoPrefetch(asset);
+    }
+  }
+
+  String _assetCacheKey(AssetReference reference) =>
+      '${reference.kind}:${reference.value}';
+
+  /// Synchronously available retained bytes restored before first paint.
+  Uint8List? cachedAssetBytes(AssetReference? reference) =>
+      reference == null ? null : _restoredAssetBytes[_assetCacheKey(reference)];
+
+  /// Reads retained preview bytes once per process and remembers them for
+  /// synchronous reuse by every card that references the same immutable id.
+  Future<Uint8List> readPreviewAsset(AssetReference reference) {
+    final key = _assetCacheKey(reference);
+    final restored = _restoredAssetBytes[key];
+    if (restored != null) return Future<Uint8List>.value(restored);
+    final existing = _assetReadJobs[key];
+    if (existing != null) return existing;
+    late final Future<Uint8List> job;
+    job = gateway
+        .readAsset(reference)
+        .then((bytes) {
+          _restoredAssetBytes[key] = bytes;
+          return bytes;
+        })
+        .catchError((Object error) {
+          if (identical(_assetReadJobs[key], job)) _assetReadJobs.remove(key);
+          throw error;
+        });
+    _assetReadJobs[key] = job;
+    return job;
+  }
+
+  /// Restores only the first page and only from local storage. Cache misses
+  /// remain misses until a card is actually viewed, at which point its normal
+  /// read path downloads and persists the Drive asset.
+  Future<void> _restoreCachedFirstPage() async {
+    final cache = _mediaCacheGateway;
+    if (cache == null) return;
+    final references = <String, AssetReference>{};
+    void add(AssetReference? reference) {
+      if (reference != null) {
+        references[_assetCacheKey(reference)] = reference;
+      }
+    }
+
+    if (section == AppSection.create || section == AppSection.library) {
+      final generationPage = section == AppSection.library
+          ? filteredGenerations
+          : visibleGenerations;
+      for (final item in generationPage.take(20)) {
+        if (item.isImage) {
+          add(item.resultAsset);
+        } else {
+          add(item.thumbnailAsset);
+        }
+      }
+    } else if (section == AppSection.references) {
+      for (final item in filteredSavedReferences.take(20)) {
+        if (item.kind == MediaReferenceKind.image) {
+          add(item.asset);
+        } else if (item.kind == MediaReferenceKind.video) {
+          add(item.thumbnailAsset);
+        }
+      }
+    } else {
+      return;
+    }
+    await Future.wait(
+      references.entries.map((entry) async {
+        if (_restoredAssetBytes.containsKey(entry.key)) return;
+        try {
+          final bytes = await cache.cachedAssetBytes(entry.value);
+          if (bytes == null || bytes.isEmpty) return;
+          _restoredAssetBytes[entry.key] = bytes;
+        } on Object {
+          // Cache inspection is best effort and must not delay app recovery.
+        }
+      }),
+    );
   }
 
   /// Serially fills the video cache in the background. [revision] cancels a
@@ -2011,6 +2192,7 @@ class AppController extends ChangeNotifier {
           'folder-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
       name: clean,
       createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
       parentId: parentId,
       collection: existing?.collection ?? collection,
       storage: destination,
@@ -2714,6 +2896,7 @@ class AppController extends ChangeNotifier {
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
+    int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
@@ -2737,6 +2920,7 @@ class AppController extends ChangeNotifier {
         ? null
         : costDeskColumns ?? this.costDeskColumns,
     localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
+    localThumbnailCacheMb: localThumbnailCacheMb ?? this.localThumbnailCacheMb,
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
   );
@@ -4678,7 +4862,7 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
     } finally {
       googleDriveBusy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -4696,7 +4880,7 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
     } finally {
       googleDriveBusy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -4704,7 +4888,11 @@ class AppController extends ChangeNotifier {
   /// startup: the companion and shell hold Drive sessions per process, so
   /// without this every launch would hide Drive work until a manual refresh.
   /// Failures stay silent — Settings still offers the interactive refresh.
-  Future<bool> resumeGoogleDrive({bool force = false}) async {
+  Future<bool> resumeGoogleDrive({
+    bool force = false,
+    bool restorePreferences = false,
+    int? expectedPreferenceRevision,
+  }) async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return false;
     if ((!force && googleDriveConnected) ||
         !googleDriveConnection.isConfigured) {
@@ -4717,7 +4905,14 @@ class AppController extends ChangeNotifier {
         force: force,
       );
       if (value == null) return false;
-      _apply(value);
+      if (_disposed) return false;
+      _apply(
+        value,
+        restorePreferences:
+            restorePreferences &&
+            (expectedPreferenceRevision == null ||
+                _preferenceRevision == expectedPreferenceRevision),
+      );
       return true;
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
@@ -4725,7 +4920,7 @@ class AppController extends ChangeNotifier {
       return false;
     } finally {
       googleDriveBusy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -4974,18 +5169,31 @@ class AppController extends ChangeNotifier {
   Future<PickedAsset> _retainedAsset(
     AssetReference reference, {
     AssetReference? thumbnailAsset,
+    bool cacheOnly = false,
   }) async {
+    Future<Uint8List?> read(AssetReference value) {
+      if (!cacheOnly || value.kind != 'drive') {
+        return gateway.readAsset(value);
+      }
+      return _mediaCacheGateway?.cachedAssetBytes(value) ??
+          Future<Uint8List?>.value();
+    }
+
     Uint8List? thumbnailBytes;
     if (thumbnailAsset != null) {
       try {
-        thumbnailBytes = await gateway.readAsset(thumbnailAsset);
+        thumbnailBytes = await read(thumbnailAsset);
       } on Object {
         // The original media remains reusable without its cached preview.
       }
     }
+    final bytes = await read(reference);
+    if (bytes == null) {
+      throw StateError('The retained media is not cached on this device.');
+    }
     return PickedAsset(
       name: reference.label,
-      bytes: await gateway.readAsset(reference),
+      bytes: bytes,
       mimeType: reference.contentType ?? 'application/octet-stream',
       retained: reference,
       thumbnailAsset: thumbnailAsset,
@@ -4996,6 +5204,7 @@ class AppController extends ChangeNotifier {
   Future<void> _restoreGenerationSettings(
     Generation item, {
     bool includePrompt = false,
+    bool cacheOnly = false,
   }) async {
     if (includePrompt &&
         providers.any((provider) => provider.id == item.provider)) {
@@ -5014,7 +5223,7 @@ class AppController extends ChangeNotifier {
       PickedAsset? asset;
       if (reference?.isLocal == true) {
         try {
-          asset = await _retainedAsset(reference!);
+          asset = await _retainedAsset(reference!, cacheOnly: cacheOnly);
         } on Object {
           // Keep the saved role and timing even if its retained file moved.
         }
@@ -5061,7 +5270,11 @@ class AppController extends ChangeNotifier {
       Uint8List? thumbnailBytes;
       if (media.thumbnailAsset != null) {
         try {
-          thumbnailBytes = await gateway.readAsset(media.thumbnailAsset!);
+          thumbnailBytes = cacheOnly && media.thumbnailAsset!.kind == 'drive'
+              ? await _mediaCacheGateway?.cachedAssetBytes(
+                  media.thumbnailAsset!,
+                )
+              : await gateway.readAsset(media.thumbnailAsset!);
         } on Object {
           // The original reference can regenerate its preview.
         }
@@ -5071,6 +5284,7 @@ class AppController extends ChangeNotifier {
           asset = await _retainedAsset(
             reference!,
             thumbnailAsset: media.thumbnailAsset,
+            cacheOnly: cacheOnly,
           );
         } on Object {
           // Keep the saved reference label if its retained file moved.
@@ -5106,25 +5320,29 @@ class AppController extends ChangeNotifier {
         retainedSource = await _retainedAsset(
           durableSource!,
           thumbnailAsset: item.config.sourceThumbnailAsset,
+          cacheOnly: cacheOnly,
         );
       } on Object {
         // Preserve the rest of the last-used settings when an asset is gone.
-        showNotice(
-          item.mode == VideoMode.upscale
-              ? 'The retained source video is no longer available. Attach a video to upscale.'
-              : item.mode == VideoMode.v2v
-              ? 'The retained starting video is no longer available. Attach a video to continue one.'
-              : 'The retained draft cache is no longer available. Attach a draft to enhance it.',
-        );
+        if (!cacheOnly) {
+          showNotice(
+            item.mode == VideoMode.upscale
+                ? 'The retained source video is no longer available. Attach a video to upscale.'
+                : item.mode == VideoMode.v2v
+                ? 'The retained starting video is no longer available. Attach a video to continue one.'
+                : 'The retained draft cache is no longer available. Attach a draft to enhance it.',
+          );
+        }
       }
     }
     Uint8List? sourceThumbnailBytes = retainedSource?.thumbnailBytes;
     if (sourceThumbnailBytes == null &&
         item.config.sourceThumbnailAsset != null) {
       try {
-        sourceThumbnailBytes = await gateway.readAsset(
-          item.config.sourceThumbnailAsset!,
-        );
+        final thumbnail = item.config.sourceThumbnailAsset!;
+        sourceThumbnailBytes = cacheOnly && thumbnail.kind == 'drive'
+            ? await _mediaCacheGateway?.cachedAssetBytes(thumbnail)
+            : await gateway.readAsset(thumbnail);
       } on Object {
         // Reused source media can regenerate its preview in the Create panel.
       }
@@ -5133,6 +5351,7 @@ class AppController extends ChangeNotifier {
         selectedModel.referenceTasks.contains(item.config.referenceTask)
         ? item.config.referenceTask
         : MediaReferenceTask.reference;
+    if (_disposed) return;
     form
       ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
           ? item.prompt

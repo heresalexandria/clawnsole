@@ -533,14 +533,16 @@ class LibraryFolder {
     required this.id,
     required this.name,
     required this.createdAt,
+    DateTime? updatedAt,
     this.parentId,
     this.collection = LibraryCollection.generated,
     this.storage = LibraryStorage.local,
-  });
+  }) : updatedAt = updatedAt ?? createdAt;
 
   final String id;
   final String name;
   final DateTime createdAt;
+  final DateTime updatedAt;
   final String? parentId;
   final LibraryCollection collection;
   final LibraryStorage storage;
@@ -551,10 +553,12 @@ class LibraryFolder {
     bool clearParent = false,
     LibraryCollection? collection,
     LibraryStorage? storage,
+    DateTime? updatedAt,
   }) => LibraryFolder(
     id: id,
     name: name ?? this.name,
     createdAt: createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
     parentId: clearParent ? null : parentId ?? this.parentId,
     collection: collection ?? this.collection,
     storage: storage ?? this.storage,
@@ -564,6 +568,7 @@ class LibraryFolder {
     'id': id,
     'name': name,
     'createdAt': createdAt.toUtc().toIso8601String(),
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
     if (parentId != null) 'parentId': parentId,
     if (collection != LibraryCollection.generated)
       'collection': collection.name,
@@ -574,6 +579,10 @@ class LibraryFolder {
     id: json['id'] as String? ?? '',
     name: json['name'] as String? ?? '',
     createdAt:
+        DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+        DateTime.now().toUtc(),
+    updatedAt:
+        DateTime.tryParse(json['updatedAt'] as String? ?? '') ??
         DateTime.tryParse(json['createdAt'] as String? ?? '') ??
         DateTime.now().toUtc(),
     parentId:
@@ -1187,10 +1196,12 @@ class AppPreferences {
     this.lastDriveGenerationFolderId,
     this.costDeskColumns,
     this.localVideoCacheMb = defaultLocalVideoCacheMb,
+    this.localThumbnailCacheMb = defaultLocalThumbnailCacheMb,
     this.autoFixReferenceVideos = defaultAutoFixReferenceVideos,
   });
 
   static const int defaultLocalVideoCacheMb = 100;
+  static const int defaultLocalThumbnailCacheMb = 100;
   static const bool defaultAutoFixReferenceVideos = true;
 
   final AppSection activeSection;
@@ -1210,10 +1221,14 @@ class AppPreferences {
   /// set; ids missing from the list stay hidden and unknown ids are ignored.
   final List<String>? costDeskColumns;
 
-  /// Size cap in megabytes for cached Drive previews and videos. Zero turns
-  /// the cache (and video prefetching) off. The legacy field name is retained
-  /// for settings compatibility.
+  /// Size cap in megabytes for cached Drive videos. Zero turns full-film
+  /// caching and prefetching off.
   final int localVideoCacheMb;
+
+  /// Independent size cap in megabytes for cached Drive images and video
+  /// thumbnails. Keeping previews separate prevents a large film from
+  /// evicting every lightweight library image.
+  final int localThumbnailCacheMb;
 
   /// Whether visual references should be checked and repaired for provider
   /// compatibility before upload. The legacy field name is retained for
@@ -1238,6 +1253,7 @@ class AppPreferences {
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
+    int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
@@ -1262,6 +1278,7 @@ class AppPreferences {
         ? null
         : costDeskColumns ?? this.costDeskColumns,
     localVideoCacheMb: localVideoCacheMb ?? this.localVideoCacheMb,
+    localThumbnailCacheMb: localThumbnailCacheMb ?? this.localThumbnailCacheMb,
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
   );
@@ -1283,58 +1300,71 @@ class AppPreferences {
       'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
     if (costDeskColumns != null) 'costDeskColumns': costDeskColumns,
     'localVideoCacheMb': localVideoCacheMb,
+    'localThumbnailCacheMb': localThumbnailCacheMb,
     'autoFixReferenceVideos': autoFixReferenceVideos,
   };
 
-  factory AppPreferences.fromJson(Map<String, Object?> json) => AppPreferences(
-    activeSection: AppSection.values.firstWhere(
-      (value) => value.name == json['activeSection'],
-      orElse: () => AppSection.create,
-    ),
-    libraryFilter: LibraryFilter.values.firstWhere(
-      (value) => value.name == json['libraryFilter'],
-      orElse: () => LibraryFilter.all,
-    ),
-    recentWorkViewMode: GenerationViewMode.values.firstWhere(
-      (value) => value.name == json['recentWorkViewMode'],
-      orElse: () => GenerationViewMode.full,
-    ),
-    libraryViewMode: GenerationViewMode.values.firstWhere(
-      (value) => value.name == json['libraryViewMode'],
-      orElse: () => GenerationViewMode.full,
-    ),
-    provider: json['provider'] as String? ?? 'bfl',
-    model: json['model'] as String? ?? 'flux-3-video',
-    defaultStorage: LibraryStorage.values.firstWhere(
-      (value) => value.name == json['defaultStorage'],
-      orElse: () => LibraryStorage.local,
-    ),
-    libraryStorageFilter: LibraryStorageFilter.values.firstWhere(
-      (value) => value.name == json['libraryStorageFilter'],
-      orElse: () => LibraryStorageFilter.all,
-    ),
-    referenceStorageFilter: LibraryStorageFilter.values.firstWhere(
-      (value) => value.name == json['referenceStorageFilter'],
-      orElse: () => LibraryStorageFilter.all,
-    ),
-    generationPlaceholderStyle: GenerationPlaceholderStyleValue.parse(
-      json['generationPlaceholderStyle'],
-    ),
-    lastLocalGenerationFolderId: json['lastLocalGenerationFolderId'] as String?,
-    lastDriveGenerationFolderId: json['lastDriveGenerationFolderId'] as String?,
-    costDeskColumns: switch (json['costDeskColumns']) {
-      final List<Object?> ids => ids.whereType<String>().toList(),
-      _ => null,
-    },
-    localVideoCacheMb: switch (json['localVideoCacheMb']) {
+  factory AppPreferences.fromJson(Map<String, Object?> json) {
+    final videoCacheMb = switch (json['localVideoCacheMb']) {
       final num value => value.toInt().clamp(0, 1 << 20),
       _ => defaultLocalVideoCacheMb,
-    },
-    autoFixReferenceVideos: switch (json['autoFixReferenceVideos']) {
-      final bool value => value,
-      _ => defaultAutoFixReferenceVideos,
-    },
-  );
+    };
+    return AppPreferences(
+      activeSection: AppSection.values.firstWhere(
+        (value) => value.name == json['activeSection'],
+        orElse: () => AppSection.create,
+      ),
+      libraryFilter: LibraryFilter.values.firstWhere(
+        (value) => value.name == json['libraryFilter'],
+        orElse: () => LibraryFilter.all,
+      ),
+      recentWorkViewMode: GenerationViewMode.values.firstWhere(
+        (value) => value.name == json['recentWorkViewMode'],
+        orElse: () => GenerationViewMode.full,
+      ),
+      libraryViewMode: GenerationViewMode.values.firstWhere(
+        (value) => value.name == json['libraryViewMode'],
+        orElse: () => GenerationViewMode.full,
+      ),
+      provider: json['provider'] as String? ?? 'bfl',
+      model: json['model'] as String? ?? 'flux-3-video',
+      defaultStorage: LibraryStorage.values.firstWhere(
+        (value) => value.name == json['defaultStorage'],
+        orElse: () => LibraryStorage.local,
+      ),
+      libraryStorageFilter: LibraryStorageFilter.values.firstWhere(
+        (value) => value.name == json['libraryStorageFilter'],
+        orElse: () => LibraryStorageFilter.all,
+      ),
+      referenceStorageFilter: LibraryStorageFilter.values.firstWhere(
+        (value) => value.name == json['referenceStorageFilter'],
+        orElse: () => LibraryStorageFilter.all,
+      ),
+      generationPlaceholderStyle: GenerationPlaceholderStyleValue.parse(
+        json['generationPlaceholderStyle'],
+      ),
+      lastLocalGenerationFolderId:
+          json['lastLocalGenerationFolderId'] as String?,
+      lastDriveGenerationFolderId:
+          json['lastDriveGenerationFolderId'] as String?,
+      costDeskColumns: switch (json['costDeskColumns']) {
+        final List<Object?> ids => ids.whereType<String>().toList(),
+        _ => null,
+      },
+      localVideoCacheMb: videoCacheMb,
+      // Before schema 22 one shared cap covered both kinds. Inherit that cap on
+      // migration so an existing Off choice stays off and custom limits remain
+      // respected until the user chooses separate values.
+      localThumbnailCacheMb: switch (json['localThumbnailCacheMb']) {
+        final num value => value.toInt().clamp(0, 1 << 20),
+        _ => videoCacheMb,
+      },
+      autoFixReferenceVideos: switch (json['autoFixReferenceVideos']) {
+        final bool value => value,
+        _ => defaultAutoFixReferenceVideos,
+      },
+    );
+  }
 }
 
 class StoredData {

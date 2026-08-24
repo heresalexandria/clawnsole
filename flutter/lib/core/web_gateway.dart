@@ -9,6 +9,7 @@ import 'data_location_shell.dart';
 import 'gateway.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
+import 'media_cache_gateway.dart';
 import 'models.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_shell.dart';
@@ -37,6 +38,7 @@ class WebGateway
         GoogleDriveGateway,
         SettingsVaultGateway,
         DataLocationGateway,
+        MediaCacheGateway,
         VideoCacheGateway {
   WebGateway({
     http.Client? client,
@@ -674,8 +676,36 @@ class WebGateway
   }
 
   @override
+  Future<int> thumbnailCacheUsedBytes() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/thumbnail-cache'))),
+    );
+    return (payload['usedBytes'] as num?)?.toInt() ?? 0;
+  }
+
+  @override
   Future<void> clearVideoCache() async {
     await _read(await _client.delete(_url('/video-cache')));
+  }
+
+  @override
+  Future<void> clearThumbnailCache() async {
+    await _read(await _client.delete(_url('/thumbnail-cache')));
+  }
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) async {
+    final response = await _client.get(
+      _url('/asset-cache', <String, String>{'id': reference.value}),
+    );
+    if (response.statusCode == 404) return null;
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ProviderException(
+        'The local media cache could not be read.',
+        status: response.statusCode,
+      );
+    }
+    return response.bodyBytes;
   }
 
   @override

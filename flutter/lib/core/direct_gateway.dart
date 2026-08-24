@@ -345,6 +345,7 @@ class DirectGateway
       id: folder.id,
       name: name,
       createdAt: folder.createdAt,
+      updatedAt: folder.updatedAt,
       parentId: parentId,
       collection: folder.collection,
       storage: folder.storage,

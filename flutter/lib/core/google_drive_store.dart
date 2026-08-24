@@ -112,12 +112,12 @@ class GoogleDriveStore implements DurableDataStore {
     _stateFile = null;
     _assetsFolderId = '';
     _lastData = null;
-    await _presenter.clear();
     _connection = GoogleDriveConnection(
       state: GoogleDriveConnectionState.disconnected,
       folderName: connection.folderName,
       folderId: connection.folderId,
-      message: 'Drive disconnected on this device. Cloud files were kept.',
+      message:
+          'Drive disconnected on this device. Cloud files and the bounded local media cache were kept.',
     );
   }
 
