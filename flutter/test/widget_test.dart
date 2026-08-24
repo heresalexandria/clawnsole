@@ -3666,6 +3666,138 @@ void main() {
     },
   );
 
+  testWidgets('selecting the entire prompt does not scroll the Create screen', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..form.prompt = List<String>.generate(
+        80,
+        (index) => 'Shot direction line ${index + 1}.',
+      ).join('\n');
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final prompt = find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    await tester.ensureVisible(prompt);
+    await tester.tap(prompt);
+    await tester.pumpAndSettle();
+
+    final outerScrollable = find
+        .descendant(
+          of: find.byType(CreateScreen),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    final outerPosition = tester
+        .state<ScrollableState>(outerScrollable)
+        .position;
+    final before = outerPosition.pixels;
+    final editableFinder = find.descendant(
+      of: prompt,
+      matching: find.byType(EditableText),
+    );
+
+    Actions.invoke(
+      tester.element(editableFinder),
+      const SelectAllTextIntent(SelectionChangedCause.keyboard),
+    );
+    await tester.pumpAndSettle();
+
+    final editable = tester.widget<EditableText>(editableFinder);
+    expect(editable.controller.selection.baseOffset, 0);
+    expect(
+      editable.controller.selection.extentOffset,
+      editable.controller.text.length,
+    );
+    expect(outerPosition.pixels, closeTo(before, .01));
+
+    // Native desktop context menus can update the platform text input
+    // selection directly instead of dispatching Flutter's Select All intent.
+    editable.controller.selection = const TextSelection.collapsed(offset: 0);
+    await tester.pump();
+    final beforePlatformSelection = outerPosition.pixels;
+    tester
+        .state<EditableTextState>(editableFinder)
+        .updateEditingValue(
+          editable.controller.value.copyWith(
+            selection: TextSelection(
+              baseOffset: 0,
+              extentOffset: editable.controller.text.length,
+            ),
+          ),
+        );
+    await tester.pumpAndSettle();
+    expect(outerPosition.pixels, closeTo(beforePlatformSelection, .01));
+  });
+
+  testWidgets('prompt expands to the full viewport and minimizes in place', (
+    tester,
+  ) async {
+    const viewport = Size(1000, 720);
+    await tester.binding.setSurfaceSize(viewport);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()..form.prompt = 'Original direction';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-button')));
+    await tester.pumpAndSettle();
+
+    final fullscreen = find.byKey(const ValueKey('prompt-fullscreen-editor'));
+    final fullscreenPrompt = find.byKey(
+      ValueKey<String>(
+        'generation-prompt-fullscreen-${controller.formRevision}',
+      ),
+    );
+    expect(fullscreen, findsOneWidget);
+    expect(tester.getSize(fullscreen), viewport);
+    expect(tester.getSize(fullscreenPrompt).height, greaterThan(600));
+    expect(
+      find.byKey(const ValueKey('prompt-fullscreen-minimize')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(fullscreenPrompt, 'Direction edited full screen');
+    await tester.pump();
+    expect(controller.form.prompt, 'Direction edited full screen');
+
+    await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-minimize')));
+    await tester.pumpAndSettle();
+    expect(fullscreen, findsNothing);
+
+    final inlinePrompt = find.byKey(
+      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+    );
+    final inlineEditable = tester.widget<EditableText>(
+      find.descendant(of: inlinePrompt, matching: find.byType(EditableText)),
+    );
+    expect(inlineEditable.controller.text, 'Direction edited full screen');
+  });
+
   testWidgets('prompt reference tags autocomplete and highlight', (
     tester,
   ) async {
