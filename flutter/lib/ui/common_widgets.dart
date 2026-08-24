@@ -1906,7 +1906,9 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
                 : Icons.hourglass_bottom_rounded,
             label: snapshot.connectionState == ConnectionState.done
                 ? 'Tap to play video'
-                : 'Caching preview',
+                : widget.item.thumbnailAsset == null
+                ? 'Caching preview'
+                : 'Loading preview',
             loading: snapshot.connectionState != ConnectionState.done,
             expectedDuration: _previewExpectedDuration,
             startedAt: _previewStartedAt,

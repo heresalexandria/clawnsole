@@ -13,6 +13,9 @@ class _WebGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   final Map<String, String> _urls = <String, String>{};
 
   @override
+  Future<Uint8List?> read(AssetReference reference) async => null;
+
+  @override
   Future<Uri?> lookup(AssetReference reference) async {
     final cached = _urls[reference.value];
     return cached == null ? null : Uri.parse(cached);

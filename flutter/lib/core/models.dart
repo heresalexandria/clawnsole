@@ -1210,9 +1210,9 @@ class AppPreferences {
   /// set; ids missing from the list stay hidden and unknown ids are ignored.
   final List<String>? costDeskColumns;
 
-  /// Size cap in megabytes for the local video player cache that keeps
-  /// Drive-stored films on this device for instant playback. Zero turns the
-  /// cache (and its prefetching) off.
+  /// Size cap in megabytes for cached Drive previews and videos. Zero turns
+  /// the cache (and video prefetching) off. The legacy field name is retained
+  /// for settings compatibility.
   final int localVideoCacheMb;
 
   /// Whether visual references should be checked and repaired for provider

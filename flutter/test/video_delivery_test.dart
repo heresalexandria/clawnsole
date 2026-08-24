@@ -136,7 +136,7 @@ void main() {
     expect(await cache.lookup('drive-file-0003'), isNotNull);
   });
 
-  test('a newly uploaded Drive film seeds the local presenter cache', () async {
+  test('newly uploaded Drive media survives a presenter restart', () async {
     final cache = VideoCache(directory: () async => temporary);
     final api = _UploadDriveApi();
     final store = GoogleDriveStore(
@@ -160,7 +160,19 @@ void main() {
       label: 'poster.png',
       contentType: 'image/png',
     );
-    expect(await cache.lookup(image.value), isNull);
+    expect(
+      await File.fromUri((await cache.lookup(image.value))!.uri).readAsBytes(),
+      <int>[1, 2],
+    );
+
+    // A fresh cache and presenter instance models a normal app relaunch. The
+    // preview remains readable even before Drive reconnects.
+    final restarted = GoogleDriveStore(
+      presenter: IoGoogleDriveAssetPresenter(
+        cache: VideoCache(directory: () async => temporary),
+      ),
+    );
+    expect(await restarted.readAsset(image), <int>[1, 2]);
   });
 
   test('readFileRange requests a byte window and slices 200s', () async {
@@ -282,7 +294,7 @@ void main() {
     final dropdown = find.byKey(const ValueKey('local-video-cache-cap'));
     await tester.ensureVisible(dropdown);
     await tester.pumpAndSettle();
-    expect(find.text('Local video player cache'), findsOneWidget);
+    expect(find.text('Local media cache'), findsOneWidget);
     expect(find.text('Cached now: 5.00 MB'), findsOneWidget);
 
     await tester.tap(dropdown);

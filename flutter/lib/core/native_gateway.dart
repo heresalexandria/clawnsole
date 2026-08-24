@@ -90,7 +90,7 @@ class NativeGateway extends DirectGateway
     ReferenceVideoNormalizationService? referenceVideoNormalizer,
   }) {
     final localStore = store ?? (hybridStore == null ? LocalDataStore() : null);
-    // The video cache lives in the app cache directory: unlike a per-process
+    // The media cache lives in the app cache directory: unlike a per-process
     // system-temp folder it survives relaunches (which is the entire point of
     // the cache), while the operating system may still reclaim it under
     // storage pressure and it stays out of device backups. The directory is

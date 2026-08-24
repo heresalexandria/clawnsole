@@ -500,8 +500,8 @@ class _StorageSectionState extends State<_StorageSection> {
   );
 }
 
-/// The "Local video player cache" cap: how much finished film Clawnsole may
-/// keep on this device so Drive-stored videos start instantly.
+/// The local media-cache cap: how much Drive preview and finished-film data
+/// Clawnsole may keep on this device for faster library and player startup.
 class _LocalVideoCacheControl extends StatefulWidget {
   const _LocalVideoCacheControl({required this.controller});
 
@@ -584,11 +584,11 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
           key: const ValueKey('local-video-cache-cap'),
           initialValue: current,
           decoration: const InputDecoration(
-            labelText: 'Local video player cache',
+            labelText: 'Local media cache',
             helperText:
-                'Keeps recent and listed Drive films on this device so '
-                'playback starts instantly. Off also stops prefetching and '
-                'clears the cache.',
+                'Keeps Drive previews and recent films on this device so the '
+                'library and playback open faster. Off stops prefetching and '
+                'clears cached media.',
             helperMaxLines: 3,
           ),
           items: caps
