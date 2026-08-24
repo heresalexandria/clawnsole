@@ -6,7 +6,7 @@ import 'dart:io';
 typedef VideoCacheProgressListener =
     void Function(int received, int? total, bool done);
 
-/// A bounded least-recently-used disk cache for delivered video files.
+/// A bounded least-recently-used disk cache for Drive previews and videos.
 ///
 /// Files are stored as `<key><extension>` inside a caller-supplied directory.
 /// The recency index is the filesystem itself: a lookup touches the file's

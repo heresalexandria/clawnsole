@@ -228,20 +228,20 @@ class GoogleDriveStore implements DurableDataStore {
         contentType: contentType,
         bytes: bytes.length,
       );
-      if (contentType.toLowerCase().startsWith('video/')) {
+      if (_isLocallyCacheable(reference)) {
         try {
-          // The uploaded bytes are already in hand. Materialize them through
-          // the platform presenter now so the originating device can extract
-          // and sync its thumbnail and timeline strip without downloading the
-          // same film back from Drive first.
+          // The uploaded bytes are already in hand. Materialize films and
+          // preview images now so a relaunch never has to download them back
+          // from Drive before showing the library.
           await _presenter.present(
             reference,
             Stream<List<int>>.value(bytes),
             expectedLength: bytes.length,
           );
         } on Object {
-          // Retaining the film is the durable operation. A cache that is off,
-          // full, or temporarily unavailable must never make the upload fail.
+          // Retaining the asset is the durable operation. A cache that is
+          // off, full, or temporarily unavailable must never make the upload
+          // fail.
         }
       }
       return reference;
@@ -292,9 +292,24 @@ class GoogleDriveStore implements DurableDataStore {
     if (reference.kind != 'drive') {
       throw StateError('The asset is not stored in Google Drive.');
     }
+    final cached = await _presenter.read(reference);
+    if (cached != null) return cached;
     _requireConnected();
     try {
-      return await _api!.downloadFile(reference.value);
+      final bytes = await _api!.downloadFile(reference.value);
+      if (_isLocallyCacheable(reference)) {
+        try {
+          await _presenter.present(
+            reference,
+            Stream<List<int>>.value(bytes),
+            expectedLength: bytes.length,
+          );
+        } on Object {
+          // A read still succeeds when the bounded local cache is disabled,
+          // full, or unavailable.
+        }
+      }
+      return bytes;
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
@@ -441,6 +456,11 @@ class GoogleDriveStore implements DurableDataStore {
       add(reference.thumbnailAsset);
     }
     return retained;
+  }
+
+  bool _isLocallyCacheable(AssetReference reference) {
+    final contentType = reference.contentType?.toLowerCase() ?? '';
+    return contentType.startsWith('video/') || contentType.startsWith('image/');
   }
 
   void _requireConnected() {

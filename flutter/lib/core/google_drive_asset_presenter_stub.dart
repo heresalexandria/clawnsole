@@ -9,6 +9,9 @@ GoogleDriveAssetPresenter createPlatformGoogleDriveAssetPresenter() =>
 
 class _MemoryGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   @override
+  Future<Uint8List?> read(AssetReference reference) async => null;
+
+  @override
   Future<Uri?> lookup(AssetReference reference) async => null;
 
   @override

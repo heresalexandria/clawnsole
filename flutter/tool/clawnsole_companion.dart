@@ -37,7 +37,7 @@ Future<void> main(List<String> arguments) async {
               File('${config.dataFile}.development-key'),
             ));
   final localStore = CompanionStore(File(config.dataFile));
-  // The video cache sits beside the companion's data file so it shares the
+  // The media cache sits beside the companion's data file so it shares the
   // library's lifetime and disk, and survives companion restarts.
   final videoCache = VideoCache(
     directory: () async => Directory(

@@ -1266,7 +1266,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Caching preview'), findsOneWidget);
+    expect(find.text('Loading preview'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsWidgets);
     final progressHost = find.byKey(
       const ValueKey('media-loading-estimated-progress'),
@@ -1285,7 +1285,7 @@ void main() {
 
     gateway.completeAsset(frame);
     await tester.pumpAndSettle();
-    expect(find.text('Caching preview'), findsNothing);
+    expect(find.text('Loading preview'), findsNothing);
     expect(
       find.byKey(const ValueKey('generation-video-filmstrip')),
       findsNothing,

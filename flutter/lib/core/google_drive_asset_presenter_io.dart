@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'asset_extensions.dart';
 import 'google_drive_asset_presenter_base.dart';
@@ -41,15 +42,14 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   String _extension(AssetReference reference) =>
       retainedAssetExtension(reference.contentType, reference.label);
 
-  @override
-  Future<Uri?> lookup(AssetReference reference) async {
+  Future<File?> _lookupFile(AssetReference reference) async {
     if (!RegExp(r'^[A-Za-z0-9_-]{8,200}$').hasMatch(reference.value)) {
       return null;
     }
     final cache = _cache;
     if (cache != null && cache.enabled) {
       final cached = await cache.lookup(reference.value);
-      if (cached != null) return cached.uri;
+      if (cached != null) return cached;
     }
     final temporary = _temporary;
     if (temporary != null) {
@@ -57,10 +57,23 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
         '${temporary.path}${Platform.pathSeparator}'
         '${reference.value}${_extension(reference)}',
       );
-      if (await file.exists()) return file.uri;
+      if (await file.exists()) return file;
     }
     return null;
   }
+
+  @override
+  Future<Uint8List?> read(AssetReference reference) async {
+    try {
+      return await (await _lookupFile(reference))?.readAsBytes();
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  @override
+  Future<Uri?> lookup(AssetReference reference) async =>
+      (await _lookupFile(reference))?.uri;
 
   @override
   Future<Uri> present(

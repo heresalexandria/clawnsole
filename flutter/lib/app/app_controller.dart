@@ -299,8 +299,8 @@ class AppController extends ChangeNotifier {
   GenerationPlaceholderStyle generationPlaceholderStyle =
       GenerationPlaceholderStyle.broadcastStatic;
 
-  /// Size cap in megabytes for the local video player cache; 0 turns the
-  /// cache and its prefetching off.
+  /// Size cap in megabytes for cached Drive previews and videos; 0 turns the
+  /// cache and video prefetching off.
   int localVideoCacheMb = AppPreferences.defaultLocalVideoCacheMb;
 
   /// Converts unsupported reference images and repairs incompatible reference
