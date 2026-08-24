@@ -4197,6 +4197,54 @@ void main() {
     expect(inlineEditable.controller.text, 'Direction edited full screen');
   });
 
+  testWidgets('prompt toolbar copies the exact direction to the clipboard', (
+    tester,
+  ) async {
+    String? copiedText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copiedText =
+                (call.arguments as Map<Object?, Object?>)['text'] as String?;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = '  First shot.\nThen follow @Image 1.  ';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final copyButton = find.byKey(const ValueKey('prompt-copy-button'));
+    final fullscreenButton = find.byKey(
+      const ValueKey('prompt-fullscreen-button'),
+    );
+    expect(copyButton, findsOneWidget);
+    expect(
+      tester.getCenter(copyButton).dx,
+      lessThan(tester.getCenter(fullscreenButton).dx),
+    );
+
+    await tester.tap(copyButton);
+    await tester.pump();
+
+    expect(copiedText, controller.form.prompt);
+    expect(controller.notice, 'Prompt copied to the clipboard.');
+    await tester.pump(const Duration(seconds: 4));
+  });
+
   testWidgets('prompt reference tags autocomplete and highlight', (
     tester,
   ) async {
