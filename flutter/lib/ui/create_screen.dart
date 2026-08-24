@@ -638,13 +638,33 @@ class _ComposerState extends State<_Composer> {
             FieldLabel(
               upscaling ? 'Detail guidance · optional' : 'Direction',
               icon: Icons.edit_note_rounded,
-              trailing: IconButton(
-                key: const ValueKey('prompt-fullscreen-button'),
-                tooltip: 'Expand prompt to full screen',
-                visualDensity: VisualDensity.compact,
-                onPressed: () =>
-                    unawaited(_showFullscreenPrompt(upscaling: upscaling)),
-                icon: const Icon(Icons.fullscreen_rounded),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (controller.selectedModel.maxPromptCharacters != null)
+                    Tooltip(
+                      message: '${controller.selectedModel.label} prompt limit',
+                      child: Text(
+                        '≤ ${controller.selectedModel.maxPromptCharacters} chars',
+                        key: const ValueKey('prompt-character-limit'),
+                        style: TextStyle(
+                          color: context.colors.onSurfaceVariant,
+                          fontSize: 10.5,
+                          fontFeatures: const <FontFeature>[
+                            FontFeature.tabularFigures(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  IconButton(
+                    key: const ValueKey('prompt-fullscreen-button'),
+                    tooltip: 'Expand prompt to full screen',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () =>
+                        unawaited(_showFullscreenPrompt(upscaling: upscaling)),
+                    icon: const Icon(Icons.fullscreen_rounded),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 7),
@@ -653,6 +673,7 @@ class _ComposerState extends State<_Composer> {
               prompt: form.prompt,
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(form.references),
+              maxLength: controller.selectedModel.maxPromptCharacters,
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
             ),
@@ -682,10 +703,17 @@ class _ComposerState extends State<_Composer> {
           else if (videoActive) ...<Widget>[
             _SourceEditor(
               controller: controller,
-              title: upscaling ? 'Video to upscale' : 'Continue a video',
+              title: upscaling
+                  ? 'Video to upscale'
+                  : controller.selectedModel.sourceInputLabel ??
+                        'Continue a video',
               description: upscaling
-                  ? 'Upload an MP4 up to 20 seconds and 50 MB, at 2560×1440 or below. Hosted HTTP(S) clips also work, and source audio is preserved.'
-                  : 'FLUX 3 extends the motion of an uploaded clip or a hosted provider-compatible URL.',
+                  ? controller.selectedModel.sourceInputHint ??
+                        'Upload an MP4 up to 20 seconds and 50 MB, at 2560×1440 or below. Hosted HTTP(S) clips also work, and source audio is preserved.'
+                  : controller.selectedModel.sourceInputHint ??
+                        (controller.selectedModel.maxSourceVideoSeconds == null
+                            ? 'Attach an uploaded clip or a hosted provider-compatible URL.'
+                            : 'Attach a clip up to ${controller.selectedModel.maxSourceVideoSeconds} seconds or use a hosted provider-compatible URL.'),
               icon: upscaling
                   ? Icons.high_quality_rounded
                   : Icons.movie_filter_rounded,
@@ -712,7 +740,16 @@ class _ComposerState extends State<_Composer> {
               },
               formRevision: controller.formRevision,
             ),
-            if (form.keyframes.isNotEmpty) ...<Widget>[
+            if (controller
+                .selectedModel
+                .supportsGuidanceWithSource) ...<Widget>[
+              const SizedBox(height: 14),
+              _GuidanceInputsSection(
+                controller: controller,
+                videoAction: null,
+                draftAction: null,
+              ),
+            ] else if (form.keyframes.isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
               Text(
                 'Your ${form.keyframes.length} reference '
@@ -840,6 +877,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                     ),
                     expands: true,
                     autofocus: true,
+                    maxLength: controller.selectedModel.maxPromptCharacters,
                     onChanged: (value) =>
                         controller.updateForm((form) => form.prompt = value),
                   ),
@@ -1115,7 +1153,7 @@ class _GuidanceInputsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final model = controller.selectedModel;
     final showFrames =
-        model.maxKeyframes > 0 || controller.form.keyframes.isNotEmpty;
+        controller.keyframeLimit > 0 || controller.form.keyframes.isNotEmpty;
     final showReferences =
         model.supportsMediaReferences || controller.form.references.isNotEmpty;
     if (!showFrames && !showReferences) {
@@ -1288,17 +1326,18 @@ class _FramesSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final form = controller.form;
     final model = controller.selectedModel;
+    final maximumFrames = controller.keyframeLimit;
     final setAside = controller.framesBlockedByReferences;
     final conflicted =
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
     final frameLimit = model.supportsTimedKeyframes
-        ? '${model.maxKeyframes} frames max · custom timing available'
+        ? '$maximumFrames frames max · custom timing available'
         : model.supportsEndFrame
-        ? '${model.maxKeyframes} frames max · first + last · pinned by the provider'
+        ? '$maximumFrames frames max · first + last · pinned by the provider'
         : '1 first frame max · pins frame 0';
-    final exclusiveInputs = model.maxKeyframes == 1
+    final exclusiveInputs = maximumFrames == 1
         ? 'a first frame or creative references'
         : 'first/last frames or creative references';
     final caption = conflicted
@@ -1470,7 +1509,7 @@ class _ReferencesSection extends StatelessWidget {
     final form = controller.form;
     final model = controller.selectedModel;
     final limits = MediaReferenceKind.values
-        .where((kind) => model.maxReferences(kind) > 0)
+        .where((kind) => controller.referenceLimit(kind) > 0)
         .map((kind) {
           final maximum = controller.referenceLimit(kind);
           final label = maximum == 1
@@ -1481,8 +1520,15 @@ class _ReferencesSection extends StatelessWidget {
                 }
               : kind.pluralLabel;
           final seconds = model.maxReferenceSeconds(kind, form.resolution);
+          final minimum = kind == MediaReferenceKind.audio
+              ? model.minReferenceAudioSeconds
+              : null;
           final duration = seconds == null
               ? ''
+              : minimum != null && maximum == 1
+              ? ' ($minimum–${seconds}s)'
+              : minimum != null
+              ? ' (${minimum}s min each · ${seconds}s total)'
               : maximum == 1
               ? ' (up to ${seconds}s)'
               : ' (${seconds}s total)';
@@ -1553,7 +1599,7 @@ class _ReferencesSection extends StatelessWidget {
         : MediaReferenceKind.values
               .where(
                 (kind) =>
-                    model.maxReferences(kind) > 0 ||
+                    controller.referenceLimit(kind) > 0 ||
                     form.referenceCount(kind) > 0,
               )
               .map(
@@ -1734,6 +1780,21 @@ class _ReferenceTile extends StatelessWidget {
                           ? (bytes) => controller.rememberReferenceThumbnail(
                               reference.id,
                               bytes,
+                            )
+                          : null,
+                      onVideoMetadata:
+                          reference.kind == MediaReferenceKind.video
+                          ? (metadata) =>
+                                controller.rememberReferenceVideoMetadata(
+                                  reference.id,
+                                  metadata,
+                                )
+                          : null,
+                      onMediaDuration:
+                          reference.kind == MediaReferenceKind.audio
+                          ? (seconds) => controller.rememberReferenceDuration(
+                              reference.id,
+                              seconds,
                             )
                           : null,
                     ),
@@ -2486,7 +2547,10 @@ class _SettingsGrid extends StatelessWidget {
         if (controller.selectedModel.outputKind ==
             GenerationOutputKind.video) ...<Widget>[
           const SizedBox(height: 10),
-          _DurationControl(controller: controller),
+          if (!controller.selectedModel.durationComesFromSource(
+            controller.form.mode,
+          ))
+            _DurationControl(controller: controller),
           if (controller.selectedModel.supportsFrameRate) ...<Widget>[
             const SizedBox(height: 10),
             _FrameRateControl(controller: controller),
@@ -2634,94 +2698,175 @@ class _UpscaleSettings extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final form = controller.form;
-      final creative = form.upscaleCreativity == 1;
-      final factor = form.upscaleFactor;
-      final factorText = factor == factor.roundToDouble()
-          ? factor.toStringAsFixed(0)
-          : factor.toStringAsFixed(1);
-      final scale = <Widget>[
-        FieldLabel(
-          'Upscale factor',
-          icon: Icons.zoom_out_map_rounded,
-          trailing: CounterReadout(factorText, unit: '×'),
-        ),
-        const SizedBox(height: 8),
-        HardwareSlider(
-          key: const ValueKey('upscale-factor-slider'),
-          min: 1.5,
-          max: 3,
-          divisions: 15,
-          label: '$factorText×',
-          value: factor,
-          onChanged: (value) => controller.updateForm(
-            (form) => form.upscaleFactor = (value * 10).roundToDouble() / 10,
-          ),
-        ),
-        Text(
-          'The source aspect ratio is preserved. Output is capped at about 14.4 megapixels.',
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 10.5,
-          ),
-        ),
-      ];
-      final finish = <Widget>[
-        const FieldLabel('Detail mode', icon: Icons.auto_awesome_rounded),
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: HardwareChoiceSwitch(
-            key: const ValueKey('upscale-creativity-switch'),
-            firstLabel: 'PRECISE',
-            secondLabel: 'CREATIVE',
-            firstSelected: !creative,
-            onChanged: (precise) => controller.updateForm(
-              (form) => form.upscaleCreativity = precise ? 0 : 1,
+  Widget build(BuildContext context) {
+    if (controller.selectedModel.upscaleUsesResolutionTargets) {
+      final strength = controller.form.upscaleCreativity;
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final target = <Widget>[
+            const FieldLabel(
+              'Target resolution',
+              icon: Icons.high_quality_rounded,
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          creative
-              ? 'Creative restores and invents fine detail. It is sharpest on generated footage, but faces and products can drift.'
-              : 'Precise sharpens while preserving identity, text, products, and brand assets as faithfully as possible.',
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 10.5,
-          ),
-        ),
-        const SizedBox(height: 16),
-        _SafetyControl(controller: controller),
-      ];
-      if (constraints.maxWidth <= 640) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[...scale, const SizedBox(height: 22), ...finish],
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: Column(
+            const SizedBox(height: 8),
+            _ResolutionDropdown(controller: controller),
+            const SizedBox(height: 8),
+            Text(
+              'Aspect ratio and source audio are preserved. Runway bills each output frame.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 10.5,
+              ),
+            ),
+          ];
+          final detail = <Widget>[
+            FieldLabel(
+              'Creative detail',
+              icon: Icons.auto_awesome_rounded,
+              trailing: CounterReadout('$strength', unit: '%'),
+            ),
+            const SizedBox(height: 8),
+            HardwareSlider(
+              key: const ValueKey('runway-upscale-creativity-slider'),
+              min: 0,
+              max: 100,
+              divisions: 20,
+              label: '$strength%',
+              value: strength.toDouble(),
+              onChanged: (value) => controller.updateForm(
+                (form) => form.upscaleCreativity = value.round(),
+              ),
+            ),
+            Text(
+              strength <= 25
+                  ? 'Faithful restoration with restrained invented detail.'
+                  : 'Higher values invent more texture and may drift from faces, text, or products.',
+              style: TextStyle(
+                color: context.colors.onSurfaceVariant,
+                fontSize: 10.5,
+              ),
+            ),
+          ];
+          if (constraints.maxWidth <= 640) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: scale,
-            ),
-          ),
-          const SizedBox(width: 26),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: finish,
-            ),
-          ),
-        ],
+              children: <Widget>[
+                ...target,
+                const SizedBox(height: 22),
+                ...detail,
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: target,
+                ),
+              ),
+              const SizedBox(width: 26),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: detail,
+                ),
+              ),
+            ],
+          );
+        },
       );
-    },
-  );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final form = controller.form;
+        final creative = form.upscaleCreativity == 1;
+        final factor = form.upscaleFactor;
+        final factorText = factor == factor.roundToDouble()
+            ? factor.toStringAsFixed(0)
+            : factor.toStringAsFixed(1);
+        final scale = <Widget>[
+          FieldLabel(
+            'Upscale factor',
+            icon: Icons.zoom_out_map_rounded,
+            trailing: CounterReadout(factorText, unit: '×'),
+          ),
+          const SizedBox(height: 8),
+          HardwareSlider(
+            key: const ValueKey('upscale-factor-slider'),
+            min: 1.5,
+            max: 3,
+            divisions: 15,
+            label: '$factorText×',
+            value: factor,
+            onChanged: (value) => controller.updateForm(
+              (form) => form.upscaleFactor = (value * 10).roundToDouble() / 10,
+            ),
+          ),
+          Text(
+            'The source aspect ratio is preserved. Output is capped at about 14.4 megapixels.',
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+            ),
+          ),
+        ];
+        final finish = <Widget>[
+          const FieldLabel('Detail mode', icon: Icons.auto_awesome_rounded),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: HardwareChoiceSwitch(
+              key: const ValueKey('upscale-creativity-switch'),
+              firstLabel: 'PRECISE',
+              secondLabel: 'CREATIVE',
+              firstSelected: !creative,
+              onChanged: (precise) => controller.updateForm(
+                (form) => form.upscaleCreativity = precise ? 0 : 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            creative
+                ? 'Creative restores and invents fine detail. It is sharpest on generated footage, but faces and products can drift.'
+                : 'Precise sharpens while preserving identity, text, products, and brand assets as faithfully as possible.',
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _SafetyControl(controller: controller),
+        ];
+        if (constraints.maxWidth <= 640) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[...scale, const SizedBox(height: 22), ...finish],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: scale,
+              ),
+            ),
+            const SizedBox(width: 26),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: finish,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _EnhanceSettings extends StatelessWidget {

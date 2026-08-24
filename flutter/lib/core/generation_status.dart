@@ -6,6 +6,7 @@ const Set<String> generationFailureStatuses = <String>{
   'Failed',
   'Request Moderated',
   'Content Moderated',
+  'Cancelled',
 };
 
 String normalizeGenerationStatus(Object? value) {
@@ -14,6 +15,7 @@ String normalizeGenerationStatus(Object? value) {
     'submitting' => 'submitting',
     'pending' ||
     'queued' ||
+    'throttled' ||
     'processing' ||
     'running' ||
     'in_progress' => 'Pending',
@@ -23,6 +25,7 @@ String normalizeGenerationStatus(Object? value) {
     'failed' => 'Failed',
     'request moderated' => 'Request Moderated',
     'content moderated' => 'Content Moderated',
+    'cancelled' || 'canceled' => 'Cancelled',
     _ => status.isEmpty ? 'Unknown' : status,
   };
 }

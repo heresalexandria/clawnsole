@@ -53,6 +53,7 @@ class VideoModelDefinition {
     required this.maxDuration,
     required this.durationStep,
     required this.maxKeyframes,
+    this.maxKeyframesByMode = const <VideoMode, int>{},
     required this.usdPerSecond,
     this.referenceUsdPerSecond,
     this.supportsStartFrame = false,
@@ -61,15 +62,19 @@ class VideoModelDefinition {
     this.maxVideoReferences = 0,
     this.maxAudioReferences = 0,
     this.maxTotalReferences,
+    this.maxReferencesByMode =
+        const <VideoMode, Map<MediaReferenceKind, int>>{},
     this.framesExclusiveWithReferences = false,
     this.maxReferenceVideoSeconds,
     this.maxReferenceAudioSeconds,
+    this.minReferenceAudioSeconds,
     this.maxReferenceVideoSecondsByResolution = const <String, int>{},
     this.maxReferenceAudioSecondsByResolution = const <String, int>{},
     this.requiresVisualReferenceForAudio = false,
     this.maxDurationWithImageGuidance,
     this.maxDurationByResolution = const <String, int>{},
     this.aspectRatiosByResolution = const <String, List<String>>{},
+    this.aspectRatiosByMode = const <VideoMode, List<String>>{},
     this.aspectRatiosWithFrames,
     this.resolutionsByReferenceKind =
         const <MediaReferenceKind, List<String>>{},
@@ -83,6 +88,17 @@ class VideoModelDefinition {
     this.supportsTimedKeyframes = false,
     this.supportsFrameRate = false,
     this.supportsSeed = false,
+    this.maxPromptCharacters,
+    this.promptOptionalModes = const <VideoMode>[],
+    this.promptOptionalWithFramesOnly = false,
+    this.minSourceVideoSeconds,
+    this.maxSourceVideoSeconds,
+    this.durationFromSourceModes = const <VideoMode>[],
+    this.sourceInputLabel,
+    this.sourceInputHint,
+    this.supportsGuidanceWithSource = false,
+    this.sourceGuidanceRequiresTimestamps = false,
+    this.upscaleUsesResolutionTargets = false,
     this.outputKind = GenerationOutputKind.video,
     this.progressReporting,
   });
@@ -98,6 +114,7 @@ class VideoModelDefinition {
   final int maxDuration;
   final int durationStep;
   final int maxKeyframes;
+  final Map<VideoMode, int> maxKeyframesByMode;
   final double usdPerSecond;
   final double? referenceUsdPerSecond;
   final bool supportsStartFrame;
@@ -106,6 +123,7 @@ class VideoModelDefinition {
   final int maxVideoReferences;
   final int maxAudioReferences;
   final int? maxTotalReferences;
+  final Map<VideoMode, Map<MediaReferenceKind, int>> maxReferencesByMode;
 
   /// The provider exposes pinned-keyframe and creative-reference modes as
   /// separate request shapes, so a generation cannot combine both.
@@ -113,12 +131,14 @@ class VideoModelDefinition {
 
   final int? maxReferenceVideoSeconds;
   final int? maxReferenceAudioSeconds;
+  final int? minReferenceAudioSeconds;
   final Map<String, int> maxReferenceVideoSecondsByResolution;
   final Map<String, int> maxReferenceAudioSecondsByResolution;
   final bool requiresVisualReferenceForAudio;
   final int? maxDurationWithImageGuidance;
   final Map<String, int> maxDurationByResolution;
   final Map<String, List<String>> aspectRatiosByResolution;
+  final Map<VideoMode, List<String>> aspectRatiosByMode;
   final List<String>? aspectRatiosWithFrames;
   final Map<MediaReferenceKind, List<String>> resolutionsByReferenceKind;
   final String? referencePromptHint;
@@ -131,6 +151,27 @@ class VideoModelDefinition {
 
   /// The wire API accepts a reproducible random seed for this model.
   final bool supportsSeed;
+
+  /// Provider-published prompt ceiling, measured in Dart/UTF-16 code units.
+  /// Null means the provider does not publish a dependable route limit.
+  final int? maxPromptCharacters;
+
+  /// Modes whose wire contract permits an empty prompt.
+  final List<VideoMode> promptOptionalModes;
+  final bool promptOptionalWithFramesOnly;
+
+  /// Provider-published limits for the dedicated source-video input.
+  final int? minSourceVideoSeconds;
+  final int? maxSourceVideoSeconds;
+
+  /// Modes whose output length follows the attached source instead of the
+  /// duration control.
+  final List<VideoMode> durationFromSourceModes;
+  final String? sourceInputLabel;
+  final String? sourceInputHint;
+  final bool supportsGuidanceWithSource;
+  final bool sourceGuidanceRequiresTimestamps;
+  final bool upscaleUsesResolutionTargets;
   final GenerationOutputKind outputKind;
 
   /// Overrides the provider-wide progress contract for this model route.
@@ -138,11 +179,16 @@ class VideoModelDefinition {
 
   String get canonicalId => canonicalModelId ?? id;
 
-  int maxReferences(MediaReferenceKind kind) => switch (kind) {
-    MediaReferenceKind.image => maxImageReferences,
-    MediaReferenceKind.video => maxVideoReferences,
-    MediaReferenceKind.audio => maxAudioReferences,
-  };
+  int maxReferences(MediaReferenceKind kind, [VideoMode? mode]) =>
+      (mode == null ? null : maxReferencesByMode[mode]?[kind]) ??
+      switch (kind) {
+        MediaReferenceKind.image => maxImageReferences,
+        MediaReferenceKind.video => maxVideoReferences,
+        MediaReferenceKind.audio => maxAudioReferences,
+      };
+
+  int maxKeyframesFor(VideoMode mode) =>
+      maxKeyframesByMode[mode] ?? maxKeyframes;
 
   bool get supportsMediaReferences =>
       maxImageReferences > 0 ||
@@ -157,6 +203,13 @@ class VideoModelDefinition {
       : ReferenceVideoCompatibilityProfile.generic;
 
   bool get isUpscaler => modes.length == 1 && modes.single == VideoMode.upscale;
+
+  bool promptIsOptional(VideoMode mode, {bool hasFrames = false}) =>
+      promptOptionalModes.contains(mode) &&
+      (!promptOptionalWithFramesOnly || mode != VideoMode.i2v || hasFrames);
+
+  bool durationComesFromSource(VideoMode mode) =>
+      durationFromSourceModes.contains(mode);
 
   int maxDurationFor(String resolution, {bool withImageGuidance = false}) {
     final resolutionMaximum =
@@ -192,10 +245,15 @@ class VideoModelDefinition {
               maxReferenceAudioSeconds,
       };
 
-  List<String> aspectRatiosFor(String resolution, {bool withFrames = false}) =>
-      withFrames && aspectRatiosWithFrames != null
+  List<String> aspectRatiosFor(
+    String resolution, {
+    bool withFrames = false,
+    VideoMode? mode,
+  }) => withFrames && aspectRatiosWithFrames != null
       ? aspectRatiosWithFrames!
-      : aspectRatiosByResolution[resolution] ?? aspectRatios;
+      : (mode == null ? null : aspectRatiosByMode[mode]) ??
+            aspectRatiosByResolution[resolution] ??
+            aspectRatios;
 
   bool supportsResolutionForReferences(
     String resolution,
@@ -470,6 +528,433 @@ const ltxProvider = VideoProviderDefinition(
       maxAudioReferences: 1,
       maxReferenceAudioSeconds: 20,
       maxReferenceAudioSecondsByResolution: <String, int>{'qhd': 10, '4k': 10},
+    ),
+  ],
+);
+
+const _runwayRatios = <String>[
+  '21:9',
+  '16:9',
+  '4:3',
+  '3:2',
+  '1:1',
+  '2:3',
+  '3:4',
+  '9:16',
+];
+const _runwayCommonRatios = <String>['16:9', '4:3', '1:1', '3:4', '9:16'];
+const _runwayPortraitRatios = <String>['16:9', '9:16'];
+
+/// Runway's direct API exposes one model through several request endpoints.
+/// Keeping those modes on one canonical definition lets Create switch request
+/// shapes without duplicating the model in the library and cost desk.
+const runwayProvider = VideoProviderDefinition(
+  id: 'runway',
+  name: 'Runway',
+  description:
+      'Runway’s first-party video models, multimodal references, edits, and character performance.',
+  consoleUrl: 'https://app.runwayml.com/',
+  docsUrl: 'https://docs.dev.runwayml.com/guides/models/',
+  pricingUrl: 'https://docs.dev.runwayml.com/guides/pricing/',
+  pricingSource:
+      'Published credits · converted at \$0.01/credit; the live model guide is checked for additions',
+  progressReporting: ProviderProgressReporting.reported,
+  resultDelivery: ProviderResultDelivery(
+    availability: Duration(hours: 24),
+    keepOpenRecommended: true,
+  ),
+  models: <VideoModelDefinition>[
+    VideoModelDefinition(
+      id: 'seedance2_5',
+      canonicalModelId: 'seedance-2.5',
+      label: 'Seedance 2.5',
+      description:
+          'Long-form generation and reference-video guidance with native audio.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: _runwayCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd],
+      minDuration: 4,
+      maxDuration: 30,
+      durationStep: 1,
+      maxKeyframes: 2,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .30,
+      referenceUsdPerSecond: .30,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxImageReferences: 30,
+      maxVideoReferences: 10,
+      maxAudioReferences: 10,
+      framesExclusiveWithReferences: true,
+      maxReferenceVideoSeconds: 30,
+      maxReferenceAudioSeconds: 30,
+      maxPromptCharacters: 15000,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v, VideoMode.v2v],
+      maxSourceVideoSeconds: 30,
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'grok_imagine_1_5',
+      canonicalModelId: 'grok-imagine-video-1.5',
+      label: 'Grok Imagine 1.5',
+      description:
+          'Fast generation with image and audio guidance up to Full HD.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _runwayRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd],
+      minDuration: 1,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: .16,
+      referenceUsdPerSecond: .16,
+      supportsStartFrame: true,
+      maxImageReferences: 7,
+      maxAudioReferences: 1,
+      maxTotalReferences: 8,
+      maxReferenceAudioSeconds: 15,
+      minReferenceAudioSeconds: 3,
+      requiresVisualReferenceForAudio: true,
+      framesExclusiveWithReferences: true,
+      aspectRatiosByMode: <VideoMode, List<String>>{
+        VideoMode.i2v: <String>['auto'],
+      },
+      resolutionsByReferenceKind: <MediaReferenceKind, List<String>>{
+        MediaReferenceKind.image: <String>['sd', 'hd'],
+        MediaReferenceKind.audio: <String>['sd', 'hd'],
+      },
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+      promptOptionalWithFramesOnly: true,
+    ),
+    VideoModelDefinition(
+      id: 'seedance2',
+      canonicalModelId: 'seedance-2.0',
+      label: 'Seedance 2.0',
+      description:
+          'Full-quality multimodal generation and video guidance up to 4K.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: _runwayCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd, _fhd, _uhd],
+      minDuration: 4,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 2,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .36,
+      referenceUsdPerSecond: .36,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxImageReferences: 9,
+      maxVideoReferences: 3,
+      maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
+      maxReferenceVideoSeconds: 15,
+      maxReferenceAudioSeconds: 15,
+      maxPromptCharacters: 3500,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v, VideoMode.v2v],
+      promptOptionalWithFramesOnly: true,
+      maxSourceVideoSeconds: 15,
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'seedance2_fast',
+      canonicalModelId: 'seedance-2.0-fast',
+      label: 'Seedance 2.0 Fast',
+      description: 'Faster multimodal generation at 480p or 720p.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: _runwayCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd],
+      minDuration: 4,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 2,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .29,
+      referenceUsdPerSecond: .29,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxImageReferences: 9,
+      maxVideoReferences: 3,
+      maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
+      maxReferenceVideoSeconds: 15,
+      maxReferenceAudioSeconds: 15,
+      maxPromptCharacters: 3500,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v, VideoMode.v2v],
+      promptOptionalWithFramesOnly: true,
+      maxSourceVideoSeconds: 15,
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'seedance2_mini',
+      canonicalModelId: 'seedance-2.0-mini',
+      label: 'Seedance 2.0 Mini',
+      description: 'Lowest-cost Seedance route with rich references.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: _runwayCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_sd, _hd],
+      minDuration: 4,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 2,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .16,
+      referenceUsdPerSecond: .16,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxImageReferences: 9,
+      maxVideoReferences: 3,
+      maxAudioReferences: 3,
+      framesExclusiveWithReferences: true,
+      maxReferenceVideoSeconds: 15,
+      maxReferenceAudioSeconds: 15,
+      maxPromptCharacters: 3500,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v, VideoMode.v2v],
+      promptOptionalWithFramesOnly: true,
+      maxSourceVideoSeconds: 15,
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'hailuo3',
+      canonicalModelId: 'hailuo-3',
+      label: 'Hailuo 3',
+      description: 'Reference-rich MiniMax generation at 768p or 2K.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: <String>['auto', ..._runwayCommonRatios, '21:9'],
+      resolutions: <VideoResolutionDefinition>[_hd, _twoK],
+      minDuration: 5,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 1,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .10,
+      referenceUsdPerSecond: .10,
+      supportsStartFrame: true,
+      maxImageReferences: 9,
+      maxVideoReferences: 3,
+      maxAudioReferences: 3,
+      maxTotalReferences: 12,
+      framesExclusiveWithReferences: true,
+      maxReferenceVideoSeconds: 15,
+      maxReferenceAudioSeconds: 15,
+      maxSourceVideoSeconds: 15,
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'aleph2',
+      canonicalModelId: 'aleph-2',
+      label: 'Aleph 2',
+      description: 'Source-faithful video editing with timed guidance images.',
+      modes: <VideoMode>[VideoMode.v2v],
+      aspectRatios: <String>['auto', ..._runwayRatios],
+      resolutions: <VideoResolutionDefinition>[
+        VideoResolutionDefinition('source', 'Source', 'Source resolution'),
+      ],
+      minDuration: 2,
+      maxDuration: 30,
+      durationStep: 1,
+      maxKeyframes: 5,
+      usdPerSecond: .28,
+      referenceUsdPerSecond: .28,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      supportsTimedKeyframes: true,
+      supportsSeed: true,
+      promptOptionalModes: <VideoMode>[VideoMode.v2v],
+      minSourceVideoSeconds: 2,
+      maxSourceVideoSeconds: 30,
+      durationFromSourceModes: <VideoMode>[VideoMode.v2v],
+      sourceInputLabel: 'Video to edit',
+      sourceInputHint:
+          'Attach a 2–30 second clip. Optional timed images pin edits to exact moments.',
+      supportsGuidanceWithSource: true,
+      sourceGuidanceRequiresTimestamps: true,
+    ),
+    VideoModelDefinition(
+      id: 'gen4.5',
+      canonicalModelId: 'runway-gen-4.5',
+      label: 'Gen-4.5',
+      description: 'Runway’s highest-fidelity text and image generation.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: <String>['21:9', ..._runwayCommonRatios],
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 2,
+      maxDuration: 10,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: .12,
+      referenceUsdPerSecond: .12,
+      supportsStartFrame: true,
+      supportsSeed: true,
+      maxPromptCharacters: 1000,
+      aspectRatiosByMode: <VideoMode, List<String>>{
+        VideoMode.t2v: _runwayPortraitRatios,
+      },
+    ),
+    VideoModelDefinition(
+      id: 'gen4_turbo',
+      canonicalModelId: 'runway-gen-4-turbo',
+      label: 'Gen-4 Turbo',
+      description: 'Economical image-to-video generation.',
+      modes: <VideoMode>[VideoMode.i2v],
+      aspectRatios: <String>['21:9', ..._runwayCommonRatios],
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 2,
+      maxDuration: 10,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: .05,
+      referenceUsdPerSecond: .05,
+      supportsStartFrame: true,
+      supportsSeed: true,
+      maxPromptCharacters: 1000,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+    ),
+    VideoModelDefinition(
+      id: 'act_two',
+      canonicalModelId: 'runway-act-two',
+      label: 'Act-Two',
+      description: 'Drive a character image or video from a performance clip.',
+      modes: <VideoMode>[VideoMode.v2v],
+      aspectRatios: <String>['21:9', ..._runwayCommonRatios],
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 3,
+      maxDuration: 30,
+      durationStep: 1,
+      maxKeyframes: 0,
+      usdPerSecond: .05,
+      referenceUsdPerSecond: .05,
+      maxImageReferences: 1,
+      maxVideoReferences: 1,
+      maxTotalReferences: 1,
+      supportsAudio: false,
+      supportsSeed: true,
+      promptOptionalModes: <VideoMode>[VideoMode.v2v],
+      minSourceVideoSeconds: 3,
+      maxSourceVideoSeconds: 30,
+      durationFromSourceModes: <VideoMode>[VideoMode.v2v],
+      sourceInputLabel: 'Performance video',
+      sourceInputHint:
+          'Attach a 3–30 second performance, then one character image or video below.',
+      referencePromptHint:
+          'Exactly one image or video supplies the character to animate.',
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'veo3.1',
+      canonicalModelId: 'veo-3.1',
+      label: 'Veo 3.1',
+      description: 'Premium Veo generation with optional synchronized audio.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _runwayPortraitRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 4,
+      maxDuration: 8,
+      durationStep: 2,
+      maxKeyframes: 2,
+      usdPerSecond: .40,
+      referenceUsdPerSecond: .40,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxPromptCharacters: 1000,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+    ),
+    VideoModelDefinition(
+      id: 'veo3.1_fast',
+      canonicalModelId: 'veo-3.1-fast',
+      label: 'Veo 3.1 Fast',
+      description: 'Faster Veo generation with optional synchronized audio.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _runwayPortraitRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 4,
+      maxDuration: 8,
+      durationStep: 2,
+      maxKeyframes: 2,
+      usdPerSecond: .15,
+      referenceUsdPerSecond: .15,
+      supportsStartFrame: true,
+      supportsEndFrame: true,
+      maxPromptCharacters: 1000,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+    ),
+    VideoModelDefinition(
+      id: 'happyhorse_1_0',
+      canonicalModelId: 'happy-horse-1.0',
+      label: 'Happy Horse 1.0',
+      description: 'Alibaba generation from text or a first frame up to 1080p.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+      aspectRatios: _runwayCommonRatios,
+      resolutions: <VideoResolutionDefinition>[_hd, _fhd],
+      minDuration: 3,
+      maxDuration: 15,
+      durationStep: 1,
+      maxKeyframes: 1,
+      usdPerSecond: .15,
+      referenceUsdPerSecond: .15,
+      supportsStartFrame: true,
+      maxPromptCharacters: 2500,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+      aspectRatiosByMode: <VideoMode, List<String>>{
+        VideoMode.i2v: <String>['auto'],
+      },
+    ),
+    VideoModelDefinition(
+      id: 'gemini_omni_flash',
+      canonicalModelId: 'gemini-omni-flash',
+      label: 'Gemini Omni Flash',
+      description: 'Generation and instruction-led video editing.',
+      modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+      aspectRatios: _runwayPortraitRatios,
+      resolutions: <VideoResolutionDefinition>[_hd],
+      minDuration: 3,
+      maxDuration: 10,
+      durationStep: 1,
+      maxKeyframes: 1,
+      maxKeyframesByMode: <VideoMode, int>{VideoMode.v2v: 0},
+      usdPerSecond: .10,
+      referenceUsdPerSecond: .10,
+      supportsStartFrame: true,
+      maxImageReferences: 5,
+      maxReferencesByMode: <VideoMode, Map<MediaReferenceKind, int>>{
+        VideoMode.i2v: <MediaReferenceKind, int>{MediaReferenceKind.image: 1},
+        VideoMode.v2v: <MediaReferenceKind, int>{MediaReferenceKind.image: 5},
+      },
+      maxSourceVideoSeconds: 10,
+      framesExclusiveWithReferences: true,
+      promptOptionalModes: <VideoMode>[VideoMode.i2v],
+      durationFromSourceModes: <VideoMode>[VideoMode.v2v],
+      sourceInputLabel: 'Video to edit',
+      sourceInputHint:
+          'Attach a clip up to 10 seconds; optional images can guide the edit.',
+      supportsGuidanceWithSource: true,
+    ),
+    VideoModelDefinition(
+      id: 'magnific_video_upscaler_creative',
+      canonicalModelId: 'magnific-video-upscaler-creative',
+      label: 'Magnific Video Upscaler',
+      description:
+          'AI-detail video upscaling from 720p through 4K, billed per output frame.',
+      modes: <VideoMode>[VideoMode.upscale],
+      aspectRatios: <String>['auto'],
+      resolutions: <VideoResolutionDefinition>[
+        VideoResolutionDefinition('hd', '720p', 'Target 720p'),
+        VideoResolutionDefinition('fhd', '1K', 'Target 1K'),
+        VideoResolutionDefinition('qhd', '2K', 'Target 2K'),
+        _uhd,
+      ],
+      minDuration: 1,
+      maxDuration: 30,
+      durationStep: 1,
+      maxKeyframes: 0,
+      usdPerSecond: .168,
+      supportsAudio: false,
+      maxSourceVideoSeconds: 30,
+      durationFromSourceModes: <VideoMode>[VideoMode.upscale],
+      sourceInputLabel: 'Video to upscale',
+      sourceInputHint:
+          'Attach a clip up to 30 seconds. Runway preserves its aspect ratio and bills each output frame.',
+      upscaleUsesResolutionTargets: true,
     ),
   ],
 );
@@ -1417,6 +1902,7 @@ const videoProviders = <VideoProviderDefinition>[
   atlasProvider,
   bflProvider,
   ltxProvider,
+  runwayProvider,
 ];
 
 VideoProviderDefinition providerById(String id) => videoProviders.firstWhere(
@@ -1569,6 +2055,257 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         ),
       );
     }).toList();
+  }
+  if (providerId == 'runway') {
+    ProviderModelPrice rate(
+      String model,
+      String label,
+      double creditsPerSecond, {
+      required List<VideoMode> modes,
+      required int minimum,
+      required int maximum,
+      String? canonical,
+      String detail = 'published',
+    }) => ProviderModelPrice(
+      provider: 'runway',
+      model: model,
+      canonicalModelId: canonical,
+      label: label,
+      usdPerSecond: creditsPerSecond * .01,
+      referenceUsdPerSecond: creditsPerSecond * .01,
+      modes: modes,
+      source: '$detail · ${creditsPerSecond.toStringAsFixed(0)} credits/s',
+      minDuration: minimum,
+      maxDuration: maximum,
+    );
+
+    return <ProviderModelPrice>[
+      rate(
+        'seedance2_5:480p',
+        'Seedance 2.5 · 480p',
+        20,
+        modes: runwayProvider.models[0].modes,
+        minimum: 4,
+        maximum: 30,
+        canonical: 'seedance-2.5',
+        detail: 'published · reference video adds 10 credits/input-s',
+      ),
+      rate(
+        'seedance2_5:720p',
+        'Seedance 2.5 · 720p',
+        30,
+        modes: runwayProvider.models[0].modes,
+        minimum: 4,
+        maximum: 30,
+        canonical: 'seedance-2.5',
+        detail: 'published · reference video adds 15 credits/input-s',
+      ),
+      rate(
+        'seedance2_5:1080p',
+        'Seedance 2.5 · 1080p',
+        68,
+        modes: runwayProvider.models[0].modes,
+        minimum: 4,
+        maximum: 30,
+        canonical: 'seedance-2.5',
+        detail: 'published · reference video adds 34 credits/input-s',
+      ),
+      for (final tier in const <(String, String, double)>[
+        ('480p', '480p', 10),
+        ('720p', '720p', 16),
+        ('1080p', '1080p', 29),
+      ])
+        rate(
+          'grok_imagine_1_5:${tier.$1}',
+          'Grok Imagine 1.5 · ${tier.$2}',
+          tier.$3,
+          modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+          minimum: 1,
+          maximum: 15,
+          canonical: 'grok-imagine-video-1.5',
+          detail: 'published · references add 1 credit each',
+        ),
+      for (final tier in const <(String, String, double)>[
+        ('480p', '480p', 36),
+        ('720p', '720p', 36),
+        ('1080p', '1080p', 40),
+        ('4K', '4K', 150),
+      ])
+        rate(
+          'seedance2:${tier.$1}',
+          'Seedance 2.0 · ${tier.$2}',
+          tier.$3,
+          modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+          minimum: 4,
+          maximum: 15,
+          canonical: 'seedance-2.0',
+        ),
+      for (final model in const <(String, String, double, String)>[
+        ('seedance2_fast', 'Seedance 2.0 Fast', 29, 'seedance-2.0-fast'),
+        ('seedance2_mini', 'Seedance 2.0 Mini', 16, 'seedance-2.0-mini'),
+      ])
+        for (final tier in const <String>['480p', '720p'])
+          rate(
+            '${model.$1}:$tier',
+            '${model.$2} · $tier',
+            model.$3,
+            modes: const <VideoMode>[
+              VideoMode.t2v,
+              VideoMode.i2v,
+              VideoMode.v2v,
+            ],
+            minimum: 4,
+            maximum: 15,
+            canonical: model.$4,
+          ),
+      rate(
+        'hailuo3:720p',
+        'Hailuo 3 · 768p',
+        10,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+        minimum: 5,
+        maximum: 15,
+        canonical: 'hailuo-3',
+        detail: 'published · images add 2 credits each',
+      ),
+      rate(
+        'hailuo3:1440p',
+        'Hailuo 3 · 2K',
+        15,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
+        minimum: 5,
+        maximum: 15,
+        canonical: 'hailuo-3',
+        detail: 'published · images add 2 credits each',
+      ),
+      rate(
+        'aleph2',
+        'Aleph 2',
+        28,
+        modes: const <VideoMode>[VideoMode.v2v],
+        minimum: 2,
+        maximum: 30,
+        canonical: 'aleph-2',
+      ),
+      rate(
+        'gen4.5',
+        'Gen-4.5',
+        12,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+        minimum: 2,
+        maximum: 10,
+        canonical: 'runway-gen-4.5',
+      ),
+      rate(
+        'gen4_turbo',
+        'Gen-4 Turbo',
+        5,
+        modes: const <VideoMode>[VideoMode.i2v],
+        minimum: 2,
+        maximum: 10,
+        canonical: 'runway-gen-4-turbo',
+      ),
+      rate(
+        'act_two',
+        'Act-Two',
+        5,
+        modes: const <VideoMode>[VideoMode.v2v],
+        minimum: 3,
+        maximum: 30,
+        canonical: 'runway-act-two',
+      ),
+      for (final model in const <(String, String, double, double, String)>[
+        ('veo3.1', 'Veo 3.1', 40, 20, 'veo-3.1'),
+        ('veo3.1_fast', 'Veo 3.1 Fast', 15, 10, 'veo-3.1-fast'),
+      ]) ...<ProviderModelPrice>[
+        rate(
+          '${model.$1}:audio',
+          '${model.$2} · Audio',
+          model.$3,
+          modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+          minimum: 4,
+          maximum: 8,
+          canonical: model.$5,
+        ),
+        rate(
+          '${model.$1}:silent',
+          '${model.$2} · Silent',
+          model.$4,
+          modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+          minimum: 4,
+          maximum: 8,
+          canonical: model.$5,
+        ),
+      ],
+      rate(
+        'happyhorse_1_0:720p',
+        'Happy Horse 1.0 · 720p',
+        15,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+        minimum: 3,
+        maximum: 15,
+        canonical: 'happy-horse-1.0',
+      ),
+      rate(
+        'happyhorse_1_0:1080p',
+        'Happy Horse 1.0 · 1080p',
+        30,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+        minimum: 3,
+        maximum: 15,
+        canonical: 'happy-horse-1.0',
+      ),
+      rate(
+        'gemini_omni_flash:generation',
+        'Gemini Omni Flash · Generate',
+        10,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v],
+        minimum: 3,
+        maximum: 10,
+        canonical: 'gemini-omni-flash',
+        detail: 'published · image input adds 1 credit',
+      ),
+      rate(
+        'gemini_omni_flash:edit',
+        'Gemini Omni Flash · Edit',
+        11,
+        modes: const <VideoMode>[VideoMode.v2v],
+        minimum: 3,
+        maximum: 10,
+        canonical: 'gemini-omni-flash',
+        detail: 'published · includes input-video processing',
+      ),
+      for (final tier in const <(String, String, double)>[
+        ('720p', '720p', .007),
+        ('1080p', '1K', .007),
+        ('1440p', '2K', .009),
+        ('4K', '4K', .012),
+      ])
+        ProviderModelPrice(
+          provider: 'runway',
+          model: 'magnific_video_upscaler_creative:${tier.$1}',
+          canonicalModelId: 'magnific-video-upscaler-creative',
+          label: 'Magnific Video Upscaler · ${tier.$2}',
+          usdPerSecond: tier.$3,
+          modes: const <VideoMode>[VideoMode.upscale],
+          source: 'published · per output frame',
+          minDuration: 1,
+          maxDuration: 30,
+          pricingUnit: 'per-frame',
+        ),
+      const ProviderModelPrice(
+        provider: 'runway',
+        model: 'gwm1_avatars',
+        canonicalModelId: 'gwm-1-avatars',
+        label: 'GWM-1 Avatars · Realtime',
+        usdPerSecond: .0033333333333333335,
+        modes: <VideoMode>[],
+        source:
+            'published · interactive realtime only · 2-credit start + 2 credits/6s',
+        createReady: false,
+        pricingUnit: 'realtime-session',
+      ),
+    ];
   }
   final provider = providerById(providerId);
   return provider.models.map((model) => model.price(provider.id)).toList();

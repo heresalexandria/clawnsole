@@ -130,6 +130,7 @@ class MediaReferenceDraft {
     this.thumbnailAsset,
     this.thumbnailBytes,
     this.savedReferenceId,
+    this.durationSeconds,
   });
 
   final String id;
@@ -141,6 +142,7 @@ class MediaReferenceDraft {
   final AssetReference? thumbnailAsset;
   final Uint8List? thumbnailBytes;
   final String? savedReferenceId;
+  final double? durationSeconds;
 
   String get requestSource => asset?.dataUrl ?? source.trim();
 
@@ -153,6 +155,8 @@ class MediaReferenceDraft {
     bool clearThumbnailBytes = false,
     String? savedReferenceId,
     bool clearSavedReferenceId = false,
+    double? durationSeconds,
+    bool clearDurationSeconds = false,
   }) => MediaReferenceDraft(
     id: id,
     label: label ?? this.label,
@@ -169,6 +173,9 @@ class MediaReferenceDraft {
     savedReferenceId: clearSavedReferenceId
         ? null
         : savedReferenceId ?? this.savedReferenceId,
+    durationSeconds: clearDurationSeconds
+        ? null
+        : durationSeconds ?? this.durationSeconds,
   );
 }
 
@@ -456,6 +463,9 @@ class AppController extends ChangeNotifier {
   VideoModelDefinition get selectedModel =>
       modelById(selectedProviderId, selectedModelId);
   VideoModelDefinition get referenceModel => selectedModel;
+  int get keyframeLimit => selectedModel.maxKeyframesFor(
+    form.mode == VideoMode.t2v ? VideoMode.i2v : form.mode,
+  );
   bool get hasApiKey => hasApiKeyFor(selectedProviderId);
   bool hasApiKeyFor(String provider) =>
       snapshot?.hasApiKeyFor(provider) ?? false;
@@ -858,22 +868,37 @@ class AppController extends ChangeNotifier {
   GenerationConfig get currentConfig {
     final orderedFrames = _orderedFrames();
     final upscaling = form.mode == VideoMode.upscale;
+    final retainsGuidance =
+        form.mode == VideoMode.i2v ||
+        (form.mode == VideoMode.v2v &&
+            selectedModel.supportsGuidanceWithSource);
+    final timedSourceGuidance =
+        form.mode == VideoMode.v2v &&
+        selectedModel.sourceGuidanceRequiresTimestamps;
     return GenerationConfig(
       aspectRatio: upscaling ? 'auto' : form.aspectRatio,
-      duration: upscaling ? 'source' : form.duration,
+      duration: upscaling || selectedModel.durationComesFromSource(form.mode)
+          ? 'source'
+          : form.duration,
       resolution: upscaling ? 'source' : form.resolution,
       generateAudio: upscaling ? false : form.generateAudio,
       safetyTolerance: form.safetyTolerance,
       draft: upscaling ? false : form.draft,
       frameRate: form.frameRate,
-      exactTiming: form.usesTimedKeyframes,
-      keyframes: form.mode == VideoMode.i2v
+      exactTiming: form.usesTimedKeyframes || timedSourceGuidance,
+      keyframes: retainsGuidance && orderedFrames.isNotEmpty
           ? orderedFrames
                 .map(
                   (frame) => KeyframeLabel(
                     label: frame.label,
                     role: frame.role,
-                    seconds: form.usesTimedKeyframes ? frame.seconds : null,
+                    seconds: form.usesTimedKeyframes || timedSourceGuidance
+                        ? timedSourceGuidance &&
+                                  frame.role == KeyframeRole.end &&
+                                  form.videoMetadata != null
+                              ? form.videoMetadata!.durationSeconds
+                              : frame.seconds
+                        : null,
                     referenceId: frame.savedReferenceId,
                     source:
                         frame.asset?.retained ??
@@ -883,7 +908,7 @@ class AppController extends ChangeNotifier {
                 )
                 .toList()
           : null,
-      references: form.mode == VideoMode.i2v
+      references: retainsGuidance && form.references.isNotEmpty
           ? form.references
                 .map(
                   (item) => MediaReferenceLabel(
@@ -898,6 +923,7 @@ class AppController extends ChangeNotifier {
                       item.thumbnailAsset ?? item.asset?.thumbnailAsset,
                       effectiveStorage,
                     ),
+                    durationSeconds: item.durationSeconds,
                   ),
                 )
                 .toList()
@@ -2477,6 +2503,7 @@ class AppController extends ChangeNotifier {
       : selectedModel.aspectRatiosFor(
           form.resolution,
           withFrames: form.keyframes.isNotEmpty,
+          mode: form.mode,
         );
 
   void _selectCompatibleModel() {
@@ -2489,9 +2516,13 @@ class AppController extends ChangeNotifier {
       }
       if (!model.modes.contains(form.mode)) return false;
       if (!model.referenceTasks.contains(form.referenceTask)) return false;
-      if (form.keyframes.length > model.maxKeyframes) return false;
+      if (form.keyframes.length > model.maxKeyframesFor(form.mode)) {
+        return false;
+      }
       for (final kind in MediaReferenceKind.values) {
-        if (form.referenceCount(kind) > model.maxReferences(kind)) return false;
+        if (form.referenceCount(kind) > model.maxReferences(kind, form.mode)) {
+          return false;
+        }
       }
       return true;
     }
@@ -2572,6 +2603,13 @@ class AppController extends ChangeNotifier {
       form.referenceTask = MediaReferenceTask.reference;
     }
     if (!model.supportsSeed) form.seed = null;
+    if (model.upscaleUsesResolutionTargets && form.upscaleCreativity <= 1) {
+      form.upscaleCreativity = 50;
+    } else if (model.isUpscaler &&
+        !model.upscaleUsesResolutionTargets &&
+        form.upscaleCreativity > 1) {
+      form.upscaleCreativity = 1;
+    }
     if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     final resolutions = availableResolutions;
     if (!resolutions.any((item) => item.id == form.resolution)) {
@@ -2740,7 +2778,7 @@ class AppController extends ChangeNotifier {
 
   bool canAddFrame(KeyframeRole role) =>
       !framesBlockedByReferences &&
-      form.keyframes.length < referenceModel.maxKeyframes &&
+      form.keyframes.length < keyframeLimit &&
       switch (role) {
         KeyframeRole.start => referenceModel.supportsStartFrame,
         KeyframeRole.middle => referenceModel.supportsTimedKeyframes,
@@ -2769,7 +2807,7 @@ class AppController extends ChangeNotifier {
       if (!model.modes.contains(VideoMode.i2v) ||
           !model.supportsStartFrame ||
           !model.referenceTasks.contains(form.referenceTask) ||
-          form.keyframes.length + 1 > model.maxKeyframes) {
+          form.keyframes.length + 1 > model.maxKeyframesFor(VideoMode.i2v)) {
         return false;
       }
       if (form.keyframes.any(
@@ -2787,7 +2825,7 @@ class AppController extends ChangeNotifier {
       }
       for (final kind in MediaReferenceKind.values) {
         if (remainingReferences.where((item) => item.kind == kind).length >
-            model.maxReferences(kind)) {
+            model.maxReferences(kind, VideoMode.i2v)) {
           return false;
         }
       }
@@ -2859,7 +2897,7 @@ class AppController extends ChangeNotifier {
       kind == MediaReferenceKind.video &&
           form.referenceTask != MediaReferenceTask.reference
       ? selectedModel.maxVideoReferences.clamp(0, 1)
-      : selectedModel.maxReferences(kind);
+      : selectedModel.maxReferences(kind, form.mode);
 
   void setReferenceTask(MediaReferenceTask task) {
     if (!selectedModel.referenceTasks.contains(task)) return;
@@ -3022,6 +3060,7 @@ class AppController extends ChangeNotifier {
         clearThumbnailAsset: true,
         clearThumbnailBytes: true,
         clearSavedReferenceId: true,
+        clearDurationSeconds: true,
       );
     }).toList();
     _invalidateProviderEstimate();
@@ -3041,6 +3080,25 @@ class AppController extends ChangeNotifier {
     if (saved != null && saved.thumbnailAsset == null) {
       unawaited(cacheReferencePreview(saved, bytes));
     }
+  }
+
+  void rememberReferenceVideoMetadata(String id, VideoSourceMetadata value) {
+    rememberReferenceDuration(id, value.durationSeconds);
+  }
+
+  void rememberReferenceDuration(String id, double seconds) {
+    if (!seconds.isFinite || seconds <= 0) return;
+    final index = form.references.indexWhere((item) => item.id == id);
+    if (index < 0 || form.references[index].durationSeconds == seconds) {
+      return;
+    }
+    form.references = form.references
+        .map(
+          (item) =>
+              item.id == id ? item.copyWith(durationSeconds: seconds) : item,
+        )
+        .toList();
+    notifyListeners();
   }
 
   void rememberVideoSourceThumbnail(Uint8List bytes) {
@@ -3239,19 +3297,28 @@ class AppController extends ChangeNotifier {
       if (model.supportsMediaReferences) {
         return 'Add at least one image, video, or audio reference for ${model.label}.';
       }
-      if (model.maxKeyframes > 0) {
+      if (model.maxKeyframesFor(VideoMode.i2v) > 0) {
         return 'Add a first frame for ${model.label}.';
       }
     }
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
     }
+    final prompt = form.prompt.trim();
     if (form.mode != VideoMode.draftEnhance &&
         form.mode != VideoMode.upscale &&
-        form.prompt.trim().isEmpty) {
+        prompt.isEmpty &&
+        !model.promptIsOptional(
+          form.mode,
+          hasFrames: form.keyframes.isNotEmpty,
+        )) {
       return model.outputKind == GenerationOutputKind.image
           ? 'Describe the image you want to make.'
           : 'Describe the animation you want to make.';
+    }
+    final promptLimit = model.maxPromptCharacters;
+    if (promptLimit != null && prompt.length > promptLimit) {
+      return '${model.label} accepts prompts up to $promptLimit characters.';
     }
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty && form.references.isEmpty) {
@@ -3263,10 +3330,11 @@ class AppController extends ChangeNotifier {
         return '${model.label} takes pinned frames or creative references, '
             'not both. Remove one side before generating.';
       }
-      if (form.keyframes.length > model.maxKeyframes) {
-        return model.maxKeyframes == 0
+      final maximumKeyframes = model.maxKeyframesFor(VideoMode.i2v);
+      if (form.keyframes.length > maximumKeyframes) {
+        return maximumKeyframes == 0
             ? '${model.label} uses media references instead of keyframes.'
-            : '${model.label} accepts up to ${model.maxKeyframes} keyframes.';
+            : '${model.label} accepts up to $maximumKeyframes keyframes.';
       }
       if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
         return 'Every keyframe needs an image or URL.';
@@ -3315,6 +3383,8 @@ class AppController extends ChangeNotifier {
           form.referenceCount(MediaReferenceKind.video) == 0) {
         return '${model.label} needs an image or video when audio references are attached.';
       }
+      final durationProblem = _referenceDurationProblem(model);
+      if (durationProblem != null) return durationProblem;
       if (provider.isLocal &&
           form.keyframes.any(
             (frame) => frame.asset == null && frame.retained?.isLocal != true,
@@ -3341,14 +3411,57 @@ class AppController extends ChangeNotifier {
     if (form.mode == VideoMode.v2v &&
         form.videoAsset == null &&
         form.videoUrl.trim().isEmpty) {
-      return 'Add the video you want ${model.label} to continue.';
+      return 'Add the source video for ${model.label}.';
+    }
+    if (form.mode == VideoMode.v2v && model.supportsGuidanceWithSource) {
+      final maximumKeyframes = model.maxKeyframesFor(VideoMode.v2v);
+      if (form.keyframes.length > maximumKeyframes) {
+        return maximumKeyframes == 0
+            ? '${model.label} does not accept guidance keyframes.'
+            : '${model.label} accepts up to $maximumKeyframes keyframes.';
+      }
+      if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
+        return 'Every keyframe needs an image or URL.';
+      }
+      for (final kind in MediaReferenceKind.values) {
+        final count = form.referenceCount(kind);
+        final maximum = referenceLimit(kind);
+        if (count > maximum) {
+          return maximum == 0
+              ? '${model.label} does not accept reference ${kind.pluralLabel} for this operation.'
+              : '${model.label} accepts up to $maximum ${kind.pluralLabel}.';
+        }
+      }
+      final totalLimit = model.maxTotalReferences;
+      if (totalLimit != null && form.references.length > totalLimit) {
+        return '${model.label} accepts up to $totalLimit creative references total.';
+      }
+      if (form.references.any((item) => item.requestSource.isEmpty)) {
+        return 'Every reference needs an upload or HTTPS URL.';
+      }
+      final durationProblem = _referenceDurationProblem(model);
+      if (durationProblem != null) return durationProblem;
+      if (model.id == 'act_two' && form.references.length != 1) {
+        return 'Act-Two needs exactly one character image or video.';
+      }
+      final metadata = form.videoMetadata;
+      if (metadata != null) {
+        final minimum = model.minSourceVideoSeconds;
+        final maximum = model.maxSourceVideoSeconds;
+        if (minimum != null && metadata.durationSeconds + .001 < minimum) {
+          return '${model.label} needs a source video at least $minimum seconds long.';
+        }
+        if (maximum != null && metadata.durationSeconds > maximum + .001) {
+          return '${model.label} accepts source videos up to $maximum seconds.';
+        }
+      }
     }
     if (form.mode == VideoMode.upscale) {
       if (form.videoAsset == null && form.videoUrl.trim().isEmpty) {
         return 'Add the video you want to upscale.';
       }
       final asset = form.videoAsset;
-      if (asset != null) {
+      if (asset != null && !model.upscaleUsesResolutionTargets) {
         final mp4 =
             asset.name.toLowerCase().endsWith('.mp4') ||
             asset.mimeType.toLowerCase().contains('mp4');
@@ -3368,20 +3481,24 @@ class AppController extends ChangeNotifier {
       }
       final metadata = form.videoMetadata;
       if (metadata != null) {
-        if (metadata.durationSeconds > 20.001) {
-          return 'FLUX Video Upscale accepts source clips up to 20 seconds.';
+        final sourceLimit = model.maxSourceVideoSeconds ?? 20;
+        if (metadata.durationSeconds > sourceLimit + .001) {
+          return '${model.label} accepts source clips up to $sourceLimit seconds.';
         }
-        final longest = metadata.width > metadata.height
-            ? metadata.width
-            : metadata.height;
-        final shortest = metadata.width < metadata.height
-            ? metadata.width
-            : metadata.height;
-        if (longest > 2560 || shortest > 1440) {
-          return 'FLUX Video Upscale accepts source resolution up to 2560×1440.';
+        if (!model.upscaleUsesResolutionTargets) {
+          final longest = metadata.width > metadata.height
+              ? metadata.width
+              : metadata.height;
+          final shortest = metadata.width < metadata.height
+              ? metadata.width
+              : metadata.height;
+          if (longest > 2560 || shortest > 1440) {
+            return 'FLUX Video Upscale accepts source resolution up to 2560×1440.';
+          }
         }
       }
-      if (form.upscaleFactor < 1.5 || form.upscaleFactor > 3) {
+      if (!model.upscaleUsesResolutionTargets &&
+          (form.upscaleFactor < 1.5 || form.upscaleFactor > 3)) {
         return 'Choose an upscale factor between 1.5× and 3×.';
       }
     }
@@ -3396,13 +3513,46 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  String? _referenceDurationProblem(VideoModelDefinition model) {
+    for (final kind in const <MediaReferenceKind>[
+      MediaReferenceKind.video,
+      MediaReferenceKind.audio,
+    ]) {
+      final knownDurations = form.references
+          .where((item) => item.kind == kind)
+          .map((item) => item.durationSeconds)
+          .whereType<double>()
+          .toList();
+      final minimum = kind == MediaReferenceKind.audio
+          ? model.minReferenceAudioSeconds
+          : null;
+      if (minimum != null &&
+          knownDurations.any((seconds) => seconds + .001 < minimum)) {
+        return '${model.label} needs each reference audio clip to be at least $minimum seconds.';
+      }
+      final maximum = model.maxReferenceSeconds(kind, form.resolution);
+      final total = knownDurations.fold<double>(
+        0,
+        (sum, seconds) => sum + seconds,
+      );
+      if (maximum != null && total > maximum + .001) {
+        final media = kind == MediaReferenceKind.video ? 'video' : 'audio';
+        return '${model.label} accepts up to $maximum seconds of reference $media in total.';
+      }
+    }
+    return null;
+  }
+
   Map<String, Object?> _buildInput() {
     if (form.mode == VideoMode.upscale) {
       final prompt = form.prompt.trim();
       return <String, Object?>{
+        if (selectedModel.upscaleUsesResolutionTargets) 'mode': 'upscale',
         'input_video': form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
         'upscale_factor': form.upscaleFactor,
         'creativity': form.upscaleCreativity,
+        if (selectedModel.upscaleUsesResolutionTargets)
+          'resolution': form.resolution,
         if (prompt.isNotEmpty) 'prompt': prompt,
         'safety_tolerance': form.safetyTolerance,
       };
@@ -3427,23 +3577,32 @@ class AppController extends ChangeNotifier {
       if (selectedModel.supportsFrameRate) 'frame_rate': form.frameRate,
       if (selectedModel.supportsSeed && form.seed != null) 'seed': form.seed,
     };
+    final orderedFrames = _orderedFrames();
+    final providerNeedsTimedSourceGuidance =
+        form.mode == VideoMode.v2v &&
+        selectedModel.sourceGuidanceRequiresTimestamps;
+    final frames = form.usesTimedKeyframes || providerNeedsTimedSourceGuidance
+        ? orderedFrames
+              .map<Object?>(
+                (frame) => <Object?>[
+                  providerNeedsTimedSourceGuidance &&
+                          frame.role == KeyframeRole.end &&
+                          form.videoMetadata != null
+                      ? form.videoMetadata!.durationSeconds
+                      : frame.seconds,
+                  frame.requestSource,
+                ],
+              )
+              .toList()
+        : orderedFrames.map<Object?>((frame) => frame.requestSource).toList();
+    final references = <MediaReferenceKind, List<String>>{
+      for (final kind in MediaReferenceKind.values)
+        kind: form.references
+            .where((item) => item.kind == kind)
+            .map((item) => item.requestSource)
+            .toList(),
+    };
     if (form.mode == VideoMode.i2v) {
-      final frames = form.usesTimedKeyframes
-          ? _orderedFrames()
-                .map<Object?>(
-                  (frame) => <Object?>[frame.seconds, frame.requestSource],
-                )
-                .toList()
-          : _orderedFrames()
-                .map<Object?>((frame) => frame.requestSource)
-                .toList();
-      final references = <MediaReferenceKind, List<String>>{
-        for (final kind in MediaReferenceKind.values)
-          kind: form.references
-              .where((item) => item.kind == kind)
-              .map((item) => item.requestSource)
-              .toList(),
-      };
       return <String, Object?>{
         ...common,
         'mode': 'i2v',
@@ -3463,6 +3622,17 @@ class AppController extends ChangeNotifier {
         ...common,
         'mode': 'v2v',
         'start_video': form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        if (selectedModel.supportsGuidanceWithSource && frames.isNotEmpty)
+          'keyframes': frames,
+        if (selectedModel.supportsGuidanceWithSource &&
+            references[MediaReferenceKind.image]!.isNotEmpty)
+          'reference_images': references[MediaReferenceKind.image]!,
+        if (selectedModel.supportsGuidanceWithSource &&
+            references[MediaReferenceKind.video]!.isNotEmpty)
+          'reference_videos': references[MediaReferenceKind.video]!,
+        if (selectedModel.supportsGuidanceWithSource &&
+            references[MediaReferenceKind.audio]!.isNotEmpty)
+          'reference_audios': references[MediaReferenceKind.audio]!,
       };
     }
     return <String, Object?>{...common, 'mode': 't2v'};
@@ -3506,7 +3676,9 @@ class AppController extends ChangeNotifier {
       canonicalModelId: selectedModel.canonicalId,
       billingUnit: selectedProvider.isLocal
           ? 'local'
-          : selectedProviderId == 'bfl' || selectedProviderId == 'artcraft'
+          : selectedProviderId == 'bfl' ||
+                selectedProviderId == 'artcraft' ||
+                selectedProviderId == 'runway'
           ? 'credits'
           : 'usd',
       outputKind: selectedModel.outputKind,

@@ -8,11 +8,244 @@ import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/runway_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'Runway reads the organization credit balance with versioned auth',
+    () async {
+      final api = RunwayApi(
+        client: MockClient((request) async {
+          expect(request.url.path, '/v1/organization');
+          expect(request.headers['authorization'], 'Bearer runway-secret');
+          expect(request.headers['x-runway-version'], RunwayApi.apiVersion);
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'creditBalance': 321.5,
+              'tier': <String, Object?>{},
+              'usage': <String, Object?>{},
+            }),
+            200,
+          );
+        }),
+      );
+
+      final account = await api.verify('runway-secret');
+      expect(account.provider, 'runway');
+      expect(account.balance, 321.5);
+      expect(account.currency, 'credits');
+    },
+  );
+
+  test(
+    'Runway maps a cheap text generation and retains its cost ceiling',
+    () async {
+      late Map<String, Object?> requestBody;
+      final api = RunwayApi(
+        client: MockClient((request) async {
+          expect(request.url.path, '/v1/text_to_video');
+          requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'id': 'runway-task',
+              'estimatedCost': <String, Object?>{'credits': 64},
+            }),
+            200,
+          );
+        }),
+      );
+
+      final receipt = await api
+          .submit('runway-secret', 'seedance2_mini', <String, Object?>{
+            'mode': 't2v',
+            'prompt': 'A three-toed sloth files a motion. It is tabled.',
+            'duration': 4,
+            'resolution': 'sd',
+            'aspect_ratio': '16:9',
+            'generate_audio': false,
+          });
+
+      expect(requestBody['model'], 'seedance2_mini');
+      expect(requestBody['duration'], 4);
+      expect(requestBody['ratio'], '864:496');
+      expect(requestBody['audio'], isFalse);
+      expect(receipt['estimated_credits'], 64.0);
+      expect(
+        receipt['polling_url'],
+        'https://api.dev.runwayml.com/v1/tasks/runway-task',
+      );
+    },
+  );
+
+  test('Runway maps pinned frames and terminal task accounting', () async {
+    final requests = <String, Map<String, Object?>>{};
+    final api = RunwayApi(
+      client: MockClient((request) async {
+        if (request.method == 'POST') {
+          requests[request.url.path] =
+              (jsonDecode(request.body) as Map<Object?, Object?>).map(
+                (key, value) => MapEntry(key.toString(), value),
+              );
+          return http.Response(
+            '{"id":"veo-task","estimatedCost":{"credits":60}}',
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'id': 'veo-task',
+            'status': 'SUCCEEDED',
+            'output': <String>['https://cdn.runway.test/result.mp4'],
+            'cost': <String, Object?>{'credits': 59},
+          }),
+          200,
+        );
+      }),
+    );
+
+    await api.submit('secret', 'veo3.1_fast', <String, Object?>{
+      'mode': 'i2v',
+      'prompt': '',
+      'duration': 4,
+      'resolution': 'hd',
+      'aspect_ratio': '9:16',
+      'generate_audio': true,
+      'keyframes': <String>[
+        'https://cdn.test/first.png',
+        'https://cdn.test/last.png',
+      ],
+    });
+    final generation = requests['/v1/image_to_video']!;
+    expect(generation['ratio'], '720:1280');
+    expect(generation['audio'], isTrue);
+    expect(generation['promptImage'], <Object?>[
+      <String, Object?>{
+        'uri': 'https://cdn.test/first.png',
+        'position': 'first',
+      },
+      <String, Object?>{'uri': 'https://cdn.test/last.png', 'position': 'last'},
+    ]);
+
+    final status = await api.poll(
+      'secret',
+      'https://api.dev.runwayml.com/v1/tasks/veo-task',
+    );
+    expect(status['status'], 'SUCCEEDED');
+    expect(status['outputs'], <String>['https://cdn.runway.test/result.mp4']);
+    expect(status['actual_cost'], 59.0);
+  });
+
+  test('Runway sends source video through multimodal video routes', () async {
+    late Map<String, Object?> requestBody;
+    final api = RunwayApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/v1/video_to_video');
+        requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        return http.Response(
+          '{"id":"hailuo-task","estimatedCost":{"credits":50}}',
+          200,
+        );
+      }),
+    );
+
+    await api.submit('secret', 'hailuo3', <String, Object?>{
+      'mode': 'v2v',
+      'prompt': 'A sloth joins the slowcial movement.',
+      'start_video': 'https://cdn.test/source.mp4',
+      'duration': 5,
+      'resolution': 'hd',
+      'aspect_ratio': '16:9',
+    });
+
+    expect(requestBody['promptVideo'], 'https://cdn.test/source.mp4');
+    expect(requestBody, isNot(contains('videoUri')));
+  });
+
+  test(
+    'Runway uploads local media without forwarding API credentials',
+    () async {
+      late Map<String, Object?> generation;
+      var storageUploadSeen = false;
+      final api = RunwayApi(
+        client: MockClient((request) async {
+          if (request.url.path == '/v1/uploads') {
+            expect(request.headers['authorization'], 'Bearer secret');
+            return http.Response(
+              jsonEncode(<String, Object?>{
+                'uploadUrl': 'https://storage.runway.test/upload',
+                'runwayUri': 'runway://ephemeral/local-image',
+                'fields': <String, String>{'key': 'temporary/object'},
+              }),
+              200,
+            );
+          }
+          if (request.url.host == 'storage.runway.test') {
+            storageUploadSeen = true;
+            expect(request.headers['authorization'], isNull);
+            expect(
+              request.headers['content-type'],
+              startsWith('multipart/form-data'),
+            );
+            return http.Response('', 204);
+          }
+          generation = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            '{"id":"upload-task","estimatedCost":{"credits":20}}',
+            200,
+          );
+        }),
+      );
+
+      await api.submit('secret', 'gen4_turbo', <String, Object?>{
+        'mode': 'i2v',
+        'prompt': 'Stillness moves quickly. Management called it agile.',
+        'duration': 2,
+        'resolution': 'hd',
+        'aspect_ratio': '16:9',
+        'keyframes': <String>['data:image/png;base64,AQID'],
+      });
+
+      expect(storageUploadSeen, isTrue);
+      expect(generation['promptImage'], 'runway://ephemeral/local-image');
+    },
+  );
+
+  test('Runway live guide exposes new video models as audited-pending', () async {
+    final api = RunwayApi(
+      client: MockClient(
+        (_) async => http.Response(
+          '<h2 id="generate-video">Generate Video</h2><table><tbody>'
+          '<tr><td><code>seedance2_mini</code></td><td>Text</td><td>Video</td></tr>'
+          '<tr><td><code>gwm1_avatars</code></td><td>Text</td><td>Video + Audio</td></tr>'
+          '<tr><td><code>deadpan_future_1</code></td><td>Text</td><td>Video</td></tr>'
+          '</tbody></table><h2 id="generate-image">Generate Image</h2>',
+          200,
+        ),
+      ),
+    );
+
+    final models = await api.listVideoModels();
+    final discovered = models.where(
+      (model) => model.model == 'deadpan_future_1',
+    );
+    expect(discovered, hasLength(1));
+    expect(discovered.single.createReady, isFalse);
+    expect(discovered.single.pricingUnit, 'catalog-unpriced');
+    final avatars = models.where((model) => model.model == 'gwm1_avatars');
+    expect(avatars, hasLength(1));
+    expect(avatars.single.createReady, isFalse);
+    expect(avatars.single.pricingUnit, 'realtime-session');
+  });
+
   test('BFL routes video upscale requests and sends raw base64', () async {
     late http.Request captured;
     final api = BflApi(
@@ -355,6 +588,77 @@ void main() {
         'ltx-2-3-fast': '2/0/0/0/-/mix/audio-ok',
         'ltx-2-3-pro': '2/0/0/1/-/mix/audio-ok',
       },
+    );
+    expect(
+      <String, String>{
+        for (final model in runwayProvider.models) model.id: constraint(model),
+      },
+      <String, String>{
+        'seedance2_5': '2/30/10/10/-/exclusive/audio-ok',
+        'grok_imagine_1_5': '1/7/0/1/8/exclusive/visual',
+        'seedance2': '2/9/3/3/-/exclusive/audio-ok',
+        'seedance2_fast': '2/9/3/3/-/exclusive/audio-ok',
+        'seedance2_mini': '2/9/3/3/-/exclusive/audio-ok',
+        'hailuo3': '1/9/3/3/12/exclusive/audio-ok',
+        'aleph2': '5/0/0/0/-/mix/audio-ok',
+        'gen4.5': '1/0/0/0/-/mix/audio-ok',
+        'gen4_turbo': '1/0/0/0/-/mix/audio-ok',
+        'act_two': '0/1/1/0/1/mix/audio-ok',
+        'veo3.1': '2/0/0/0/-/mix/audio-ok',
+        'veo3.1_fast': '2/0/0/0/-/mix/audio-ok',
+        'happyhorse_1_0': '1/0/0/0/-/mix/audio-ok',
+        'gemini_omni_flash': '1/5/0/0/-/exclusive/audio-ok',
+        'magnific_video_upscaler_creative': '0/0/0/0/-/mix/audio-ok',
+      },
+    );
+    expect(
+      <String, int?>{
+        for (final model in runwayProvider.models)
+          model.id: model.maxPromptCharacters,
+      },
+      <String, int?>{
+        'seedance2_5': 15000,
+        'grok_imagine_1_5': null,
+        'seedance2': 3500,
+        'seedance2_fast': 3500,
+        'seedance2_mini': 3500,
+        'hailuo3': null,
+        'aleph2': null,
+        'gen4.5': 1000,
+        'gen4_turbo': 1000,
+        'act_two': null,
+        'veo3.1': 1000,
+        'veo3.1_fast': 1000,
+        'happyhorse_1_0': 2500,
+        'gemini_omni_flash': null,
+        'magnific_video_upscaler_creative': null,
+      },
+    );
+    expect(
+      modelById(
+        'runway',
+        'gemini_omni_flash',
+      ).maxReferences(MediaReferenceKind.image, VideoMode.i2v),
+      1,
+    );
+    expect(
+      modelById(
+        'runway',
+        'gemini_omni_flash',
+      ).maxReferences(MediaReferenceKind.image, VideoMode.v2v),
+      5,
+    );
+    expect(modelById('runway', 'seedance2').maxKeyframesFor(VideoMode.v2v), 0);
+    expect(
+      modelById('runway', 'gen4.5').aspectRatiosFor('hd', mode: VideoMode.t2v),
+      <String>['16:9', '9:16'],
+    );
+    expect(
+      modelById(
+        'runway',
+        'grok_imagine_1_5',
+      ).aspectRatiosFor('hd', mode: VideoMode.i2v),
+      <String>['auto'],
     );
 
     final grok = modelById('artcraft', 'grok_imagine_video');
@@ -989,6 +1293,20 @@ void main() {
     ]);
   });
 
+  test('measured reference duration survives compact history', () {
+    const reference = MediaReferenceLabel(
+      label: 'Ten seconds of deliberate ambience',
+      kind: MediaReferenceKind.audio,
+      durationSeconds: 10.25,
+    );
+
+    final decoded = MediaReferenceLabel.fromJson(reference.toJson());
+
+    expect(decoded.label, reference.label);
+    expect(decoded.kind, reference.kind);
+    expect(decoded.durationSeconds, 10.25);
+  });
+
   test('every provider route exposes an input-derived estimate and rate', () {
     for (final provider in videoProviders) {
       for (final model in provider.models) {
@@ -1090,6 +1408,33 @@ void main() {
     expect(ltxRows.first.priceFor(10), .3);
     expect(ltxRows.first.supportsDuration(15), isFalse);
     expect(ltxRows.first.supportsDuration(20), isTrue);
+  });
+
+  test('Runway estimate includes known Seedance input-video credits', () {
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 4,
+      resolution: 'sd',
+      generateAudio: false,
+      safetyTolerance: 2,
+      draft: false,
+    );
+
+    final estimate = estimateCost(
+      'runway',
+      'seedance2_5',
+      VideoMode.v2v,
+      config,
+      const <Generation>[],
+      publishedProviderPrices('runway'),
+      const VideoSourceMetadata(width: 864, height: 496, durationSeconds: 10),
+    );
+
+    expect(estimate.minimumUsd, 1.8);
+    expect(estimate.maximumUsd, 1.8);
+    expect(estimate.providerUnitsMinimum, 180);
+    expect(estimate.calculation, contains('100.0 known input credits'));
+    expect(estimate.basis, contains('provider receipt settles'));
   });
 
   test('catalog applies resolution-dependent provider capabilities', () {

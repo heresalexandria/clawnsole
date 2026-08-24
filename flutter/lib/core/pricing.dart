@@ -298,21 +298,31 @@ RouteCostObservation? routeCostObservation(
 
 ProviderModelPrice? _pricedModel(
   String modelId,
+  VideoMode mode,
   GenerationConfig config,
   List<ProviderModelPrice> prices,
 ) {
   final resolutionLabel = switch (config.resolution) {
+    'sd' => '480p',
+    'hd' => '720p',
     'fhd' => '1080p',
     'qhd' => '1440p',
     '4k' => '4K',
     _ => '720p',
   };
-  return prices
-      .where(
-        (item) =>
-            item.model == modelId || item.model == '$modelId:$resolutionLabel',
-      )
-      .lastOrNull;
+  final routeSpecific = <String>[
+    if (modelId == 'veo3.1' || modelId == 'veo3.1_fast')
+      '$modelId:${config.generateAudio ? 'audio' : 'silent'}',
+    if (modelId == 'gemini_omni_flash')
+      '$modelId:${mode == VideoMode.v2v ? 'edit' : 'generation'}',
+    '$modelId:$resolutionLabel',
+    modelId,
+  ];
+  for (final candidate in routeSpecific) {
+    final match = prices.where((item) => item.model == candidate).firstOrNull;
+    if (match != null) return match;
+  }
+  return null;
 }
 
 ({double usdPerSecond, String source}) _providerRate(
@@ -340,7 +350,13 @@ ProviderModelPrice? _pricedModel(
           true) {
     return (usdPerSecond: .10, source: 'published-rate');
   }
-  final pricedModel = _pricedModel(modelId, config, prices);
+  final pricedModel = _pricedModel(modelId, mode, config, prices);
+  if (pricedModel?.pricingUnit == 'per-frame') {
+    return (
+      usdPerSecond: pricedModel!.usdPerSecond * 24,
+      source: '${pricedModel.source} · estimated at 24 fps',
+    );
+  }
   if (pricedModel != null && pricedModel.pricingUnit != 'catalog-base') {
     return (
       usdPerSecond: mode == VideoMode.i2v
@@ -391,14 +407,17 @@ CostEstimate estimateCost(
 ]) {
   final duration = config.duration;
   final model = modelById(providerId, modelId);
-  final minimumSeconds = duration is num
-      ? duration.toDouble()
-      : model.minDuration.toDouble();
-  final maximumSeconds = duration is num
-      ? duration.toDouble()
-      : model.maxDuration.toDouble();
+  final sourceDuration = model.durationComesFromSource(mode)
+      ? sourceMetadata?.durationSeconds
+      : null;
+  final minimumSeconds =
+      sourceDuration ??
+      (duration is num ? duration.toDouble() : model.minDuration.toDouble());
+  final maximumSeconds =
+      sourceDuration ??
+      (duration is num ? duration.toDouble() : model.maxDuration.toDouble());
   final rate = _providerRate(providerId, modelId, mode, config, prices);
-  final pricedModel = _pricedModel(modelId, config, prices);
+  final pricedModel = _pricedModel(modelId, mode, config, prices);
   final durationLabel = minimumSeconds == maximumSeconds
       ? '${_secondsLabel(minimumSeconds)} s'
       : '${_secondsLabel(minimumSeconds)}–${_secondsLabel(maximumSeconds)} s Auto';
@@ -456,19 +475,39 @@ CostEstimate estimateCost(
           : calculation,
     );
   }
-  if (providerId == 'artcraft') {
-    final minimumUsd = _roundUsd(quotedTotal(minimumSeconds));
-    final maximumUsd = _roundUsd(quotedTotal(maximumSeconds));
+  if (providerId == 'artcraft' || providerId == 'runway') {
+    final knownInputSurchargeUsd = providerId == 'runway'
+        ? _runwayKnownInputSurchargeUsd(modelId, mode, config, sourceMetadata)
+        : 0.0;
+    final minimumUsd = _roundUsd(
+      quotedTotal(minimumSeconds) + knownInputSurchargeUsd,
+    );
+    final maximumUsd = _roundUsd(
+      quotedTotal(maximumSeconds) + knownInputSurchargeUsd,
+    );
     return CostEstimate(
       minimumUsd: minimumUsd,
       maximumUsd: maximumUsd,
-      basis: rate.source,
+      basis:
+          providerId == 'runway' &&
+              (config.references?.any(
+                        (item) => item.kind != MediaReferenceKind.audio,
+                      ) ==
+                      true ||
+                  config.keyframes?.isNotEmpty == true ||
+                  mode == VideoMode.v2v)
+          ? '${rate.source} · provider receipt settles input/reference surcharges'
+          : rate.source,
       providerUnitsMinimum: _roundCredits(minimumUsd / bflUsdPerCredit),
       providerUnitsMaximum: _roundCredits(maximumUsd / bflUsdPerCredit),
       providerUnitLabel: 'credits',
       rateUsd: rate.usdPerSecond,
-      rateUnit: 'second',
-      calculation: calculation,
+      rateUnit: pricedModel?.pricingUnit == 'per-frame'
+          ? 'second · 24 fps estimate'
+          : 'second',
+      calculation: knownInputSurchargeUsd > 0
+          ? '$calculation · ${_roundCredits(knownInputSurchargeUsd / bflUsdPerCredit)} known input credits'
+          : calculation,
     );
   }
   return CostEstimate(
@@ -479,4 +518,47 @@ CostEstimate estimateCost(
     rateUnit: 'second',
     calculation: calculation,
   );
+}
+
+double _runwayKnownInputSurchargeUsd(
+  String modelId,
+  VideoMode mode,
+  GenerationConfig config,
+  VideoSourceMetadata? sourceMetadata,
+) {
+  final references = config.references ?? const <MediaReferenceLabel>[];
+  final keyframes = config.keyframes ?? const <KeyframeLabel>[];
+  if (modelId == 'seedance2_5') {
+    final inputCreditsPerSecond = switch (config.resolution) {
+      'sd' => 10.0,
+      'fhd' => 34.0,
+      _ => 15.0,
+    };
+    final referenceVideoSeconds = references
+        .where((item) => item.kind == MediaReferenceKind.video)
+        .map((item) => item.durationSeconds)
+        .whereType<double>()
+        .fold<double>(0, (sum, seconds) => sum + seconds);
+    final sourceSeconds = mode == VideoMode.v2v
+        ? sourceMetadata?.durationSeconds ?? 0
+        : 0;
+    return creditsToUsd(
+      (referenceVideoSeconds + sourceSeconds) * inputCreditsPerSecond,
+    );
+  }
+  if (modelId == 'grok_imagine_1_5') {
+    return creditsToUsd((references.length + keyframes.length).toDouble());
+  }
+  if (modelId == 'hailuo3') {
+    final imageCount =
+        references
+            .where((item) => item.kind == MediaReferenceKind.image)
+            .length +
+        keyframes.length;
+    return creditsToUsd(imageCount * 2.0);
+  }
+  if (modelId == 'gemini_omni_flash' && mode == VideoMode.i2v) {
+    return creditsToUsd((references.length + keyframes.length).toDouble());
+  }
+  return 0;
 }

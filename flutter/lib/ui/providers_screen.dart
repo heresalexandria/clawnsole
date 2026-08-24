@@ -597,10 +597,10 @@ class _PricingTable extends StatelessWidget {
       : model.modes.map((mode) => mode.shortLabel).join(' · ');
 
   /// The comparable clip price a seconds column renders, or null when the
-  /// route has no price for that duration (per-megapixel-second routes quote
-  /// a different unit, so they compare as unpriced).
+  /// route has no price for that duration (frame- and megapixel-based routes
+  /// quote a different unit, so they compare as unpriced).
   static double? _clipPrice(ProviderModelPrice model, int seconds) =>
-      model.pricingUnit == 'per-megapixel-second' || !model.hasPriceFor(seconds)
+      model.pricingUnit != 'per-second' || !model.hasPriceFor(seconds)
       ? null
       : model.priceFor(seconds);
 
@@ -681,6 +681,10 @@ class _PricingTable extends StatelessWidget {
           ? seconds == 10
                 ? '${_usd(model.usdPerSecond)}/MP·s'
                 : '—'
+          : model.pricingUnit == 'per-frame'
+          ? seconds == 10
+                ? '${_usd(model.usdPerSecond)}/frame'
+                : '—'
           : model.hasPriceFor(seconds)
           ? _usd(model.priceFor(seconds))
           : '—',
@@ -709,13 +713,18 @@ class _PricingTable extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            Text(
-              model.createReady
-                  ? 'Create-ready · ${model.source}'
-                  : model.source,
-              style: TextStyle(
-                fontSize: 10,
-                color: context.colors.onSurfaceVariant,
+            Tooltip(
+              message: model.source,
+              child: Text(
+                model.createReady
+                    ? 'Create-ready · ${model.source}'
+                    : model.source,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: context.colors.onSurfaceVariant,
+                ),
               ),
             ),
           ],
