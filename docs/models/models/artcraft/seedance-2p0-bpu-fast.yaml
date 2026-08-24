@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "seedance_2p0_bpu_fast",
+  "label": "Seedance 2.0 Plus Ultra Fast",
+  "description": "Faster Plus Ultra Seedance 2.0 generation.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.2,
+  "reference_usd_per_second": 0.2,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 9,
+  "max_video_references": 3,
+  "max_audio_references": 3,
+  "frames_exclusive_with_references": true,
+  "max_reference_video_seconds": 15,
+  "max_reference_audio_seconds": 15,
+  "requires_visual_reference_for_audio": true,
+  "supports_audio": false
+}

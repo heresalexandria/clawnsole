@@ -56,6 +56,7 @@ trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
 
 echo "Launching Clawnsole on iOS simulator ${SIMULATOR_ID}…"
 IOS_RUN_ARGUMENTS=(-d "$SIMULATOR_ID")
+IOS_RUN_ARGUMENTS+=("${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}")
 if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
   IOS_RUN_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
 fi

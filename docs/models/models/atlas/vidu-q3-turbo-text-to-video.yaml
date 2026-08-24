@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "vidu/q3-turbo/text-to-video",
+  "canonical_model_id": "vidu-q3-turbo",
+  "label": "Vidu Q3 Turbo · Text",
+  "description": "Fast Vidu text generation with optional audio.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "qhd",
+      "label": "1440p",
+      "detail": "2560 × 1440"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 16,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.034
+}

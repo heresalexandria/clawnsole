@@ -1,6 +1,7 @@
 <!--
 This description feeds the release notes after merge. Label the PR `major`,
 `minor`, `patch`, or `no-release`; the release-label check requires exactly one.
+Add `mobile-test` as a second label only for a restricted store-review build.
 See docs/releases.md.
 -->
 

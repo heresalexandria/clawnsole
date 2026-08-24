@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "kwaivgi/kling-v3.0-pro/text-to-video",
+  "canonical_model_id": "kling-3.0-pro",
+  "label": "Kling 3.0 Pro · Text",
+  "description": "Kling Pro text generation with optional sound.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "1:1",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.095
+}

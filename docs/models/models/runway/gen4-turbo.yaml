@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "gen4_turbo",
+  "canonical_model_id": "runway-gen-4-turbo",
+  "label": "Gen-4 Turbo",
+  "description": "Economical image-to-video generation.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.05,
+  "reference_usd_per_second": 0.05,
+  "supports_start_frame": true,
+  "supports_seed": true,
+  "max_prompt_characters": 1000,
+  "prompt_optional_modes": [
+    "i2v"
+  ]
+}

@@ -39,6 +39,9 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
   CostDeskColumn? _costSortColumn;
   bool _costSortAscending = true;
 
+  TextEditingController _keyController(String providerId) =>
+      _keys.putIfAbsent(providerId, TextEditingController.new);
+
   @override
   void dispose() {
     for (final controller in _keys.values) {
@@ -50,7 +53,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
   }
 
   Future<void> _verifyOrSave(String providerId, {required bool save}) async {
-    final candidate = _keys[providerId]!.text;
+    final candidate = _keyController(providerId).text;
     if (candidate.trim().isEmpty &&
         !widget.controller.hasApiKeyFor(providerId)) {
       widget.controller.showNotice('Paste an API key first.');
@@ -68,7 +71,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
               return widget.controller.providerAccounts[providerId];
             })()
           : await widget.controller.verifyProviderKey(providerId, candidate);
-      if (save) _keys[providerId]!.clear();
+      if (save) _keyController(providerId).clear();
       _results[providerId] = _ProviderKeyResult(
         account?.balanceLabel ??
             (account?.balance == null
@@ -122,7 +125,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
                           child: _ProviderCard(
                             provider: provider,
                             controller: widget.controller,
-                            keyController: _keys[provider.id]!,
+                            keyController: _keyController(provider.id),
                             keyVisible: _visibleKeys.contains(provider.id),
                             busy: _busyProviders.contains(provider.id),
                             result: _results[provider.id],

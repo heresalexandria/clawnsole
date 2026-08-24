@@ -42,6 +42,7 @@ class DirectGateway
     implements
         AppGateway,
         ProviderGateway,
+        ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         FavoriteGateway,
@@ -118,14 +119,6 @@ class DirectGateway
     final generations = current.generations.map((item) {
       var next = item.recoverInterruptedSubmission(now);
       if (!identical(next, item)) changed = true;
-      if (next.provider == 'apple-local' && next.isWorking) {
-        changed = true;
-        next = next.copyWith(
-          status: 'Error',
-          error: 'Apple Local generation has been retired.',
-          updatedAt: now,
-        );
-      }
       if (next.isReady && next.resultAsset == null) {
         final availability = providerById(
           next.provider,
@@ -169,8 +162,10 @@ class DirectGateway
     final connected = videoProviders
         .where(
           (provider) =>
-              availableProviders.contains(provider.id) &&
-              activeApiKey(provider.id, data) != null,
+              (availableProviders.contains(provider.id) ||
+                  availableProviders.contains(provider.adapter)) &&
+              (!provider.requiresApiKey ||
+                  activeApiKey(provider.id, data) != null),
         )
         .map((provider) => provider.id)
         .toSet();
@@ -219,6 +214,16 @@ class DirectGateway
 
   @override
   Future<LocalSnapshot> load() => _snapshot();
+
+  @override
+  Future<Map<String, Object?>?> loadProviderCatalogCache() async =>
+      (await _store.read()).providerCatalogCache;
+
+  @override
+  Future<void> saveProviderCatalogCache(Map<String, Object?> cache) async {
+    final current = await _store.read();
+    await _store.write(current.copyWith(providerCatalogCache: cache));
+  }
 
   @override
   Future<LocalSnapshot> setApiKey(String value) async {
@@ -850,10 +855,30 @@ class DirectGateway
     var input = submission.input;
     final data = await _readFresh();
     final provider = record.provider;
-    if (provider == 'apple-local') {
+    final providerDefinition = providerByIdOrNull(provider);
+    final modelDefinition = providerDefinition?.models
+        .where((model) => model.id == record.model)
+        .firstOrNull;
+    if (providerDefinition == null || modelDefinition == null) {
       throw StateError(
-        'Apple Local generation has been retired. Choose another provider.',
+        'That provider or model is not available for this Clawnsole version.',
       );
+    }
+    if (activeProviderCatalogIsMobileTest) {
+      final requestedResolution =
+          input['resolution']?.toString() ?? record.config.resolution;
+      final requestedDuration = input['duration'] ?? record.config.duration;
+      final exactDuration =
+          requestedDuration is num &&
+          requestedDuration.toDouble() == mobileTestDurationSeconds;
+      if (record.config.resolution != mobileTestResolutionId ||
+          record.config.duration != mobileTestDurationSeconds ||
+          requestedResolution != mobileTestResolutionId ||
+          !exactDuration) {
+        throw StateError(
+          'Mobile test generations are limited to 480p and 5 seconds.',
+        );
+      }
     }
     final credential = activeApiKey(provider, data);
     final key = credential?.value ?? '';
@@ -1006,11 +1031,6 @@ class DirectGateway
 
   @override
   Future<Generation> poll(Generation generation) async {
-    if (generation.provider == 'apple-local') {
-      throw StateError(
-        'Apple Local generation has been retired. Existing downloaded media remains in the Library.',
-      );
-    }
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
     ActiveApiKey? credential;

@@ -9,6 +9,7 @@ import os
 
 RELEASE_LABELS = {"major", "minor", "patch"}
 SKIP_LABEL = "no-release"
+MOBILE_TEST_LABEL = "mobile-test"
 
 
 def main() -> None:
@@ -21,6 +22,8 @@ def main() -> None:
             f"{', '.join(sorted(selected)) or 'none'}"
         )
     value = selected.pop()
+    if value == SKIP_LABEL and MOBILE_TEST_LABEL in labels:
+        raise SystemExit("error: mobile-test requires major, minor, or patch")
     print("none" if value == SKIP_LABEL else value)
 
 

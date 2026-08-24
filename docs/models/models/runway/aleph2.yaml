@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "aleph2",
+  "canonical_model_id": "aleph-2",
+  "label": "Aleph 2",
+  "description": "Source-faithful video editing with timed guidance images.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "16:9",
+    "4:3",
+    "3:2",
+    "1:1",
+    "2:3",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "source",
+      "label": "Source",
+      "detail": "Source resolution"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 5,
+  "usd_per_second": 0.28,
+  "reference_usd_per_second": 0.28,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_timed_keyframes": true,
+  "supports_seed": true,
+  "prompt_optional_modes": [
+    "v2v"
+  ],
+  "min_source_video_seconds": 2,
+  "max_source_video_seconds": 30,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "source_input_label": "Video to edit",
+  "source_input_hint": "Attach a 2–30 second clip. Optional timed images pin edits to exact moments.",
+  "supports_guidance_with_source": true,
+  "source_guidance_requires_timestamps": true
+}

@@ -14,6 +14,7 @@ import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
+import '../core/provider_manifest.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/video_cache_gateway.dart';
@@ -276,12 +277,24 @@ class GenerationFormState {
 }
 
 class AppController extends ChangeNotifier {
-  AppController({AppGateway? gateway, FilePickerInvocation? filePicker})
-    : gateway = gateway ?? createGateway(),
-      _filePicker = filePicker ?? _pickFiles;
+  AppController({
+    AppGateway? gateway,
+    FilePickerInvocation? filePicker,
+    ProviderCatalogClient? providerCatalogClient,
+    bool mobileTestBuild = clawnsoleMobileTestBuild,
+  }) : gateway = gateway ?? createGateway(),
+       _filePicker = filePicker ?? _pickFiles,
+       _providerCatalogClient =
+           providerCatalogClient ?? ProviderCatalogClient(),
+       _mobileTestBuild = mobileTestBuild {
+    resetProviderCatalog(mobileTestBuild: mobileTestBuild);
+    _resetPublishedProviderPrices();
+  }
 
   final AppGateway gateway;
   final FilePickerInvocation _filePicker;
+  final ProviderCatalogClient _providerCatalogClient;
+  final bool _mobileTestBuild;
   final GenerationFormState form = GenerationFormState();
 
   LocalSnapshot? snapshot;
@@ -325,10 +338,7 @@ class AppController extends ChangeNotifier {
   final Map<String, ProviderAccountStatus> providerAccounts =
       <String, ProviderAccountStatus>{};
   final Map<String, List<ProviderModelPrice>> providerPrices =
-      <String, List<ProviderModelPrice>>{
-        for (final provider in videoProviders)
-          provider.id: publishedProviderPrices(provider.id),
-      };
+      <String, List<ProviderModelPrice>>{};
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -536,7 +546,11 @@ class AppController extends ChangeNotifier {
       return videoProviders.where((provider) => !provider.isLocal).toList();
     }
     return videoProviders
-        .where((provider) => available.contains(provider.id))
+        .where(
+          (provider) =>
+              available.contains(provider.id) ||
+              available.contains(provider.adapter),
+        )
         .toList();
   }
 
@@ -625,7 +639,11 @@ class AppController extends ChangeNotifier {
       copyingGenerationIds.contains(localId);
   bool isCopyingReference(String referenceId) =>
       copyingReferenceIds.contains(referenceId);
-  bool canReuse(Generation item) => item.provider != 'apple-local';
+  bool canReuse(Generation item) =>
+      providerByIdOrNull(
+        item.provider,
+      )?.models.any((model) => model.id == item.model) ==
+      true;
 
   LibraryFolder? folderById(
     String? folderId, {
@@ -1096,6 +1114,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize() async {
     try {
+      await _restoreProviderCatalogCache();
       _apply(await gateway.load(), restorePreferences: true);
       // Finish the silent Drive reattachment before making the app
       // interactive. Otherwise an early tab change can persist preferences
@@ -1118,6 +1137,9 @@ class AppController extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+    // Catalog refresh is deliberately background work: cached or bundled
+    // definitions make startup immediately usable even when Pages is down.
+    unawaited(refreshProviderCatalog());
     _pollTimer = Timer.periodic(
       const Duration(seconds: 4),
       (_) => unawaited(pollWorking()),
@@ -1127,6 +1149,91 @@ class AppController extends ChangeNotifier {
         unawaited(refreshCredits());
       }
     });
+  }
+
+  Future<void> _restoreProviderCatalogCache() async {
+    if (gateway is! ProviderCatalogCacheGateway) return;
+    try {
+      final cache = await (gateway as ProviderCatalogCacheGateway)
+          .loadProviderCatalogCache();
+      if (cache == null) return;
+      final bundle = ProviderCatalogBundle.fromCache(
+        cache,
+        mobileTestBuild: _mobileTestBuild,
+      );
+      installProviderCatalog(bundle.providers, mobileTest: bundle.isMobileTest);
+      _resetPublishedProviderPrices();
+    } on Object {
+      // A malformed or obsolete cache is equivalent to no cache. The bundled
+      // catalog remains active and the remote refresh below can replace it.
+    }
+  }
+
+  Future<void> refreshProviderCatalog() async {
+    try {
+      final bundle = await _providerCatalogClient.fetch(
+        mobileTestBuild: _mobileTestBuild,
+      );
+      if (_disposed) return;
+      var companionSynchronized = !gateway.usesCompanion;
+      if (gateway case final ProviderCatalogCacheGateway cacheGateway) {
+        try {
+          await cacheGateway.saveProviderCatalogCache(bundle.cache);
+          companionSynchronized = true;
+        } on Object {
+          // The fresh catalog remains valid for this session even if a local
+          // cache write fails; the next launch will use its previous fallback.
+        }
+      }
+      // Electron's companion installs the catalog while handling the cache
+      // write. Never move its renderer ahead if that synchronization failed.
+      if (!companionSynchronized || _disposed) return;
+      installProviderCatalog(bundle.providers, mobileTest: bundle.isMobileTest);
+      // Test status also gates the compiled mobile credential. Refresh the
+      // snapshot now so provider UI cannot retain the key after an unlock.
+      try {
+        _apply(await gateway.load());
+      } on Object {
+        // Request routing consults the active catalog directly; foreground
+        // reconciliation can repair this best-effort UI snapshot later.
+      }
+      _resetPublishedProviderPrices();
+      _reconcileProviderCatalogSelection();
+      notifyListeners();
+      for (final provider in providers.where((item) => item.requiresApiKey)) {
+        unawaited(refreshProviderModels(provider.id));
+      }
+    } on Object {
+      // Network, schema, and compatibility failures must never displace the
+      // last valid cached catalog or the defaults compiled into the app.
+    }
+  }
+
+  void _resetPublishedProviderPrices() {
+    providerPrices
+      ..clear()
+      ..addEntries(
+        videoProviders.map(
+          (provider) =>
+              MapEntry(provider.id, publishedProviderPrices(provider.id)),
+        ),
+      );
+  }
+
+  void _reconcileProviderCatalogSelection() {
+    final available = providers;
+    if (available.isEmpty) return;
+    final provider = available
+        .where((candidate) => candidate.id == selectedProviderId)
+        .firstOrNull;
+    if (provider == null) {
+      selectedProviderId = available.first.id;
+      selectedModelId = available.first.defaultModel.id;
+    } else if (!provider.models.any((model) => model.id == selectedModelId)) {
+      selectedModelId = provider.defaultModel.id;
+    }
+    _normalizeFormForModel();
+    _invalidateProviderEstimate();
   }
 
   /// Reloads durable generation receipts and immediately resumes polling.
@@ -5078,7 +5185,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> reuse(Generation item) async {
     if (!canReuse(item)) {
-      showNotice('Apple Local has been retired. Choose another provider.');
+      showNotice(
+        'That provider or model is not available in this app version.',
+      );
       return;
     }
     try {
@@ -5304,6 +5413,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _providerCatalogClient.close();
     _pollTimer?.cancel();
     _creditTimer?.cancel();
     _estimateTimer?.cancel();

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "kwaivgi/kling-v3.0-pro/image-to-video",
+  "canonical_model_id": "kling-3.0-pro",
+  "label": "Kling 3.0 Pro · Frames",
+  "description": "Kling Pro generation from first and last frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "1:1",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "qhd",
+      "label": "1440p",
+      "detail": "2560 × 1440"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.095,
+  "reference_usd_per_second": 0.095,
+  "supports_start_frame": true,
+  "supports_end_frame": true
+}

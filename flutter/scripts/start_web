@@ -67,4 +67,5 @@ flutter run \
   -d chrome \
   --web-port "$WEB_PORT" \
   --dart-define "CLAWNSOLE_PROXY_URL=$PROXY_URL" \
+  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
   "$@"

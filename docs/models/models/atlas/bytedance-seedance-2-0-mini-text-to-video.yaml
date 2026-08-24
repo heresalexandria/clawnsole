@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "bytedance/seedance-2.0-mini/text-to-video",
+  "canonical_model_id": "seedance-2.0-mini",
+  "label": "Seedance 2.0 Mini · Text",
+  "description": "Low-cost Seedance text-to-video.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "2:1",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.039,
+  "supports_auto_duration": true
+}

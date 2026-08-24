@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "grok_imagine_video_1p5",
+  "canonical_model_id": "grok-imagine-video-1.5",
+  "label": "Grok Imagine 1.5",
+  "description": "Fast, high-quality image-to-video generation.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "16:9",
+    "4:3",
+    "3:2",
+    "1:1",
+    "2:3",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.1475,
+  "reference_usd_per_second": 0.1475,
+  "supports_start_frame": true,
+  "max_duration_with_image_guidance": 10,
+  "supports_audio": false
+}

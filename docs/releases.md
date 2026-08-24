@@ -7,6 +7,7 @@ the iOS upload.
 
 ```text
 PR labelled minor -> merge -> bump Flutter and Electron together
+                              |-> advance /models catalog_version
                               `-> dispatch exact commit from main
                                   |-> build signed iOS IPA -> upload to App Store Connect
                                   |-> build macOS DMG + updater ZIP ─┐
@@ -25,6 +26,13 @@ Every PR needs exactly one:
 | `patch` | bump the third component and release |
 | `no-release` | merge without changing versions or publishing |
 
+`mobile-test` is an optional, non-impact label used in addition to exactly one
+row above. It marks the new release version in `/models` `test_versions` and
+builds the mobile review profile: ArtCraft Seedance 1.5 Pro, 480p, 5 seconds,
+plus keyless Apple Intelligence image and image-sequence generation on
+supported iOS devices. Android exposes only the ArtCraft route. It does not
+affect the synchronized macOS or Windows build of that release.
+
 The labels are created in repository setup and can be repaired at any time by
 running **Create release labels** from the Actions page. The Pull request
 workflow enforces the decision. A manual **Release** dispatch accepts the bump
@@ -40,6 +48,14 @@ when retrying a later desktop or GitHub publishing failure.
 Enable **Read and write permissions** under Settings → Actions → General. The
 workflow commits the synchronized version bump to `main`, so branch protection
 must allow `github-actions[bot]` to make that commit.
+
+GitHub Pages must publish the repository's `docs/` directory for the custom
+`clawnsole.app` domain. The public `CLAWNSOLE_SITE_URL` workflow environment
+value is compiled into every target, and `/models/` must serve
+`docs/models/index.html` plus its referenced provider and model manifests. It
+is configuration rather than a secret. The synchronized version written by
+`scripts/release/bump_version.py` is also the version used for catalog
+availability checks; no separate version environment variable is needed.
 
 iOS releases run on GitHub's `macos-26` image so the archive uses Xcode 26 and
 the iOS 26 SDK required by App Store Connect. Create a GitHub environment named
@@ -62,6 +78,7 @@ its secrets to pull-request refs.
 | `IOS_CERTIFICATE_PASSWORD` | password for the iOS `.p12` |
 | `IOS_PROVISIONING_PROFILE` | App Store distribution profile for `app.clawnsole.clawnsole`, base64 encoded |
 | `GOOGLE_IOS_OAUTH_CLIENT_ID` | Google OAuth iOS client ID compiled into the production build |
+| `ARTCRAFT_TEST_KEY` | ArtCraft credential compiled only when the source PR has `mobile-test`; runtime use is gated by `/models` `test_versions` |
 | `APP_STORE_CONNECT_KEY_ID` | App Store Connect team API key ID |
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect API issuer UUID |
 | `APP_STORE_CONNECT_API_KEY_P8` | raw contents of the API key's downloaded `AuthKey_*.p8` file |
@@ -84,6 +101,14 @@ Release asset. `altool` waits only for the transfer and Apple's immediate upload
 acceptance. App Store processing, TestFlight availability, review submission,
 and public release remain asynchronous Apple-side operations and are not polled,
 so no runner minutes are spent waiting for them.
+
+For a `mobile-test` release, the workflow passes the shared ArtCraft credential
+only to the IPA build step. The key is not persisted into Clawnsole's data or
+shown in provider settings. Removing the release version from `/models`
+`test_versions` disables the compiled credential after the next successful
+catalog refresh; users must then configure their own provider keys. The signed
+Android build script implements the identical define contract, although
+Android distribution remains outside this workflow.
 
 For a local fallback, sync the workflow-created release commit and run
 `./scripts/build_ios.sh` from the repository root. Do not build the pre-bump

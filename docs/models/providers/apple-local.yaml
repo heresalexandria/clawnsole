@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "apple-local",
+  "adapter": "apple-local",
+  "name": "Apple Intelligence",
+  "description": "Keyless image creation through Apple Intelligence on this device, including a silent image-sequence video option.",
+  "console_url": "https://support.apple.com/121115",
+  "docs_url": "https://developer.apple.com/documentation/imageplayground",
+  "pricing_url": "https://support.apple.com/121115",
+  "pricing_source": "Apple system service · no provider charge",
+  "requires_api_key": false,
+  "is_local": true,
+  "progress_reporting": "reported",
+  "models": [
+    "models/apple-local/image.yaml",
+    "models/apple-local/sequence.yaml"
+  ]
+}

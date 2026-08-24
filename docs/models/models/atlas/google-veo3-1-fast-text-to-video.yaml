@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "google/veo3.1-fast/text-to-video",
+  "canonical_model_id": "veo-3.1-fast",
+  "label": "Veo 3.1 Fast · Text",
+  "description": "Fast Veo text generation with optional native audio.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 8,
+  "duration_step": 2,
+  "max_keyframes": 0,
+  "usd_per_second": 0.08
+}

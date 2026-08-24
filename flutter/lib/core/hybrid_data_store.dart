@@ -508,6 +508,7 @@ class HybridDataStore implements DurableDataStore {
       apiKeys: local.apiKeys,
       rejectedIosReviewApiKeyId: local.rejectedIosReviewApiKeyId,
       rejectedIosReviewApiKeyIds: local.rejectedIosReviewApiKeyIds,
+      providerCatalogCache: local.providerCatalogCache,
       preferences: preferences,
       preferencesUpdatedAt: preferencesUpdatedAt,
       driveFolderName: _drive.connection.folderName.isNotEmpty
@@ -557,6 +558,7 @@ class HybridDataStore implements DurableDataStore {
     apiKeys: data.apiKeys,
     rejectedIosReviewApiKeyId: data.rejectedIosReviewApiKeyId,
     rejectedIosReviewApiKeyIds: data.rejectedIosReviewApiKeyIds,
+    providerCatalogCache: data.providerCatalogCache,
     preferences: data.preferences,
     preferencesUpdatedAt: data.preferencesUpdatedAt,
     driveFolderName: data.driveFolderName,

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "minimax/hailuo-2.3/i2v-standard",
+  "canonical_model_id": "hailuo-2.3-standard",
+  "label": "Hailuo 2.3 Standard · Image",
+  "description": "Cinematic MiniMax generation from a starting image.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 4,
+  "max_keyframes": 1,
+  "usd_per_second": 0.28,
+  "reference_usd_per_second": 0.28,
+  "supports_start_frame": true,
+  "supports_audio": false
+}

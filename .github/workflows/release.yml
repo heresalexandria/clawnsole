@@ -25,6 +25,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CLAWNSOLE_SITE_URL: https://clawnsole.app/
+
 concurrency:
   group: release
   cancel-in-progress: false
@@ -45,6 +48,7 @@ jobs:
       tag: ${{ steps.bump.outputs.tag || steps.current.outputs.tag }}
       sha: ${{ steps.release.outputs.sha }}
       skip: ${{ steps.kind.outputs.skip }}
+      mobile_test: ${{ steps.mobile_test.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -92,6 +96,27 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Select mobile test mode
+        id: mobile_test
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PREPARED: ${{ github.event_name == 'repository_dispatch' }}
+          PREPARED_MOBILE_TEST: ${{ github.event.client_payload.mobile_test }}
+        run: |
+          if [ "$PREPARED" = true ]; then
+            enabled="${PREPARED_MOBILE_TEST:-false}"
+          elif jq -e '(. // []) | index("mobile-test") != null' \
+            <<< "${LABELS:-null}" >/dev/null; then
+            enabled=true
+          else
+            enabled=false
+          fi
+          case "$enabled" in
+            true|false) ;;
+            *) echo "::error::Invalid prepared mobile-test value"; exit 1 ;;
+          esac
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+
       - name: Bump Flutter and Electron together
         id: bump
         if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
@@ -112,16 +137,31 @@ jobs:
         if: steps.kind.outputs.kind == 'current'
         run: python3 scripts/release/bump_version.py --current
 
+      - name: Advance the release model catalog
+        if: steps.kind.outputs.skip != 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.bump.outputs.version || steps.current.outputs.version }}
+          MOBILE_TEST: ${{ steps.mobile_test.outputs.enabled }}
+        run: |
+          args=()
+          if [ "$MOBILE_TEST" = true ]; then
+            args+=(--add-test)
+          fi
+          python3 scripts/release/set_mobile_test_version.py "$RELEASE_VERSION" "${args[@]}"
+
       - name: Commit and push version
         id: push
-        if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current' && steps.bump.outputs.changed != 'false'
+        if: steps.kind.outputs.skip != 'true' && github.event_name != 'repository_dispatch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add electron/package.json electron/package-lock.json \
-            flutter/pubspec.yaml flutter/lib/core/app_version.dart
-          git commit -m "Release ${{ steps.bump.outputs.tag }}"
-          git push origin HEAD:main
+            flutter/pubspec.yaml flutter/lib/core/app_version.dart \
+            docs/models/index.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Release ${{ steps.bump.outputs.tag || steps.current.outputs.tag }}"
+            git push origin HEAD:main
+          fi
 
       - name: Select release commit
         id: release
@@ -140,10 +180,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          MOBILE_TEST: ${{ needs.prepare.outputs.mobile_test }}
         run: |
           jq -n \
             --arg sha "$RELEASE_SHA" \
-            '{event_type: "release-prepared", client_payload: {sha: $sha, include_ios: true}}' \
+            --argjson mobile_test "$MOBILE_TEST" \
+            '{event_type: "release-prepared", client_payload: {sha: $sha, include_ios: true, mobile_test: $mobile_test}}' \
             > "$RUNNER_TEMP/release-dispatch.json"
           gh api \
             --method POST \
@@ -421,9 +463,15 @@ jobs:
       - name: Build production IPA
         env:
           CLAWNSOLE_GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_MOBILE_TEST_BUILD: ${{ needs.prepare.outputs.mobile_test }}
+          ARTCRAFT_TEST_KEY: ${{ needs.prepare.outputs.mobile_test == 'true' && secrets.ARTCRAFT_TEST_KEY || '' }}
         run: |
           if [ -z "$CLAWNSOLE_GOOGLE_IOS_CLIENT_ID" ]; then
             echo "::error::GOOGLE_IOS_OAUTH_CLIENT_ID is required for production iOS builds"
+            exit 1
+          fi
+          if [ "$CLAWNSOLE_MOBILE_TEST_BUILD" = true ] && [ -z "$ARTCRAFT_TEST_KEY" ]; then
+            echo "::error::ARTCRAFT_TEST_KEY is required for a mobile-test release"
             exit 1
           fi
           ./scripts/build_ios.sh \

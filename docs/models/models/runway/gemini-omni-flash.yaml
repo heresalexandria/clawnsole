@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "gemini_omni_flash",
+  "canonical_model_id": "gemini-omni-flash",
+  "label": "Gemini Omni Flash",
+  "description": "Generation and instruction-led video editing.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "max_keyframes_by_mode": {
+    "v2v": 0
+  },
+  "usd_per_second": 0.1,
+  "reference_usd_per_second": 0.1,
+  "supports_start_frame": true,
+  "max_image_references": 5,
+  "max_references_by_mode": {
+    "i2v": {
+      "image": 1
+    },
+    "v2v": {
+      "image": 5
+    }
+  },
+  "frames_exclusive_with_references": true,
+  "prompt_optional_modes": [
+    "i2v"
+  ],
+  "max_source_video_seconds": 10,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "source_input_label": "Video to edit",
+  "source_input_hint": "Attach a clip up to 10 seconds; optional images can guide the edit.",
+  "supports_guidance_with_source": true
+}

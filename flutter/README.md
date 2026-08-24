@@ -10,6 +10,8 @@ only macOS desktop lifecycle, packaging, and self-update.
 
 - BFL FLUX 3 and FLUX Video Upscale, LTX 2.3, ArtCraft’s live video catalog,
   selected Create-ready Atlas Cloud models, and Runway’s first-party video catalog
+- Keyless Apple Intelligence image creation on supported iOS devices, with a
+  still-image model and a one-image-per-second silent MP4 sequence model
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
   video continuation and draft enhance
 - BFL video super-resolution from 1.5×–3× with Precise/Creative detail modes,
@@ -65,6 +67,10 @@ treating every image as a keyframe:
   it is an interactive character/session and WebRTC product rather than a
   batch generation task. Newly discovered IDs remain visible but disabled
   until Clawnsole has audited their schema and pricing.
+- Apple Intelligence routes are native-iOS-only and use Image Playground on a
+  supported iPhone or iPad running iOS 18.4 or later. The sequence route makes
+  one image per selected second and encodes those images locally as a silent
+  MP4; it is not a motion-synthesis model.
 
 Image, video, and audio references are ordered independently and retained as
 separate local assets. Provider upload adapters convert local media into the
@@ -201,7 +207,9 @@ encrypted settings vault.
 - For TestFlight and App Store distribution, run `./scripts/build_ios.sh` from
   the repository root. It prefers preconfigured Google OAuth environment values
   and otherwise loads only that allowlist from the repository `.env`, requires
-  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`, and always disables provider test keys. It
+  `CLAWNSOLE_GOOGLE_IOS_CLIENT_ID`, and always disables the legacy provider
+  review-key bundle. The release workflow's version-gated `mobile-test` path is
+  the only production exception and can include only `ARTCRAFT_TEST_KEY`. It
   creates a signed Xcode archive and IPA and defaults to App Store
   export; set `CLAWNSOLE_IOS_EXPORT_METHOD` to `ad-hoc`, `development`, or
   `enterprise` when appropriate, or set `CLAWNSOLE_IOS_EXPORT_OPTIONS` to an
@@ -222,7 +230,19 @@ encrypted settings vault.
   ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
   `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
   passes credentials only to the iOS compiler when the opt-in is true;
-  Android, macOS, Windows, and the internal renderer build do not receive them.
+  Android, macOS, Windows, and the internal renderer build do not receive
+  these legacy keys.
+- A release PR may also carry `mobile-test`. Release automation compiles only
+  `ARTCRAFT_TEST_KEY` into its iOS build with
+  `CLAWNSOLE_MOBILE_TEST_BUILD=true`; `build_android` accepts the same two
+  environment values for the corresponding signed AAB. This is separate from
+  the legacy iOS-only review-key flow above. The key is active only while the
+  synchronized app version appears in `/models` `test_versions`, and the
+  paid mobile UI/request guard is fixed to ArtCraft Seedance 1.5 Pro at 480p
+  for 5 seconds. Supported iOS devices also retain the keyless Apple Image and
+  Apple Image Sequence models; Android filters those native-iOS routes out.
+  Removing that version from the endpoint restores the normal catalog and
+  disables the ArtCraft key after the next successful refresh.
 - `build_android` creates the Play Store AAB. It intentionally refuses to build
   until `android/key.properties` points at a real upload keystore; copy
   `android/key.properties.example` to get started.
@@ -238,7 +258,7 @@ encrypted settings vault.
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.
 
-Each iOS review credential is a fallback, not local user data. A saved user key
+Each review credential is a fallback, not local user data. A saved user key
 takes precedence. Clawnsole validates active access at launch and immediately
 before generation; HTTP 401/403 responses during credit checks, submission, or
 polling invalidate the active source. The review credential is never populated

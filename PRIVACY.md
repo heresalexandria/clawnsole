@@ -59,6 +59,14 @@ audio, provider job identifiers, and related request metadata.
 
 Clawnsole currently supports these generation providers:
 
+- **Apple Intelligence:** On supported iPhones and iPads, Clawnsole sends the
+  prompt and selected image settings to Apple's Image Playground system
+  framework. It requires no Clawnsole or third-party provider API key. Apple
+  controls device eligibility, model availability, processing, and applicable
+  usage limits under its platform terms and privacy disclosures. Clawnsole
+  stores only the resulting image or locally encoded silent image sequence in
+  the library location you selected.
+
 - **Black Forest Labs (BFL / FLUX 3):** Review the
   [BFL privacy policy](https://bfl.ai/legal/privacy-policy) and
   [usage policy](https://bfl.ai/legal/usage-policy).
@@ -79,12 +87,16 @@ endorsed by Black Forest Labs, Lightricks/LTX, ArtCraft, or Atlas Cloud.
 
 ## App Review provider access
 
-An iOS build prepared for App Review may include temporary provider credentials
-so Apple can test generation without entering keys manually. These credentials
-are compiled into that build, are not written to Clawnsole's local data file,
-and are never displayed in the interface. Requests made with them are still sent
-to and processed by the selected provider as described above. A user-supplied
-key for the same provider takes precedence after it is saved.
+A mobile build prepared for store review may include a temporary ArtCraft
+credential so reviewers can test the restricted Seedance route without
+entering a key manually. This credential is compiled into that build, is not
+written to Clawnsole's local data file, and is never displayed in the
+interface. Requests made with it are still sent to and processed by ArtCraft
+as described above. A user-supplied key takes precedence after it is saved.
+After Clawnsole successfully refreshes a catalog that removes that app version
+from the review list, the compiled credential is disabled and only a
+user-supplied ArtCraft key can be used. Apple Intelligence routes never use
+this credential.
 
 ## Update checks and external links
 
