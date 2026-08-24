@@ -9,7 +9,6 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
-import '../core/reference_prompts.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
@@ -672,7 +671,7 @@ class _ComposerState extends State<_Composer> {
               key: ValueKey('generation-prompt-${controller.formRevision}'),
               prompt: form.prompt,
               formRevision: controller.formRevision,
-              references: _promptReferenceOptions(form.references),
+              references: _promptReferenceOptions(controller),
               maxLength: controller.selectedModel.maxPromptCharacters,
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
@@ -872,9 +871,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                     ),
                     prompt: controller.form.prompt,
                     formRevision: controller.formRevision,
-                    references: _promptReferenceOptions(
-                      controller.form.references,
-                    ),
+                    references: _promptReferenceOptions(controller),
                     expands: true,
                     autofocus: true,
                     maxLength: controller.selectedModel.maxPromptCharacters,
@@ -1119,12 +1116,9 @@ Future<void> _showGenerationFolderDialog(
   name.dispose();
 }
 
-List<PromptReferenceOption> _promptReferenceOptions(
-  List<MediaReferenceDraft> references,
-) {
-  final mentions = promptReferenceMentions(
-    references.map((reference) => reference.kind),
-  );
+List<PromptReferenceOption> _promptReferenceOptions(AppController controller) {
+  final references = controller.form.references;
+  final mentions = controller.formPromptReferenceMentions;
   return references
       .asMap()
       .entries
@@ -1580,16 +1574,10 @@ class _ReferencesSection extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: form.references
-                .asMap()
-                .entries
                 .map(
-                  (entry) => _ReferenceTile(
+                  (reference) => _ReferenceTile(
                     controller: controller,
-                    reference: entry.value,
-                    number: form.references
-                        .take(entry.key + 1)
-                        .where((item) => item.kind == entry.value.kind)
-                        .length,
+                    reference: reference,
                   ),
                 )
                 .toList(),
@@ -1702,15 +1690,10 @@ class _ReferenceNormalizationToggle extends StatelessWidget {
 }
 
 class _ReferenceTile extends StatelessWidget {
-  const _ReferenceTile({
-    required this.controller,
-    required this.reference,
-    required this.number,
-  });
+  const _ReferenceTile({required this.controller, required this.reference});
 
   final AppController controller;
   final MediaReferenceDraft reference;
-  final int number;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1805,22 +1788,41 @@ class _ReferenceTile extends StatelessWidget {
             Positioned(
               top: 4,
               left: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 2.5,
-                ),
-                decoration: BoxDecoration(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 74),
+                child: Material(
                   color: ClawnsoleColors.plumInk.withValues(alpha: .82),
                   borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '${reference.kind.label} $number'.toUpperCase(),
-                  style: const TextStyle(
-                    color: ClawnsoleColors.cream,
-                    fontSize: 8,
-                    letterSpacing: .8,
-                    fontWeight: FontWeight.w700,
+                  clipBehavior: Clip.antiAlias,
+                  child: Tooltip(
+                    message: 'Rename prompt reference',
+                    child: InkWell(
+                      key: ValueKey('rename-media-reference-${reference.id}'),
+                      onTap: () => unawaited(
+                        _showDraftReferenceRenameDialog(
+                          context,
+                          controller,
+                          reference,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2.5,
+                        ),
+                        child: Text(
+                          '@${controller.referencePromptName(reference)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: ClawnsoleColors.cream,
+                            fontSize: 8,
+                            letterSpacing: .5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -1913,6 +1915,116 @@ class _ReferenceTile extends StatelessWidget {
         ],
       ],
     ),
+  );
+}
+
+Future<void> _showDraftReferenceRenameDialog(
+  BuildContext context,
+  AppController controller,
+  MediaReferenceDraft reference,
+) => showDialog<void>(
+  context: context,
+  builder: (context) =>
+      _DraftReferenceRenameDialog(controller: controller, reference: reference),
+);
+
+class _DraftReferenceRenameDialog extends StatefulWidget {
+  const _DraftReferenceRenameDialog({
+    required this.controller,
+    required this.reference,
+  });
+
+  final AppController controller;
+  final MediaReferenceDraft reference;
+
+  @override
+  State<_DraftReferenceRenameDialog> createState() =>
+      _DraftReferenceRenameDialogState();
+}
+
+class _DraftReferenceRenameDialogState
+    extends State<_DraftReferenceRenameDialog> {
+  late final TextEditingController _name;
+  String? _error;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(
+      text: widget.controller.referencePromptName(widget.reference),
+    );
+  }
+
+  Future<void> _save() async {
+    final currentName = widget.controller.referencePromptName(widget.reference);
+    final clean = _name.text.trim();
+    final problem = clean == currentName
+        ? null
+        : widget.controller.referenceNameProblem(
+            clean,
+            excludeDraftId: widget.reference.id,
+            excludeSavedReferenceId: widget.reference.savedReferenceId,
+          );
+    if (problem != null) {
+      setState(() => _error = problem);
+      return;
+    }
+    setState(() => _saving = true);
+    final renamed = await widget.controller.renameDraftReference(
+      widget.reference.id,
+      clean,
+    );
+    if (!mounted) return;
+    if (renamed) {
+      Navigator.pop(context);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Rename prompt reference'),
+    content: TextField(
+      key: const ValueKey('prompt-reference-name-field'),
+      controller: _name,
+      autofocus: true,
+      maxLength: 80,
+      onChanged: (_) {
+        if (_error != null) setState(() => _error = null);
+      },
+      onSubmitted: _saving ? null : (_) => unawaited(_save()),
+      decoration: InputDecoration(
+        labelText: 'Name',
+        prefixText: '@',
+        errorText: _error,
+        helperText:
+            'Names must be unique. Image 1, Video 1, and Audio 1 are reserved.',
+      ),
+    ),
+    actions: <Widget>[
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const ValueKey('save-prompt-reference-name'),
+        onPressed: _saving ? null : _save,
+        child: _saving
+            ? const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Text('Rename'),
+      ),
+    ],
   );
 }
 

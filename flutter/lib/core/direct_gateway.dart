@@ -811,6 +811,7 @@ class DirectGateway
           MediaReferenceLabel(
             label: media.label,
             kind: media.kind,
+            promptName: media.promptName,
             referenceId: media.referenceId,
             thumbnailAsset: media.thumbnailAsset,
             source: await _store.persistSource(

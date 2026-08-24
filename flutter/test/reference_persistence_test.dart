@@ -97,6 +97,79 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'upload filenames deconflict while explicit names stay unique',
+    () async {
+      final now = DateTime.utc(2026, 8, 23);
+      final existing = SavedReference(
+        id: 'existing-reference',
+        name: 'motion.mp4',
+        kind: MediaReferenceKind.video,
+        asset: const AssetReference(
+          kind: 'local',
+          value: 'existing-motion',
+          label: 'motion.mp4',
+          contentType: 'video/mp4',
+          bytes: 99,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final snapshot = LocalSnapshot(
+        generations: const <Generation>[],
+        savedReferences: <SavedReference>[existing],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      );
+      final bytes = Uint8List.fromList(<int>[10, 20, 30]);
+      final gateway = _ReferenceGateway(snapshot);
+      final controller = AppController(
+        gateway: gateway,
+        filePicker: _picker(<FileType, PlatformFile>{
+          FileType.video: PlatformFile(
+            name: 'motion.mp4',
+            size: bytes.length,
+            bytes: bytes,
+          ),
+        }),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.selectProviderModel(
+        'atlas',
+        'bytedance/seedance-2.5/reference-to-video',
+      );
+
+      await controller.addMediaReferences(MediaReferenceKind.video);
+
+      final draft = controller.form.references.single;
+      expect(controller.referencePromptName(draft), 'Video 1');
+      expect(
+        controller.savedReferences.map((reference) => reference.name),
+        containsAll(<String>['motion.mp4', 'motion.mp4 2']),
+      );
+      expect(
+        await controller.renameDraftReference(draft.id, 'motion.mp4'),
+        isFalse,
+      );
+      expect(
+        await controller.renameDraftReference(draft.id, 'Video 7'),
+        isFalse,
+      );
+      expect(
+        await controller.renameDraftReference(draft.id, 'Alexandria'),
+        isTrue,
+      );
+      expect(
+        controller.savedReferences
+            .singleWhere((reference) => reference.id == draft.savedReferenceId)
+            .name,
+        'Alexandria',
+      );
+    },
+  );
+
   test('usage lookup survives normalized derivative assets', () {
     final now = DateTime.utc(2026, 8, 23, 12);
     final reference = SavedReference(

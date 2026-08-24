@@ -9,6 +9,7 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/runway_api.dart';
+import 'package:clawnsole/core/reference_prompts.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -1116,6 +1117,30 @@ void main() {
     expect(
       payload['prompt'],
       'Keep @image2 consistent with @video1 and @audio1',
+    );
+  });
+
+  test('Atlas maps stable and custom reference names by attachment order', () {
+    final payload = AtlasCloudApi().generationPayload(
+      'bytedance/seedance-2.5/reference-to-video',
+      <String, Object?>{
+        'prompt': 'Track @Video 2, then cut to @Alexandria. Ignore @Video 1.',
+        'duration': 10,
+        'aspect_ratio': '16:9',
+        'resolution': 'hd',
+        'reference_videos': <String>[
+          'https://cdn.test/first.mp4',
+          'https://cdn.test/second.mp4',
+        ],
+        referencePromptNamesInputKey: <String, List<String>>{
+          'video': <String>['Video 2', 'Alexandria'],
+        },
+      },
+    );
+
+    expect(
+      payload['prompt'],
+      'Track @video1, then cut to @video2. Ignore @Video 1.',
     );
   });
 
