@@ -44,7 +44,12 @@ void main() {
 
       expect(decoded.credentials['bfl']!.value, 'bfl-secret');
       expect(decoded.credentials['ltx']!.isDeleted, isTrue);
+      expect(
+        decoded.credentials['bfl']!.createdAt,
+        DateTime.utc(2026, 8, 20, 12),
+      );
       expect(decoded.preferences!.value['themeMode'], 'dark');
+      expect(decoded.preferences!.createdAt, DateTime.utc(2026, 8, 20, 14));
       expect(decoded.preferences!.updatedAt, DateTime.utc(2026, 8, 20, 14));
     });
 

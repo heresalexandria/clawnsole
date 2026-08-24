@@ -513,6 +513,7 @@ class SettingsVaultDataStore
                   candidateUpdatedAt.isAfter(currentPreferences.updatedAt))) {
             state.preferences = VaultPreferencesRecord(
               value: data.preferences.toJson(),
+              createdAt: currentPreferences?.createdAt,
               updatedAt:
                   candidateUpdatedAt ??
                   _nextTimestamp(currentPreferences?.updatedAt),
@@ -599,6 +600,7 @@ class SettingsVaultDataStore
       if (previous?.value == next) continue;
       state.credentials[provider] = VaultCredentialRecord(
         value: next,
+        createdAt: previous?.createdAt,
         updatedAt: _nextTimestamp(previous?.updatedAt),
         deviceId: state.deviceId,
       );
@@ -609,6 +611,7 @@ class SettingsVaultDataStore
         jsonEncode(state.preferences?.value) != jsonEncode(preferencesJson)) {
       state.preferences = VaultPreferencesRecord(
         value: preferencesJson,
+        createdAt: state.preferences?.createdAt,
         updatedAt: _nextTimestamp(state.preferences?.updatedAt),
         deviceId: state.deviceId,
       );
@@ -620,9 +623,11 @@ class SettingsVaultDataStore
   void _captureLegacyCredentials(_DeviceVaultState state, StoredData data) {
     final now = _now();
     for (final entry in _normalizedKeys(data).entries) {
-      if (state.credentials[entry.key]?.value == entry.value) continue;
+      final previous = state.credentials[entry.key];
+      if (previous?.value == entry.value) continue;
       state.credentials[entry.key] = VaultCredentialRecord(
         value: entry.value,
+        createdAt: previous?.createdAt,
         updatedAt: now,
         deviceId: state.deviceId,
       );

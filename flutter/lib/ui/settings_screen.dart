@@ -425,6 +425,8 @@ class _StorageSectionState extends State<_StorageSection> {
           ),
         ],
         const SizedBox(height: 15),
+        _LocalVideoCacheControl(controller: controller, thumbnails: true),
+        const SizedBox(height: 12),
         _LocalVideoCacheControl(controller: controller),
         const SizedBox(height: 15),
         Container(
@@ -500,12 +502,15 @@ class _StorageSectionState extends State<_StorageSection> {
   );
 }
 
-/// The local media-cache cap: how much Drive preview and finished-film data
-/// Clawnsole may keep on this device for faster library and player startup.
+/// One of the independent local cache caps for Drive previews and full films.
 class _LocalVideoCacheControl extends StatefulWidget {
-  const _LocalVideoCacheControl({required this.controller});
+  const _LocalVideoCacheControl({
+    required this.controller,
+    this.thumbnails = false,
+  });
 
   final AppController controller;
+  final bool thumbnails;
 
   @override
   State<_LocalVideoCacheControl> createState() =>
@@ -513,7 +518,7 @@ class _LocalVideoCacheControl extends StatefulWidget {
 }
 
 class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
-  static const List<int> _caps = <int>[0, 50, 100, 250, 500, 1024];
+  static const List<int> _caps = <int>[0, 50, 100, 250, 500, 1024, 2048, 5120];
 
   Future<int>? _usage;
   bool _updating = false;
@@ -528,7 +533,9 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
 
   void _refreshUsage() {
     _usage = controller.supportsVideoCache
-        ? controller.videoCacheUsedBytes()
+        ? widget.thumbnails
+              ? controller.thumbnailCacheUsedBytes()
+              : controller.videoCacheUsedBytes()
         : null;
   }
 
@@ -541,7 +548,11 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
   Future<void> _setCap(int megabytes) async {
     setState(() => _updating = true);
     try {
-      await controller.setLocalVideoCacheMb(megabytes);
+      if (widget.thumbnails) {
+        await controller.setLocalThumbnailCacheMb(megabytes);
+      } else {
+        await controller.setLocalVideoCacheMb(megabytes);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -555,7 +566,11 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
   Future<void> _clear() async {
     setState(() => _updating = true);
     try {
-      await controller.clearVideoCache();
+      if (widget.thumbnails) {
+        await controller.clearThumbnailCache();
+      } else {
+        await controller.clearVideoCache();
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -568,7 +583,12 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
 
   @override
   Widget build(BuildContext context) {
-    final current = controller.localVideoCacheMb;
+    final current = widget.thumbnails
+        ? controller.localThumbnailCacheMb
+        : controller.localVideoCacheMb;
+    final keyPrefix = widget.thumbnails
+        ? 'local-thumbnail-cache'
+        : 'local-video-cache';
     final caps = <int>[..._caps];
     if (!caps.contains(current)) {
       // A cap synced from another surface may not match a menu step; keep
@@ -581,14 +601,15 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         DropdownButtonFormField<int>(
-          key: const ValueKey('local-video-cache-cap'),
+          key: ValueKey('$keyPrefix-cap'),
           initialValue: current,
-          decoration: const InputDecoration(
-            labelText: 'Local media cache',
-            helperText:
-                'Keeps Drive previews and recent films on this device so the '
-                'library and playback open faster. Off stops prefetching and '
-                'clears cached media.',
+          decoration: InputDecoration(
+            labelText: widget.thumbnails
+                ? 'Local thumbnail cache'
+                : 'Local video cache',
+            helperText: widget.thumbnails
+                ? 'Keeps Drive images and video previews on this device for instant library loading. Off clears only previews.'
+                : 'Keeps complete recent Drive films on this device for instant replay after relaunch. Off stops video prefetching and clears only films.',
             helperMaxLines: 3,
           ),
           items: caps
@@ -617,7 +638,7 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
                         _updating ||
                         snapshot.connectionState != ConnectionState.done;
                     return Row(
-                      key: const ValueKey('local-video-cache-usage'),
+                      key: ValueKey('$keyPrefix-usage'),
                       children: <Widget>[
                         if (loading) ...<Widget>[
                           const SizedBox.square(
@@ -643,7 +664,7 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
                 ),
               ),
               TextButton.icon(
-                key: const ValueKey('local-video-cache-clear'),
+                key: ValueKey('$keyPrefix-clear'),
                 onPressed: _updating ? null : () => unawaited(_clear()),
                 icon: _updating
                     ? const SizedBox.square(

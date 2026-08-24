@@ -31,6 +31,7 @@ StoredData mergeGoogleDriveData({
     remote: remote.generations,
     id: (item) => item.localId,
     json: (item) => item.toJson(),
+    updatedAt: (item) => item.updatedAt,
   )..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   final folders = _mergeById<LibraryFolder>(
     base: base.folders,
@@ -38,6 +39,7 @@ StoredData mergeGoogleDriveData({
     remote: remote.folders,
     id: (item) => item.id,
     json: (item) => item.toJson(),
+    updatedAt: (item) => item.updatedAt,
   );
   final references = _mergeById<SavedReference>(
     base: base.savedReferences,
@@ -45,6 +47,7 @@ StoredData mergeGoogleDriveData({
     remote: remote.savedReferences,
     id: (item) => item.id,
     json: (item) => item.toJson(),
+    updatedAt: (item) => item.updatedAt,
   )..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
   return StoredData(
     generations: generations,
@@ -59,6 +62,7 @@ List<T> _mergeById<T>({
   required List<T> remote,
   required String Function(T item) id,
   required Map<String, Object?> Function(T item) json,
+  required DateTime Function(T item) updatedAt,
 }) {
   final baseById = <String, T>{for (final item in base) id(item): item};
   final nextById = <String, T>{for (final item in next) id(item): item};
@@ -73,7 +77,22 @@ List<T> _mergeById<T>({
     final previous = baseById[key];
     if (previous == null ||
         jsonEncode(json(previous)) != jsonEncode(json(item))) {
-      merged[key] = item;
+      final remoteItem = merged[key];
+      final remoteAlsoChanged =
+          previous != null &&
+          remoteItem != null &&
+          jsonEncode(json(previous)) != jsonEncode(json(remoteItem));
+      if (!remoteAlsoChanged) {
+        merged[key] = item;
+        continue;
+      }
+      final timestamp = updatedAt(item).compareTo(updatedAt(remoteItem));
+      if (timestamp > 0 ||
+          (timestamp == 0 &&
+              jsonEncode(json(item)).compareTo(jsonEncode(json(remoteItem))) >=
+                  0)) {
+        merged[key] = item;
+      }
     }
   }
   return merged.values.toList();

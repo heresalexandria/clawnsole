@@ -20,9 +20,15 @@ GoogleDriveAssetPresenter createPlatformGoogleDriveAssetPresenter() =>
 /// plugins such as path_provider are unavailable, so the durable directory
 /// always arrives from the caller through the [VideoCache].
 class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
-  IoGoogleDriveAssetPresenter({VideoCache? cache}) : _cache = cache;
+  IoGoogleDriveAssetPresenter({
+    VideoCache? cache,
+    VideoCache? videoCache,
+    VideoCache? thumbnailCache,
+  }) : _videoCache = videoCache ?? cache,
+       _thumbnailCache = thumbnailCache ?? cache;
 
-  final VideoCache? _cache;
+  final VideoCache? _videoCache;
+  final VideoCache? _thumbnailCache;
   Directory? _temporary;
 
   Future<Directory> _temporaryDirectory() async {
@@ -42,11 +48,16 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   String _extension(AssetReference reference) =>
       retainedAssetExtension(reference.contentType, reference.label);
 
+  VideoCache? _cacheFor(AssetReference reference) =>
+      isRetainedVideoAsset(reference.contentType, reference.label)
+      ? _videoCache
+      : _thumbnailCache;
+
   Future<File?> _lookupFile(AssetReference reference) async {
     if (!RegExp(r'^[A-Za-z0-9_-]{8,200}$').hasMatch(reference.value)) {
       return null;
     }
-    final cache = _cache;
+    final cache = _cacheFor(reference);
     if (cache != null && cache.enabled) {
       final cached = await cache.lookup(reference.value);
       if (cached != null) return cached;
@@ -82,7 +93,7 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
     int? expectedLength,
   }) async {
     _requireValidId(reference);
-    final cache = _cache;
+    final cache = _cacheFor(reference);
     if (cache != null && cache.enabled) {
       final file = await cache.put(
         reference.value,
@@ -108,7 +119,10 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
 
   @override
   Future<void> clear() async {
-    await _cache?.clear();
+    await _videoCache?.clear();
+    if (!identical(_videoCache, _thumbnailCache)) {
+      await _thumbnailCache?.clear();
+    }
     final temporary = _temporary;
     if (temporary != null && await temporary.exists()) {
       await temporary.delete(recursive: true);

@@ -58,21 +58,31 @@ class HybridDataStore implements DurableDataStore {
   }
 
   Future<StoredData> refresh() async {
-    final local = _asLocal(await _local.read());
+    final persisted = await _local.read();
+    final local = _asLocal(persisted);
     final remote = _asDrive(await _drive.refresh());
     _lastLocal = local;
     _lastRemote = remote;
-    return _combine(local, remote);
+    final combined = _combine(local, remote);
+    await _persistLocalMirrorIfChanged(persisted, combined);
+    return combined;
   }
 
   @override
   Future<StoredData> read() async {
-    final local = _asLocal(await _local.read());
+    final persisted = await _local.read();
+    final local = _asLocal(persisted);
+    final cachedRemote = _asCachedDrive(persisted);
     _lastLocal = local;
-    if (!isDriveConnected) return local;
+    if (!isDriveConnected) {
+      _lastRemote = cachedRemote;
+      return _combine(local, cachedRemote);
+    }
     final remote = _asDrive(await _drive.read());
     _lastRemote = remote;
-    return _combine(local, remote);
+    final combined = _combine(local, remote);
+    await _persistLocalMirrorIfChanged(persisted, combined);
+    return combined;
   }
 
   @override
@@ -94,7 +104,7 @@ class HybridDataStore implements DurableDataStore {
         _lastRemote = remote;
       }
     }
-    await _local.write(local);
+    await _local.write(_localMirror(data));
     _lastLocal = local;
   }
 
@@ -213,15 +223,24 @@ class HybridDataStore implements DurableDataStore {
 
   Future<void> deleteLocalLibrary() async {
     final current = await _local.read();
+    final driveGenerations = current.generations
+        .where((item) => item.storage == LibraryStorage.drive)
+        .toList();
+    final driveReferences = current.savedReferences
+        .where((item) => item.storage == LibraryStorage.drive)
+        .toList();
     await _local.write(
       current.copyWith(
-        generations: const <Generation>[],
+        generations: driveGenerations,
         folders: current.folders
             .where((folder) => folder.storage == LibraryStorage.drive)
             .toList(),
-        savedReferences: const <SavedReference>[],
+        savedReferences: driveReferences,
       ),
     );
+    // Clearing the local library still clears every local media byte. The
+    // Drive records above are metadata only and their originals remain in
+    // Drive (with any bounded read-through copies owned by the media caches).
     await _local.pruneAssets(const <Generation>[], const <SavedReference>[]);
     _lastLocal = null;
   }
@@ -232,6 +251,20 @@ class HybridDataStore implements DurableDataStore {
     }
     await _drive.delete();
     _lastRemote = const StoredData();
+    final current = await _local.read();
+    await _local.write(
+      current.copyWith(
+        generations: current.generations
+            .where((item) => item.storage == LibraryStorage.local)
+            .toList(),
+        folders: current.folders
+            .where((item) => item.storage == LibraryStorage.local)
+            .toList(),
+        savedReferences: current.savedReferences
+            .where((item) => item.storage == LibraryStorage.local)
+            .toList(),
+      ),
+    );
   }
 
   @override
@@ -526,15 +559,38 @@ class HybridDataStore implements DurableDataStore {
     );
   }
 
+  /// Extracts device-owned records from the local file. Drive-tagged records
+  /// in that file are a read-through metadata mirror, not local originals.
   StoredData _asLocal(StoredData data) => data.copyWith(
     generations: data.generations
+        .where((item) => item.storage != LibraryStorage.drive)
         .map((item) => item.copyWith(storage: LibraryStorage.local))
         .toList(),
     folders: data.folders
+        .where((item) => item.storage != LibraryStorage.drive)
         .map((item) => item.copyWith(storage: LibraryStorage.local))
         .toList(),
     savedReferences: data.savedReferences
+        .where((item) => item.storage != LibraryStorage.drive)
         .map((item) => item.copyWith(storage: LibraryStorage.local))
+        .toList(),
+  );
+
+  /// Extracts the last successfully reconciled Drive metadata from the local
+  /// file. This mirror lets every surface open its library immediately while
+  /// Drive authorization and polling continue in the background.
+  StoredData _asCachedDrive(StoredData data) => StoredData(
+    generations: data.generations
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.copyWith(storage: LibraryStorage.drive))
+        .toList(),
+    folders: data.folders
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.copyWith(storage: LibraryStorage.drive))
+        .toList(),
+    savedReferences: data.savedReferences
+        .where((item) => item.storage == LibraryStorage.drive)
+        .map((item) => item.copyWith(storage: LibraryStorage.drive))
         .toList(),
   );
 
@@ -583,6 +639,32 @@ class HybridDataStore implements DurableDataStore {
         .where((item) => item.storage == LibraryStorage.drive)
         .toList(),
   );
+
+  /// The local data file owns device settings and local records while also
+  /// retaining a compact mirror of Drive metadata. Media bytes remain in the
+  /// bounded caches and originals remain solely in their respective stores.
+  StoredData _localMirror(StoredData data) => StoredData(
+    apiKey: data.apiKey,
+    apiKeys: data.apiKeys,
+    rejectedIosReviewApiKeyId: data.rejectedIosReviewApiKeyId,
+    rejectedIosReviewApiKeyIds: data.rejectedIosReviewApiKeyIds,
+    preferences: data.preferences,
+    preferencesUpdatedAt: data.preferencesUpdatedAt,
+    driveFolderName: data.driveFolderName,
+    driveFolderId: data.driveFolderId,
+    generations: data.generations,
+    folders: data.folders,
+    savedReferences: data.savedReferences,
+  );
+
+  Future<void> _persistLocalMirrorIfChanged(
+    StoredData persisted,
+    StoredData combined,
+  ) async {
+    final mirror = _localMirror(combined);
+    if (jsonEncode(persisted.toJson()) == jsonEncode(mirror.toJson())) return;
+    await _local.write(mirror);
+  }
 
   String _encoded(StoredData data) =>
       jsonEncode(googleDrivePortableData(data).toJson());
@@ -637,6 +719,7 @@ extension on LibraryFolder {
     id: value,
     name: name,
     createdAt: createdAt,
+    updatedAt: updatedAt,
     parentId: parentId,
     collection: collection,
     storage: storage,

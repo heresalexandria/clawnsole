@@ -653,8 +653,21 @@ class WebGateway
   }
 
   @override
+  Future<int> thumbnailCacheUsedBytes() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/thumbnail-cache'))),
+    );
+    return (payload['usedBytes'] as num?)?.toInt() ?? 0;
+  }
+
+  @override
   Future<void> clearVideoCache() async {
     await _read(await _client.delete(_url('/video-cache')));
+  }
+
+  @override
+  Future<void> clearThumbnailCache() async {
+    await _read(await _client.delete(_url('/thumbnail-cache')));
   }
 
   @override

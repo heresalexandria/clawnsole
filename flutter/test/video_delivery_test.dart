@@ -31,12 +31,16 @@ void main() {
     if (await temporary.exists()) await temporary.delete(recursive: true);
   });
 
-  test('preferences round-trip the video cache cap tolerantly', () {
-    const preferences = AppPreferences(localVideoCacheMb: 250);
+  test('preferences round-trip independent cache caps tolerantly', () {
+    const preferences = AppPreferences(
+      localVideoCacheMb: 250,
+      localThumbnailCacheMb: 50,
+    );
     final decoded = AppPreferences.fromJson(
       jsonDecode(jsonEncode(preferences.toJson())) as Map<String, Object?>,
     );
     expect(decoded.localVideoCacheMb, 250);
+    expect(decoded.localThumbnailCacheMb, 50);
     expect(
       AppPreferences.fromJson(const <String, Object?>{}).localVideoCacheMb,
       AppPreferences.defaultLocalVideoCacheMb,
@@ -52,6 +56,13 @@ void main() {
         'localVideoCacheMb': -5,
       }).localVideoCacheMb,
       0,
+    );
+    expect(
+      AppPreferences.fromJson(const <String, Object?>{
+        'localVideoCacheMb': 250,
+      }).localThumbnailCacheMb,
+      250,
+      reason: 'schema 21 shared caps migrate to both independent caches',
     );
   });
 
@@ -176,6 +187,37 @@ void main() {
     expect(await restarted.readAsset(image), <int>[1, 2]);
   });
 
+  test('films and previews use independent durable caches', () async {
+    final videoDirectory = Directory('${temporary.path}/videos');
+    final thumbnailDirectory = Directory('${temporary.path}/thumbnails');
+    final videos = VideoCache(directory: () async => videoDirectory);
+    final thumbnails = VideoCache(directory: () async => thumbnailDirectory);
+    final store = GoogleDriveStore(
+      apiFactory: (_) => _UploadDriveApi(),
+      presenter: IoGoogleDriveAssetPresenter(
+        videoCache: videos,
+        thumbnailCache: thumbnails,
+      ),
+    );
+    await store.connect('token', 'Shared Studio');
+
+    final film = await store.writeAsset(
+      Uint8List.fromList(<int>[7, 8, 9]),
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    final preview = await store.writeAsset(
+      Uint8List.fromList(<int>[1, 2]),
+      label: 'preview.jpg',
+      contentType: 'image/jpeg',
+    );
+
+    expect(await videos.lookup(film.value), isNotNull);
+    expect(await videos.lookup(preview.value), isNull);
+    expect(await thumbnails.lookup(preview.value), isNotNull);
+    expect(await thumbnails.lookup(film.value), isNull);
+  });
+
   test('readFileRange requests a byte window and slices 200s', () async {
     final media = Uint8List.fromList(List<int>.generate(10, (index) => index));
     String? observedRange;
@@ -295,7 +337,8 @@ void main() {
     final dropdown = find.byKey(const ValueKey('local-video-cache-cap'));
     await tester.ensureVisible(dropdown);
     await tester.pumpAndSettle();
-    expect(find.text('Local media cache'), findsOneWidget);
+    expect(find.text('Local thumbnail cache'), findsOneWidget);
+    expect(find.text('Local video cache'), findsOneWidget);
     expect(find.text('Cached now: 5.00 MB'), findsOneWidget);
 
     await tester.tap(dropdown);
@@ -459,7 +502,15 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
   Future<int> videoCacheUsedBytes() async => 5 * 1024 * 1024;
 
   @override
+  Future<int> thumbnailCacheUsedBytes() async => 1024 * 1024;
+
+  @override
   Future<void> clearVideoCache() async {
+    clears += 1;
+  }
+
+  @override
+  Future<void> clearThumbnailCache() async {
     clears += 1;
   }
 
