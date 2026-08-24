@@ -13,60 +13,145 @@ import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'video_save_sheet.dart';
 
-class LibraryScreen extends StatelessWidget {
+class LibraryScreen extends StatefulWidget {
   const LibraryScreen({required this.controller, super.key});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
-      final desktop = constraints.maxWidth >= 960;
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(padding),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1440),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _LibraryHeading(controller: controller),
-                const SizedBox(height: 22),
-                if (desktop)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SizedBox(
-                        width: 228,
-                        child: _FolderSidebar(controller: controller),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(child: _LibraryResults(controller: controller)),
-                    ],
-                  )
-                else
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      _MobileFolderBar(controller: controller),
-                      const SizedBox(height: 12),
-                      _LibraryResults(controller: controller),
-                    ],
-                  ),
-              ],
+  State<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends State<LibraryScreen> {
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
+  int _itemLimit = _pageSize;
+  String? _listingSignature;
+  bool _pageAdvancePending = false;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_loadMoreNearEnd);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _loadMoreNearEnd() {
+    if (_scrollController.position.extentAfter < 720) _loadMore();
+  }
+
+  void _loadMore() {
+    final items = controller.filteredGenerations;
+    if (_pageAdvancePending || _itemLimit >= items.length) return;
+    _pageAdvancePending = true;
+    final previousLimit = _itemLimit;
+    setState(() => _itemLimit += _pageSize);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pageAdvancePending = false;
+    });
+    controller.prefetchListedVideos(
+      items
+          .skip(previousLimit)
+          .take(_pageSize)
+          .where((item) => !item.isImage)
+          .map((item) => item.resultAsset),
+    );
+  }
+
+  void _syncListingPage() {
+    final signature = <Object?>[
+      controller.libraryFilter,
+      controller.libraryStorageFilter,
+      controller.libraryFavoriteFilter,
+      controller.libraryVisibilityFilter,
+      controller.libraryFolderView,
+      controller.libraryTag,
+      controller.librarySearch,
+      controller.libraryViewMode,
+    ].join('|');
+    if (_listingSignature == signature) return;
+    _listingSignature = signature;
+    _itemLimit = _pageSize;
+    _pageAdvancePending = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _syncListingPage();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
+        final desktop = constraints.maxWidth >= 960;
+        return SingleChildScrollView(
+          controller: _scrollController,
+          padding: EdgeInsets.all(padding),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _LibraryHeading(controller: controller),
+                  const SizedBox(height: 22),
+                  if (desktop)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SizedBox(
+                          width: 228,
+                          child: _FolderSidebar(controller: controller),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: _LibraryResults(
+                            controller: controller,
+                            itemLimit: _itemLimit,
+                            onLoadMore: _loadMore,
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        _MobileFolderBar(controller: controller),
+                        const SizedBox(height: 12),
+                        _LibraryResults(
+                          controller: controller,
+                          itemLimit: _itemLimit,
+                          onLoadMore: _loadMore,
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 class _LibraryResults extends StatefulWidget {
-  const _LibraryResults({required this.controller});
+  const _LibraryResults({
+    required this.controller,
+    required this.itemLimit,
+    required this.onLoadMore,
+  });
 
   final AppController controller;
+  final int itemLimit;
+  final VoidCallback onLoadMore;
 
   @override
   State<_LibraryResults> createState() => _LibraryResultsState();
@@ -115,6 +200,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
   @override
   Widget build(BuildContext context) {
     final filtered = controller.filteredGenerations;
+    final shown = filtered.take(widget.itemLimit).toList();
     final selected = controller.generations
         .where((item) => selectedIds.contains(item.localId))
         .toList();
@@ -175,7 +261,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
           else if (controller.libraryViewMode == GenerationViewMode.compact)
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: filtered
+              children: shown
                   .map(
                     (item) => Padding(
                       padding: const EdgeInsets.only(bottom: 9),
@@ -194,7 +280,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
                 return Wrap(
                   spacing: GenerationCardGrid.gap,
                   runSpacing: GenerationCardGrid.gap,
-                  children: filtered
+                  children: shown
                       .map(
                         (item) => SizedBox(
                           width: layout.tileWidth,
@@ -205,6 +291,19 @@ class _LibraryResultsState extends State<_LibraryResults> {
                 );
               },
             ),
+          if (shown.length < filtered.length) ...<Widget>[
+            const SizedBox(height: 14),
+            Center(
+              child: TextButton.icon(
+                key: const ValueKey('library-load-more'),
+                onPressed: widget.onLoadMore,
+                icon: const Icon(Icons.expand_more_rounded),
+                label: Text(
+                  'Load ${((filtered.length - shown.length).clamp(0, 20))} more',
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

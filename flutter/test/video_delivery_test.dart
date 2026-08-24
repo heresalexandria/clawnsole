@@ -136,7 +136,7 @@ void main() {
     expect(await cache.lookup('drive-file-0003'), isNotNull);
   });
 
-  test('newly uploaded Drive media survives a presenter restart', () async {
+  test('newly retained Drive media stays local through restart', () async {
     final cache = VideoCache(directory: () async => temporary);
     final api = _UploadDriveApi();
     final store = GoogleDriveStore(
@@ -172,6 +172,7 @@ void main() {
         cache: VideoCache(directory: () async => temporary),
       ),
     );
+    expect(await restarted.readAsset(film), <int>[7, 8, 9]);
     expect(await restarted.readAsset(image), <int>[1, 2]);
   });
 

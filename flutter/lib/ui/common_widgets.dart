@@ -1593,7 +1593,7 @@ class _GenerationMediaState extends State<GenerationMedia> {
     );
     _imageBytes = widget.item.isImage
         ? widget.item.resultAsset != null
-              ? widget.controller.gateway.readAsset(widget.item.resultAsset!)
+              ? widget.controller.readPreviewAsset(widget.item.resultAsset!)
               : widget.item.resultUrl != null
               ? widget.controller.gateway.downloadMedia(widget.item.resultUrl!)
               : null
@@ -1627,6 +1627,9 @@ class _GenerationMediaState extends State<GenerationMedia> {
       }
       return FutureBuilder<Uint8List>(
         future: bytes,
+        initialData: widget.controller.cachedAssetBytes(
+          widget.item.resultAsset,
+        ),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return const _MediaPlaceholder(
@@ -1653,8 +1656,6 @@ class _GenerationMediaState extends State<GenerationMedia> {
   }
 }
 
-final Map<String, Future<Uint8List>> _previewAssetBytes =
-    <String, Future<Uint8List>>{};
 final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
     <String, _GeneratedVideoPreviewJob>{};
 final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
@@ -1695,6 +1696,7 @@ class _CachedVideoPreview extends StatefulWidget {
 
 class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   Future<_GeneratedVideoPreview?>? _preview;
+  _GeneratedVideoPreview? _initialPreview;
   late int _sourceRevision;
   late DateTime _previewStartedAt;
   late Duration _previewExpectedDuration;
@@ -1702,22 +1704,8 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   String get _jobKey =>
       '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
 
-  Future<Uint8List> _read(AssetReference reference) {
-    final key = '${reference.kind}:${reference.value}';
-    final existing = _previewAssetBytes[key];
-    if (existing != null) return existing;
-    late final Future<Uint8List> job;
-    job = widget.controller.gateway.readAsset(reference).catchError((
-      Object error,
-    ) {
-      if (identical(_previewAssetBytes[key], job)) {
-        _previewAssetBytes.remove(key);
-      }
-      throw error;
-    });
-    _previewAssetBytes[key] = job;
-    return job;
-  }
+  Future<Uint8List> _read(AssetReference reference) =>
+      widget.controller.readPreviewAsset(reference);
 
   _GeneratedVideoPreviewJob _previewJob(String key) {
     final existing = _previewJobs[key];
@@ -1750,9 +1738,19 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   }
 
   void _load() {
+    _initialPreview = null;
     _sourceRevision = widget.controller.videoPreviewSourceRevision;
     final thumbnail = widget.item.thumbnailAsset;
     if (thumbnail != null) {
+      final restoredThumbnail = widget.controller.cachedAssetBytes(thumbnail);
+      if (restoredThumbnail != null) {
+        _initialPreview = _GeneratedVideoPreview(
+          thumbnail: restoredThumbnail,
+          timeline: widget.controller.cachedAssetBytes(
+            widget.item.timelineThumbnailAsset,
+          ),
+        );
+      }
       _previewStartedAt = DateTime.now();
       _previewExpectedDuration = _previewTimings.expected(
         LoadingOperation.generationPreviewRead,
@@ -1895,6 +1893,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   @override
   Widget build(BuildContext context) => FutureBuilder<_GeneratedVideoPreview?>(
     future: _preview,
+    initialData: _initialPreview,
     builder: (context, snapshot) {
       final preview = snapshot.data;
       if (preview == null) {

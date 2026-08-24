@@ -13,52 +13,131 @@ import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'visual_reference_viewer.dart';
 
-class ReferencesScreen extends StatelessWidget {
+class ReferencesScreen extends StatefulWidget {
   const ReferencesScreen({required this.controller, super.key});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final desktop = constraints.maxWidth >= 960;
-      final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(padding),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1440),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _ReferencesHeading(controller: controller),
-                const SizedBox(height: 22),
-                if (desktop)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      SizedBox(
-                        width: 228,
-                        child: _ReferenceFolderSidebar(controller: controller),
-                      ),
-                      const SizedBox(width: 18),
-                      Expanded(
-                        child: _ReferenceResults(controller: controller),
-                      ),
-                    ],
-                  )
-                else ...<Widget>[
-                  _ReferenceFolderPicker(controller: controller),
-                  const SizedBox(height: 12),
-                  _ReferenceResults(controller: controller),
+  State<ReferencesScreen> createState() => _ReferencesScreenState();
+}
+
+class _ReferencesScreenState extends State<ReferencesScreen> {
+  static const int _pageSize = 20;
+
+  final ScrollController _scrollController = ScrollController();
+  int _itemLimit = _pageSize;
+  String? _listingSignature;
+  bool _pageAdvancePending = false;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_loadMoreNearEnd);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _loadMoreNearEnd() {
+    if (_scrollController.position.extentAfter < 720) _loadMore();
+  }
+
+  void _loadMore() {
+    final items = controller.filteredSavedReferences;
+    if (_pageAdvancePending || _itemLimit >= items.length) return;
+    _pageAdvancePending = true;
+    final previousLimit = _itemLimit;
+    setState(() => _itemLimit += _pageSize);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pageAdvancePending = false;
+    });
+    controller.prefetchListedVideos(
+      items
+          .skip(previousLimit)
+          .take(_pageSize)
+          .where((item) => item.kind == MediaReferenceKind.video)
+          .map((item) => item.asset),
+    );
+  }
+
+  void _syncListingPage() {
+    final signature = <Object?>[
+      controller.referenceStorageFilter,
+      controller.referenceFavoriteFilter,
+      controller.referenceVisibilityFilter,
+      controller.referenceFolderView,
+      controller.referenceTag,
+      controller.referenceKind,
+      controller.referenceSort,
+      controller.referenceSearch,
+    ].join('|');
+    if (_listingSignature == signature) return;
+    _listingSignature = signature;
+    _itemLimit = _pageSize;
+    _pageAdvancePending = false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _syncListingPage();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desktop = constraints.maxWidth >= 960;
+        final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
+        return SingleChildScrollView(
+          controller: _scrollController,
+          padding: EdgeInsets.all(padding),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _ReferencesHeading(controller: controller),
+                  const SizedBox(height: 22),
+                  if (desktop)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        SizedBox(
+                          width: 228,
+                          child: _ReferenceFolderSidebar(
+                            controller: controller,
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: _ReferenceResults(
+                            controller: controller,
+                            itemLimit: _itemLimit,
+                            onLoadMore: _loadMore,
+                          ),
+                        ),
+                      ],
+                    )
+                  else ...<Widget>[
+                    _ReferenceFolderPicker(controller: controller),
+                    const SizedBox(height: 12),
+                    _ReferenceResults(
+                      controller: controller,
+                      itemLimit: _itemLimit,
+                      onLoadMore: _loadMore,
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 class _ReferencesHeading extends StatelessWidget {
@@ -170,9 +249,15 @@ class FilledButtonIconVisual extends StatelessWidget {
 }
 
 class _ReferenceResults extends StatefulWidget {
-  const _ReferenceResults({required this.controller});
+  const _ReferenceResults({
+    required this.controller,
+    required this.itemLimit,
+    required this.onLoadMore,
+  });
 
   final AppController controller;
+  final int itemLimit;
+  final VoidCallback onLoadMore;
 
   @override
   State<_ReferenceResults> createState() => _ReferenceResultsState();
@@ -196,6 +281,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
   @override
   Widget build(BuildContext context) {
     final filtered = controller.filteredSavedReferences;
+    final shown = filtered.take(widget.itemLimit).toList();
     final selected = controller.savedReferences
         .where((item) => selectedIds.contains(item.id))
         .toList();
@@ -270,7 +356,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
               return Wrap(
                 spacing: gap,
                 runSpacing: gap,
-                children: filtered
+                children: shown
                     .map(
                       (item) => SizedBox(
                         width: width,
@@ -316,6 +402,19 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
               );
             },
           ),
+        if (shown.length < filtered.length) ...<Widget>[
+          const SizedBox(height: 14),
+          Center(
+            child: TextButton.icon(
+              key: const ValueKey('references-load-more'),
+              onPressed: widget.onLoadMore,
+              icon: const Icon(Icons.expand_more_rounded),
+              label: Text(
+                'Load ${((filtered.length - shown.length).clamp(0, 20))} more',
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -534,11 +633,16 @@ class _ReferenceCardState extends State<_ReferenceCard> {
   @override
   Widget build(BuildContext context) {
     final isVideo = reference.kind == MediaReferenceKind.video;
+    final restored = controller.cachedAssetBytes(
+      isVideo ? reference.thumbnailAsset : reference.asset,
+    );
     final thumbnail = MediaThumbnail(
       gateway: controller.gateway,
       kind: reference.kind,
+      bytes: isVideo ? null : restored,
       reference: reference.asset,
       thumbnailReference: reference.thumbnailAsset,
+      thumbnailBytes: isVideo ? restored : null,
       semanticsLabel: '${reference.name} thumbnail',
       onThumbnail: isVideo
           ? (bytes) =>
@@ -836,8 +940,20 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                 child: MediaThumbnail(
                                   gateway: controller.gateway,
                                   kind: reference.kind,
+                                  bytes:
+                                      reference.kind == MediaReferenceKind.image
+                                      ? controller.cachedAssetBytes(
+                                          reference.asset,
+                                        )
+                                      : null,
                                   reference: reference.asset,
                                   thumbnailReference: reference.thumbnailAsset,
+                                  thumbnailBytes:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? controller.cachedAssetBytes(
+                                          reference.thumbnailAsset,
+                                        )
+                                      : null,
                                   fit: BoxFit.contain,
                                   semanticsLabel:
                                       '${reference.name} reference preview',
@@ -2197,8 +2313,14 @@ class _ReferenceCandidateCard extends StatelessWidget {
                       MediaThumbnail(
                         gateway: controller.gateway,
                         kind: item.kind,
+                        bytes: item.kind == MediaReferenceKind.image
+                            ? controller.cachedAssetBytes(item.asset)
+                            : null,
                         reference: item.asset,
                         thumbnailReference: item.thumbnailAsset,
+                        thumbnailBytes: item.kind == MediaReferenceKind.video
+                            ? controller.cachedAssetBytes(item.thumbnailAsset)
+                            : null,
                         semanticsLabel: '${item.name} thumbnail',
                         onThumbnail: onThumbnail,
                       ),

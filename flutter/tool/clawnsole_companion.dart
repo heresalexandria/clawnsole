@@ -916,6 +916,9 @@ class CompanionApp {
       if (request.method == 'GET' && path == '/assets') {
         return await _asset(request);
       }
+      if (request.method == 'GET' && path == '/asset-cache') {
+        return await _cachedAsset(request);
+      }
       if (request.method == 'GET' && path == '/media') {
         return await _media(request);
       }
@@ -2195,6 +2198,42 @@ class CompanionApp {
       reference,
       await _store.readAsset(reference),
     );
+  }
+
+  /// Returns retained bytes only when they already exist on this device.
+  /// A cache miss is intentionally a 404: startup preview restoration must
+  /// never turn into an implicit Google Drive download.
+  Future<void> _cachedAsset(HttpRequest request) async {
+    final id = request.uri.queryParameters['id'];
+    if (id == null || id.isEmpty) {
+      throw const ProviderException('An asset id is required.', status: 400);
+    }
+    final data = await _store.read();
+    final reference = _findAsset(data.generations, data.savedReferences, id);
+    if (reference == null) {
+      throw const ProviderException(
+        'The retained asset was not found.',
+        status: 404,
+      );
+    }
+    if (reference.kind != 'drive') {
+      return _serveAssetBytes(
+        request,
+        reference,
+        await _store.readAsset(reference),
+      );
+    }
+    final cache = await _syncedVideoCache(data);
+    final file = cache?.enabled == true
+        ? await cache!.lookup(reference.value)
+        : null;
+    if (file == null) {
+      throw const ProviderException(
+        'The retained asset is not cached on this device.',
+        status: 404,
+      );
+    }
+    return _serveAssetFile(request, reference, file);
   }
 
   /// Serves a Drive-stored film from the local disk cache, filling the cache
