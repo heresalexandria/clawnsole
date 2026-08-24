@@ -7,10 +7,11 @@ the iOS upload.
 
 ```text
 PR labelled minor -> merge -> bump Flutter and Electron together
-                              |-> build signed iOS IPA -> upload to App Store Connect
-                              |-> build macOS DMG + updater ZIP ─┐
-                              |-> build Windows x64 ZIP ─────────┤
-                              `-> checksum -> publish desktop GitHub release
+                              `-> dispatch exact commit from main
+                                  |-> build signed iOS IPA -> upload to App Store Connect
+                                  |-> build macOS DMG + updater ZIP ─┐
+                                  |-> build Windows x64 ZIP ─────────┤
+                                  `-> checksum -> publish desktop GitHub release
 ```
 
 ## Release labels
@@ -46,6 +47,14 @@ the iOS 26 SDK required by App Store Connect. Create a GitHub environment named
 environment secrets. Do not add a required reviewer if uploads should remain
 fully automatic; GitHub does not allocate the macOS runner until any environment
 protection rules are satisfied.
+
+GitHub reports a workflow started by a merged pull request as
+`refs/pull/<number>/merge`, even when a job checks out a commit from `main`.
+The merge-triggered run therefore prepares the version and dispatches a second
+run whose workflow ref is `main`. That trusted run verifies the supplied commit
+is in `main` before using it, then starts macOS, Windows, and iOS together. This
+keeps the App Store Connect environment restricted to `main` without exposing
+its secrets to pull-request refs.
 
 | secret | value |
 |---|---|
