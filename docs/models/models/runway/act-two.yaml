@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "act_two",
+  "canonical_model_id": "runway-act-two",
+  "label": "Act-Two",
+  "description": "Drive a character image or video from a performance clip.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.05,
+  "reference_usd_per_second": 0.05,
+  "max_image_references": 1,
+  "max_video_references": 1,
+  "max_total_references": 1,
+  "reference_prompt_hint": "Exactly one image or video supplies the character to animate.",
+  "supports_audio": false,
+  "supports_seed": true,
+  "prompt_optional_modes": [
+    "v2v"
+  ],
+  "min_source_video_seconds": 3,
+  "max_source_video_seconds": 30,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "source_input_label": "Performance video",
+  "source_input_hint": "Attach a 3–30 second performance, then one character image or video below.",
+  "supports_guidance_with_source": true
+}

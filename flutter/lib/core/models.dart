@@ -1380,6 +1380,7 @@ class StoredData {
     this.preferencesUpdatedAt,
     this.driveFolderName = '',
     this.driveFolderId = '',
+    this.providerCatalogCache,
   });
 
   final String apiKey;
@@ -1393,6 +1394,7 @@ class StoredData {
   final DateTime? preferencesUpdatedAt;
   final String driveFolderName;
   final String driveFolderId;
+  final Map<String, Object?>? providerCatalogCache;
 
   StoredData copyWith({
     String? apiKey,
@@ -1407,6 +1409,8 @@ class StoredData {
     bool clearPreferencesUpdatedAt = false,
     String? driveFolderName,
     String? driveFolderId,
+    Map<String, Object?>? providerCatalogCache,
+    bool clearProviderCatalogCache = false,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -1423,6 +1427,9 @@ class StoredData {
         : preferencesUpdatedAt ?? this.preferencesUpdatedAt,
     driveFolderName: driveFolderName ?? this.driveFolderName,
     driveFolderId: driveFolderId ?? this.driveFolderId,
+    providerCatalogCache: clearProviderCatalogCache
+        ? null
+        : providerCatalogCache ?? this.providerCatalogCache,
   );
 
   String apiKeyFor(String provider) =>
@@ -1471,6 +1478,8 @@ class StoredData {
       'preferencesUpdatedAt': preferencesUpdatedAt!.toUtc().toIso8601String(),
     if (driveFolderName.isNotEmpty) 'driveFolderName': driveFolderName,
     if (driveFolderId.isNotEmpty) 'driveFolderId': driveFolderId,
+    if (providerCatalogCache != null)
+      'providerCatalogCache': providerCatalogCache,
     if (folders.isNotEmpty)
       'folders': folders.map((folder) => folder.toJson()).toList(),
     if (savedReferences.isNotEmpty)
@@ -1588,6 +1597,12 @@ class StoredData {
       ),
       driveFolderName: json['driveFolderName'] as String? ?? '',
       driveFolderId: json['driveFolderId'] as String? ?? '',
+      providerCatalogCache: switch (json['providerCatalogCache']) {
+        final Map<Object?, Object?> value => value.map(
+          (key, child) => MapEntry(key.toString(), child),
+        ),
+        _ => null,
+      },
       folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
           .whereType<Map<Object?, Object?>>()
           .map(

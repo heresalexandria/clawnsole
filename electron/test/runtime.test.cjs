@@ -56,6 +56,11 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
   assert.equal(isAllowedExternalUrl("https://console.ltx.io/"), true);
   assert.equal(isAllowedExternalUrl("https://docs.ltx.io/pricing"), true);
   assert.equal(isAllowedExternalUrl("https://app.getartcraft.com/"), true);
+  assert.equal(isAllowedExternalUrl("https://support.apple.com/121115"), true);
+  assert.equal(
+    isAllowedExternalUrl("https://developer.apple.com/documentation/imageplayground"),
+    true,
+  );
   assert.equal(isAllowedExternalUrl("https://app.runwayml.com/"), true);
   assert.equal(
     isAllowedExternalUrl("https://docs.dev.runwayml.com/guides/models/"),

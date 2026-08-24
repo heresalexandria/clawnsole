@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "minimax/hailuo-2.3/t2v-standard",
+  "canonical_model_id": "hailuo-2.3-standard",
+  "label": "Hailuo 2.3 Standard · Text",
+  "description": "Cinematic MiniMax text-to-video generation.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 4,
+  "max_keyframes": 0,
+  "usd_per_second": 0.28,
+  "supports_audio": false
+}

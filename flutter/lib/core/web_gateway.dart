@@ -28,6 +28,7 @@ class WebGateway
     implements
         AppGateway,
         ProviderGateway,
+        ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         FavoriteGateway,
@@ -133,6 +134,28 @@ class WebGateway
   @override
   Future<LocalSnapshot> load() async =>
       _snapshot(await _client.get(_url('/state')));
+
+  @override
+  Future<Map<String, Object?>?> loadProviderCatalogCache() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/provider-catalog-cache'))),
+    );
+    final cache = payload['cache'];
+    return cache is Map<Object?, Object?>
+        ? cache.map((key, value) => MapEntry(key.toString(), value))
+        : null;
+  }
+
+  @override
+  Future<void> saveProviderCatalogCache(Map<String, Object?> cache) async {
+    await _read(
+      await _client.put(
+        _url('/provider-catalog-cache'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'cache': cache}),
+      ),
+    );
+  }
 
   Future<Map<String, Object?>> _settingsVaultAction(
     String action, [

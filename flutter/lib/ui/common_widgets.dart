@@ -566,7 +566,7 @@ class GenerationSpecChips extends StatelessWidget {
                     ? 'Reference to image'
                     : 'Text to image')
               : item.provider == 'apple-local'
-              ? 'Retired frame animation'
+              ? 'Apple image sequence'
               : item.mode.label,
         ),
         if (!upscaling && config.referenceTask != MediaReferenceTask.reference)
@@ -587,10 +587,7 @@ class GenerationSpecChips extends StatelessWidget {
             label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
           ),
         if (item.provider == 'apple-local' && !item.isImage)
-          _SpecChip(
-            icon: Icons.animation_rounded,
-            label: '${config.frameRate} fps',
-          ),
+          _SpecChip(icon: Icons.animation_rounded, label: '1 frame / s'),
         if (!upscaling)
           _SpecChip(
             label: switch (config.resolution) {

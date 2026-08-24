@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "apple-local-image",
+  "label": "Apple Image",
+  "description": "Creates one still image with Apple Intelligence on this device.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "Standard",
+      "detail": "512 px long edge"
+    },
+    {
+      "id": "fhd",
+      "label": "Large",
+      "detail": "768 px long edge"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 1,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0,
+  "supports_audio": false,
+  "max_prompt_characters": 900,
+  "output_kind": "image",
+  "progress_reporting": "reported"
+}

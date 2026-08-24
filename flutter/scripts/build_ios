@@ -3,6 +3,7 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 source "$SCRIPT_DIRECTORY/_review_credentials.sh"
+source "$SCRIPT_DIRECTORY/_mobile_test_credentials.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_ios [additional flutter build ipa arguments]"
@@ -22,6 +23,8 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "  CLAWNSOLE_IOS_REVIEW_ENV_FILE           Optional shell env file"
   echo "                                           (default: flutter/.env.ios-review)"
   echo "  CLAWNSOLE_GOOGLE_IOS_CLIENT_ID           Google OAuth iOS client"
+  echo "  CLAWNSOLE_MOBILE_TEST_BUILD               true for a labelled review build"
+  echo "  ARTCRAFT_TEST_KEY                          version-gated review credential"
   exit 0
 fi
 
@@ -56,10 +59,12 @@ else
   load_clawnsole_review_credentials
 fi
 prepare_clawnsole_review_defines
+prepare_clawnsole_mobile_test_defines
 prepare_google_ios_oauth
-trap 'cleanup_clawnsole_review_defines; cleanup_google_ios_oauth' EXIT
+trap 'cleanup_clawnsole_review_defines; cleanup_clawnsole_mobile_test_defines; cleanup_google_ios_oauth' EXIT
 
 IOS_BUILD_ARGUMENTS=(--release)
+IOS_BUILD_ARGUMENTS+=("${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}")
 if [[ -n "$EXPORT_OPTIONS" ]]; then
   if [[ ! -f "$EXPORT_OPTIONS" ]]; then
     echo "CLAWNSOLE_IOS_EXPORT_OPTIONS does not exist: $EXPORT_OPTIONS" >&2
@@ -71,6 +76,9 @@ else
 fi
 if [[ -n "$REVIEW_DEFINE_FILE" ]]; then
   IOS_BUILD_ARGUMENTS+=(--dart-define-from-file "$REVIEW_DEFINE_FILE")
+fi
+if [[ -n "$MOBILE_TEST_DEFINE_FILE" ]]; then
+  IOS_BUILD_ARGUMENTS+=(--dart-define-from-file "$MOBILE_TEST_DEFINE_FILE")
 fi
 if [[ -n "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
   IOS_BUILD_ARGUMENTS+=(

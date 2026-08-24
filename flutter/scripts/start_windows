@@ -36,4 +36,7 @@ if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]]; then
   )
 fi
 
-flutter run -d windows "${OAUTH_RUN_ARGUMENTS[@]}" "$@"
+flutter run -d windows \
+  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
+  "${OAUTH_RUN_ARGUMENTS[@]}" \
+  "$@"

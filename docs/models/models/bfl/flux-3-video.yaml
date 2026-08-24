@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "flux-3-video",
+  "canonical_model_id": "flux-3",
+  "label": "FLUX 3",
+  "description": "Multimodal generation, continuation, and draft enhance.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v",
+    "draft_enhance"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "2:1",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 20,
+  "duration_step": 1,
+  "max_keyframes": 10,
+  "usd_per_second": 0.17,
+  "reference_usd_per_second": 0.17,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_auto_duration": true,
+  "supports_draft": true,
+  "supports_timed_keyframes": true
+}

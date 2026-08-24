@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "flux-tools-video-upscale-v1",
+  "canonical_model_id": "flux-video-upscale",
+  "label": "FLUX Video Upscale",
+  "description": "Source-faithful or creative super-resolution from 1.5× to 3×.",
+  "modes": [
+    "upscale"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "source",
+      "label": "Source aspect",
+      "detail": "1.5×–3× · up to 4K"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 20,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.1,
+  "supports_audio": false
+}

@@ -17,6 +17,7 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
@@ -68,6 +69,16 @@ Future<void> main(List<String> arguments) async {
       ? null
       : SettingsVaultDataStore(delegate: hybrid, secureStore: secureStore);
   final store = CompanionHybridStore(hybrid, vault: vault);
+  try {
+    final cache = (await store.read()).providerCatalogCache;
+    if (cache != null) {
+      installProviderCatalog(ProviderCatalogBundle.fromCache(cache).providers);
+    }
+  } on Object {
+    // An invalid cache must not stop the companion. Its bundled definitions
+    // remain the complete offline fallback until the renderer supplies a new
+    // validated catalog.
+  }
   final server = await HttpServer.bind(
     InternetAddress.loopbackIPv4,
     config.port,
@@ -795,6 +806,30 @@ class CompanionApp {
       if (request.method == 'GET' && path == '/state') {
         return await _json(request.response, 200, await _snapshotPayload());
       }
+      if (request.method == 'GET' && path == '/provider-catalog-cache') {
+        return await _json(request.response, 200, <String, Object?>{
+          'cache': (await _store.read()).providerCatalogCache,
+        });
+      }
+      if (request.method == 'PUT' && path == '/provider-catalog-cache') {
+        final body = await _bodyMap(request);
+        final raw = body['cache'];
+        if (raw is! Map<Object?, Object?>) {
+          throw const FormatException('The provider catalog cache is invalid.');
+        }
+        final cache = raw.map((key, value) => MapEntry(key.toString(), value));
+        final bundle = ProviderCatalogBundle.fromCache(cache);
+        installProviderCatalog(bundle.providers);
+        await _store.mutate<void>(
+          (data) => StoreChange<void>(
+            data.copyWith(providerCatalogCache: cache),
+            null,
+          ),
+        );
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
+      }
       if (request.method == 'PATCH' && path == '/state') {
         final body = await _bodyMap(request);
         await _stateAction(body['action']?.toString() ?? '', body['value']);
@@ -1016,7 +1051,7 @@ class CompanionApp {
     }
     response.headers.set(
       HttpHeaders.accessControlAllowMethodsHeader,
-      'GET, POST, PATCH, DELETE, OPTIONS',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS',
     );
     response.headers.set(
       HttpHeaders.accessControlAllowHeadersHeader,

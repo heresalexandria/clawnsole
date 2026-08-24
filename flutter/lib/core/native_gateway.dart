@@ -6,6 +6,8 @@ import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'app_version.dart';
+import 'apple_local_runtime.dart';
 import 'bfl_api.dart';
 import 'asset_extensions.dart';
 import 'data_location.dart';
@@ -16,11 +18,13 @@ import 'google_drive.dart';
 import 'google_drive_asset_presenter_io.dart';
 import 'google_drive_auth.dart';
 import 'google_drive_store.dart';
+import 'generation_status.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'media_cache_gateway.dart';
 import 'models.dart';
 import 'provider_api.dart';
+import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
 import 'reference_video_normalizer_mobile.dart';
 import 'secure_value_store.dart';
@@ -55,6 +59,21 @@ const _configuredIosReviewArtCraftApiKey = String.fromEnvironment(
 const _configuredIosReviewArtCraftApiKeyId = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY_ID',
 );
+const _configuredMobileTestArtCraftApiKey = String.fromEnvironment(
+  'CLAWNSOLE_ARTCRAFT_TEST_API_KEY',
+);
+const _configuredMobileTestArtCraftApiKeyId = String.fromEnvironment(
+  'CLAWNSOLE_ARTCRAFT_TEST_API_KEY_ID',
+);
+
+Set<String> _nativeAvailableProviders(bool isIos) => <String>{
+  'bfl',
+  'ltx',
+  'artcraft',
+  'atlas',
+  'runway',
+  if (isIos) 'apple-local',
+};
 
 /// Native direct-provider gateway backed by the private app-documents store.
 ///
@@ -85,8 +104,12 @@ class NativeGateway extends DirectGateway
     String? iosReviewAtlasApiKeyId,
     String? iosReviewArtCraftApiKey,
     String? iosReviewArtCraftApiKeyId,
+    String? mobileTestArtCraftApiKey,
+    String? mobileTestArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
+    AppleLocalRuntime? appleLocalRuntime,
     bool? isIos,
+    bool? isMobile,
     SecureValueStore? secureValueStore,
     SettingsVaultRemote? settingsVaultRemote,
     SettingsVaultCodec? settingsVaultCodec,
@@ -151,8 +174,12 @@ class NativeGateway extends DirectGateway
       iosReviewAtlasApiKeyId: iosReviewAtlasApiKeyId,
       iosReviewArtCraftApiKey: iosReviewArtCraftApiKey,
       iosReviewArtCraftApiKeyId: iosReviewArtCraftApiKeyId,
+      mobileTestArtCraftApiKey: mobileTestArtCraftApiKey,
+      mobileTestArtCraftApiKeyId: mobileTestArtCraftApiKeyId,
       providerRouter: providerRouter,
+      appleLocalRuntime: appleLocalRuntime,
       isIos: isIos,
+      isMobile: isMobile,
       referenceVideoNormalizer:
           referenceVideoNormalizer ??
           ReferenceVideoNormalizer(
@@ -184,8 +211,12 @@ class NativeGateway extends DirectGateway
     String? iosReviewAtlasApiKeyId,
     String? iosReviewArtCraftApiKey,
     String? iosReviewArtCraftApiKeyId,
+    String? mobileTestArtCraftApiKey,
+    String? mobileTestArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
+    AppleLocalRuntime? appleLocalRuntime,
     bool? isIos,
+    bool? isMobile,
     required ReferenceVideoNormalizationService referenceVideoNormalizer,
   }) : _hybrid = hybrid,
        _localStore = localStore,
@@ -212,12 +243,22 @@ class NativeGateway extends DirectGateway
              (iosReviewArtCraftApiKeyId ?? _configuredIosReviewArtCraftApiKeyId)
                  .trim(),
        },
+       _mobileTestArtCraftApiKey =
+           (mobileTestArtCraftApiKey ?? _configuredMobileTestArtCraftApiKey)
+               .trim(),
+       _mobileTestArtCraftApiKeyId =
+           (mobileTestArtCraftApiKeyId ?? _configuredMobileTestArtCraftApiKeyId)
+               .trim(),
+       _appleLocal =
+           appleLocalRuntime ?? const MethodChannelAppleLocalRuntime(),
        _isIos = isIos ?? Platform.isIOS,
+       _isMobile = isMobile ?? isIos ?? (Platform.isIOS || Platform.isAndroid),
        super(
          store: vault,
          api: api,
          client: client,
          providerRouter: providerRouter,
+         availableProviders: _nativeAvailableProviders(isIos ?? Platform.isIOS),
          referenceVideoNormalizer: referenceVideoNormalizer,
          persistenceDescription:
              'Combined local app documents and optional Google Drive library',
@@ -240,7 +281,14 @@ class NativeGateway extends DirectGateway
       >{};
   final Map<String, String> _iosReviewKeys;
   final Map<String, String> _iosReviewKeyIds;
+  final String _mobileTestArtCraftApiKey;
+  final String _mobileTestArtCraftApiKeyId;
+  final AppleLocalRuntime _appleLocal;
   final bool _isIos;
+  final bool _isMobile;
+
+  String get _mobileTestArtCraftRejectionId =>
+      '$_mobileTestArtCraftApiKeyId:$clawnsoleVersion';
 
   @override
   bool get supportsLocalLibrary => true;
@@ -528,10 +576,205 @@ class NativeGateway extends DirectGateway
   @override
   bool get supportsPhotoLibrarySave => Platform.isIOS || Platform.isAndroid;
 
+  Future<Generation> _replaceAppleLocalGeneration(Generation generation) async {
+    final current = await _vault.read();
+    final generations = List<Generation>.from(current.generations);
+    final index = generations.indexWhere(
+      (item) => item.localId == generation.localId,
+    );
+    var persisted = generation;
+    if (index >= 0) {
+      final existing = generations[index];
+      persisted = generation.copyWith(
+        folderId: existing.folderId,
+        clearFolder: existing.folderId == null,
+        tags: existing.tags,
+        favorite: existing.favorite,
+        hidden: existing.hidden,
+        storage: existing.storage,
+      );
+      generations[index] = persisted;
+    } else {
+      generations.insert(0, persisted);
+    }
+    await _vault.write(current.copyWith(generations: generations));
+    return persisted;
+  }
+
+  @override
+  Future<Generation> submit(GenerationSubmission submission) async {
+    if (submission.record.provider != 'apple-local') {
+      return super.submit(submission);
+    }
+    return _submitAppleLocal(submission.record);
+  }
+
+  Future<Generation> _submitAppleLocal(Generation inputRecord) async {
+    var record = inputRecord;
+    final provider = providerByIdOrNull(record.provider);
+    final model = provider?.models
+        .where((candidate) => candidate.id == record.model)
+        .firstOrNull;
+    if (provider == null || model == null) {
+      throw StateError(
+        'Apple Intelligence is not available for this Clawnsole version.',
+      );
+    }
+    if (!_isIos || !await _appleLocal.isAvailable()) {
+      throw StateError(
+        'Apple Intelligence image creation requires a supported iPhone or iPad with iOS 18.4 or later and Image Playground enabled.',
+      );
+    }
+    final duration = record.config.duration is num
+        ? (record.config.duration as num).toInt()
+        : model.minDuration;
+    if (duration < model.minDuration || duration > model.maxDuration) {
+      throw StateError(
+        '${model.label} supports ${model.minDuration}–${model.maxDuration} seconds.',
+      );
+    }
+    record = record.copyWith(
+      canonicalModelId: record.canonicalModelId ?? model.canonicalId,
+      estimatedCreditsMin: 0,
+      estimatedCreditsMax: 0,
+      estimateBasis: 'Apple system service · no provider charge',
+      quotedCostUsdMin: 0,
+      quotedCostUsdMax: 0,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    record = await _replaceAppleLocalGeneration(record);
+    try {
+      final receipt = await _appleLocal.submit(<String, Object?>{
+        'requestId': record.localId,
+        'mode': record.isImage ? 'image' : 'sequence',
+        'prompt': record.prompt,
+        'aspectRatio': record.config.aspectRatio,
+        'resolution': record.config.resolution,
+        'durationSeconds': record.isImage ? 1 : duration,
+      });
+      final jobId = receipt['jobId']?.toString().trim();
+      if (jobId == null || jobId.isEmpty) {
+        throw StateError(
+          'Apple Intelligence returned an invalid generation receipt.',
+        );
+      }
+      final acceptedAt = DateTime.now().toUtc();
+      record = record.copyWith(
+        requestId: jobId,
+        pollingUrl: 'apple-local://$jobId',
+        status: 'Pending',
+        progress: 0,
+        providerAcceptedAt: acceptedAt,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(receipt),
+        lastProviderResponseAt: acceptedAt,
+        updatedAt: acceptedAt,
+      );
+      return await _replaceAppleLocalGeneration(record);
+    } on Object catch (error) {
+      record = record.copyWith(
+        status: 'Error',
+        error: generationExceptionMessage(error),
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await _replaceAppleLocalGeneration(record);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Generation> poll(Generation generation) {
+    if (generation.provider != 'apple-local') return super.poll(generation);
+    return _pollAppleLocal(generation);
+  }
+
+  Future<Generation> _pollAppleLocal(Generation generation) async {
+    final checkedAt = DateTime.now().toUtc();
+    try {
+      final jobId = generation.requestId?.trim() ?? '';
+      if (jobId.isEmpty) {
+        throw StateError(
+          'This Apple Intelligence generation has no local job id.',
+        );
+      }
+      final payload = await _appleLocal.poll(jobId);
+      final providerStatus = payload['status']?.toString() ?? 'Pending';
+      final status = normalizeGenerationStatus(providerStatus);
+      AssetReference? resultAsset = generation.resultAsset;
+      if (status == 'Ready' && resultAsset == null) {
+        final resultPath = payload['resultPath']?.toString().trim() ?? '';
+        if (resultPath.isEmpty) {
+          throw StateError(
+            'Apple Intelligence finished without returning a media file.',
+          );
+        }
+        final resultFile = File(resultPath);
+        final contentType =
+            payload['contentType']?.toString() ??
+            (generation.isImage ? 'image/png' : 'video/mp4');
+        resultAsset = await _vault.writeAsset(
+          await resultFile.readAsBytes(),
+          label:
+              'clawnsole-${generation.localId}.${generation.isImage ? 'png' : 'mp4'}',
+          contentType: contentType,
+          storage: generation.storage,
+        );
+        try {
+          await resultFile.parent.delete(recursive: true);
+        } on FileSystemException {
+          // The operating system also reclaims the temporary job directory.
+        }
+      }
+      final failed = isGenerationFailureStatus(status);
+      final next = generation.copyWith(
+        status: status,
+        progress: status == 'Ready'
+            ? 100
+            : normalizedProgress(payload['progress']),
+        resultAsset: resultAsset,
+        providerCompletedAt: status == 'Ready' ? checkedAt : null,
+        error: failed ? payload['error']?.toString() ?? providerStatus : null,
+        clearError: !failed,
+        lastCheckedAt: checkedAt,
+        statusCheckCount: generation.statusCheckCount + 1,
+        consecutiveCheckFailures: 0,
+        clearLastCheckError: true,
+        lastProviderStatusCode: 200,
+        lastProviderResponse: compactProviderResponse(<String, Object?>{
+          'status': providerStatus,
+          'progress': payload['progress'],
+          if (payload['message'] != null) 'message': payload['message'],
+          if (payload['error'] != null) 'error': payload['error'],
+        }),
+        lastProviderResponseAt: checkedAt,
+        updatedAt: checkedAt,
+      );
+      return await _replaceAppleLocalGeneration(next);
+    } on Object catch (error) {
+      final next = generation.copyWith(
+        lastCheckedAt: checkedAt,
+        statusCheckCount: generation.statusCheckCount + 1,
+        consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
+        lastCheckError: generationExceptionMessage(error),
+        updatedAt: checkedAt,
+      );
+      return _replaceAppleLocalGeneration(next);
+    }
+  }
+
   @override
   ActiveApiKey? activeApiKey(String provider, StoredData data) {
     final saved = super.activeApiKey(provider, data);
     if (saved != null) return saved;
+    if (_isMobile &&
+        activeProviderCatalogIsMobileTest &&
+        provider == mobileTestProviderId &&
+        _mobileTestArtCraftApiKey.isNotEmpty &&
+        _mobileTestArtCraftApiKeyId.isNotEmpty &&
+        data.rejectedReviewKeyIdFor(provider) !=
+            _mobileTestArtCraftRejectionId) {
+      return ActiveApiKey(_mobileTestArtCraftApiKey, ApiKeySource.configured);
+    }
     final key = _iosReviewKeys[provider] ?? '';
     final keyId = _iosReviewKeyIds[provider] ?? '';
     if (_isIos &&
@@ -552,6 +795,15 @@ class NativeGateway extends DirectGateway
   @override
   StoredData rejectConfiguredCredential(String provider, StoredData data) {
     var next = data;
+    if (_isMobile &&
+        activeProviderCatalogIsMobileTest &&
+        provider == mobileTestProviderId &&
+        _mobileTestArtCraftApiKeyId.isNotEmpty) {
+      return next.withRejectedReviewKeyId(
+        provider,
+        _mobileTestArtCraftRejectionId,
+      );
+    }
     final reviewId = _iosReviewKeyIds[provider] ?? '';
     if (_isIos && reviewId.isNotEmpty) {
       next = next.withRejectedReviewKeyId(provider, reviewId);

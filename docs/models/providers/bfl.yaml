@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "bfl",
+  "adapter": "bfl",
+  "name": "Black Forest Labs",
+  "description": "Multimodal video generation plus precise and creative finishing tools.",
+  "console_url": "https://dashboard.bfl.ai",
+  "docs_url": "https://docs.bfl.ai/flux_3/flux3_video",
+  "pricing_url": "https://bfl.ai/pricing",
+  "pricing_source": "Published credits · converted at $0.01/credit",
+  "result_delivery": {
+    "availability_seconds": 600,
+    "keep_open_recommended": true
+  },
+  "progress_reporting": "reported",
+  "models": [
+    "models/bfl/flux-3-video.yaml",
+    "models/bfl/flux-tools-video-upscale-v1.yaml"
+  ]
+}

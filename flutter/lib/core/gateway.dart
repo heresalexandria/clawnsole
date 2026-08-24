@@ -52,6 +52,15 @@ abstract interface class ProviderGateway {
   );
 }
 
+/// Device-local persistence for the last complete remote provider catalog.
+///
+/// This stays separate from [AppGateway] so lightweight embedders and tests can
+/// continue using only the bundled catalog.
+abstract interface class ProviderCatalogCacheGateway {
+  Future<Map<String, Object?>?> loadProviderCatalogCache();
+  Future<void> saveProviderCatalogCache(Map<String, Object?> cache);
+}
+
 abstract interface class LibraryOrganizationGateway {
   Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder);
   Future<LocalSnapshot> deleteLibraryFolder(String folderId);

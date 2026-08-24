@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "ltx-2-3-pro",
+  "label": "LTX 2.3 Pro",
+  "description": "High-fidelity 720p–4K video generation.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "qhd",
+      "label": "1440p",
+      "detail": "2560 × 1440"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 2,
+  "max_keyframes": 2,
+  "usd_per_second": 0.04,
+  "reference_usd_per_second": 0.04,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_audio_references": 1,
+  "max_reference_audio_seconds": 20,
+  "max_reference_audio_seconds_by_resolution": {
+    "qhd": 10,
+    "4k": 10
+  }
+}

@@ -10,8 +10,9 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_ios.sh [additional flutter build ipa arguments]"
   echo
   echo "Builds the production App Store IPA with Google OAuth configuration from"
-  echo "the environment or repository .env. Provider test keys and custom Dart"
-  echo "defines are prohibited."
+  echo "the environment or repository .env. Custom Dart defines and legacy"
+  echo "provider review keys are prohibited. A release workflow may set"
+  echo "CLAWNSOLE_MOBILE_TEST_BUILD=true and ARTCRAFT_TEST_KEY."
   exit 0
 fi
 
@@ -63,8 +64,10 @@ if [[ -z "${CLAWNSOLE_GOOGLE_IOS_CLIENT_ID:-}" ]]; then
   exit 1
 fi
 
-# Production iOS builds never contain shared provider credentials, even if a
-# developer's shell or .env opts into the local App Review credential flow.
+# Production iOS builds never contain legacy shared provider credentials, even
+# if a developer's shell or .env opts into the local App Review flow. The one
+# mobile-test key is accepted only through its explicit release variables and
+# remains disabled at runtime unless this version is in /models test_versions.
 export INCLUDE_IOS_TEST_KEYS=false
 
 exec "$REPOSITORY_ROOT/flutter/scripts/build_ios" --production "$@"

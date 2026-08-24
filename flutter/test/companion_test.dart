@@ -157,6 +157,10 @@ void main() {
           preflight.headers[HttpHeaders.accessControlAllowHeadersHeader],
           contains('X-Clawnsole-Session'),
         );
+        expect(
+          preflight.headers[HttpHeaders.accessControlAllowMethodsHeader],
+          contains('PUT'),
+        );
       } finally {
         await subscription.cancel();
         await server.close(force: true);

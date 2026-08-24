@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "veo_3p1_fast",
+  "canonical_model_id": "veo-3.1-fast",
+  "label": "Veo 3.1 Fast",
+  "description": "Faster Veo 3.1 with references, audio, and 4K output.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 8,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.165,
+  "reference_usd_per_second": 0.165,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 3,
+  "max_video_references": 1,
+  "frames_exclusive_with_references": true
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "kling_1p6_pro",
+  "label": "Kling 1.6 Pro",
+  "description": "Kling generation with start, end, and image references.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "1:1",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 10,
+  "duration_step": 5,
+  "max_keyframes": 2,
+  "usd_per_second": 0.114,
+  "reference_usd_per_second": 0.114,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 4,
+  "supports_audio": false
+}

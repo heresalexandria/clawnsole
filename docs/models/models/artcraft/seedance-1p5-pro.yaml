@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "seedance_1p5_pro",
+  "label": "Seedance 1.5 Pro",
+  "description": "High-quality Seedance with start and end frames.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 12,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.16875,
+  "reference_usd_per_second": 0.16875,
+  "supports_start_frame": true,
+  "supports_end_frame": true
+}

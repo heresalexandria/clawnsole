@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "bytedance/seedance-2.5/image-to-video",
+  "canonical_model_id": "seedance-2.5",
+  "label": "Seedance 2.5 · Frames",
+  "description": "First/last-frame guided Seedance generation.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.134,
+  "reference_usd_per_second": 0.134,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_auto_duration": true
+}

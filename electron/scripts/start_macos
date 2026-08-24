@@ -29,5 +29,7 @@ if [[ -f "$REPOSITORY_ROOT/.env" ]]; then
 fi
 
 cd "$FLUTTER_DIRECTORY"
-flutter build web --debug --dart-define "CLAWNSOLE_PROXY_URL="
+flutter build web --debug \
+  --dart-define "CLAWNSOLE_PROXY_URL=" \
+  --dart-define "CLAWNSOLE_SITE_URL=${CLAWNSOLE_SITE_URL:-https://clawnsole.app/}"
 exec node "$ELECTRON_DIRECTORY/scripts/start.mjs" "$@"

@@ -546,7 +546,7 @@ List<String> _denseGenerationMetadata(Generation item) {
   final kind = item.isImage
       ? 'Image'
       : item.provider == 'apple-local'
-      ? 'Frame animation'
+      ? 'Image sequence'
       : item.mode.shortLabel;
   return <String>[
     providerNameForHistory(item.provider),

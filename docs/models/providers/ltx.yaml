@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "ltx",
+  "adapter": "ltx",
+  "name": "LTX Studio",
+  "description": "Production-focused video generation with native audio.",
+  "console_url": "https://console.ltx.io/",
+  "docs_url": "https://docs.ltx.io",
+  "pricing_url": "https://docs.ltx.io/pricing",
+  "pricing_source": "Published rate card",
+  "result_delivery": {
+    "availability_seconds": 86400
+  },
+  "models": [
+    "models/ltx/ltx-2-3-fast.yaml",
+    "models/ltx/ltx-2-3-pro.yaml"
+  ]
+}

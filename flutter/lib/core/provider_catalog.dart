@@ -1,5 +1,25 @@
 import 'models.dart';
 
+const clawnsoleMobileTestBuild = bool.fromEnvironment(
+  'CLAWNSOLE_MOBILE_TEST_BUILD',
+);
+const mobileTestProviderId = 'artcraft';
+const mobileTestModelId = 'seedance_1p5_pro';
+const mobileTestResolutionId = 'sd';
+const mobileTestDurationSeconds = 5;
+
+const _appleLocalRatios = <String>['16:9', '4:3', '1:1', '3:4', '9:16'];
+const _appleLocalStandard = VideoResolutionDefinition(
+  'hd',
+  'Standard',
+  '512 px long edge',
+);
+const _appleLocalLarge = VideoResolutionDefinition(
+  'fhd',
+  'Large',
+  '768 px long edge',
+);
+
 enum ReferenceVideoCompatibilityProfile { generic, seedance }
 
 /// Whether a provider/model route supplies a meaningful completion percentage.
@@ -177,6 +197,72 @@ class VideoModelDefinition {
   /// Overrides the provider-wide progress contract for this model route.
   final ProviderProgressReporting? progressReporting;
 
+  /// Produces the fixed, low-cost capability surface used by mobile review.
+  ///
+  /// All request semantics stay attached to the manifest-defined model, while
+  /// the selectable output and duration are narrowed to one exact choice.
+  VideoModelDefinition constrainedForMobileTest(
+    VideoResolutionDefinition resolution,
+  ) => VideoModelDefinition(
+    id: id,
+    canonicalModelId: canonicalModelId,
+    label: label,
+    description: description,
+    modes: modes,
+    aspectRatios: aspectRatios,
+    resolutions: <VideoResolutionDefinition>[resolution],
+    minDuration: mobileTestDurationSeconds,
+    maxDuration: mobileTestDurationSeconds,
+    durationStep: 1,
+    maxKeyframes: maxKeyframes,
+    maxKeyframesByMode: maxKeyframesByMode,
+    usdPerSecond: usdPerSecond,
+    referenceUsdPerSecond: referenceUsdPerSecond,
+    supportsStartFrame: supportsStartFrame,
+    supportsEndFrame: supportsEndFrame,
+    maxImageReferences: maxImageReferences,
+    maxVideoReferences: maxVideoReferences,
+    maxAudioReferences: maxAudioReferences,
+    maxTotalReferences: maxTotalReferences,
+    maxReferencesByMode: maxReferencesByMode,
+    framesExclusiveWithReferences: framesExclusiveWithReferences,
+    maxReferenceVideoSeconds: maxReferenceVideoSeconds,
+    maxReferenceAudioSeconds: maxReferenceAudioSeconds,
+    minReferenceAudioSeconds: minReferenceAudioSeconds,
+    maxReferenceVideoSecondsByResolution: maxReferenceVideoSecondsByResolution,
+    maxReferenceAudioSecondsByResolution: maxReferenceAudioSecondsByResolution,
+    requiresVisualReferenceForAudio: requiresVisualReferenceForAudio,
+    maxDurationWithImageGuidance: mobileTestDurationSeconds,
+    maxDurationByResolution: const <String, int>{
+      mobileTestResolutionId: mobileTestDurationSeconds,
+    },
+    aspectRatiosByResolution: aspectRatiosByResolution,
+    aspectRatiosByMode: aspectRatiosByMode,
+    aspectRatiosWithFrames: aspectRatiosWithFrames,
+    resolutionsByReferenceKind: resolutionsByReferenceKind,
+    referencePromptHint: referencePromptHint,
+    referenceTasks: referenceTasks,
+    supportsAutoDuration: false,
+    supportsAudio: supportsAudio,
+    supportsDraft: supportsDraft,
+    supportsTimedKeyframes: supportsTimedKeyframes,
+    supportsFrameRate: supportsFrameRate,
+    supportsSeed: supportsSeed,
+    maxPromptCharacters: maxPromptCharacters,
+    promptOptionalModes: promptOptionalModes,
+    promptOptionalWithFramesOnly: promptOptionalWithFramesOnly,
+    minSourceVideoSeconds: minSourceVideoSeconds,
+    maxSourceVideoSeconds: maxSourceVideoSeconds,
+    durationFromSourceModes: durationFromSourceModes,
+    sourceInputLabel: sourceInputLabel,
+    sourceInputHint: sourceInputHint,
+    supportsGuidanceWithSource: supportsGuidanceWithSource,
+    sourceGuidanceRequiresTimestamps: sourceGuidanceRequiresTimestamps,
+    upscaleUsesResolutionTargets: upscaleUsesResolutionTargets,
+    outputKind: outputKind,
+    progressReporting: progressReporting,
+  );
+
   String get canonicalId => canonicalModelId ?? id;
 
   int maxReferences(MediaReferenceKind kind, [VideoMode? mode]) =>
@@ -284,6 +370,7 @@ class VideoModelDefinition {
 class VideoProviderDefinition {
   const VideoProviderDefinition({
     required this.id,
+    String? adapter,
     required this.name,
     required this.description,
     required this.consoleUrl,
@@ -295,9 +382,10 @@ class VideoProviderDefinition {
     this.isLocal = false,
     this.resultDelivery = const ProviderResultDelivery(),
     this.progressReporting = ProviderProgressReporting.none,
-  });
+  }) : adapter = adapter ?? id;
 
   final String id;
+  final String adapter;
   final String name;
   final String description;
   final String consoleUrl;
@@ -419,7 +507,7 @@ const _artCraftGrokRatios = <String>[
 const _artCraftKlingRatios = <String>['16:9', '1:1', '9:16'];
 const _artCraftVeoRatios = <String>['auto', '16:9', '9:16'];
 const _artCraftViduRatios = <String>['16:9', '9:16', '4:3', '3:4', '1:1'];
-const bflProvider = VideoProviderDefinition(
+const _bflProvider = VideoProviderDefinition(
   id: 'bfl',
   name: 'Black Forest Labs',
   description:
@@ -484,7 +572,7 @@ const bflProvider = VideoProviderDefinition(
   ],
 );
 
-const ltxProvider = VideoProviderDefinition(
+const _ltxProvider = VideoProviderDefinition(
   id: 'ltx',
   name: 'LTX Studio',
   description: 'Production-focused video generation with native audio.',
@@ -548,7 +636,7 @@ const _runwayPortraitRatios = <String>['16:9', '9:16'];
 /// Runway's direct API exposes one model through several request endpoints.
 /// Keeping those modes on one canonical definition lets Create switch request
 /// shapes without duplicating the model in the library and cost desk.
-const runwayProvider = VideoProviderDefinition(
+const _runwayProvider = VideoProviderDefinition(
   id: 'runway',
   name: 'Runway',
   description:
@@ -959,7 +1047,7 @@ const runwayProvider = VideoProviderDefinition(
   ],
 );
 
-const artCraftProvider = VideoProviderDefinition(
+const _artCraftProvider = VideoProviderDefinition(
   id: 'artcraft',
   name: 'ArtCraft',
   description:
@@ -1452,7 +1540,7 @@ class _AtlasRouteModel extends VideoModelDefinition {
        );
 }
 
-const atlasProvider = VideoProviderDefinition(
+const _atlasProvider = VideoProviderDefinition(
   id: 'atlas',
   name: 'Atlas Cloud',
   description: 'A broad model marketplace with live, preflight pricing.',
@@ -1897,21 +1985,172 @@ const atlasProvider = VideoProviderDefinition(
   ],
 );
 
-const videoProviders = <VideoProviderDefinition>[
-  artCraftProvider,
-  atlasProvider,
-  bflProvider,
-  ltxProvider,
-  runwayProvider,
-];
-
-VideoProviderDefinition providerById(String id) => videoProviders.firstWhere(
-  (provider) => provider.id == id,
-  orElse: () => bflProvider,
+const appleLocalProvider = VideoProviderDefinition(
+  id: 'apple-local',
+  adapter: 'apple-local',
+  name: 'Apple Intelligence',
+  description:
+      'Keyless image creation through Apple Intelligence on this device, including a silent image-sequence video option.',
+  consoleUrl: 'https://support.apple.com/121115',
+  docsUrl: 'https://developer.apple.com/documentation/imageplayground',
+  pricingUrl: 'https://support.apple.com/121115',
+  pricingSource: 'Apple system service · no provider charge',
+  requiresApiKey: false,
+  isLocal: true,
+  resultDelivery: ProviderResultDelivery(),
+  progressReporting: ProviderProgressReporting.reported,
+  models: <VideoModelDefinition>[
+    VideoModelDefinition(
+      id: 'apple-local-image',
+      label: 'Apple Image',
+      description:
+          'Creates one still image with Apple Intelligence on this device.',
+      modes: <VideoMode>[VideoMode.t2v],
+      aspectRatios: _appleLocalRatios,
+      resolutions: <VideoResolutionDefinition>[
+        _appleLocalStandard,
+        _appleLocalLarge,
+      ],
+      minDuration: 1,
+      maxDuration: 1,
+      durationStep: 1,
+      maxKeyframes: 0,
+      usdPerSecond: 0,
+      supportsAudio: false,
+      maxPromptCharacters: 900,
+      outputKind: GenerationOutputKind.image,
+      progressReporting: ProviderProgressReporting.reported,
+    ),
+    VideoModelDefinition(
+      id: 'apple-local-animation',
+      label: 'Apple Image Sequence',
+      description:
+          'Creates one Apple-generated image per selected second and encodes the sequence as a silent MP4.',
+      modes: <VideoMode>[VideoMode.t2v],
+      aspectRatios: _appleLocalRatios,
+      resolutions: <VideoResolutionDefinition>[
+        _appleLocalStandard,
+        _appleLocalLarge,
+      ],
+      minDuration: 1,
+      maxDuration: 8,
+      durationStep: 1,
+      maxKeyframes: 0,
+      usdPerSecond: 0,
+      supportsAudio: false,
+      maxPromptCharacters: 900,
+      progressReporting: ProviderProgressReporting.reported,
+    ),
+  ],
 );
 
+const bundledVideoProviders = <VideoProviderDefinition>[
+  appleLocalProvider,
+  _artCraftProvider,
+  _atlasProvider,
+  _bflProvider,
+  _ltxProvider,
+  _runwayProvider,
+];
+
+List<VideoProviderDefinition> mobileTestProviderCatalog(
+  List<VideoProviderDefinition> providers,
+) {
+  final provider = providers
+      .where(
+        (candidate) =>
+            candidate.id == mobileTestProviderId &&
+            candidate.adapter == mobileTestProviderId,
+      )
+      .firstOrNull;
+  final model = provider?.models
+      .where((candidate) => candidate.id == mobileTestModelId)
+      .firstOrNull;
+  final resolution = model?.resolutions
+      .where((candidate) => candidate.id == mobileTestResolutionId)
+      .firstOrNull;
+  if (provider == null || model == null || resolution == null) {
+    return const <VideoProviderDefinition>[];
+  }
+  final appleProviders = providers.where(
+    (candidate) => candidate.adapter == 'apple-local' && candidate.isLocal,
+  );
+  return <VideoProviderDefinition>[
+    VideoProviderDefinition(
+      id: provider.id,
+      adapter: provider.adapter,
+      name: provider.name,
+      description: provider.description,
+      consoleUrl: provider.consoleUrl,
+      docsUrl: provider.docsUrl,
+      pricingUrl: provider.pricingUrl,
+      pricingSource: provider.pricingSource,
+      requiresApiKey: provider.requiresApiKey,
+      isLocal: provider.isLocal,
+      resultDelivery: provider.resultDelivery,
+      progressReporting: provider.progressReporting,
+      models: <VideoModelDefinition>[
+        model.constrainedForMobileTest(resolution),
+      ],
+    ),
+    ...appleProviders,
+  ];
+}
+
+List<VideoProviderDefinition> _activeVideoProviders = clawnsoleMobileTestBuild
+    ? List<VideoProviderDefinition>.unmodifiable(
+        mobileTestProviderCatalog(bundledVideoProviders),
+      )
+    : bundledVideoProviders;
+bool _activeProviderCatalogIsMobileTest = clawnsoleMobileTestBuild;
+
+List<VideoProviderDefinition> get videoProviders => _activeVideoProviders;
+bool get activeProviderCatalogIsMobileTest =>
+    _activeProviderCatalogIsMobileTest;
+
+void installProviderCatalog(
+  List<VideoProviderDefinition> providers, {
+  bool mobileTest = false,
+}) {
+  _activeVideoProviders = List<VideoProviderDefinition>.unmodifiable(providers);
+  _activeProviderCatalogIsMobileTest = mobileTest;
+}
+
+void resetProviderCatalog({bool mobileTestBuild = clawnsoleMobileTestBuild}) {
+  _activeVideoProviders = mobileTestBuild
+      ? List<VideoProviderDefinition>.unmodifiable(
+          mobileTestProviderCatalog(bundledVideoProviders),
+        )
+      : bundledVideoProviders;
+  _activeProviderCatalogIsMobileTest = mobileTestBuild;
+}
+
+VideoProviderDefinition? providerByIdOrNull(String id) =>
+    videoProviders.where((provider) => provider.id == id).firstOrNull;
+
+VideoProviderDefinition? providerByIdForRouting(String id) =>
+    providerByIdOrNull(id) ??
+    bundledVideoProviders.where((provider) => provider.id == id).firstOrNull;
+
+VideoProviderDefinition providerById(String id) =>
+    providerByIdOrNull(id) ??
+    providerByIdOrNull('bfl') ??
+    videoProviders.firstOrNull ??
+    _bflProvider;
+
+VideoProviderDefinition get artCraftProvider =>
+    providerByIdOrNull('artcraft') ?? _artCraftProvider;
+VideoProviderDefinition get atlasProvider =>
+    providerByIdOrNull('atlas') ?? _atlasProvider;
+VideoProviderDefinition get bflProvider =>
+    providerByIdOrNull('bfl') ?? _bflProvider;
+VideoProviderDefinition get ltxProvider =>
+    providerByIdOrNull('ltx') ?? _ltxProvider;
+VideoProviderDefinition get runwayProvider =>
+    providerByIdOrNull('runway') ?? _runwayProvider;
+
 String providerNameForHistory(String id) =>
-    id == 'apple-local' ? 'Apple Local · Retired' : providerById(id).name;
+    providerByIdForRouting(id)?.name ?? id;
 
 VideoModelDefinition modelById(String providerId, String modelId) {
   final provider = providerById(providerId);
@@ -1960,7 +2199,7 @@ double? trustedGenerationProgress(Generation generation) {
 
 List<ProviderModelPrice> publishedProviderPrices(String providerId) {
   if (providerId == 'bfl') {
-    return const <ProviderModelPrice>[
+    return _availablePublishedPrices(providerId, const <ProviderModelPrice>[
       ProviderModelPrice(
         provider: 'bfl',
         model: 'flux-3-video:draft',
@@ -2021,7 +2260,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         maxDuration: 20,
         pricingUnit: 'per-megapixel-second',
       ),
-    ];
+    ]);
   }
   if (providerId == 'ltx') {
     const rates = <String, Map<String, double>>{
@@ -2039,7 +2278,9 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
       },
     };
     return ltxProvider.models.expand((model) {
-      return rates[model.id]!.entries.map(
+      final tiers = rates[model.id];
+      if (tiers == null) return <ProviderModelPrice>[model.price('ltx')];
+      return tiers.entries.map(
         (entry) => ProviderModelPrice(
           provider: 'ltx',
           model: '${model.id}:${entry.key}',
@@ -2079,12 +2320,12 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
       maxDuration: maximum,
     );
 
-    return <ProviderModelPrice>[
+    return _availablePublishedPrices(providerId, <ProviderModelPrice>[
       rate(
         'seedance2_5:480p',
         'Seedance 2.5 · 480p',
         20,
-        modes: runwayProvider.models[0].modes,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
         minimum: 4,
         maximum: 30,
         canonical: 'seedance-2.5',
@@ -2094,7 +2335,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         'seedance2_5:720p',
         'Seedance 2.5 · 720p',
         30,
-        modes: runwayProvider.models[0].modes,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
         minimum: 4,
         maximum: 30,
         canonical: 'seedance-2.5',
@@ -2104,7 +2345,7 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         'seedance2_5:1080p',
         'Seedance 2.5 · 1080p',
         68,
-        modes: runwayProvider.models[0].modes,
+        modes: const <VideoMode>[VideoMode.t2v, VideoMode.i2v, VideoMode.v2v],
         minimum: 4,
         maximum: 30,
         canonical: 'seedance-2.5',
@@ -2305,8 +2546,24 @@ List<ProviderModelPrice> publishedProviderPrices(String providerId) {
         createReady: false,
         pricingUnit: 'realtime-session',
       ),
-    ];
+    ]);
   }
   final provider = providerById(providerId);
   return provider.models.map((model) => model.price(provider.id)).toList();
+}
+
+List<ProviderModelPrice> _availablePublishedPrices(
+  String providerId,
+  List<ProviderModelPrice> prices,
+) {
+  final available = providerById(
+    providerId,
+  ).models.map((model) => model.id).toSet();
+  return prices
+      .where(
+        (price) =>
+            !price.createReady ||
+            available.contains(price.model.split(':').first),
+      )
+      .toList();
 }

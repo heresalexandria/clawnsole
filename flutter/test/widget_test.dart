@@ -6,6 +6,7 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:clawnsole/core/app_version.dart';
+import 'package:clawnsole/core/apple_local_runtime.dart';
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/asset_extensions.dart';
@@ -20,6 +21,7 @@ import 'package:clawnsole/core/native_gateway.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:clawnsole/core/shell_bridge.dart';
 import 'package:clawnsole/core/store_update.dart';
 import 'package:clawnsole/core/update_check.dart';
@@ -2048,34 +2050,235 @@ void main() {
     expect((await gateway.load()).hasApiKey, isFalse);
   });
 
-  test('does not advertise retired Apple Local generation on iOS', () async {
+  test(
+    'uses the mobile test key on Android only while the catalog is locked',
+    () async {
+      addTearDown(resetProviderCatalog);
+      resetProviderCatalog(mobileTestBuild: true);
+      const testKey = 'artcraft-mobile-test-key-not-persisted';
+      final store = _MemoryLocalDataStore();
+      final gateway = NativeGateway(
+        store: store,
+        mobileTestArtCraftApiKey: testKey,
+        mobileTestArtCraftApiKeyId: 'mobile-test-key-id',
+        isIos: false,
+        isMobile: true,
+      );
+
+      var snapshot = await gateway.load();
+      expect(snapshot.connectedProviders, <String>{mobileTestProviderId});
+      expect(store.data.encode(), isNot(contains(testKey)));
+
+      resetProviderCatalog();
+      snapshot = await gateway.load();
+      expect(snapshot.connectedProviders, isEmpty);
+      expect(store.data.encode(), isNot(contains(testKey)));
+    },
+  );
+
+  test('mobile test submission rejects stale resolution state', () async {
+    addTearDown(resetProviderCatalog);
+    resetProviderCatalog(mobileTestBuild: true);
+    final gateway = NativeGateway(
+      store: _MemoryLocalDataStore(),
+      mobileTestArtCraftApiKey: 'mobile-test-key',
+      mobileTestArtCraftApiKeyId: 'mobile-test-key-id',
+      isIos: false,
+      isMobile: true,
+    );
+    final now = DateTime.utc(2026, 8, 24);
+
+    await expectLater(
+      gateway.submit(
+        GenerationSubmission(
+          record: Generation(
+            localId: 'stale-mobile-test-form',
+            provider: mobileTestProviderId,
+            model: mobileTestModelId,
+            status: 'submitting',
+            prompt: 'A slow pan through a garden.',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: mobileTestDurationSeconds,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+          input: const <String, Object?>{},
+        ),
+      ),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('480p and 5 seconds'),
+        ),
+      ),
+    );
+  });
+
+  test(
+    'a successful catalog removal disables the mobile test key immediately',
+    () async {
+      addTearDown(resetProviderCatalog);
+      const testKey = 'artcraft-mobile-test-key-not-persisted';
+      final store = _MemoryLocalDataStore();
+      final gateway = NativeGateway(
+        store: store,
+        mobileTestArtCraftApiKey: testKey,
+        mobileTestArtCraftApiKeyId: 'mobile-test-key-id',
+        isIos: true,
+        isMobile: true,
+      );
+      final responses = <String, Object?>{
+        '/models/': <String, Object?>{
+          'schema_version': 1,
+          'catalog_version': clawnsoleVersion,
+          'test_versions': <String>[],
+          'providers': <String>[
+            'providers/artcraft.yaml',
+            'providers/bfl.yaml',
+          ],
+        },
+        '/models/providers/artcraft.yaml': <String, Object?>{
+          'schema_version': 1,
+          'id': 'artcraft',
+          'adapter': 'artcraft',
+          'name': 'ArtCraft',
+          'description': 'Remote ArtCraft catalog.',
+          'console_url': 'https://example.com/console',
+          'docs_url': 'https://example.com/docs',
+          'pricing_url': 'https://example.com/pricing',
+          'models': <String>['models/artcraft/seedance.yaml'],
+        },
+        '/models/providers/bfl.yaml': <String, Object?>{
+          'schema_version': 1,
+          'id': 'bfl',
+          'adapter': 'bfl',
+          'name': 'BFL',
+          'description': 'Remote BFL catalog.',
+          'console_url': 'https://example.com/console',
+          'docs_url': 'https://example.com/docs',
+          'pricing_url': 'https://example.com/pricing',
+          'models': <String>['models/bfl/model.yaml'],
+        },
+        '/models/models/artcraft/seedance.yaml': _remoteManifestModel(
+          mobileTestModelId,
+          resolution: mobileTestResolutionId,
+        ),
+        '/models/models/bfl/model.yaml': _remoteManifestModel('restored'),
+      };
+      final catalogClient = ProviderCatalogClient(
+        client: MockClient((request) async {
+          final response = responses[request.url.path];
+          return response == null
+              ? http.Response('missing', 404)
+              : http.Response.bytes(utf8.encode(jsonEncode(response)), 200);
+        }),
+        siteUrl: Uri.parse('https://clawnsole.app/'),
+      );
+      final preflight = await catalogClient.fetch(mobileTestBuild: true);
+      expect(preflight.isMobileTest, isFalse);
+      expect(preflight.providers, hasLength(2));
+      final controller = AppController(
+        gateway: gateway,
+        mobileTestBuild: true,
+        providerCatalogClient: catalogClient,
+      );
+
+      expect((await gateway.load()).connectedProviders, <String>{
+        mobileTestProviderId,
+        'apple-local',
+      });
+      await controller.initialize();
+      await controller.refreshProviderCatalog();
+
+      expect(controller.providers, hasLength(2));
+      expect(controller.snapshot!.connectedProviders, isEmpty);
+      expect(store.data.encode(), isNot(contains(testKey)));
+      controller.dispose();
+    },
+  );
+
+  test('advertises keyless Apple Intelligence generation on iOS', () async {
     final store = _MemoryLocalDataStore();
     final gateway = NativeGateway(store: store, isIos: true);
 
     final snapshot = await gateway.load();
 
     expect(snapshot.preferences.provider, 'bfl');
-    expect(snapshot.availableProviders, isNot(contains('apple-local')));
-    expect(snapshot.connectedProviders, isNot(contains('apple-local')));
+    expect(snapshot.availableProviders, contains('apple-local'));
+    expect(snapshot.connectedProviders, contains('apple-local'));
     expect(store.data.apiKey, isEmpty);
   });
 
-  test('rejects legacy Apple Local submissions without a runtime', () async {
-    final gateway = NativeGateway(store: _MemoryLocalDataStore(), isIos: true);
-    final now = DateTime.utc(2026, 8, 19);
-    final image = Generation(
-      localId: 'retired-image',
+  test(
+    'submits Apple Intelligence image jobs through the iOS runtime',
+    () async {
+      final runtime = _AppleLocalRuntime();
+      final gateway = NativeGateway(
+        store: _MemoryLocalDataStore(),
+        appleLocalRuntime: runtime,
+        isIos: true,
+      );
+      final now = DateTime.utc(2026, 8, 19);
+      final image = Generation(
+        localId: 'apple-image',
+        provider: 'apple-local',
+        model: 'apple-local-image',
+        billingUnit: 'local',
+        outputKind: GenerationOutputKind.image,
+        status: 'submitting',
+        prompt: 'A painted lighthouse',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '1:1',
+          duration: 1,
+          resolution: 'hd',
+          generateAudio: false,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      final submitted = await gateway.submit(
+        GenerationSubmission(record: image, input: const <String, Object?>{}),
+      );
+      expect(submitted.status, 'Pending');
+      expect(submitted.requestId, 'apple-job');
+      expect(runtime.lastSubmission?['mode'], 'image');
+      expect(runtime.lastSubmission?['durationSeconds'], 1);
+    },
+  );
+
+  test('maps Apple sequence duration to one image per second', () async {
+    final runtime = _AppleLocalRuntime();
+    final gateway = NativeGateway(
+      store: _MemoryLocalDataStore(),
+      appleLocalRuntime: runtime,
+      isIos: true,
+    );
+    final now = DateTime.utc(2026, 8, 24);
+    final sequence = Generation(
+      localId: 'apple-sequence',
       provider: 'apple-local',
-      model: 'apple-local-image',
+      model: 'apple-local-animation',
       billingUnit: 'local',
-      outputKind: GenerationOutputKind.image,
+      outputKind: GenerationOutputKind.video,
       status: 'submitting',
-      prompt: 'A painted lighthouse',
+      prompt: 'A fox walks through a garden',
       mode: VideoMode.t2v,
       config: const GenerationConfig(
-        aspectRatio: '1:1',
-        duration: 1,
-        resolution: 'hd',
+        aspectRatio: '16:9',
+        duration: 6,
+        resolution: 'fhd',
         generateAudio: false,
         safetyTolerance: 2,
         draft: false,
@@ -2084,88 +2287,80 @@ void main() {
       updatedAt: now,
     );
 
-    await expectLater(
-      gateway.submit(
-        GenerationSubmission(record: image, input: const <String, Object?>{}),
-      ),
-      throwsA(
-        isA<StateError>().having(
-          (error) => error.message,
-          'message',
-          contains('retired'),
-        ),
-      ),
+    final submitted = await gateway.submit(
+      GenerationSubmission(record: sequence, input: const <String, Object?>{}),
     );
+
+    expect(submitted.status, 'Pending');
+    expect(runtime.lastSubmission?['mode'], 'sequence');
+    expect(runtime.lastSubmission?['durationSeconds'], 6);
   });
 
-  test(
-    'retires active Apple Local jobs without deleting saved media',
-    () async {
-      final now = DateTime.utc(2026, 8, 19);
-      const savedImage = AssetReference(
-        kind: 'local',
-        value: 'saved-apple-image',
-        label: 'saved.png',
-        contentType: 'image/png',
-      );
-      final store = _MemoryLocalDataStore(
-        StoredData(
-          generations: <Generation>[
-            Generation(
-              localId: 'pending-apple-image',
-              provider: 'apple-local',
-              model: 'apple-local-image',
-              billingUnit: 'local',
-              outputKind: GenerationOutputKind.image,
-              status: 'Pending',
-              prompt: 'A pending image',
-              mode: VideoMode.t2v,
-              config: const GenerationConfig(
-                aspectRatio: '1:1',
-                duration: 1,
-                resolution: 'hd',
-                generateAudio: false,
-                safetyTolerance: 2,
-                draft: false,
-              ),
-              createdAt: now,
-              updatedAt: now,
+  test('preserves active Apple Intelligence jobs and saved media', () async {
+    final now = DateTime.utc(2026, 8, 19);
+    const savedImage = AssetReference(
+      kind: 'local',
+      value: 'saved-apple-image',
+      label: 'saved.png',
+      contentType: 'image/png',
+    );
+    final store = _MemoryLocalDataStore(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'pending-apple-image',
+            provider: 'apple-local',
+            model: 'apple-local-image',
+            billingUnit: 'local',
+            outputKind: GenerationOutputKind.image,
+            status: 'Pending',
+            prompt: 'A pending image',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '1:1',
+              duration: 1,
+              resolution: 'hd',
+              generateAudio: false,
+              safetyTolerance: 2,
+              draft: false,
             ),
-            Generation(
-              localId: 'saved-apple-image',
-              provider: 'apple-local',
-              model: 'apple-local-image',
-              billingUnit: 'local',
-              outputKind: GenerationOutputKind.image,
-              status: 'Ready',
-              prompt: 'A saved image',
-              mode: VideoMode.t2v,
-              config: const GenerationConfig(
-                aspectRatio: '1:1',
-                duration: 1,
-                resolution: 'hd',
-                generateAudio: false,
-                safetyTolerance: 2,
-                draft: false,
-              ),
-              createdAt: now,
-              updatedAt: now,
-              resultAsset: savedImage,
+            createdAt: now,
+            updatedAt: now,
+          ),
+          Generation(
+            localId: 'saved-apple-image',
+            provider: 'apple-local',
+            model: 'apple-local-image',
+            billingUnit: 'local',
+            outputKind: GenerationOutputKind.image,
+            status: 'Ready',
+            prompt: 'A saved image',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '1:1',
+              duration: 1,
+              resolution: 'hd',
+              generateAudio: false,
+              safetyTolerance: 2,
+              draft: false,
             ),
-          ],
-        ),
-      );
+            createdAt: now,
+            updatedAt: now,
+            resultAsset: savedImage,
+          ),
+        ],
+      ),
+    );
 
-      final snapshot = await NativeGateway(store: store, isIos: true).load();
+    final snapshot = await NativeGateway(store: store, isIos: true).load();
 
-      final pending = snapshot.generations.first;
-      expect(pending.status, 'Error');
-      expect(pending.error, contains('retired'));
-      final saved = snapshot.generations.last;
-      expect(saved.status, 'Ready');
-      expect(saved.resultAsset, savedImage);
-    },
-  );
+    final pending = snapshot.generations.first;
+    expect(pending.status, 'Pending');
+    expect(pending.error, isNull);
+    final saved = snapshot.generations.last;
+    expect(saved.status, 'Ready');
+    expect(saved.resultAsset, savedImage);
+  });
 
   test(
     'startup validation clears rejected access and requires another key',
@@ -5307,6 +5502,7 @@ void main() {
           ),
           hasApiKey: false,
           connectedProviders: <String>{provider.id},
+          availableProviders: <String>{provider.id},
           storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
         ),
         ProviderAccountStatus(
@@ -5323,7 +5519,10 @@ void main() {
       final balance = find.byKey(
         const ValueKey<String>('selected-provider-balance'),
       );
-      expect(tester.widget<Text>(balance).data, '${provider.name} ↗');
+      expect(
+        tester.widget<Text>(balance).data,
+        provider.isLocal ? provider.name : '${provider.name} ↗',
+      );
       expect(find.text(provider.name), findsAtLeastNWidgets(1));
       expect(
         tester.takeException(),
@@ -6832,6 +7031,32 @@ Generation _deliveredGeneration(
   );
 }
 
+Map<String, Object?> _remoteManifestModel(
+  String id, {
+  String resolution = 'hd',
+}) => <String, Object?>{
+  'schema_version': 1,
+  'id': id,
+  'label': id,
+  'description': 'A remote test model.',
+  'modes': <String>['t2v'],
+  'aspect_ratios': <String>['16:9'],
+  'resolutions': <Map<String, String>>[
+    <String, String>{
+      'id': resolution,
+      'label': resolution == mobileTestResolutionId ? '480p' : 'HD',
+      'detail': resolution == mobileTestResolutionId
+          ? '854 × 480'
+          : '1280 × 720',
+    },
+  ],
+  'min_duration': 1,
+  'max_duration': 8,
+  'duration_step': 1,
+  'max_keyframes': 0,
+  'usd_per_second': .1,
+};
+
 class _ResumableDriveGateway extends _MemoryGateway
     implements GoogleDriveGateway {
   _ResumableDriveGateway(
@@ -7243,6 +7468,25 @@ class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
   @override
   Future<List<ProviderModelPrice>> listProviderModels(String provider) async =>
       publishedProviderPrices(provider);
+}
+
+class _AppleLocalRuntime implements AppleLocalRuntime {
+  Map<String, Object?>? lastSubmission;
+
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<Map<String, Object?>> submit(Map<String, Object?> request) async {
+    lastSubmission = Map<String, Object?>.from(request);
+    return <String, Object?>{'jobId': 'apple-job', 'status': 'Pending'};
+  }
+
+  @override
+  Future<Map<String, Object?>> poll(String jobId) async => <String, Object?>{
+    'status': 'Pending',
+    'progress': 25,
+  };
 }
 
 class _MemoryLocalDataStore extends LocalDataStore {

@@ -25,16 +25,27 @@ class ProviderApiRouter {
   final AtlasCloudApi atlas;
   final RunwayApi runway;
 
+  String _adapter(String provider) {
+    final definition = providerByIdForRouting(provider);
+    if (definition == null) {
+      throw ProviderException('Provider "$provider" is not available.');
+    }
+    return definition.adapter;
+  }
+
   Future<ProviderAccountStatus> verify(String provider, String key) async =>
-      switch (provider) {
+      switch (_adapter(provider)) {
         'ltx' => ltx.verify(key),
         'artcraft' => artcraft.verify(key),
         'atlas' => atlas.verify(key),
         'runway' => runway.verify(key),
-        _ => ProviderAccountStatus(
+        'bfl' => ProviderAccountStatus(
           provider: 'bfl',
           balance: await bfl.getCredits(key),
           currency: 'credits',
+        ),
+        final adapter => throw ProviderException(
+          'Provider adapter "$adapter" is not supported by this build.',
         ),
       };
 
@@ -43,33 +54,42 @@ class ProviderApiRouter {
     String key,
     String model,
     Map<String, Object?> input,
-  ) => switch (provider) {
+  ) => switch (_adapter(provider)) {
     'ltx' => ltx.submit(key, model, input),
     'artcraft' => artcraft.submit(key, model, input),
     'atlas' => atlas.submit(key, model, input),
     'runway' => runway.submit(key, model, input),
-    _ => bfl.submit(key, input, model: model),
+    'bfl' => bfl.submit(key, input, model: model),
+    final adapter => throw ProviderException(
+      'Provider adapter "$adapter" is not supported by this build.',
+    ),
   };
 
   Future<Map<String, Object?>> poll(
     String provider,
     String key,
     String pollingUrl,
-  ) => switch (provider) {
+  ) => switch (_adapter(provider)) {
     'ltx' => ltx.poll(key, pollingUrl),
     'artcraft' => artcraft.poll(key, pollingUrl),
     'atlas' => atlas.poll(key, pollingUrl),
     'runway' => runway.poll(key, pollingUrl),
-    _ => bfl.poll(key, pollingUrl),
+    'bfl' => bfl.poll(key, pollingUrl),
+    final adapter => throw ProviderException(
+      'Provider adapter "$adapter" is not supported by this build.',
+    ),
   };
 
   Future<List<ProviderModelPrice>> listModels(String provider, [String? key]) =>
-      switch (provider) {
+      switch (_adapter(provider)) {
         'atlas' => atlas.listVideoModels(key),
         'artcraft' => artcraft.listVideoModels(),
         'runway' => runway.listVideoModels(),
-        _ => Future<List<ProviderModelPrice>>.value(
+        'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
+        ),
+        final adapter => throw ProviderException(
+          'Provider adapter "$adapter" is not supported by this build.',
         ),
       };
 
@@ -77,7 +97,7 @@ class ProviderApiRouter {
     String provider,
     String model,
     Map<String, Object?> input,
-  ) => switch (provider) {
+  ) => switch (_adapter(provider)) {
     'artcraft' => artcraft.estimate(model, input),
     _ => Future<CostEstimate?>.value(),
   };

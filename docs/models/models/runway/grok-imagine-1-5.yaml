@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "id": "grok_imagine_1_5",
+  "canonical_model_id": "grok-imagine-video-1.5",
+  "label": "Grok Imagine 1.5",
+  "description": "Fast generation with image and audio guidance up to Full HD.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "21:9",
+    "16:9",
+    "4:3",
+    "3:2",
+    "1:1",
+    "2:3",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.16,
+  "reference_usd_per_second": 0.16,
+  "supports_start_frame": true,
+  "max_image_references": 7,
+  "max_audio_references": 1,
+  "max_total_references": 8,
+  "frames_exclusive_with_references": true,
+  "max_reference_audio_seconds": 15,
+  "min_reference_audio_seconds": 3,
+  "requires_visual_reference_for_audio": true,
+  "aspect_ratios_by_mode": {
+    "i2v": [
+      "auto"
+    ]
+  },
+  "resolutions_by_reference_kind": {
+    "image": [
+      "sd",
+      "hd"
+    ],
+    "audio": [
+      "sd",
+      "hd"
+    ]
+  },
+  "prompt_optional_modes": [
+    "i2v"
+  ],
+  "prompt_optional_with_frames_only": true
+}

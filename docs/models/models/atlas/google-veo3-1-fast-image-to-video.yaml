@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "google/veo3.1-fast/image-to-video",
+  "canonical_model_id": "veo-3.1-fast",
+  "label": "Veo 3.1 Fast · Frames",
+  "description": "Fast Veo generation from first and last frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 8,
+  "duration_step": 2,
+  "max_keyframes": 2,
+  "usd_per_second": 0.08,
+  "reference_usd_per_second": 0.08,
+  "supports_start_frame": true,
+  "supports_end_frame": true
+}

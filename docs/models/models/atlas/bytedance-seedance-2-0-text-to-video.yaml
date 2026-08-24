@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "bytedance/seedance-2.0/text-to-video",
+  "canonical_model_id": "seedance-2.0",
+  "label": "Seedance 2.0 · Text",
+  "description": "Full-quality Seedance text-to-video with native audio.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "2:1",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.112,
+  "aspect_ratios_by_resolution": {
+    "4k": [
+      "16:9"
+    ]
+  },
+  "supports_auto_duration": true
+}

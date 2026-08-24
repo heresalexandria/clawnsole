@@ -2,6 +2,7 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+source "$SCRIPT_DIRECTORY/_mobile_test_credentials.sh"
 
 if [[ "${1:-}" == "--help" ]]; then
   echo "Usage: ./scripts/build_android [additional flutter build appbundle arguments]"
@@ -10,11 +11,26 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "and keyPassword. See android/key.properties.example."
   echo "Set CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID to the registered web"
   echo "OAuth client associated with the Android package and signing SHA."
+  echo "Set CLAWNSOLE_MOBILE_TEST_BUILD=true with ARTCRAFT_TEST_KEY only for"
+  echo "a labelled mobile-test release."
   exit 0
 fi
 
 print_heading "Android deployable build"
 prepare_flutter
+prepare_clawnsole_mobile_test_defines
+trap cleanup_clawnsole_mobile_test_defines EXIT
+
+if [[ -n "$MOBILE_TEST_DEFINE_FILE" ]]; then
+  for argument in "$@"; do
+    case "$argument" in
+      --dart-define | --dart-define=* | --dart-define-from-file | --dart-define-from-file=*)
+        echo "Mobile-test Android builds do not accept custom Dart defines." >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
 
 if [[ ! -f android/key.properties ]]; then
   echo "android/key.properties is required for a deployable signed bundle." >&2
@@ -29,7 +45,18 @@ if [[ -n "${CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID:-}" ]]; then
   )
 fi
 
-flutter build appbundle --release "${OAUTH_BUILD_ARGUMENTS[@]}" "$@"
+MOBILE_TEST_BUILD_ARGUMENTS=()
+if [[ -n "$MOBILE_TEST_DEFINE_FILE" ]]; then
+  MOBILE_TEST_BUILD_ARGUMENTS+=(
+    --dart-define-from-file "$MOBILE_TEST_DEFINE_FILE"
+  )
+fi
+
+flutter build appbundle --release \
+  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
+  "${OAUTH_BUILD_ARGUMENTS[@]}" \
+  "${MOBILE_TEST_BUILD_ARGUMENTS[@]}" \
+  "$@"
 
 echo
 echo "Android App Bundle: $FLUTTER_DIRECTORY/build/app/outputs/bundle/release/app-release.aab"

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "runway",
+  "adapter": "runway",
+  "name": "Runway",
+  "description": "Runway’s first-party video models, multimodal references, edits, and character performance.",
+  "console_url": "https://app.runwayml.com/",
+  "docs_url": "https://docs.dev.runwayml.com/guides/models/",
+  "pricing_url": "https://docs.dev.runwayml.com/guides/pricing/",
+  "pricing_source": "Published credits · converted at $0.01/credit; the live model guide is checked for additions",
+  "result_delivery": {
+    "availability_seconds": 86400,
+    "keep_open_recommended": true
+  },
+  "progress_reporting": "reported",
+  "models": [
+    "models/runway/seedance2-5.yaml",
+    "models/runway/grok-imagine-1-5.yaml",
+    "models/runway/seedance2.yaml",
+    "models/runway/seedance2-fast.yaml",
+    "models/runway/seedance2-mini.yaml",
+    "models/runway/hailuo3.yaml",
+    "models/runway/aleph2.yaml",
+    "models/runway/gen4-5.yaml",
+    "models/runway/gen4-turbo.yaml",
+    "models/runway/act-two.yaml",
+    "models/runway/veo3-1.yaml",
+    "models/runway/veo3-1-fast.yaml",
+    "models/runway/happyhorse-1-0.yaml",
+    "models/runway/gemini-omni-flash.yaml",
+    "models/runway/magnific-video-upscaler-creative.yaml"
+  ]
+}

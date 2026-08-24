@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "magnific_video_upscaler_creative",
+  "canonical_model_id": "magnific-video-upscaler-creative",
+  "label": "Magnific Video Upscaler",
+  "description": "AI-detail video upscaling from 720p through 4K, billed per output frame.",
+  "modes": [
+    "upscale"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "Target 720p"
+    },
+    {
+      "id": "fhd",
+      "label": "1K",
+      "detail": "Target 1K"
+    },
+    {
+      "id": "qhd",
+      "label": "2K",
+      "detail": "Target 2K"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.168,
+  "supports_audio": false,
+  "max_source_video_seconds": 30,
+  "duration_from_source_modes": [
+    "upscale"
+  ],
+  "source_input_label": "Video to upscale",
+  "source_input_hint": "Attach a clip up to 30 seconds. Runway preserves its aspect ratio and bills each output frame.",
+  "upscale_uses_resolution_targets": true
+}

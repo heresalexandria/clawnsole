@@ -21,7 +21,8 @@ jobs:
             'major|B60205|Breaking change - bumps 1.2.3 to 2.0.0' \
             'minor|0E8A16|New feature - bumps 1.2.3 to 1.3.0' \
             'patch|1D76DB|Fix or small change - bumps 1.2.3 to 1.2.4' \
-            'no-release|5B45A8|Merge without cutting a release'; do
+            'no-release|5B45A8|Merge without cutting a release' \
+            'mobile-test|FBCA04|Limit this release to the low-cost mobile review profile'; do
             IFS='|' read -r name color description <<< "$spec"
             gh label create "$name" --repo "${{ github.repository }}" \
               --color "$color" --description "$description" --force

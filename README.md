@@ -39,6 +39,8 @@ and optional Google Drive sync keep work organized wherever you create.
 
 - Provider-aware text-to-video and image-to-video, plus FLUX 3 continuation,
   draft enhancement, and FLUX Video Upscale finishing at 1.5×–3×
+- Keyless Apple Intelligence still-image creation on supported iPhones and
+  iPads, plus silent MP4 sequences built from one generated image per second
 - Model-aware image, video, and audio references, with timing and placement controls where supported
 - Model-specific durations, aspect ratios, resolutions, audio, draft, and safety controls
 - App-wide polling, foreground/relaunch recovery, manual status refresh,
@@ -60,6 +62,12 @@ and optional Google Drive sync keep work organized wherever you create.
 - A Providers desk for per-provider keys, console/docs links, live Atlas Cloud
   and Runway model discovery, canonical cross-provider model matching,
   observed quote variance, and route-aware 10/15/20/30-second USD comparisons
+- A remotely managed, version-aware provider/model catalog from
+  `https://clawnsole.app/models/`, with a durable device cache and complete
+  build-time fallback when the site is unavailable
+- A version-gated `mobile-test` profile that limits store review builds to
+  ArtCraft Seedance 1.5 Pro at 480p for 5 seconds plus Apple Intelligence on
+  supported iOS devices, then unlocks the other catalog routes remotely
 
 ## One studio, every screen
 
@@ -138,6 +146,7 @@ See [Google Drive and encrypted settings sync](docs/google-drive-web.md).
 ## Architecture
 
 - `flutter/lib/core/`: provider contracts, pricing, models, gateways, and storage
+- `docs/models/`: discrete GitHub Pages provider/model YAML manifests
 - `flutter/lib/app/`: application state and composition
 - `flutter/lib/ui/`: shared responsive screens and widgets
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
@@ -201,3 +210,8 @@ schema-aware, no-charge request preflight when available. Runway’s guide is
 refreshed for new video model IDs; unfamiliar routes remain comparison-only
 until their request shape, limits, and rate are audited. Equivalent routes
 retain provider-specific IDs while sharing a canonical comparison ID.
+
+Catalog authoring, version bounds, and adapter compatibility are documented in
+[the model manifest guide](docs/models/README.md). Builds read the public
+`CLAWNSOLE_SITE_URL` setting from the environment or repository `.env`; the
+checked-in `.env.example` and GitHub Actions use `https://clawnsole.app/`.

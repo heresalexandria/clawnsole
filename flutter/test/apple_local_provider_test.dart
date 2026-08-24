@@ -3,14 +3,22 @@ import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Apple Local is absent from the active provider catalog', () {
+  test('Apple Intelligence is keyless with image and sequence modes', () {
+    expect(appleLocalProvider.requiresApiKey, isFalse);
+    expect(appleLocalProvider.isLocal, isTrue);
+    expect(appleLocalProvider.models, hasLength(2));
     expect(
-      videoProviders.any((provider) => provider.id == 'apple-local'),
-      isFalse,
+      modelById('apple-local', 'apple-local-image').outputKind,
+      GenerationOutputKind.image,
     );
+    final sequence = modelById('apple-local', 'apple-local-animation');
+    expect(sequence.outputKind, GenerationOutputKind.video);
+    expect(sequence.supportsFrameRate, isFalse);
+    expect(sequence.minDuration, 1);
+    expect(sequence.maxDuration, 8);
   });
 
-  test('retired local animation history keeps its original media metadata', () {
+  test('local sequence settings round-trip output metadata', () {
     final now = DateTime.utc(2026, 8, 18);
     final original = Generation(
       localId: 'local-test',

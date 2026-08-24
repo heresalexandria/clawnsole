@@ -3565,6 +3565,8 @@ class _CostPreview extends StatelessWidget {
     if (controller.selectedProvider.isLocal) {
       final frames = controller.selectedModel.supportsFrameRate
           ? controller.form.frameRate * controller.form.durationSeconds
+          : controller.selectedModel.outputKind == GenerationOutputKind.video
+          ? controller.form.durationSeconds
           : 1;
       return TexturePanel(
         surface: PanelSurface.hunterFelt,
@@ -3604,7 +3606,7 @@ class _CostPreview extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Uses Apple Image Playground with no provider key. On Mac, keep its generation window in front.',
+                    'Uses Apple Image Playground on this device with no provider key. Image sequences render one frame per second.',
                     style: TextStyle(
                       color: context.tokens.onMoneyMuted,
                       fontSize: 10.5,

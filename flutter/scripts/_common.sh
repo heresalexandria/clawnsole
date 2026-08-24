@@ -6,6 +6,43 @@ SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLUTTER_DIRECTORY="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 REPOSITORY_ROOT="$(cd "$FLUTTER_DIRECTORY/.." && pwd)"
 
+load_public_env_value() {
+  local name="$1"
+  local env_file="$REPOSITORY_ROOT/.env"
+  local line
+  local value=""
+  if [[ -n "${!name:-}" || ! -f "$env_file" ]]; then
+    return
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?${name}[[:space:]]*=(.*)$ ]]; then
+      value="${BASH_REMATCH[2]}"
+    fi
+  done <"$env_file"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ ${#value} -ge 2 ]]; then
+    if [[ ( "$value" == \"*\" && "$value" == *\" ) ||
+          ( "$value" == \'*\' && "$value" == *\' ) ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  if [[ -n "$value" ]]; then
+    printf -v "$name" '%s' "$value"
+    export "$name"
+  fi
+}
+
+load_public_env_value CLAWNSOLE_SITE_URL
+load_public_env_value CLAWNSOLE_MOBILE_TEST_BUILD
+CLAWNSOLE_SITE_URL="${CLAWNSOLE_SITE_URL:-https://clawnsole.app/}"
+CLAWNSOLE_MOBILE_TEST_BUILD="${CLAWNSOLE_MOBILE_TEST_BUILD:-false}"
+export CLAWNSOLE_SITE_URL
+export CLAWNSOLE_MOBILE_TEST_BUILD
+CLAWNSOLE_SITE_BUILD_ARGUMENT=(
+  --dart-define "CLAWNSOLE_SITE_URL=$CLAWNSOLE_SITE_URL"
+)
+
 cd "$FLUTTER_DIRECTORY"
 
 require_command() {
