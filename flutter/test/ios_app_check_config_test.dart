@@ -55,4 +55,17 @@ void main() {
       hasLength(3),
     );
   });
+
+  test('iOS media picker declares its transitive location purpose', () {
+    final infoPlist = File('ios/Runner/Info.plist').readAsStringSync();
+
+    expect(
+      infoPlist,
+      contains('<key>NSLocationWhenInUseUsageDescription</key>'),
+    );
+    expect(
+      infoPlist,
+      contains('Clawnsole does not request your current location.'),
+    );
+  });
 }
