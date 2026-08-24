@@ -1,12 +1,15 @@
 name: Release
 
-# A release-labelled PR merge bumps every app target to one version, builds the
-# desktop packages and iOS concurrently, uploads iOS directly to App Store
+# A release-labelled PR merge bumps every app target to one version, then hands
+# that exact main-branch commit to a trusted build run. The second run builds
+# the desktop packages and iOS concurrently, uploads iOS directly to App Store
 # Connect, then publishes only the desktop packages on GitHub.
 on:
   pull_request:
     types: [closed]
     branches: [main]
+  repository_dispatch:
+    types: [release-prepared]
   workflow_dispatch:
     inputs:
       bump:
@@ -29,7 +32,10 @@ concurrency:
 jobs:
   prepare:
     name: bump version
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'repository_dispatch' ||
+      github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -42,16 +48,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || 'main' }}
           fetch-depth: 0
+
+      - name: Verify prepared release commit is on main
+        if: github.event_name == 'repository_dispatch'
+        env:
+          PREPARED_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          if [[ ! "$PREPARED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The prepared release SHA is invalid"
+            exit 1
+          fi
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$actual_sha" != "$PREPARED_SHA" ]; then
+            echo "::error::The checked-out commit does not match the prepared release"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$actual_sha" FETCH_HEAD; then
+            echo "::error::The prepared release commit is not on main"
+            exit 1
+          fi
 
       - name: Select release kind
         id: kind
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           DISPATCH: ${{ inputs.bump }}
+          PREPARED: ${{ github.event_name == 'repository_dispatch' }}
         run: |
-          if [ -n "$DISPATCH" ]; then
+          if [ "$PREPARED" = true ]; then
+            kind=current
+          elif [ -n "$DISPATCH" ]; then
             kind="$DISPATCH"
           else
             kind="$(python3 scripts/release/select_bump.py)"
@@ -99,10 +128,32 @@ jobs:
         if: steps.kind.outputs.skip != 'true'
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+  dispatch:
+    name: start trusted release builds
+    needs: prepare
+    if: github.event_name == 'pull_request' && needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Dispatch prepared commit from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          jq -n \
+            --arg sha "$RELEASE_SHA" \
+            '{event_type: "release-prepared", client_payload: {sha: $sha, include_ios: true}}' \
+            > "$RUNNER_TEMP/release-dispatch.json"
+          gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/dispatches" \
+            --input "$RUNNER_TEMP/release-dispatch.json"
+
   macos:
     name: build macOS desktop
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
+    if: github.event_name != 'pull_request' && needs.prepare.outputs.skip != 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -135,9 +186,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # This workflow is triggered by a merged PR, but checks out the trusted
-          # release commit from main. Electron Builder otherwise skips signing.
-          CSC_FOR_PULL_REQUEST: true
           CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_ID }}
           CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET }}
         run: |
@@ -185,7 +233,7 @@ jobs:
   windows:
     name: build Windows desktop
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
+    if: github.event_name != 'pull_request' && needs.prepare.outputs.skip != 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -238,7 +286,11 @@ jobs:
   ios:
     name: build and upload iOS
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true' && (github.event_name != 'workflow_dispatch' || inputs.include_ios == true)
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.prepare.outputs.skip != 'true' &&
+      (github.event_name != 'workflow_dispatch' || inputs.include_ios == true) &&
+      (github.event_name != 'repository_dispatch' || github.event.client_payload.include_ios == true)
     runs-on: macos-26
     timeout-minutes: 45
     environment: app-store-connect
@@ -464,7 +516,14 @@ jobs:
   publish:
     name: publish GitHub release
     needs: [prepare, macos, windows, ios]
-    if: always() && needs.prepare.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'skipped') && needs.prepare.outputs.skip != 'true'
+    if: >-
+      always() &&
+      github.event_name != 'pull_request' &&
+      needs.prepare.result == 'success' &&
+      needs.macos.result == 'success' &&
+      needs.windows.result == 'success' &&
+      (needs.ios.result == 'success' || needs.ios.result == 'skipped') &&
+      needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
