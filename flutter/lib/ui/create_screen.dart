@@ -629,6 +629,12 @@ class _ComposerState extends State<_Composer> {
 
   AppController get controller => widget.controller;
 
+  Future<void> _copyPrompt() async {
+    await Clipboard.setData(ClipboardData(text: controller.form.prompt));
+    if (!mounted) return;
+    controller.showNotice('Prompt copied to the clipboard.');
+  }
+
   Future<void> _showFullscreenPrompt({required bool upscaling}) async {
     FocusManager.instance.primaryFocus?.unfocus();
     await showGeneralDialog<void>(
@@ -718,6 +724,13 @@ class _ComposerState extends State<_Composer> {
                         ),
                       ),
                     ),
+                  IconButton(
+                    key: const ValueKey('prompt-copy-button'),
+                    tooltip: 'Copy prompt to clipboard',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => unawaited(_copyPrompt()),
+                    icon: const Icon(Icons.copy_rounded),
+                  ),
                   IconButton(
                     key: const ValueKey('prompt-fullscreen-button'),
                     tooltip: 'Expand prompt to full screen',
