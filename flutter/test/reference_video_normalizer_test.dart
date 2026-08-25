@@ -881,7 +881,7 @@ void main() {
           record: Generation(
             localId: 'image-reference-submit',
             provider: 'artcraft',
-            model: 'flux_3_draft',
+            model: 'flux_3',
             status: 'submitting',
             prompt: 'Animate the frame',
             mode: VideoMode.i2v,
@@ -910,7 +910,7 @@ void main() {
         ),
       );
 
-      expect(modelById('artcraft', 'flux_3_draft').maxVideoReferences, 0);
+      expect(modelById('artcraft', 'flux_3').maxVideoReferences, 0);
       expect(normalizer.imageProfile?.maxPixels, 4000000);
       expect(api.input['keyframes'], <String>['image-fixed']);
       expect(store.persistedSources, <String>['image-fixed']);

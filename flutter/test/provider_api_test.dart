@@ -499,6 +499,11 @@ void main() {
     expect(seedance.maxVideoReferences, 3);
     expect(seedance.maxAudioReferences, 3);
     expect(modelById('artcraft', 'kling_2p6_pro').supportsAudio, isTrue);
+    final fluxDraft = modelById('artcraft', 'flux_3_draft');
+    expect(fluxDraft.modes, <VideoMode>[VideoMode.t2v]);
+    expect(fluxDraft.maxKeyframes, 0);
+    expect(fluxDraft.supportsStartFrame, isFalse);
+    expect(fluxDraft.supportsEndFrame, isFalse);
   });
 
   test('every create-ready model keeps its audited guidance constraints', () {
@@ -514,7 +519,7 @@ void main() {
 
     const expectedArtCraft = <String, String>{
       'flux_3': '2/0/0/0/-/mix/audio-ok',
-      'flux_3_draft': '2/0/0/0/-/mix/audio-ok',
+      'flux_3_draft': '0/0/0/0/-/mix/audio-ok',
       'grok_imagine_video': '1/7/0/0/-/exclusive/audio-ok',
       'grok_imagine_video_1p5': '1/0/0/0/-/mix/audio-ok',
       'happy_horse_1p0': '1/0/0/0/-/mix/audio-ok',
@@ -683,7 +688,7 @@ void main() {
   test('FLUX 3 visual routes declare the audited four megapixel cap', () {
     expect(modelById('bfl', 'flux-3-video').maxInputImagePixels, 4000000);
     expect(modelById('artcraft', 'flux_3').maxInputImagePixels, 4000000);
-    expect(modelById('artcraft', 'flux_3_draft').maxInputImagePixels, 4000000);
+    expect(modelById('artcraft', 'flux_3_draft').maxInputImagePixels, isNull);
     expect(
       modelById(
         'atlas',

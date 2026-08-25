@@ -3,10 +3,9 @@
   "id": "flux_3_draft",
   "canonical_model_id": "flux-3-draft",
   "label": "FLUX 3 Draft",
-  "description": "Fast, low-cost FLUX 3 drafts with audio.",
+  "description": "Fast, low-cost FLUX 3 text-to-video drafts with audio.",
   "modes": [
-    "t2v",
-    "i2v"
+    "t2v"
   ],
   "aspect_ratios": [
     "auto",
@@ -27,10 +26,8 @@
   "min_duration": 5,
   "max_duration": 20,
   "duration_step": 1,
-  "max_keyframes": 2,
-  "max_input_image_pixels": 4000000,
+  "max_keyframes": 0,
   "usd_per_second": 0.07,
-  "reference_usd_per_second": 0.07,
-  "supports_start_frame": true,
-  "supports_end_frame": true
+  "supports_start_frame": false,
+  "supports_end_frame": false
 }
