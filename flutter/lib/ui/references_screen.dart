@@ -146,83 +146,109 @@ class _ReferencesHeading extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 20,
-    runSpacing: 14,
-    alignment: WrapAlignment.spaceBetween,
-    crossAxisAlignment: WrapCrossAlignment.center,
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'REFERENCE LIBRARY',
-              style: TextStyle(
-                color: context.tokens.brass,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.35,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Your creative ingredients.',
-              style: Theme.of(context).textTheme.displayLarge,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              controller.supportsLocalLibrary
-                  ? 'Keep reusable images, videos, and audio on this device or in Drive, then attach them from Create in a few clicks.'
-                  : 'Keep reusable images, videos, and audio in Drive, then attach them from Create in a few clicks.',
-              style: TextStyle(color: context.colors.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
       Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: 20,
+        runSpacing: 14,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          if (controller.supportsGoogleDrive)
-            DriveRefreshButton(controller: controller, keyPrefix: 'references'),
-          PopupMenuButton<MediaReferenceKind>(
-            onSelected: (kind) => unawaited(() async {
-              final source = await chooseMediaPickerSource(context, kind);
-              if (source == null) return;
-              await controller.importSavedReferences(
-                kind,
-                source: source,
-                folderId:
-                    controller.referenceFolderView ==
-                            AppController.libraryFolderAll ||
-                        controller.referenceFolderView ==
-                            AppController.libraryFolderUnfiled
-                    ? null
-                    : controller.referenceFolderView,
-              );
-            }()),
-            itemBuilder: (context) => MediaReferenceKind.values
-                .map(
-                  (kind) => PopupMenuItem<MediaReferenceKind>(
-                    value: kind,
-                    child: Row(
-                      children: <Widget>[
-                        Icon(_kindIcon(kind), size: 18),
-                        const SizedBox(width: 10),
-                        Text('Add ${kind.pluralLabel}'),
-                      ],
-                    ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'REFERENCE LIBRARY',
+                  style: TextStyle(
+                    color: context.tokens.brass,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.35,
                   ),
-                )
-                .toList(),
-            child: const FilledButtonIconVisual(
-              icon: Icons.add_rounded,
-              label: 'Add references',
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Your creative ingredients.',
+                  style: Theme.of(context).textTheme.displayLarge,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  controller.supportsLocalLibrary
+                      ? 'Keep reusable images, videos, and audio on this device or in Drive, then attach them from Create in a few clicks.'
+                      : 'Keep reusable images, videos, and audio in Drive, then attach them from Create in a few clicks.',
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
+          ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              final uploading = controller.referenceUploadInProgress;
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (controller.supportsGoogleDrive)
+                    DriveRefreshButton(
+                      controller: controller,
+                      keyPrefix: 'references',
+                    ),
+                  PopupMenuButton<MediaReferenceKind>(
+                    enabled: !uploading,
+                    tooltip: uploading
+                        ? controller.referenceUploadStatus
+                        : 'Add references',
+                    onSelected: (kind) => unawaited(() async {
+                      final source = await chooseMediaPickerSource(
+                        context,
+                        kind,
+                      );
+                      if (source == null) return;
+                      await controller.importSavedReferences(
+                        kind,
+                        source: source,
+                        folderId:
+                            controller.referenceFolderView ==
+                                    AppController.libraryFolderAll ||
+                                controller.referenceFolderView ==
+                                    AppController.libraryFolderUnfiled
+                            ? null
+                            : controller.referenceFolderView,
+                      );
+                    }()),
+                    itemBuilder: (context) => MediaReferenceKind.values
+                        .map(
+                          (kind) => PopupMenuItem<MediaReferenceKind>(
+                            value: kind,
+                            child: Row(
+                              children: <Widget>[
+                                Icon(_kindIcon(kind), size: 18),
+                                const SizedBox(width: 10),
+                                Text('Add ${kind.pluralLabel}'),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    child: FilledButtonIconVisual(
+                      icon: Icons.add_rounded,
+                      label: uploading ? 'Adding…' : 'Add references',
+                      loading: uploading,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ],
+      ),
+      ReferenceUploadIndicator(
+        controller: controller,
+        margin: const EdgeInsets.only(top: 12),
       ),
     ],
   );
@@ -232,17 +258,24 @@ class FilledButtonIconVisual extends StatelessWidget {
   const FilledButtonIconVisual({
     required this.icon,
     required this.label,
+    this.loading = false,
     super.key,
   });
 
   final IconData icon;
   final String label;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
     child: FilledButton.icon(
-      onPressed: () {},
-      icon: Icon(icon),
+      onPressed: loading ? null : () {},
+      icon: loading
+          ? const SizedBox.square(
+              dimension: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(icon),
       label: Text(label),
     ),
   );

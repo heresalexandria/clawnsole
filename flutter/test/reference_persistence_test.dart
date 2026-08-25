@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
+import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/ui/create_screen.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -13,6 +17,113 @@ void main() {
     preferences: AppPreferences(),
     hasApiKey: false,
     storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+  );
+
+  testWidgets('reference upload shows loading while the picker reads a file', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1400));
+    final pickerResult = Completer<FilePickerResult?>();
+    final gateway = _ReferenceGateway(emptySnapshot);
+    final controller =
+        AppController(
+            gateway: gateway,
+            filePicker:
+                ({
+                  required FileType type,
+                  required bool allowMultiple,
+                  required bool withData,
+                }) => pickerResult.future,
+          )
+          ..snapshot = emptySnapshot
+          ..loading = false
+          ..selectedProviderId = 'artcraft'
+          ..selectedModelId = 'seedance_2p5';
+    addTearDown(() async {
+      if (!pickerResult.isCompleted) pickerResult.complete(null);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+      controller.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    final upload = controller.addMediaReferences(MediaReferenceKind.image);
+    await tester.pump();
+
+    expect(controller.referenceUploadInProgress, isTrue);
+    expect(find.byKey(const ValueKey('reference-upload-progress')), findsOne);
+    expect(find.text('Waiting for image selection…'), findsOne);
+    expect(controller.form.references, isEmpty);
+
+    pickerResult.complete(null);
+    await upload;
+    await tester.pump();
+
+    expect(controller.referenceUploadInProgress, isFalse);
+    expect(
+      find.byKey(const ValueKey('reference-upload-progress')),
+      findsNothing,
+    );
+    expect(controller.form.references, isEmpty);
+  });
+
+  test(
+    'reference loader stays active through processing and persistence',
+    () async {
+      final saveStarted = Completer<void>();
+      final finishSave = Completer<void>();
+      final bytes = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final gateway = _ReferenceGateway(
+        emptySnapshot,
+        beforeSave: () async {
+          if (!saveStarted.isCompleted) saveStarted.complete();
+          await finishSave.future;
+        },
+      );
+      final controller = AppController(
+        gateway: gateway,
+        filePicker: _picker(<FileType, PlatformFile>{
+          FileType.image: PlatformFile(
+            name: 'large-reference.heic',
+            size: bytes.length,
+            bytes: bytes,
+          ),
+        }),
+      );
+      addTearDown(() {
+        if (!finishSave.isCompleted) finishSave.complete();
+        controller.dispose();
+      });
+      await controller.initialize();
+      await controller.selectProviderModel('artcraft', 'seedance_2p5');
+
+      final upload = controller.addMediaReferences(MediaReferenceKind.image);
+      await saveStarted.future.timeout(const Duration(seconds: 5));
+
+      expect(controller.referenceUploadInProgress, isTrue);
+      expect(
+        controller.referenceUploadStatus,
+        'Uploading large-reference.heic…',
+      );
+      expect(controller.form.references, isEmpty);
+
+      finishSave.complete();
+      await upload;
+
+      expect(controller.referenceUploadInProgress, isFalse);
+      expect(controller.referenceUploadStatus, isNull);
+      expect(controller.form.references, hasLength(1));
+    },
   );
 
   test(
@@ -308,9 +419,10 @@ FilePickerInvocation _picker(Map<FileType, PlatformFile> files) =>
     };
 
 class _ReferenceGateway implements AppGateway, ReferenceLibraryGateway {
-  _ReferenceGateway(this.snapshot);
+  _ReferenceGateway(this.snapshot, {this.beforeSave});
 
   LocalSnapshot snapshot;
+  final Future<void> Function()? beforeSave;
   final Map<String, Uint8List> _assets = <String, Uint8List>{};
 
   @override
@@ -330,6 +442,7 @@ class _ReferenceGateway implements AppGateway, ReferenceLibraryGateway {
     SavedReference reference, {
     String? source,
   }) async {
+    await beforeSave?.call();
     var asset = reference.asset;
     if (source != null) {
       final comma = source.indexOf(',');
