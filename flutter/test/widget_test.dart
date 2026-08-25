@@ -47,6 +47,27 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'web video preview sources use the cache-only companion route',
+    () async {
+      final gateway = WebGateway(baseUrl: Uri.parse('http://127.0.0.1:8787/'));
+
+      final uri = await gateway.cachedVideoAssetUri(
+        const AssetReference(
+          kind: 'drive',
+          value: 'drive-film-0001',
+          label: 'film.mp4',
+          contentType: 'video/mp4',
+        ),
+      );
+
+      expect(
+        uri,
+        Uri.parse('http://127.0.0.1:8787/asset-cache?id=drive-film-0001'),
+      );
+    },
+  );
+
   testWidgets('video media thumbnail extracts and exposes a reusable frame', (
     tester,
   ) async {
@@ -99,6 +120,64 @@ void main() {
     expect(requested, Uri.parse('https://cdn.test/reference.mp4'));
     expect(generated, frame);
     expect(metadata?.signature, '1920×1080@8.000');
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('video media thumbnail retries when its cache source changes', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    var frameLoads = 0;
+
+    Widget thumbnail(int revision) => MaterialApp(
+      home: SizedBox(
+        width: 160,
+        height: 90,
+        child: MediaThumbnail(
+          gateway: gateway,
+          kind: MediaReferenceKind.video,
+          reference: const AssetReference(
+            kind: 'drive',
+            value: 'drive-film-0002',
+            label: 'reference.mp4',
+            contentType: 'video/mp4',
+          ),
+          mediaUriRevision: revision,
+          mediaUriLoader: () async => revision == 0
+              ? null
+              : Uri.parse('http://127.0.0.1:8787/asset-cache?id=cached'),
+          frameLoader: (_, _) async {
+            frameLoads += 1;
+            return frame;
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(thumbnail(0));
+    await tester.pumpAndSettle();
+    expect(frameLoads, 0);
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(thumbnail(1));
+    await tester.pumpAndSettle();
+    expect(frameLoads, 1);
     expect(
       find.byKey(const ValueKey('media-thumbnail-video-frame')),
       findsOneWidget,
@@ -5734,6 +5813,54 @@ void main() {
     expect(gateway.snapshot.preferences.activeSection, AppSection.references);
   });
 
+  testWidgets('References opens before its retained preview cache responds', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    final now = DateTime.utc(2026, 8, 25, 12);
+    final gateway = _BlockingCacheGateway(
+      LocalSnapshot(
+        generations: const <Generation>[],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'cached-reference',
+            name: 'Cached character',
+            kind: MediaReferenceKind.image,
+            asset: const AssetReference(
+              kind: 'drive',
+              value: 'cached-character-image',
+              label: 'character.png',
+              contentType: 'image/png',
+            ),
+            createdAt: now,
+            updatedAt: now,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+    addTearDown(() async {
+      gateway.completeCache();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('References'));
+    await tester.pump();
+
+    expect(gateway.cacheReads, 1);
+    expect(gateway.cacheCompleted, isFalse);
+    expect(find.text('Your creative ingredients.'), findsOneWidget);
+    expect(find.text('Cached character'), findsOneWidget);
+  });
+
   test(
     'keeps the latest tab selected while preference writes finish',
     () async {
@@ -7401,6 +7528,26 @@ class _CacheRestoringGateway extends _MemoryGateway
   Future<Uint8List> readAsset(AssetReference reference) async {
     assetReads += 1;
     return super.readAsset(reference);
+  }
+}
+
+class _BlockingCacheGateway extends _MemoryGateway
+    implements MediaCacheGateway {
+  _BlockingCacheGateway(super.snapshot);
+
+  final Completer<Uint8List?> _cache = Completer<Uint8List?>();
+  int cacheReads = 0;
+
+  bool get cacheCompleted => _cache.isCompleted;
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) {
+    cacheReads += 1;
+    return _cache.future;
+  }
+
+  void completeCache() {
+    if (!_cache.isCompleted) _cache.complete(null);
   }
 }
 
