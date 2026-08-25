@@ -23,6 +23,64 @@ import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
 import 'visual_reference_viewer.dart';
 
+class ReferenceUploadIndicator extends StatelessWidget {
+  const ReferenceUploadIndicator({
+    required this.controller,
+    this.margin = const EdgeInsets.only(top: 8),
+    super.key,
+  });
+
+  final AppController controller;
+  final EdgeInsetsGeometry margin;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final status = controller.referenceUploadStatus;
+      if (!controller.referenceUploadInProgress || status == null) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: margin,
+        child: Semantics(
+          liveRegion: true,
+          label: status,
+          child: Container(
+            key: const ValueKey('reference-upload-progress'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: context.colors.primaryContainer.withValues(alpha: .42),
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: context.colors.outlineVariant),
+            ),
+            child: Row(
+              children: <Widget>[
+                const SizedBox.square(
+                  dimension: 17,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    status,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class StorageBadge extends StatelessWidget {
   const StorageBadge({required this.storage, super.key, this.compact = false});
 

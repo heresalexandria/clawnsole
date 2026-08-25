@@ -22,6 +22,8 @@ import '../core/video_cache_gateway.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
+String _base64Payload(Uint8List bytes) => base64Encode(bytes);
+
 enum MediaPickerSource { library, files }
 
 enum AppNoticeAction { retryWithVisualNormalization }
@@ -347,6 +349,8 @@ class AppController extends ChangeNotifier {
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
+  int _referenceUploadDepth = 0;
+  String? referenceUploadStatus;
   int formRevision = 0;
   String? loadError;
   String? creditError;
@@ -400,6 +404,27 @@ class AppController extends ChangeNotifier {
   /// widgets use this to retry frame extraction after background prefetching
   /// completes instead of remaining on their initial cold-cache placeholder.
   int get videoPreviewSourceRevision => _videoPreviewSourceRevision;
+
+  bool get referenceUploadInProgress => _referenceUploadDepth > 0;
+
+  void _beginReferenceUpload(String status) {
+    _referenceUploadDepth += 1;
+    referenceUploadStatus = status;
+    notifyListeners();
+  }
+
+  void _updateReferenceUpload(String status) {
+    if (!referenceUploadInProgress || referenceUploadStatus == status) return;
+    referenceUploadStatus = status;
+    notifyListeners();
+  }
+
+  void _finishReferenceUpload() {
+    if (_referenceUploadDepth == 0) return;
+    _referenceUploadDepth -= 1;
+    if (_referenceUploadDepth == 0) referenceUploadStatus = null;
+    notifyListeners();
+  }
 
   List<Generation> get generations => snapshot?.generations ?? const [];
 
@@ -2555,6 +2580,7 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
+    _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
     try {
       final picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
@@ -2562,7 +2588,8 @@ class AppController extends ChangeNotifier {
         MediaReferenceKind.audio => FileType.audio,
       }, source: source);
       var saved = 0;
-      for (final asset in picked) {
+      for (final entry in picked.indexed) {
+        final asset = entry.$2;
         final now = DateTime.now().toUtc();
         final destination =
             folderById(
@@ -2593,10 +2620,14 @@ class AppController extends ChangeNotifier {
           folderId: folderId,
           storage: destination,
         );
+        _updateReferenceUpload(
+          'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
+        );
+        final dataUrl = await _dataUrlForAsset(asset);
         _apply(
           await (gateway as ReferenceLibraryGateway).saveReference(
             reference,
-            source: asset.dataUrl,
+            source: dataUrl,
           ),
         );
         saved += 1;
@@ -2606,6 +2637,8 @@ class AppController extends ChangeNotifier {
       }
     } on Object catch (error) {
       showNotice(_message(error));
+    } finally {
+      _finishReferenceUpload();
     }
   }
 
@@ -2671,9 +2704,16 @@ class AppController extends ChangeNotifier {
     final available = referenceLimit(kind) - form.referenceCount(kind);
     final selected = candidates
         .where((item) => item.kind == kind)
-        .take(available);
+        .take(available)
+        .toList();
+    if (selected.isEmpty) return;
+    _beginReferenceUpload('Loading ${kind.pluralLabel}…');
     try {
-      for (final candidate in selected) {
+      for (final entry in selected.indexed) {
+        final candidate = entry.$2;
+        _updateReferenceUpload(
+          'Loading ${candidate.name} (${entry.$1 + 1} of ${selected.length})…',
+        );
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
@@ -2742,6 +2782,8 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     } on Object catch (error) {
       showNotice(_message(error));
+    } finally {
+      _finishReferenceUpload();
     }
   }
 
@@ -2778,6 +2820,7 @@ class AppController extends ChangeNotifier {
     }
     // Videos can be hundreds of megabytes, so keep content-addressing off the
     // UI isolate on native platforms.
+    _updateReferenceUpload('Processing ${asset.name}…');
     final digest = await compute(_sha256Digest, asset.bytes);
     SavedReference? existing = savedReferences
         .where(
@@ -2840,10 +2883,17 @@ class AppController extends ChangeNotifier {
       storage: effectiveStorage,
       contentDigest: digest,
     );
-    _apply(await library.saveReference(reference, source: asset.dataUrl));
+    _updateReferenceUpload('Uploading ${asset.name}…');
+    final dataUrl = await _dataUrlForAsset(asset);
+    _apply(await library.saveReference(reference, source: dataUrl));
     return savedReferences
         .where((candidate) => candidate.id == reference.id)
         .firstOrNull;
+  }
+
+  Future<String> _dataUrlForAsset(PickedAsset asset) async {
+    final payload = await compute(_base64Payload, asset.bytes);
+    return 'data:${asset.mimeType};base64,$payload';
   }
 
   Future<SavedReference?> _retainCreateUpload(
@@ -3498,6 +3548,7 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
+    _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
     try {
       final picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
@@ -3509,7 +3560,12 @@ class AppController extends ChangeNotifier {
           ? available
           : selectedModel.maxTotalReferences! - form.references.length;
       final accepted = available < totalAvailable ? available : totalAvailable;
-      for (final asset in picked.take(accepted)) {
+      final uploads = picked.take(accepted).toList();
+      for (final entry in uploads.indexed) {
+        final asset = entry.$2;
+        _updateReferenceUpload(
+          'Processing ${asset.name} (${entry.$1 + 1} of ${uploads.length})…',
+        );
         final saved = await _retainCreateUpload(kind, asset);
         _appendReference(
           kind,
@@ -3530,6 +3586,8 @@ class AppController extends ChangeNotifier {
       }
     } on Object catch (error) {
       showNotice(_message(error));
+    } finally {
+      _finishReferenceUpload();
     }
   }
 

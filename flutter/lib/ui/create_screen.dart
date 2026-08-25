@@ -1702,6 +1702,7 @@ class _ReferencesSection extends StatelessWidget {
             const SizedBox(height: 5),
             Text(note, style: noteStyle),
           ],
+          ReferenceUploadIndicator(controller: controller),
           if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
         ],
       );
@@ -1731,6 +1732,7 @@ class _ReferencesSection extends StatelessWidget {
           const SizedBox(height: 5),
           Text(note, style: noteStyle),
         ],
+        ReferenceUploadIndicator(controller: controller),
         if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
         if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
           const SizedBox(height: 10),
@@ -2111,13 +2113,16 @@ class _AddReferenceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final enabled = controller.canAddReference(kind);
+    final uploading = controller.referenceUploadInProgress;
+    final enabled = controller.canAddReference(kind) && !uploading;
     final count = controller.form.referenceCount(kind);
     final maximum = controller.referenceLimit(kind);
     return PopupMenuButton<String>(
       key: ValueKey('add-${kind.name}-reference'),
       enabled: enabled,
-      tooltip: enabled
+      tooltip: uploading
+          ? controller.referenceUploadStatus
+          : enabled
           ? 'Add reference ${kind.pluralLabel}'
           : '$maximum ${kind.pluralLabel} attached',
       onSelected: (choice) {
@@ -2189,16 +2194,22 @@ class _AddReferenceButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              enabled ? Icons.add_rounded : Icons.check_rounded,
-              size: 15,
-              color: enabled
-                  ? context.colors.primary
-                  : context.colors.onSurfaceVariant,
-            ),
+            if (uploading)
+              const SizedBox.square(
+                dimension: 15,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Icon(
+                enabled ? Icons.add_rounded : Icons.check_rounded,
+                size: 15,
+                color: enabled
+                    ? context.colors.primary
+                    : context.colors.onSurfaceVariant,
+              ),
             const SizedBox(width: 5),
             Text(
-              '${kind.label} $count/$maximum',
+              uploading ? 'Adding…' : '${kind.label} $count/$maximum',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
