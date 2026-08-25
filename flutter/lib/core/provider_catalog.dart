@@ -8,11 +8,6 @@ const mobileTestModelId = 'seedance_1p5_pro';
 const mobileTestResolutionId = 'sd';
 const mobileTestDurationSeconds = 5;
 
-// FLUX 3 rejects images above 4 MP after internally aligning their dimensions.
-// Leave enough room for that alignment instead of normalizing against the raw
-// request validator's exact boundary.
-const _flux3SafeInputImagePixels = 3800000;
-
 const _appleLocalRatios = <String>['16:9', '4:3', '1:1', '3:4', '9:16'];
 const _appleLocalStandard = VideoResolutionDefinition(
   'hd',
@@ -582,7 +577,7 @@ const _bflProvider = VideoProviderDefinition(
       maxDuration: 20,
       durationStep: 1,
       maxKeyframes: 10,
-      maxInputImagePixels: _flux3SafeInputImagePixels,
+      maxInputImagePixels: 4000000,
       usdPerSecond: .17,
       referenceUsdPerSecond: .17,
       supportsStartFrame: true,
@@ -1354,7 +1349,7 @@ const _artCraftProvider = VideoProviderDefinition(
       minDuration: 5,
       maxDuration: 20,
       maxKeyframes: 2,
-      maxInputImagePixels: _flux3SafeInputImagePixels,
+      maxInputImagePixels: 4000000,
       usdPerSecond: .196,
       supportsAudio: true,
     ),
@@ -1362,13 +1357,16 @@ const _artCraftProvider = VideoProviderDefinition(
       id: 'flux_3_draft',
       canonicalModelId: 'flux-3-draft',
       label: 'FLUX 3 Draft',
-      description: 'Fast, low-cost FLUX 3 drafts with audio.',
+      description: 'Fast, low-cost FLUX 3 text-to-video drafts with audio.',
       aspectRatios: _artCraftAutoRatios,
       resolutions: <VideoResolutionDefinition>[_hd],
       minDuration: 5,
       maxDuration: 20,
-      maxKeyframes: 2,
-      maxInputImagePixels: _flux3SafeInputImagePixels,
+      // Live Omni API controls on 2026-08-25 completed for text-only input,
+      // while start frames from uploads and public URLs all failed downstream.
+      maxKeyframes: 0,
+      supportsStartFrame: false,
+      supportsEndFrame: false,
       usdPerSecond: .07,
       supportsAudio: true,
     ),
@@ -2030,7 +2028,7 @@ const _atlasProvider = VideoProviderDefinition(
       maxDuration: 20,
       usdPerSecond: .17,
       imageRoute: true,
-      maxInputImagePixels: _flux3SafeInputImagePixels,
+      maxInputImagePixels: 4000000,
     ),
   ],
 );
