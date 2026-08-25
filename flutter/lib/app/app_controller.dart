@@ -5917,9 +5917,17 @@ class AppController extends ChangeNotifier {
     if (item.resultAsset == null && item.resultUrl == null) {
       throw StateError('This media is not available.');
     }
-    final bytes = item.resultAsset != null
-        ? await gateway.readAsset(item.resultAsset!)
-        : await gateway.downloadMedia(item.resultUrl!);
+    late Uint8List bytes;
+    if (item.resultAsset == null) {
+      bytes = await gateway.downloadMedia(item.resultUrl!);
+    } else {
+      try {
+        bytes = await gateway.readAsset(item.resultAsset!);
+      } on Object {
+        if (item.resultUrl == null) rethrow;
+        bytes = await gateway.downloadMedia(item.resultUrl!);
+      }
+    }
     final baseName =
         'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
         '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
@@ -5962,7 +5970,13 @@ class AppController extends ChangeNotifier {
   }) => saveMedia(item, destination: destination);
 
   Future<Uri?> generationMediaUri(Generation item) async {
-    if (item.resultAsset != null) return gateway.assetUri(item.resultAsset!);
+    if (item.resultAsset != null) {
+      try {
+        return await gateway.assetUri(item.resultAsset!);
+      } on Object {
+        if (item.resultUrl == null) rethrow;
+      }
+    }
     return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
   }
 
@@ -5995,13 +6009,16 @@ class AppController extends ChangeNotifier {
 
   /// A URI usable for preview-frame extraction only when producing it is
   /// cheap: an already-cached Drive film, a local file, or a companion URL.
-  /// Never triggers a full Drive download — cold Drive items return null and
-  /// the card keeps its tap-to-play placeholder until the film is cached.
+  /// Never triggers a full Drive download. A cold Drive item can use its
+  /// provider delivery while that remains available; otherwise the card keeps
+  /// its tap-to-play placeholder until the retained film is cached.
   Future<Uri?> generationPreviewSourceUri(Generation item) async {
     final asset = item.resultAsset;
     final cacheGateway = _videoCacheGateway;
     if (asset != null && asset.kind == 'drive' && cacheGateway != null) {
-      return cacheGateway.cachedVideoAssetUri(asset);
+      final cached = await cacheGateway.cachedVideoAssetUri(asset);
+      if (cached != null) return cached;
+      return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
     }
     return generationMediaUri(item);
   }

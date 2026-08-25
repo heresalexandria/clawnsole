@@ -297,31 +297,42 @@ class GoogleDriveApi {
   }
 
   Future<List<GoogleDriveFile>> _list(String query) async {
-    final response = await _client.get(
-      _apiBase
-          .resolve('files')
-          .replace(
-            queryParameters: <String, String>{
-              'q': query,
-              'spaces': 'drive',
-              'pageSize': '100',
-              'orderBy': 'modifiedTime desc',
-              'fields':
-                  'files(id,name,mimeType,size,modifiedTime,appProperties)',
-            },
-          ),
-      headers: _headers,
-    );
-    final payload = _json(await _expect(response));
-    return (payload['files'] as List<Object?>? ?? const <Object?>[])
-        .whereType<Map<Object?, Object?>>()
-        .map(
-          (item) => GoogleDriveFile.fromJson(
-            item.map((key, value) => MapEntry(key.toString(), value)),
-          ),
-        )
-        .where((item) => item.id.isNotEmpty)
-        .toList();
+    final files = <GoogleDriveFile>[];
+    String? pageToken;
+    do {
+      final response = await _client.get(
+        _apiBase
+            .resolve('files')
+            .replace(
+              queryParameters: <String, String>{
+                'q': query,
+                'spaces': 'drive',
+                'pageSize': '100',
+                'orderBy': 'modifiedTime desc',
+                'fields':
+                    'nextPageToken,files(id,name,mimeType,size,modifiedTime,appProperties)',
+                if (pageToken != null) 'pageToken': pageToken,
+              },
+            ),
+        headers: _headers,
+      );
+      final payload = _json(await _expect(response));
+      files.addAll(
+        (payload['files'] as List<Object?>? ?? const <Object?>[])
+            .whereType<Map<Object?, Object?>>()
+            .map(
+              (item) => GoogleDriveFile.fromJson(
+                item.map((key, value) => MapEntry(key.toString(), value)),
+              ),
+            )
+            .where((item) => item.id.isNotEmpty),
+      );
+      pageToken = switch (payload['nextPageToken']) {
+        final String value when value.isNotEmpty => value,
+        _ => null,
+      };
+    } while (pageToken != null);
+    return files;
   }
 
   Future<GoogleDriveFile> createFolder(

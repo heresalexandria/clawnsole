@@ -19,23 +19,30 @@ class GoogleDriveStore implements DurableDataStore {
     http.Client? client,
     GoogleDriveApiFactory? apiFactory,
     GoogleDriveAssetPresenter? presenter,
+    DateTime Function()? clock,
+    this.pruneGracePeriod = const Duration(hours: 1),
   }) : _client = client ?? http.Client(),
        _apiFactory = apiFactory,
-       _presenter = presenter ?? createGoogleDriveAssetPresenter();
+       _presenter = presenter ?? createGoogleDriveAssetPresenter(),
+       _clock = clock ?? DateTime.now;
 
   final http.Client _client;
   final GoogleDriveApiFactory? _apiFactory;
   final GoogleDriveAssetPresenter _presenter;
+  final DateTime Function() _clock;
+  final Duration pruneGracePeriod;
 
   GoogleDriveApi? _api;
   GoogleDriveFile? _stateFile;
   String _assetsFolderId = '';
   StoredData? _lastData;
+  final Map<String, DateTime> _pendingAssetIds = <String, DateTime>{};
   GoogleDriveConnection _connection = const GoogleDriveConnection(
     state: GoogleDriveConnectionState.disconnected,
   );
 
   GoogleDriveConnection get connection => _connection;
+  StoredData? get lastData => _lastData;
 
   Future<StoredData> connect(
     String accessToken,
@@ -158,6 +165,7 @@ class GoogleDriveStore implements DurableDataStore {
       if (_stateFile == null) {
         await _writeRemote(data);
         _lastData = data;
+        _acknowledgePublishedAssets(data);
         return;
       }
       final base = _lastData ?? await read();
@@ -172,6 +180,7 @@ class GoogleDriveStore implements DurableDataStore {
         await _writeRemote(merged);
       }
       _lastData = merged;
+      _acknowledgePublishedAssets(merged);
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
@@ -228,6 +237,11 @@ class GoogleDriveStore implements DurableDataStore {
         contentType: contentType,
         bytes: bytes.length,
       );
+      // Asset bytes and their metadata reference are necessarily published by
+      // separate Drive requests. Keep this id protected until a later state
+      // write confirms the reference, so concurrent preview cleanup cannot
+      // delete a just-uploaded result in that gap.
+      _pendingAssetIds[file.id] = _now();
       if (_isLocallyCacheable(reference)) {
         try {
           // The uploaded bytes are already in hand. Materialize films and
@@ -358,6 +372,49 @@ class GoogleDriveStore implements DurableDataStore {
     return _presenter.lookup(reference);
   }
 
+  /// Re-uploads referenced Drive assets that disappeared remotely when their
+  /// bytes still exist in this device's bounded cache.
+  ///
+  /// This repairs the publication/pruning race in older builds without
+  /// putting media in history JSON. The device that generated or previously
+  /// played the media owns the recovery bytes; other devices simply keep the
+  /// existing reference until that source device reconnects.
+  Future<StoredData> repairMissingCachedAssets(StoredData data) async {
+    _requireConnected();
+    try {
+      final liveIds = (await _driveAssets()).map((file) => file.id).toSet();
+      final referenced = _referencedAssetReferences(
+        data.generations,
+        data.savedReferences,
+      );
+      final replacements = <String, AssetReference>{};
+      for (final entry in referenced.entries) {
+        if (liveIds.contains(entry.key)) continue;
+        final bytes = await _presenter.read(entry.value);
+        if (bytes == null || bytes.isEmpty) continue;
+        replacements[entry.key] = await writeAsset(
+          bytes,
+          label: entry.value.label,
+          contentType: entry.value.contentType ?? 'application/octet-stream',
+        );
+      }
+      if (replacements.isEmpty) return data;
+      final repaired = data.copyWith(
+        generations: data.generations
+            .map((item) => _replaceGenerationAssets(item, replacements))
+            .toList(),
+        savedReferences: data.savedReferences
+            .map((item) => _replaceSavedReferenceAssets(item, replacements))
+            .toList(),
+      );
+      await write(repaired);
+      return _lastData ?? repaired;
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error);
+      rethrow;
+    }
+  }
+
   @override
   Future<Uri> assetUri(AssetReference reference) async {
     if (reference.kind != 'drive') return Uri.parse(reference.value);
@@ -385,8 +442,21 @@ class GoogleDriveStore implements DurableDataStore {
   ]) async {
     if (_api == null || _assetsFolderId.isEmpty) return;
     final retained = _referencedAssetIds(generations, savedReferences);
+    final canonical = _lastData;
+    if (canonical != null) {
+      retained.addAll(
+        _referencedAssetIds(canonical.generations, canonical.savedReferences),
+      );
+    }
+    final cutoff = _now().subtract(pruneGracePeriod);
+    _pendingAssetIds.removeWhere((_, createdAt) => createdAt.isBefore(cutoff));
+    retained.addAll(_pendingAssetIds.keys);
     for (final file in await _driveAssets()) {
-      if (!retained.contains(file.id)) await _api!.deleteFile(file.id);
+      final recentlyUploaded =
+          file.modifiedTime != null && !file.modifiedTime!.isBefore(cutoff);
+      if (!retained.contains(file.id) && !recentlyUploaded) {
+        await _api!.deleteFile(file.id);
+      }
     }
   }
 
@@ -429,10 +499,17 @@ class GoogleDriveStore implements DurableDataStore {
   Set<String> _referencedAssetIds(
     List<Generation> generations,
     List<SavedReference> references,
+  ) => _referencedAssetReferences(generations, references).keys.toSet();
+
+  Map<String, AssetReference> _referencedAssetReferences(
+    List<Generation> generations,
+    List<SavedReference> references,
   ) {
-    final retained = <String>{};
+    final retained = <String, AssetReference>{};
     void add(AssetReference? reference) {
-      if (reference?.kind == 'drive') retained.add(reference!.value);
+      if (reference?.kind == 'drive' && reference!.value.isNotEmpty) {
+        retained.putIfAbsent(reference.value, () => reference);
+      }
     }
 
     for (final generation in generations) {
@@ -458,10 +535,94 @@ class GoogleDriveStore implements DurableDataStore {
     return retained;
   }
 
+  void _acknowledgePublishedAssets(StoredData data) {
+    final published = _referencedAssetIds(
+      data.generations,
+      data.savedReferences,
+    );
+    _pendingAssetIds.removeWhere((id, _) => published.contains(id));
+  }
+
+  Generation _replaceGenerationAssets(
+    Generation item,
+    Map<String, AssetReference> replacements,
+  ) {
+    AssetReference? replace(AssetReference? reference) =>
+        reference?.kind == 'drive'
+        ? replacements[reference!.value] ?? reference
+        : reference;
+    final config = item.config;
+    return item.copyWith(
+      config: GenerationConfig(
+        aspectRatio: config.aspectRatio,
+        duration: config.duration,
+        resolution: config.resolution,
+        generateAudio: config.generateAudio,
+        safetyTolerance: config.safetyTolerance,
+        draft: config.draft,
+        frameRate: config.frameRate,
+        exactTiming: config.exactTiming,
+        keyframes: config.keyframes
+            ?.map(
+              (frame) => KeyframeLabel(
+                label: frame.label,
+                role: frame.role,
+                seconds: frame.seconds,
+                referenceId: frame.referenceId,
+                source: replace(frame.source),
+              ),
+            )
+            .toList(),
+        references: config.references
+            ?.map(
+              (media) => MediaReferenceLabel(
+                label: media.label,
+                kind: media.kind,
+                promptName: media.promptName,
+                referenceId: media.referenceId,
+                source: replace(media.source),
+                thumbnailAsset: replace(media.thumbnailAsset),
+                durationSeconds: media.durationSeconds,
+              ),
+            )
+            .toList(),
+        referenceTask: config.referenceTask,
+        sourceLabel: config.sourceLabel,
+        sourceReferenceId: config.sourceReferenceId,
+        source: replace(config.source),
+        sourceThumbnailAsset: replace(config.sourceThumbnailAsset),
+        upscaleFactor: config.upscaleFactor,
+        upscaleCreativity: config.upscaleCreativity,
+        seed: config.seed,
+      ),
+      resultAsset: replace(item.resultAsset),
+      thumbnailAsset: replace(item.thumbnailAsset),
+      timelineThumbnailAsset: replace(item.timelineThumbnailAsset),
+    );
+  }
+
+  SavedReference _replaceSavedReferenceAssets(
+    SavedReference item,
+    Map<String, AssetReference> replacements,
+  ) {
+    AssetReference replace(AssetReference reference) =>
+        reference.kind == 'drive'
+        ? replacements[reference.value] ?? reference
+        : reference;
+    return item.copyWith(
+      asset: replace(item.asset),
+      thumbnailAsset: item.thumbnailAsset == null
+          ? null
+          : replace(item.thumbnailAsset!),
+    );
+  }
+
   bool _isLocallyCacheable(AssetReference reference) {
     final contentType = reference.contentType?.toLowerCase() ?? '';
     return contentType.startsWith('video/') || contentType.startsWith('image/');
   }
+
+  DateTime _now() => _clock().toUtc();
 
   void _requireConnected() {
     if (_api == null || !connection.isConnected) {
