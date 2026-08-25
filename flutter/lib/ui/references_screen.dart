@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
@@ -11,7 +11,22 @@ import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
+import 'video_frame_loader.dart';
 import 'visual_reference_viewer.dart';
+
+Future<Uint8List?> _loadReferenceVideoPreview(
+  PickedAsset asset,
+  String source,
+) {
+  final path = asset.path?.trim() ?? '';
+  final parsed = path.isEmpty ? null : Uri.tryParse(path);
+  final uri = path.isEmpty
+      ? Uri.parse(source)
+      : kIsWeb && parsed?.hasScheme == true
+      ? parsed!
+      : Uri.file(path);
+  return loadVideoFrame(uri, const Duration(milliseconds: 250));
+}
 
 class ReferencesScreen extends StatefulWidget {
   const ReferencesScreen({required this.controller, super.key});
@@ -61,7 +76,11 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
       items
           .skip(previousLimit)
           .take(_pageSize)
-          .where((item) => item.kind == MediaReferenceKind.video)
+          .where(
+            (item) =>
+                item.kind == MediaReferenceKind.video &&
+                item.thumbnailAsset == null,
+          )
           .map((item) => item.asset),
     );
   }
@@ -211,6 +230,9 @@ class _ReferencesHeading extends StatelessWidget {
                       await controller.importSavedReferences(
                         kind,
                         source: source,
+                        previewLoader: kind == MediaReferenceKind.video
+                            ? _loadReferenceVideoPreview
+                            : null,
                         folderId:
                             controller.referenceFolderView ==
                                     AppController.libraryFolderAll ||
@@ -725,38 +747,18 @@ class _ReferenceBulkActions extends StatelessWidget {
   );
 }
 
-class _ReferenceCard extends StatefulWidget {
+class _ReferenceCard extends StatelessWidget {
   const _ReferenceCard({required this.controller, required this.reference});
 
   final AppController controller;
   final SavedReference reference;
 
   @override
-  State<_ReferenceCard> createState() => _ReferenceCardState();
-}
-
-class _ReferenceCardState extends State<_ReferenceCard> {
-  /// The film's measured aspect ratio once its metadata loads. References
-  /// store no dimensions, so video previews open at 16:9 and settle into
-  /// their true shape; images and audio stay 16:9.
-  double? _videoAspect;
-
-  AppController get controller => widget.controller;
-  SavedReference get reference => widget.reference;
-
-  void _onVideoMetadata(VideoSourceMetadata metadata) {
-    if (!metadata.isUsable) return;
-    final aspect = metadata.width / metadata.height;
-    if (_videoAspect != null && (aspect - _videoAspect!).abs() < .001) return;
-    setState(() => _videoAspect = aspect);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isVideo = reference.kind == MediaReferenceKind.video;
-    final restored = controller.cachedAssetBytes(
-      isVideo ? reference.thumbnailAsset : reference.asset,
-    );
+    final restored = isVideo
+        ? controller.cachedReferencePreview(reference)
+        : controller.cachedAssetBytes(reference.asset);
     final thumbnail = MediaThumbnail(
       gateway: controller.gateway,
       kind: reference.kind,
@@ -764,12 +766,15 @@ class _ReferenceCardState extends State<_ReferenceCard> {
       reference: reference.asset,
       thumbnailReference: reference.thumbnailAsset,
       thumbnailBytes: isVideo ? restored : null,
+      mediaUriLoader: isVideo
+          ? () => controller.referencePreviewSourceUri(reference)
+          : null,
+      mediaUriRevision: isVideo ? controller.videoPreviewSourceRevision : null,
       semanticsLabel: '${reference.name} thumbnail',
       onThumbnail: isVideo
           ? (bytes) =>
                 unawaited(controller.cacheReferencePreview(reference, bytes))
           : null,
-      onVideoMetadata: isVideo ? _onVideoMetadata : null,
     );
     return SurfaceCard(
       padding: EdgeInsets.zero,
@@ -779,7 +784,7 @@ class _ReferenceCardState extends State<_ReferenceCard> {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             child: AspectRatio(
-              aspectRatio: isVideo ? _videoAspect ?? 16 / 9 : 16 / 9,
+              aspectRatio: 16 / 9,
               child: Semantics(
                 button: reference.kind != MediaReferenceKind.audio,
                 label: 'View ${reference.name} full screen',
@@ -798,7 +803,7 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                     fit: StackFit.expand,
                     children: <Widget>[
                       thumbnail,
-                      if (isVideo)
+                      if (isVideo && restored != null)
                         const Center(
                           child: Icon(
                             Icons.play_circle_fill_rounded,
@@ -1071,9 +1076,20 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                   thumbnailReference: reference.thumbnailAsset,
                                   thumbnailBytes:
                                       reference.kind == MediaReferenceKind.video
-                                      ? controller.cachedAssetBytes(
-                                          reference.thumbnailAsset,
+                                      ? controller.cachedReferencePreview(
+                                          reference,
                                         )
+                                      : null,
+                                  mediaUriLoader:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? () => controller
+                                            .referencePreviewSourceUri(
+                                              reference,
+                                            )
+                                      : null,
+                                  mediaUriRevision:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? controller.videoPreviewSourceRevision
                                       : null,
                                   fit: BoxFit.contain,
                                   semanticsLabel:
@@ -1089,7 +1105,11 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                       : null,
                                 ),
                               ),
-                              if (reference.kind == MediaReferenceKind.video)
+                              if (reference.kind == MediaReferenceKind.video &&
+                                  controller.cachedReferencePreview(
+                                        reference,
+                                      ) !=
+                                      null)
                                 const Center(
                                   child: Icon(
                                     Icons.play_circle_fill_rounded,

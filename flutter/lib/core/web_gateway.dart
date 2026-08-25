@@ -710,9 +710,9 @@ class WebGateway
 
   @override
   Future<Uri?> cachedVideoAssetUri(AssetReference reference) =>
-      // Building a companion URL is always cheap; the companion streams the
-      // asset with Range support and keeps its own disk cache warm.
-      assetUri(reference);
+      Future<Uri?>.value(
+        _url('/asset-cache', <String, String>{'id': reference.value}),
+      );
 
   @override
   Future<void> prefetchVideoAsset(AssetReference reference) async {

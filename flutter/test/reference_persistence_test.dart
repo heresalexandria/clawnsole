@@ -210,6 +210,95 @@ void main() {
   });
 
   test(
+    'References video imports persist the preview made from picked media',
+    () async {
+      final video = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final frame = Uint8List.fromList(<int>[9, 8, 7]);
+      final gateway = _ReferenceGateway(emptySnapshot);
+      final controller = AppController(
+        gateway: gateway,
+        filePicker:
+            ({
+              required FileType type,
+              required bool allowMultiple,
+              required bool withData,
+            }) async => FilePickerResult(<PlatformFile>[
+              PlatformFile(
+                name: 'character.mp4',
+                size: video.length,
+                bytes: video,
+              ),
+            ]),
+      )..snapshot = emptySnapshot;
+      addTearDown(controller.dispose);
+      PickedAsset? previewAsset;
+      String? previewSource;
+
+      await controller.importSavedReferences(
+        MediaReferenceKind.video,
+        previewLoader: (asset, source) async {
+          previewAsset = asset;
+          previewSource = source;
+          return frame;
+        },
+      );
+
+      expect(previewAsset?.name, 'character.mp4');
+      expect(previewSource, startsWith('data:video/mp4;base64,'));
+      final saved = controller.savedReferences.single;
+      expect(saved.thumbnailAsset, isNotNull);
+      expect(await gateway.readAsset(saved.thumbnailAsset!), frame);
+      expect(controller.cachedReferencePreview(saved), frame);
+    },
+  );
+
+  testWidgets('References uses one thumbnail ratio for every video card', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.utc(2026, 8, 25);
+    final references = <SavedReference>[
+      for (final id in <String>['landscape', 'portrait'])
+        SavedReference(
+          id: id,
+          name: '$id.mp4',
+          kind: MediaReferenceKind.video,
+          asset: AssetReference(
+            kind: 'local',
+            value: '$id.mp4',
+            label: '$id.mp4',
+            contentType: 'video/mp4',
+          ),
+          createdAt: now,
+          updatedAt: now,
+        ),
+    ];
+    final snapshot = emptySnapshot.copyWith(savedReferences: references);
+    final controller = AppController(gateway: _ReferenceGateway(snapshot))
+      ..snapshot = snapshot
+      ..loading = false;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: ReferencesScreen(controller: controller)),
+      ),
+    );
+    await tester.pump();
+
+    for (final id in <String>['landscape', 'portrait']) {
+      final cardMedia = find.byKey(ValueKey('view-saved-reference-$id'));
+      final ratio = tester.widget<AspectRatio>(
+        find.ancestor(of: cardMedia, matching: find.byType(AspectRatio)).first,
+      );
+      expect(ratio.aspectRatio, 16 / 9);
+    }
+    expect(find.byIcon(Icons.play_circle_fill_rounded), findsNothing);
+  });
+
+  test(
     'Create image uploads auto-save once and keep durable identity',
     () async {
       final gateway = _ReferenceGateway(emptySnapshot);
@@ -501,7 +590,8 @@ FilePickerInvocation _picker(Map<FileType, PlatformFile> files) =>
       return file == null ? null : FilePickerResult(<PlatformFile>[file]);
     };
 
-class _ReferenceGateway implements AppGateway, ReferenceLibraryGateway {
+class _ReferenceGateway
+    implements AppGateway, ReferenceLibraryGateway, MediaPreviewGateway {
   _ReferenceGateway(this.snapshot, {this.beforeSave});
 
   LocalSnapshot snapshot;
@@ -558,6 +648,39 @@ class _ReferenceGateway implements AppGateway, ReferenceLibraryGateway {
     );
     return snapshot;
   }
+
+  @override
+  Future<LocalSnapshot> saveReferencePreview(
+    String referenceId,
+    Uint8List thumbnailBytes,
+  ) async {
+    final value = '$referenceId-thumbnail.jpg';
+    _assets[value] = thumbnailBytes;
+    final thumbnail = AssetReference(
+      kind: 'local',
+      value: value,
+      label: value,
+      contentType: 'image/jpeg',
+      bytes: thumbnailBytes.length,
+    );
+    snapshot = snapshot.copyWith(
+      savedReferences: snapshot.savedReferences
+          .map(
+            (item) => item.id == referenceId
+                ? item.copyWith(thumbnailAsset: thumbnail)
+                : item,
+          )
+          .toList(),
+    );
+    return snapshot;
+  }
+
+  @override
+  Future<LocalSnapshot> saveGenerationInputPreview(
+    String localId,
+    String sourceAssetValue,
+    Uint8List thumbnailBytes,
+  ) async => snapshot;
 
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {

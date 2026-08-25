@@ -35,6 +35,9 @@ typedef FilePickerInvocation =
       required bool withData,
     });
 
+typedef ReferencePreviewLoader =
+    Future<Uint8List?> Function(PickedAsset asset, String source);
+
 Future<FilePickerResult?> _pickFiles({
   required FileType type,
   required bool allowMultiple,
@@ -438,6 +441,7 @@ class AppController extends ChangeNotifier {
   bool _reconcilingGenerationWork = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
+  final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
   int _idCounter = 0;
   int _libraryMutationRevision = 0;
@@ -1758,6 +1762,7 @@ class AppController extends ChangeNotifier {
       if (clamped == 0) {
         _restoredAssetBytes.clear();
         _assetReadJobs.clear();
+        _referencePreviewBytes.clear();
         await _videoCacheGateway?.clearThumbnailCache();
       } else {
         unawaited(_restoreCachedFirstPage().then((_) => notifyListeners()));
@@ -1785,6 +1790,7 @@ class AppController extends ChangeNotifier {
     try {
       _restoredAssetBytes.clear();
       _assetReadJobs.clear();
+      _referencePreviewBytes.clear();
       await _videoCacheGateway?.clearThumbnailCache();
       notifyListeners();
     } on Object catch (error) {
@@ -1815,7 +1821,8 @@ class AppController extends ChangeNotifier {
                 .where(
                   (item) =>
                       item.kind == MediaReferenceKind.video &&
-                      item.storage == LibraryStorage.drive,
+                      item.storage == LibraryStorage.drive &&
+                      item.thumbnailAsset == null,
                 )
                 .map((item) => item.asset)
           : (section == AppSection.library
@@ -1853,6 +1860,12 @@ class AppController extends ChangeNotifier {
   /// Synchronously available retained bytes restored before first paint.
   Uint8List? cachedAssetBytes(AssetReference? reference) =>
       reference == null ? null : _restoredAssetBytes[_assetCacheKey(reference)];
+
+  /// Returns a reference preview immediately, including a newly generated
+  /// frame whose durable thumbnail write is still in flight.
+  Uint8List? cachedReferencePreview(SavedReference reference) =>
+      cachedAssetBytes(reference.thumbnailAsset) ??
+      _referencePreviewBytes[reference.id];
 
   /// Reads retained preview bytes once per process and remembers them for
   /// synchronous reuse by every card that references the same immutable id.
@@ -2692,6 +2705,7 @@ class AppController extends ChangeNotifier {
     String? folderId,
     LibraryStorage? storage,
     MediaPickerSource source = MediaPickerSource.library,
+    ReferencePreviewLoader? previewLoader,
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
@@ -2763,6 +2777,17 @@ class AppController extends ChangeNotifier {
             'Preparing ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
           );
           final dataUrl = await _dataUrlForAsset(asset);
+          var thumbnailBytes = asset.thumbnailBytes;
+          if (kind == MediaReferenceKind.video &&
+              thumbnailBytes == null &&
+              previewLoader != null) {
+            try {
+              thumbnailBytes = await previewLoader(asset, dataUrl);
+            } on Object {
+              // Preview creation is best effort; the retained video can also
+              // backfill its frame after the card is rendered.
+            }
+          }
           _setReferenceImportStage(progress.id, ReferenceImportStage.uploading);
           _updateReferenceUpload(
             'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
@@ -2773,6 +2798,15 @@ class AppController extends ChangeNotifier {
               source: dataUrl,
             ),
           );
+          final savedReference = savedReferences
+              .where((item) => item.id == reference.id)
+              .firstOrNull;
+          if (savedReference != null &&
+              savedReference.thumbnailAsset == null &&
+              thumbnailBytes != null &&
+              thumbnailBytes.isNotEmpty) {
+            await cacheReferencePreview(savedReference, thumbnailBytes);
+          }
           saved += 1;
         } on Object catch (error) {
           failed += 1;
@@ -2810,6 +2844,7 @@ class AppController extends ChangeNotifier {
       _apply(
         await (gateway as ReferenceLibraryGateway).deleteReference(referenceId),
       );
+      _referencePreviewBytes.remove(referenceId);
       showNotice('Saved reference deleted.');
       return true;
     } on Object catch (error) {
@@ -5373,8 +5408,10 @@ class AppController extends ChangeNotifier {
     SavedReference reference,
     Uint8List thumbnailBytes,
   ) async {
+    if (thumbnailBytes.isEmpty) return;
+    _referencePreviewBytes[reference.id] = thumbnailBytes;
+    notifyListeners();
     if (gateway is! MediaPreviewGateway ||
-        thumbnailBytes.isEmpty ||
         !_referencePreviewWrites.add(reference.id)) {
       return;
     }
@@ -5385,6 +5422,13 @@ class AppController extends ChangeNotifier {
           thumbnailBytes,
         ),
       );
+      final retained = savedReferences
+          .where((item) => item.id == reference.id)
+          .firstOrNull
+          ?.thumbnailAsset;
+      if (retained != null) {
+        _restoredAssetBytes[_assetCacheKey(retained)] = thumbnailBytes;
+      }
     } on Object {
       // The original reference remains usable if a thumbnail write fails.
     } finally {
@@ -5784,6 +5828,21 @@ class AppController extends ChangeNotifier {
       return cacheGateway.cachedVideoAssetUri(asset);
     }
     return generationMediaUri(item);
+  }
+
+  /// Resolves a reference-video URI only when frame extraction is cheap.
+  /// Cold Drive videos wait for the bounded background cache instead of
+  /// turning every visible card into a full media download.
+  Future<Uri?> referencePreviewSourceUri(SavedReference reference) async {
+    final asset = reference.asset;
+    final cacheGateway = _videoCacheGateway;
+    if (asset.kind == 'drive' && cacheGateway != null) {
+      return cacheGateway.cachedVideoAssetUri(asset);
+    }
+    if (asset.isLocal) return gateway.assetUri(asset);
+    final remote = Uri.tryParse(asset.value);
+    if (remote?.scheme == 'https') return gateway.mediaUri(asset.value);
+    return null;
   }
 
   Future<void> saveReferenceImage(AssetReference reference) async {
