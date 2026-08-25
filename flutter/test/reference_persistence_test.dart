@@ -298,6 +298,93 @@ void main() {
     expect(find.byIcon(Icons.play_circle_fill_rounded), findsNothing);
   });
 
+  testWidgets(
+    'References paints every generated preview before persistence finishes',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 1000));
+      final finishPreviewWrites = Completer<void>();
+      final gateway = _ReferenceGateway(
+        emptySnapshot,
+        beforePreviewSave: () => finishPreviewWrites.future,
+      );
+      final now = DateTime.utc(2026, 8, 25);
+      final references = <SavedReference>[
+        for (final id in <String>['first', 'second'])
+          SavedReference(
+            id: id,
+            name: '$id.mp4',
+            kind: MediaReferenceKind.video,
+            asset: AssetReference(
+              kind: 'local',
+              value: '$id.mp4',
+              label: '$id.mp4',
+              contentType: 'video/mp4',
+            ),
+            createdAt: now,
+            updatedAt: now,
+          ),
+      ];
+      final snapshot = emptySnapshot.copyWith(savedReferences: references);
+      gateway.snapshot = snapshot;
+      final controller = AppController(gateway: gateway)
+        ..snapshot = snapshot
+        ..loading = false;
+      addTearDown(() async {
+        if (!finishPreviewWrites.isCompleted) finishPreviewWrites.complete();
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+        controller.dispose();
+      });
+      final frame = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) => ReferencesScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final writes = <Future<void>>[
+        for (final reference in references)
+          controller.cacheReferencePreview(reference, frame),
+      ];
+      for (final reference in references) {
+        expect(controller.cachedReferencePreview(reference), frame);
+      }
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.byKey(const ValueKey('media-thumbnail-video-frame')),
+        findsNWidgets(2),
+      );
+      expect(
+        controller.savedReferences.every(
+          (reference) => reference.thumbnailAsset == null,
+        ),
+        isTrue,
+      );
+
+      finishPreviewWrites.complete();
+      await Future.wait(writes);
+      await tester.pump();
+      expect(
+        controller.savedReferences.every(
+          (reference) => reference.thumbnailAsset != null,
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test(
     'Create image uploads auto-save once and keep durable identity',
     () async {
@@ -592,10 +679,11 @@ FilePickerInvocation _picker(Map<FileType, PlatformFile> files) =>
 
 class _ReferenceGateway
     implements AppGateway, ReferenceLibraryGateway, MediaPreviewGateway {
-  _ReferenceGateway(this.snapshot, {this.beforeSave});
+  _ReferenceGateway(this.snapshot, {this.beforeSave, this.beforePreviewSave});
 
   LocalSnapshot snapshot;
   final Future<void> Function()? beforeSave;
+  final Future<void> Function()? beforePreviewSave;
   final Map<String, Uint8List> _assets = <String, Uint8List>{};
 
   @override
@@ -654,6 +742,7 @@ class _ReferenceGateway
     String referenceId,
     Uint8List thumbnailBytes,
   ) async {
+    await beforePreviewSave?.call();
     final value = '$referenceId-thumbnail.jpg';
     _assets[value] = thumbnailBytes;
     final thumbnail = AssetReference(
