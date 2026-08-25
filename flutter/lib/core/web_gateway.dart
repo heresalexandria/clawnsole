@@ -676,7 +676,7 @@ class WebGateway
     final response = await _client.get(await assetUri(reference));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ProviderException(
-        'The retained input is unavailable.',
+        'The retained media is unavailable.',
         status: response.statusCode,
       );
     }

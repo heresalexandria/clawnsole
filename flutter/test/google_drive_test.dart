@@ -149,6 +149,40 @@ void main() {
     expect(observed.url.queryParameters['spaces'], 'drive');
   });
 
+  test('Drive listings follow every provider page', () async {
+    final pageTokens = <String?>[];
+    final api = GoogleDriveApi(
+      accessToken: 'token',
+      apiBase: Uri.parse('https://drive.test/drive/v3/'),
+      client: MockClient((request) async {
+        final token = request.url.queryParameters['pageToken'];
+        pageTokens.add(token);
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            if (token == null) 'nextPageToken': 'second-page',
+            'files': <Object?>[
+              <String, Object?>{
+                'id': token == null ? 'asset-one' : 'asset-two',
+                'name': token == null ? 'one.mp4' : 'two.mp4',
+                'mimeType': 'video/mp4',
+              },
+            ],
+          }),
+          200,
+          headers: const <String, String>{'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    final files = await api.listChildren(
+      'assets-folder',
+      appPropertyKey: 'clawnsoleAsset',
+    );
+
+    expect(pageTokens, <String?>[null, 'second-page']);
+    expect(files.map((file) => file.id), <String>['asset-one', 'asset-two']);
+  });
+
   test(
     'Drive asset upload uses multipart content and its selected parent',
     () async {

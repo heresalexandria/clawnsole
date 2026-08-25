@@ -2335,6 +2335,16 @@ class CompanionApp {
     return null;
   }
 
+  String? _resultFallbackUrl(StoredData data, String assetId) => data
+      .generations
+      .where(
+        (item) =>
+            item.resultAsset?.value == assetId &&
+            item.resultUrl?.trim().isNotEmpty == true,
+      )
+      .firstOrNull
+      ?.resultUrl;
+
   /// Applies the persisted cache-cap preference before any cache use, so a
   /// cap changed on another surface (through the synced preferences) takes
   /// effect on the very next request.
@@ -2390,17 +2400,25 @@ class CompanionApp {
       HttpHeaders.cacheControlHeader,
       'private, max-age=86400, immutable',
     );
-    if (reference.kind == 'drive' && _isVideoAsset(reference)) {
-      final cache = await _syncedVideoCache(data);
-      if (cache != null && cache.enabled) {
-        return _driveVideoAsset(request, reference, cache);
+    try {
+      if (reference.kind == 'drive' && _isVideoAsset(reference)) {
+        final cache = await _syncedVideoCache(data);
+        if (cache != null && cache.enabled) {
+          return _driveVideoAsset(request, reference, cache);
+        }
       }
+      return _serveAssetBytes(
+        request,
+        reference,
+        await _store.readAsset(reference),
+      );
+    } on GoogleDriveException catch (error) {
+      final fallback = error.status == 404
+          ? _resultFallbackUrl(data, reference.value)
+          : null;
+      if (fallback != null) return _serveRemoteMedia(request, fallback);
+      rethrow;
     }
-    return _serveAssetBytes(
-      request,
-      reference,
-      await _store.readAsset(reference),
-    );
   }
 
   /// Returns retained bytes only when they already exist on this device.
@@ -2654,6 +2672,10 @@ class CompanionApp {
     if (source == null) {
       throw const ProviderException('A media URL is required.', status: 400);
     }
+    return _serveRemoteMedia(request, source);
+  }
+
+  Future<void> _serveRemoteMedia(HttpRequest request, String source) async {
     final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {

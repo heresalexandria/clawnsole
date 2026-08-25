@@ -38,7 +38,8 @@ class HybridDataStore implements DurableDataStore {
 
   Future<StoredData> connect(String accessToken, String folderName) async {
     final local = _asLocal(await _local.read());
-    final remote = _asDrive(await _drive.connect(accessToken, folderName));
+    final connected = await _drive.connect(accessToken, folderName);
+    final remote = _asDrive(await _repairCachedDriveAssets(connected));
     _lastLocal = local;
     _lastRemote = remote;
     final combined = _combine(local, remote);
@@ -60,7 +61,8 @@ class HybridDataStore implements DurableDataStore {
   Future<StoredData> refresh() async {
     final persisted = await _local.read();
     final local = _asLocal(persisted);
-    final remote = _asDrive(await _drive.refresh());
+    final refreshed = await _drive.refresh();
+    final remote = _asDrive(await _repairCachedDriveAssets(refreshed));
     _lastLocal = local;
     _lastRemote = remote;
     final combined = _combine(local, remote);
@@ -101,10 +103,13 @@ class HybridDataStore implements DurableDataStore {
         }
       } else {
         await _drive.write(remote);
-        _lastRemote = remote;
+        _lastRemote = _asDrive(_drive.lastData ?? remote);
       }
     }
-    await _local.write(_localMirror(data));
+    final mirrored = isDriveConnected && _lastRemote != null
+        ? _combine(local, _lastRemote!)
+        : data;
+    await _local.write(_localMirror(mirrored));
     _lastLocal = local;
   }
 
@@ -671,6 +676,18 @@ class HybridDataStore implements DurableDataStore {
 
   String _encoded(StoredData data) =>
       jsonEncode(googleDrivePortableData(data).toJson());
+
+  Future<StoredData> _repairCachedDriveAssets(StoredData data) async {
+    try {
+      return await _drive.repairMissingCachedAssets(data);
+    } on Object {
+      if (!_drive.connection.isConnected) rethrow;
+      // Reconciliation remains usable during a transient listing or upload
+      // failure. The source device retries the repair on its next reconnect
+      // or explicit Drive refresh.
+      return data;
+    }
+  }
 
   bool _hasPortableContent(StoredData data) =>
       data.generations.isNotEmpty ||
