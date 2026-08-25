@@ -1698,6 +1698,10 @@ class _ReferencesSection extends StatelessWidget {
             const SizedBox(height: 6),
             taskChips,
           ],
+          if (!setAside) ...<Widget>[
+            const SizedBox(height: 8),
+            _ReferenceCapacityGauges(controller: controller),
+          ],
           for (final note in notes) ...<Widget>[
             const SizedBox(height: 5),
             Text(note, style: noteStyle),
@@ -1728,6 +1732,10 @@ class _ReferencesSection extends StatelessWidget {
             height: 1.4,
           ),
         ),
+        if (!setAside) ...<Widget>[
+          const SizedBox(height: 10),
+          _ReferenceCapacityGauges(controller: controller),
+        ],
         for (final note in notes) ...<Widget>[
           const SizedBox(height: 5),
           Text(note, style: noteStyle),
@@ -1744,6 +1752,139 @@ class _ReferencesSection extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _ReferenceCapacityGauges extends StatelessWidget {
+  const _ReferenceCapacityGauges({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final form = controller.form;
+    final model = controller.selectedModel;
+    final gauges = <Widget>[];
+    final totalMaximum = model.maxTotalReferences;
+    if (totalMaximum != null && totalMaximum > 0) {
+      gauges.add(
+        _ReferenceCapacityGauge(
+          key: const ValueKey('reference-capacity-total'),
+          label: 'All references',
+          value: form.references.length / totalMaximum,
+          valueLabel: '${form.references.length} / $totalMaximum added',
+        ),
+      );
+    }
+    for (final kind in MediaReferenceKind.values) {
+      final maximum = controller.referenceLimit(kind);
+      if (maximum <= 0) continue;
+      final attached = form.references
+          .where((reference) => reference.kind == kind)
+          .toList();
+      final kindLabel = switch (kind) {
+        MediaReferenceKind.image => 'Images',
+        MediaReferenceKind.video => 'Videos',
+        MediaReferenceKind.audio => 'Audio clips',
+      };
+      gauges.add(
+        _ReferenceCapacityGauge(
+          key: ValueKey('reference-capacity-${kind.name}-count'),
+          label: kindLabel,
+          value: attached.length / maximum,
+          valueLabel: '${attached.length} / $maximum added',
+        ),
+      );
+      final maximumSeconds = model.maxReferenceSeconds(kind, form.resolution);
+      if (maximumSeconds == null) continue;
+      final known = attached
+          .map((reference) => reference.durationSeconds)
+          .whereType<double>()
+          .toList();
+      final used = known.fold<double>(0, (sum, seconds) => sum + seconds);
+      final unknown = attached.length - known.length;
+      gauges.add(
+        _ReferenceCapacityGauge(
+          key: ValueKey('reference-capacity-${kind.name}-duration'),
+          label: '$kindLabel duration',
+          value: used / maximumSeconds,
+          valueLabel:
+              '${formatMediaDuration(used)} / ${formatMediaDuration(maximumSeconds.toDouble())}'
+              '${unknown == 0 ? '' : ' · measuring $unknown'}',
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: gauges
+          .map(
+            (gauge) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: gauge,
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _ReferenceCapacityGauge extends StatelessWidget {
+  const _ReferenceCapacityGauge({
+    required this.label,
+    required this.value,
+    required this.valueLabel,
+    super.key,
+  });
+
+  final String label;
+  final double value;
+  final String valueLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+    return Semantics(
+      label: '$label, $valueLabel',
+      value: '${(progress * 100).round()}%',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                valueLabel,
+                style: TextStyle(
+                  color: context.colors.onSurfaceVariant,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(99),
+              child: LinearProgressIndicator(
+                minHeight: 7,
+                value: progress,
+                backgroundColor: context.colors.surfaceContainerHighest,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1951,7 +2092,9 @@ class _ReferenceTile extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          reference.label,
+          reference.durationSeconds == null
+              ? reference.label
+              : '${reference.label} · ${formatMediaDuration(reference.durationSeconds!)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),

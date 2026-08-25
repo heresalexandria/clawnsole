@@ -50,7 +50,10 @@ and optional Google Drive sync keep work organized wherever you create.
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - Nested project folders, multi-tag organization, and combined prompt/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
-  sorting, and Saved/Generated pickers directly in Create
+  duration-aware sorting, non-destructive video trimming, and Saved/Generated
+  pickers directly in Create
+- Live reference-count and media-duration gauges that track each selected
+  model's per-kind and total input ceilings
 - One-tap folder and tag filters with a desktop folder rail and compact mobile picker
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls

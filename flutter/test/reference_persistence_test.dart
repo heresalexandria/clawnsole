@@ -540,6 +540,86 @@ void main() {
     },
   );
 
+  test('reference duration persists, sorts, and survives a new trim', () async {
+    final now = DateTime.utc(2026, 8, 25, 12);
+    SavedReference video(String id, String name, double? duration) =>
+        SavedReference(
+          id: id,
+          name: name,
+          kind: MediaReferenceKind.video,
+          asset: AssetReference(
+            kind: 'local',
+            value: id,
+            label: '$name.mp4',
+            contentType: 'video/mp4',
+          ),
+          createdAt: now,
+          updatedAt: now,
+          tags: const <String>['motion'],
+          durationSeconds: duration,
+        );
+
+    final gateway = _EditingReferenceGateway(
+      LocalSnapshot(
+        generations: const <Generation>[],
+        savedReferences: <SavedReference>[
+          video('long', 'Long', 12),
+          video('unknown', 'Unknown', null),
+          video('short', 'Short', 3.5),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 3),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    controller.setReferenceSort(ReferenceSort.durationShortest);
+    expect(controller.filteredSavedReferences.map((item) => item.id), <String>[
+      'short',
+      'long',
+      'unknown',
+    ]);
+    controller.setReferenceSort(ReferenceSort.durationLongest);
+    expect(controller.filteredSavedReferences.map((item) => item.id), <String>[
+      'long',
+      'short',
+      'unknown',
+    ]);
+
+    await controller.rememberSavedReferenceDuration(
+      controller.savedReferences.singleWhere((item) => item.id == 'unknown'),
+      7.25,
+    );
+    expect(
+      SavedReference.fromJson(
+        controller.savedReferences
+            .singleWhere((item) => item.id == 'unknown')
+            .toJson(),
+      ).durationSeconds,
+      7.25,
+    );
+
+    final trimmed = await controller.trimSavedReference(
+      controller.savedReferences.singleWhere((item) => item.id == 'long'),
+      name: 'Long excerpt',
+      startSeconds: 2,
+      endSeconds: 8.5,
+    );
+
+    expect(trimmed, isNotNull);
+    expect(trimmed!.durationSeconds, 6.5);
+    expect(trimmed.tags, <String>['motion']);
+    expect(gateway.sourceReferenceId, 'long');
+    expect(gateway.trimRange, (2.0, 8.5));
+    expect(
+      controller.savedReferences.where((item) => item.id == 'long'),
+      hasLength(1),
+    );
+  });
+
   test('usage lookup survives normalized derivative assets', () {
     final now = DateTime.utc(2026, 8, 23, 12);
     final reference = SavedReference(
@@ -659,7 +739,7 @@ void main() {
 
     final migrated = StoredData.fromJson(json);
 
-    expect(migrated.toJson()['schemaVersion'], 22);
+    expect(migrated.toJson()['schemaVersion'], 23);
     expect(
       migrated.generations.single.config.references!.single.referenceId,
       'legacy-reference',
@@ -828,4 +908,35 @@ class _ReferenceGateway
 
   @override
   Future<LocalSnapshot> clearAll() async => snapshot;
+}
+
+class _EditingReferenceGateway extends _ReferenceGateway
+    implements ReferenceVideoEditingGateway {
+  _EditingReferenceGateway(super.snapshot);
+
+  String? sourceReferenceId;
+  (double, double)? trimRange;
+
+  @override
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    this.sourceReferenceId = sourceReferenceId;
+    trimRange = (startSeconds, endSeconds);
+    final saved = output.copyWith(
+      asset: AssetReference(
+        kind: 'local',
+        value: output.id,
+        label: '${output.name}.mp4',
+        contentType: 'video/mp4',
+      ),
+    );
+    snapshot = snapshot.copyWith(
+      savedReferences: <SavedReference>[saved, ...snapshot.savedReferences],
+    );
+    return snapshot;
+  }
 }

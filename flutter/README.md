@@ -19,7 +19,10 @@ only macOS desktop lifecycle, packaging, and self-update.
 - Model-aware multi-upload image, video, and audio references, kept distinct
   from first/last or explicitly timed keyframes
 - A searchable saved-reference library with independent nested folders, tags,
-  naming, sorting, and direct Saved/Generated selection from Create
+  naming, duration-aware sorting, non-destructive video trimming, and direct
+  Saved/Generated selection from Create
+- Left-to-right reference count and duration gauges driven by each model's
+  active resolution and input limits
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
@@ -77,7 +80,10 @@ separate local assets. Provider upload adapters convert local media into the
 token or hosted-asset form required by ArtCraft, Atlas, and Runway before submission.
 The References tab stores reusable media alongside compact metadata. Its folder
 tree is independent from Generated history, while the Create picker can search
-either hierarchy without copying local assets unnecessarily.
+either hierarchy without copying local assets unnecessarily. Video and audio
+durations are measured once and retained in that compact metadata. Trimming a
+video encodes the selected range as a new MP4 in the same storage and folder;
+the original reference is never modified.
 
 ## Install
 

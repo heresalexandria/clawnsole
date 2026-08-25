@@ -250,6 +250,7 @@ class ReferenceCandidate {
     this.tags = const <String>[],
     this.generated = false,
     this.storage = LibraryStorage.local,
+    this.durationSeconds,
   });
 
   final String id;
@@ -262,6 +263,7 @@ class ReferenceCandidate {
   final List<String> tags;
   final bool generated;
   final LibraryStorage storage;
+  final double? durationSeconds;
 }
 
 class GenerationFormState {
@@ -442,6 +444,7 @@ class AppController extends ChangeNotifier {
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
   final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
+  final Set<String> _referenceDurationWrites = <String>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
   int _idCounter = 0;
   int _libraryMutationRevision = 0;
@@ -1041,6 +1044,26 @@ class AppController extends ChangeNotifier {
       }
       return referenceKind == null || item.kind == referenceKind;
     }).toList();
+    int compareDuration(
+      SavedReference first,
+      SavedReference second, {
+      required bool longestFirst,
+    }) {
+      final firstDuration = first.durationSeconds;
+      final secondDuration = second.durationSeconds;
+      if (firstDuration == null && secondDuration == null) {
+        return first.name.toLowerCase().compareTo(second.name.toLowerCase());
+      }
+      if (firstDuration == null) return 1;
+      if (secondDuration == null) return -1;
+      final duration = longestFirst
+          ? secondDuration.compareTo(firstDuration)
+          : firstDuration.compareTo(secondDuration);
+      return duration != 0
+          ? duration
+          : first.name.toLowerCase().compareTo(second.name.toLowerCase());
+    }
+
     values.sort(switch (referenceSort) {
       ReferenceSort.newest => (a, b) => b.updatedAt.compareTo(a.updatedAt),
       ReferenceSort.oldest => (a, b) => a.updatedAt.compareTo(b.updatedAt),
@@ -1053,6 +1076,16 @@ class AppController extends ChangeNotifier {
             ? kind
             : a.name.toLowerCase().compareTo(b.name.toLowerCase());
       },
+      ReferenceSort.durationShortest => (a, b) => compareDuration(
+        a,
+        b,
+        longestFirst: false,
+      ),
+      ReferenceSort.durationLongest => (a, b) => compareDuration(
+        a,
+        b,
+        longestFirst: true,
+      ),
     });
     return values;
   }
@@ -2590,6 +2623,7 @@ class AppController extends ChangeNotifier {
       folderId: folderId,
       tags: cleanLibraryTags(tags),
       storage: destination,
+      durationSeconds: draft.durationSeconds,
     );
     try {
       _apply(
@@ -2635,6 +2669,8 @@ class AppController extends ChangeNotifier {
           thumbnailAsset: savedReference.thumbnailAsset,
           thumbnailBytes: item.thumbnailBytes,
           savedReferenceId: savedReference.id,
+          durationSeconds:
+              savedReference.durationSeconds ?? item.durationSeconds,
         );
       }).toList();
       notifyListeners();
@@ -2853,6 +2889,90 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  String suggestedTrimmedReferenceName(SavedReference source) =>
+      _uniqueSavedReferenceName('${source.name} trim');
+
+  Future<SavedReference?> trimSavedReference(
+    SavedReference source, {
+    required String name,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    if (gateway is! ReferenceVideoEditingGateway) {
+      showNotice('Video trimming is unavailable on this build.');
+      return null;
+    }
+    final current = savedReferences
+        .where((item) => item.id == source.id)
+        .firstOrNull;
+    final duration = current?.durationSeconds;
+    if (current == null ||
+        current.kind != MediaReferenceKind.video ||
+        duration == null ||
+        !startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds > duration + .001 ||
+        endSeconds - startSeconds < .1) {
+      showNotice('Choose a valid range within the reference video.');
+      return null;
+    }
+    if (startSeconds < .001 && (endSeconds - duration).abs() < .001) {
+      showNotice('Move the beginning or ending handle to create a trim.');
+      return null;
+    }
+    final clean = name.trim();
+    final problem = referenceNameProblem(clean);
+    if (problem != null) {
+      showNotice(problem);
+      return null;
+    }
+    final now = DateTime.now().toUtc();
+    final id =
+        'reference-trim-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}';
+    final output = SavedReference(
+      id: id,
+      name: clean,
+      kind: MediaReferenceKind.video,
+      asset: AssetReference(
+        kind: 'remote',
+        value: '',
+        label: clean,
+        contentType: 'video/mp4',
+      ),
+      createdAt: now,
+      updatedAt: now,
+      folderId: current.folderId,
+      tags: current.tags,
+      storage: current.storage,
+      durationSeconds: endSeconds - startSeconds,
+    );
+    _beginReferenceUpload('Trimming ${current.name}…');
+    try {
+      _apply(
+        await (gateway as ReferenceVideoEditingGateway).trimReferenceVideo(
+          sourceReferenceId: current.id,
+          output: output,
+          startSeconds: startSeconds,
+          endSeconds: endSeconds,
+        ),
+      );
+      final saved = savedReferences
+          .where((item) => item.id == output.id)
+          .firstOrNull;
+      if (saved == null) {
+        throw StateError('The trimmed reference was not saved.');
+      }
+      showNotice('“${saved.name}” saved as a new reference.');
+      return saved;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    } finally {
+      _finishReferenceUpload();
+    }
+  }
+
   List<ReferenceCandidate> generatedReferenceCandidates(
     MediaReferenceKind kind,
   ) {
@@ -2889,6 +3009,9 @@ class AppController extends ChangeNotifier {
             tags: item.tags,
             generated: true,
             storage: item.storage,
+            durationSeconds: item.config.duration is num
+                ? (item.config.duration as num).toDouble()
+                : null,
           );
         })
         .toList();
@@ -2970,6 +3093,7 @@ class AppController extends ChangeNotifier {
             ),
             thumbnailBytes: thumbnailBytes,
             savedReferenceId: candidate.generated ? null : candidate.id,
+            durationSeconds: candidate.durationSeconds,
           ),
         ];
       }
@@ -3842,7 +3966,53 @@ class AppController extends ChangeNotifier {
               item.id == id ? item.copyWith(durationSeconds: seconds) : item,
         )
         .toList();
+    final savedReferenceId = form.references[index].savedReferenceId;
+    final saved = savedReferences
+        .where((item) => item.id == savedReferenceId)
+        .firstOrNull;
+    if (saved != null) {
+      unawaited(rememberSavedReferenceDuration(saved, seconds));
+    }
     notifyListeners();
+  }
+
+  Future<void> rememberSavedReferenceDuration(
+    SavedReference reference,
+    double seconds,
+  ) async {
+    if (!seconds.isFinite ||
+        seconds <= 0 ||
+        gateway is! ReferenceLibraryGateway ||
+        _referenceDurationWrites.contains(reference.id)) {
+      return;
+    }
+    final current = savedReferences
+        .where((item) => item.id == reference.id)
+        .firstOrNull;
+    if (current == null ||
+        (current.durationSeconds != null &&
+            (current.durationSeconds! - seconds).abs() < .01)) {
+      return;
+    }
+    _referenceDurationWrites.add(reference.id);
+    try {
+      _apply(
+        await (gateway as ReferenceLibraryGateway).saveReference(
+          current.copyWith(durationSeconds: seconds),
+        ),
+      );
+      form.references = form.references.map((draft) {
+        return draft.savedReferenceId == reference.id
+            ? draft.copyWith(durationSeconds: seconds)
+            : draft;
+      }).toList();
+      notifyListeners();
+    } on Object {
+      // Duration metadata is an enhancement. The retained media remains
+      // usable if a background metadata write fails.
+    } finally {
+      _referenceDurationWrites.remove(reference.id);
+    }
   }
 
   void rememberVideoSourceThumbnail(Uint8List bytes) {
@@ -3862,10 +4032,16 @@ class AppController extends ChangeNotifier {
   }
 
   void rememberVideoSourceMetadata(VideoSourceMetadata metadata) {
-    if (!metadata.isUsable ||
-        form.videoMetadata?.signature == metadata.signature) {
-      return;
+    if (!metadata.isUsable) return;
+    final saved = savedReferences
+        .where((reference) => reference.id == form.videoSavedReferenceId)
+        .firstOrNull;
+    if (saved != null) {
+      unawaited(
+        rememberSavedReferenceDuration(saved, metadata.durationSeconds),
+      );
     }
+    if (form.videoMetadata?.signature == metadata.signature) return;
     form.videoMetadata = metadata;
     _invalidateProviderEstimate();
     notifyListeners();

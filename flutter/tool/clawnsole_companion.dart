@@ -769,6 +769,10 @@ class CompanionApp {
   final VideoCache? _videoCache;
   final VideoCache? _thumbnailCache;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
+  ReferenceVideoEditingService? get _referenceVideoEditingService =>
+      _referenceVideoNormalizer is ReferenceVideoEditingService
+      ? _referenceVideoNormalizer as ReferenceVideoEditingService
+      : null;
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
 
   Future<void> handle(HttpRequest request) async {
@@ -1546,13 +1550,15 @@ class CompanionApp {
           asset: asset,
           thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
           createdAt: existing?.createdAt ?? reference.createdAt,
-          updatedAt: DateTime.now().toUtc(),
+          updatedAt: reference.updatedAt,
           folderId: reference.folderId,
           tags: _cleanLibraryTags(reference.tags),
           favorite: reference.favorite,
           hidden: reference.hidden,
           storage: reference.storage,
           contentDigest: reference.contentDigest ?? existing?.contentDigest,
+          durationSeconds:
+              reference.durationSeconds ?? existing?.durationSeconds,
         );
         final references = List<SavedReference>.from(current.savedReferences);
         final index = references.indexWhere((item) => item.id == clean.id);
@@ -1562,6 +1568,86 @@ class CompanionApp {
           references[index] = clean;
         }
         next = current.copyWith(savedReferences: references);
+      } else if (action == 'trimReferenceVideo') {
+        final editor = _referenceVideoEditingService;
+        if (editor == null) {
+          throw StateError('Video trimming is unavailable on this build.');
+        }
+        final map = value is Map<Object?, Object?> ? value : const {};
+        final sourceReferenceId = map['sourceReferenceId']?.toString() ?? '';
+        final source = current.savedReferences
+            .where((item) => item.id == sourceReferenceId)
+            .firstOrNull;
+        if (source == null || source.kind != MediaReferenceKind.video) {
+          throw StateError('That reference video no longer exists.');
+        }
+        final rawOutput = map['output'];
+        final output = SavedReference.fromJson(
+          rawOutput is Map<Object?, Object?>
+              ? rawOutput.map((key, child) => MapEntry(key.toString(), child))
+              : const <String, Object?>{},
+        );
+        final startSeconds = (map['startSeconds'] as num?)?.toDouble();
+        final endSeconds = (map['endSeconds'] as num?)?.toDouble();
+        final sourceDuration = source.durationSeconds;
+        if (sourceDuration == null ||
+            startSeconds == null ||
+            endSeconds == null ||
+            !startSeconds.isFinite ||
+            !endSeconds.isFinite ||
+            startSeconds < 0 ||
+            endSeconds > sourceDuration + .001 ||
+            endSeconds - startSeconds < .1) {
+          throw StateError('Choose a valid range within the reference video.');
+        }
+        final name = output.name.trim();
+        if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+          throw StateError(
+            'Reference names must be between 1 and 80 characters.',
+          );
+        }
+        if (current.savedReferences.any((item) => item.id == output.id)) {
+          throw StateError('That reference already exists.');
+        }
+        if (output.storage != source.storage ||
+            (output.folderId != null &&
+                !current.folders.any(
+                  (folder) =>
+                      folder.id == output.folderId &&
+                      folder.collection == LibraryCollection.references &&
+                      folder.storage == source.storage,
+                ))) {
+          throw StateError('That reference folder no longer exists.');
+        }
+        final trimmed = await editor.trimVideo(
+          await _referenceVideoBytes(source.asset),
+          startSeconds: startSeconds,
+          endSeconds: endSeconds,
+        );
+        final asset = await _store.writeAsset(
+          trimmed,
+          label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
+          contentType: 'video/mp4',
+          storage: source.storage,
+        );
+        final now = DateTime.now().toUtc();
+        final saved = SavedReference(
+          id: output.id,
+          name: name,
+          kind: MediaReferenceKind.video,
+          asset: asset,
+          createdAt: now,
+          updatedAt: now,
+          folderId: output.folderId,
+          tags: _cleanLibraryTags(output.tags),
+          favorite: output.favorite,
+          hidden: output.hidden,
+          storage: source.storage,
+          durationSeconds: endSeconds - startSeconds,
+        );
+        next = current.copyWith(
+          savedReferences: <SavedReference>[saved, ...current.savedReferences],
+        );
       } else if (action == 'deleteReference') {
         final id = value?.toString() ?? '';
         next = current.copyWith(
@@ -1595,6 +1681,41 @@ class CompanionApp {
         action == 'saveGenerationInputPreview') {
       final data = await _store.read();
       await _store.pruneAssets(data.generations, data.savedReferences);
+    }
+  }
+
+  Future<Uint8List> _referenceVideoBytes(AssetReference asset) async {
+    if (asset.isLocal) return _store.readAsset(asset);
+    final uri = Uri.tryParse(asset.value);
+    if (uri == null || uri.scheme != 'https') {
+      throw StateError('The reference video is not available for trimming.');
+    }
+    const maximumBytes = 512 * 1024 * 1024;
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('The reference video could not be downloaded.');
+      }
+      if (response.contentLength > maximumBytes) {
+        throw StateError('Reference videos must be 512 MB or smaller.');
+      }
+      final bytes = BytesBuilder(copy: false);
+      var length = 0;
+      await for (final chunk in response) {
+        length += chunk.length;
+        if (length > maximumBytes) {
+          throw StateError('Reference videos must be 512 MB or smaller.');
+        }
+        bytes.add(chunk);
+      }
+      final value = bytes.takeBytes();
+      if (value.isEmpty) throw StateError('The reference video is empty.');
+      return value;
+    } finally {
+      client.close(force: true);
     }
   }
 

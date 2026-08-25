@@ -75,6 +75,37 @@ void main() {
     expect(ReferenceVideoCanvas.forDisplaySize(1334, 1000).width, 1280);
   });
 
+  test(
+    'video trims are frame-accurate derivatives with explicit bounds',
+    () async {
+      final cache = await Directory.systemTemp.createTemp('clawnsole-trim-');
+      addTearDown(() => cache.delete(recursive: true));
+      final backend = _FakeBackend(<Map<String, Object?>>[
+        _canonicalProbe(),
+        _canonicalProbe(),
+      ]);
+      final normalizer = ReferenceVideoNormalizer(
+        backend: backend,
+        cacheDirectory: () async => cache,
+      );
+      final source = Uint8List.fromList(<int>[1, 2, 3, 4]);
+
+      final trimmed = await normalizer.trimVideo(
+        source,
+        startSeconds: 1.25,
+        endSeconds: 4.75,
+      );
+
+      expect(source, <int>[1, 2, 3, 4]);
+      expect(trimmed, _minimalFastStartMp4());
+      expect(backend.ffmpegArguments, hasLength(1));
+      final arguments = backend.ffmpegArguments.single;
+      expect(arguments[arguments.indexOf('-ss') + 1], '1.250000');
+      expect(arguments[arguments.indexOf('-t') + 1], '3.500000');
+      expect(arguments, containsAllInOrder(<String>['-c:v', 'test_h264']));
+    },
+  );
+
   test('compatible reference images pass through without ffmpeg', () async {
     final cache = await Directory.systemTemp.createTemp(
       'clawnsole-image-normalizer-',

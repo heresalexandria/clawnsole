@@ -31,6 +31,7 @@ class WebGateway
         ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
+        ReferenceVideoEditingGateway,
         FavoriteGateway,
         VisibilityGateway,
         GenerationPreviewGateway,
@@ -511,6 +512,19 @@ class WebGateway
   @override
   Future<LocalSnapshot> deleteReference(String referenceId) =>
       _action('deleteReference', referenceId);
+
+  @override
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  }) => _action('trimReferenceVideo', <String, Object?>{
+    'sourceReferenceId': sourceReferenceId,
+    'output': output.toJson(),
+    'startSeconds': startSeconds,
+    'endSeconds': endSeconds,
+  });
 
   @override
   Future<LocalSnapshot> setGenerationFavorite(String localId, bool favorite) =>

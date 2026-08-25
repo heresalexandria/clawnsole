@@ -45,6 +45,7 @@ class DirectGateway
         ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
+        ReferenceVideoEditingGateway,
         FavoriteGateway,
         VisibilityGateway,
         GenerationPreviewGateway,
@@ -67,12 +68,17 @@ class DirectGateway
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _client = client ?? http.Client(),
-       _referenceVideoNormalizer = referenceVideoNormalizer;
+       _referenceVideoNormalizer = referenceVideoNormalizer,
+       _referenceVideoEditingService =
+           referenceVideoNormalizer is ReferenceVideoEditingService
+           ? referenceVideoNormalizer as ReferenceVideoEditingService
+           : null;
 
   final DurableDataStore _store;
   final ProviderApiRouter _providers;
   final http.Client _client;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
+  final ReferenceVideoEditingService? _referenceVideoEditingService;
   @override
   final String persistenceDescription;
   final Set<String> availableProviders;
@@ -477,13 +483,14 @@ class DirectGateway
       asset: asset,
       thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
       createdAt: existing?.createdAt ?? reference.createdAt,
-      updatedAt: DateTime.now().toUtc(),
+      updatedAt: reference.updatedAt,
       folderId: reference.folderId,
       tags: _cleanLibraryTags(reference.tags),
       favorite: reference.favorite,
       hidden: reference.hidden,
       storage: reference.storage,
       contentDigest: reference.contentDigest ?? existing?.contentDigest,
+      durationSeconds: reference.durationSeconds ?? existing?.durationSeconds,
     );
     final references = List<SavedReference>.from(current.savedReferences);
     final index = references.indexWhere((item) => item.id == clean.id);
@@ -495,6 +502,102 @@ class DirectGateway
     final next = current.copyWith(savedReferences: references);
     await _store.write(next);
     return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    final editor = _referenceVideoEditingService;
+    if (editor == null) {
+      throw StateError('Video trimming is unavailable on this build.');
+    }
+    final current = await _store.read();
+    final source = current.savedReferences
+        .where((item) => item.id == sourceReferenceId)
+        .firstOrNull;
+    if (source == null || source.kind != MediaReferenceKind.video) {
+      throw StateError('That reference video no longer exists.');
+    }
+    final sourceDuration = source.durationSeconds;
+    if (sourceDuration == null ||
+        !startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds > sourceDuration + .001 ||
+        endSeconds - startSeconds < .1) {
+      throw StateError('Choose a valid range within the reference video.');
+    }
+    final name = output.name.trim();
+    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+      throw StateError('Reference names must be between 1 and 80 characters.');
+    }
+    if (current.savedReferences.any((item) => item.id == output.id)) {
+      throw StateError('That reference already exists.');
+    }
+    if (output.storage != source.storage ||
+        (output.folderId != null &&
+            !current.folders.any(
+              (folder) =>
+                  folder.id == output.folderId &&
+                  folder.collection == LibraryCollection.references &&
+                  folder.storage == source.storage,
+            ))) {
+      throw StateError('That reference folder no longer exists.');
+    }
+    final original = await _referenceVideoBytes(source.asset);
+    final trimmed = await editor.trimVideo(
+      original,
+      startSeconds: startSeconds,
+      endSeconds: endSeconds,
+    );
+    final asset = await _store.writeAsset(
+      trimmed,
+      label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
+      contentType: 'video/mp4',
+      storage: source.storage,
+    );
+    final now = DateTime.now().toUtc();
+    final saved = SavedReference(
+      id: output.id,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      createdAt: now,
+      updatedAt: now,
+      folderId: output.folderId,
+      tags: _cleanLibraryTags(output.tags),
+      favorite: output.favorite,
+      hidden: output.hidden,
+      storage: source.storage,
+      durationSeconds: endSeconds - startSeconds,
+    );
+    final next = current.copyWith(
+      savedReferences: <SavedReference>[saved, ...current.savedReferences],
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  Future<Uint8List> _referenceVideoBytes(AssetReference asset) async {
+    if (asset.isLocal) return _store.readAsset(asset);
+    final uri = Uri.tryParse(asset.value);
+    if (uri == null || uri.scheme != 'https') {
+      throw StateError('The reference video is not available for trimming.');
+    }
+    final response = await _client.get(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('The reference video could not be downloaded.');
+    }
+    const maximumBytes = 512 * 1024 * 1024;
+    if (response.bodyBytes.isEmpty ||
+        response.bodyBytes.length > maximumBytes) {
+      throw StateError('Reference videos must be 512 MB or smaller.');
+    }
+    return response.bodyBytes;
   }
 
   @override

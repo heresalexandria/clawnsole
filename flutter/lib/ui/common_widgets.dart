@@ -810,7 +810,10 @@ class _MediaReferenceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: '${media.kind.label} reference · ${media.label} — tap to view',
+    message:
+        '${media.kind.label} reference · ${media.label}'
+        '${media.durationSeconds == null ? '' : ' · ${formatMediaDuration(media.durationSeconds!)}'}'
+        ' — tap to view',
     child: InkWell(
       key: ValueKey('view-generation-reference-${item.localId}-${media.label}'),
       borderRadius: BorderRadius.circular(8),
@@ -862,7 +865,9 @@ class _MediaReferenceChip extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 110),
               child: Text(
-                media.label,
+                media.durationSeconds == null
+                    ? media.label
+                    : '${media.label} · ${formatMediaDuration(media.durationSeconds!)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(

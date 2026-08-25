@@ -1741,7 +1741,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 22);
+    expect(decoded.toJson()['schemaVersion'], 23);
   });
 
   test(
@@ -1937,7 +1937,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 22);
+      expect(decoded.toJson()['schemaVersion'], 23);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -4362,7 +4362,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: buildClawnsoleTheme(Brightness.light),
-          home: Scaffold(body: CreateScreen(controller: controller)),
+          home: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) =>
+                Scaffold(body: CreateScreen(controller: controller)),
+          ),
         ),
       );
 
@@ -4376,6 +4380,43 @@ void main() {
       expect(find.textContaining('30 images'), findsOneWidget);
       expect(find.textContaining('10 videos'), findsOneWidget);
       expect(find.textContaining('10 audio clips'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('reference-capacity-image-count')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-video-count')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-video-duration')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-audio-duration')),
+        findsOneWidget,
+      );
+      controller.addUrlReference(MediaReferenceKind.video);
+      final videoReference = controller.form.references.single;
+      controller.form.references = <MediaReferenceDraft>[
+        videoReference.copyWith(durationSeconds: 12),
+      ];
+      await tester.pump();
+      final videoCountGauge = tester.widget<LinearProgressIndicator>(
+        find.descendant(
+          of: find.byKey(const ValueKey('reference-capacity-video-count')),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+      );
+      final videoDurationGauge = tester.widget<LinearProgressIndicator>(
+        find.descendant(
+          of: find.byKey(const ValueKey('reference-capacity-video-duration')),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+      );
+      expect(videoCountGauge.value, .1);
+      expect(videoDurationGauge.value, .4);
+      expect(find.text('12 s / 30 s'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reference-task-reference')),
         findsOneWidget,
@@ -4862,6 +4903,7 @@ void main() {
       createdAt: now,
       updatedAt: now,
       tags: const <String>['skate'],
+      durationSeconds: 12,
     );
     final snapshot = LocalSnapshot(
       generations: const <Generation>[],
@@ -4923,6 +4965,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('0/2 selected'), findsOneWidget);
+    expect(find.textContaining('12 s'), findsNWidgets(3));
 
     final first = find.byKey(
       const ValueKey('reference-picker-card-saved-video-1'),

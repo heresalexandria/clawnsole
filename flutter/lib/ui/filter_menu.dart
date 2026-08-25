@@ -674,6 +674,8 @@ class ReferenceSortButton extends StatelessWidget {
     ReferenceSort.oldest => 'Oldest',
     ReferenceSort.name => 'Name',
     ReferenceSort.kind => 'Media type',
+    ReferenceSort.durationShortest => 'Duration: shortest',
+    ReferenceSort.durationLongest => 'Duration: longest',
   };
 
   @override
