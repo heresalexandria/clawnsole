@@ -299,6 +299,8 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           focusNode: _focusNode,
           autofocus: widget.autofocus,
           expands: widget.expands,
+          textAlign: widget.expands ? TextAlign.left : TextAlign.start,
+          textAlignVertical: widget.expands ? TextAlignVertical.top : null,
           minLines: widget.expands ? null : 4,
           maxLines: widget.expands ? null : 10,
           maxLength: widget.maxLength ?? 50000,

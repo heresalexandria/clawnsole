@@ -4482,6 +4482,7 @@ void main() {
     await tester.binding.setSurfaceSize(viewport);
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
+      tester.view.resetViewInsets();
       await tester.binding.setSurfaceSize(null);
     });
     final controller = AppController()
@@ -4521,6 +4522,25 @@ void main() {
     expect(fullscreen, findsOneWidget);
     expect(tester.getSize(fullscreen), viewport);
     expect(tester.getSize(fullscreenPrompt).height, greaterThan(600));
+    final fullscreenTextField = tester.widget<TextField>(
+      find.descendant(of: fullscreenPrompt, matching: find.byType(TextField)),
+    );
+    expect(fullscreenTextField.textAlign, TextAlign.left);
+    expect(fullscreenTextField.textAlignVertical, TextAlignVertical.top);
+
+    const keyboardHeight = 280.0;
+    tester.view.viewInsets = FakeViewPadding(
+      bottom: keyboardHeight * tester.view.devicePixelRatio,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(
+      tester.getBottomRight(fullscreenPrompt).dy,
+      lessThanOrEqualTo(viewport.height - keyboardHeight),
+    );
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+
     await tester.enterText(
       fullscreenPrompt,
       List<String>.filled(1001, 'y').join(),

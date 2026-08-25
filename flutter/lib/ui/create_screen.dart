@@ -916,46 +916,53 @@ class _FullscreenPromptEditor extends StatelessWidget {
       key: const ValueKey('prompt-fullscreen-editor'),
       type: MaterialType.transparency,
       child: AppBackdrop(
-        child: SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
-              12,
-              horizontalPadding,
-              16,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                FieldLabel(
-                  upscaling ? 'Detail guidance · optional' : 'Direction',
-                  icon: Icons.edit_note_rounded,
-                  trailing: IconButton(
-                    key: const ValueKey('prompt-fullscreen-minimize'),
-                    tooltip: 'Minimize prompt',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.fullscreen_exit_rounded),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ReferencePromptField(
-                    key: ValueKey(
-                      'generation-prompt-fullscreen-'
-                      '${controller.formRevision}',
+        child: AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                12,
+                horizontalPadding,
+                16,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  FieldLabel(
+                    upscaling ? 'Detail guidance · optional' : 'Direction',
+                    icon: Icons.edit_note_rounded,
+                    trailing: IconButton(
+                      key: const ValueKey('prompt-fullscreen-minimize'),
+                      tooltip: 'Minimize prompt',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.fullscreen_exit_rounded),
                     ),
-                    prompt: controller.form.prompt,
-                    formRevision: controller.formRevision,
-                    references: _promptReferenceOptions(controller),
-                    expands: true,
-                    autofocus: true,
-                    maxLength: controller.selectedModel.maxPromptCharacters,
-                    onChanged: (value) =>
-                        controller.updateForm((form) => form.prompt = value),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ReferencePromptField(
+                      key: ValueKey(
+                        'generation-prompt-fullscreen-'
+                        '${controller.formRevision}',
+                      ),
+                      prompt: controller.form.prompt,
+                      formRevision: controller.formRevision,
+                      references: _promptReferenceOptions(controller),
+                      expands: true,
+                      autofocus: true,
+                      maxLength: controller.selectedModel.maxPromptCharacters,
+                      onChanged: (value) =>
+                          controller.updateForm((form) => form.prompt = value),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
