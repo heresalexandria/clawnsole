@@ -592,6 +592,13 @@ class AppController extends ChangeNotifier {
   bool get hasApiKey => hasApiKeyFor(selectedProviderId);
   bool hasApiKeyFor(String provider) =>
       snapshot?.hasApiKeyFor(provider) ?? false;
+  bool get requiresProviderRetentionAcknowledgement =>
+      selectedProvider.resultDelivery.keepOpenRecommended &&
+      hasApiKey &&
+      !(snapshot?.providerRetentionAcknowledgements.contains(
+            selectedProviderId,
+          ) ??
+          false);
   bool get hasAnyApiKey =>
       snapshot?.connectedProviders.isNotEmpty == true ||
       snapshot?.hasApiKey == true;
@@ -1308,6 +1315,8 @@ class AppController extends ChangeNotifier {
             hasApiKey: value.hasApiKey,
             connectedProviders: value.connectedProviders,
             availableProviders: value.availableProviders,
+            providerRetentionAcknowledgements:
+                value.providerRetentionAcknowledgements,
             storage: value.storage,
             settingsVault: value.settingsVault,
           );
@@ -4154,6 +4163,12 @@ class AppController extends ChangeNotifier {
       }
       return;
     }
+    if (requiresProviderRetentionAcknowledgement) {
+      showNotice(
+        'Review and accept the ${selectedProvider.name} result-retention warning before generating.',
+      );
+      return;
+    }
     if (!canUseDefaultStorage) {
       showNotice(
         'Connect Google Drive before generating to your Drive library.',
@@ -4208,6 +4223,8 @@ class AppController extends ChangeNotifier {
         hasApiKey: current.hasApiKey,
         connectedProviders: current.connectedProviders,
         availableProviders: current.availableProviders,
+        providerRetentionAcknowledgements:
+            current.providerRetentionAcknowledgements,
         folders: current.folders,
         savedReferences: current.savedReferences,
         storage: current.storage,
@@ -4319,6 +4336,8 @@ class AppController extends ChangeNotifier {
       hasApiKey: current.hasApiKey,
       connectedProviders: current.connectedProviders,
       availableProviders: current.availableProviders,
+      providerRetentionAcknowledgements:
+          current.providerRetentionAcknowledgements,
       folders: current.folders,
       savedReferences: current.savedReferences,
       storage: current.storage,
@@ -4585,6 +4604,20 @@ class AppController extends ChangeNotifier {
     creditError = null;
     showNotice(
       '${providerById(provider).name} key verified and saved locally.',
+    );
+  }
+
+  Future<void> acknowledgeProviderRetentionRisk() async {
+    final provider = selectedProvider;
+    if (!provider.resultDelivery.keepOpenRecommended) return;
+    if (gateway is! ProviderRetentionAcknowledgementGateway) {
+      throw StateError(
+        'This app build cannot save the ${provider.name} acknowledgement.',
+      );
+    }
+    _apply(
+      await (gateway as ProviderRetentionAcknowledgementGateway)
+          .acknowledgeProviderRetentionRisk(provider.id),
     );
   }
 

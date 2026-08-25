@@ -1233,13 +1233,46 @@ void main() {
 
     expect(encoded, isNot(contains('secret')));
     expect(decoded.apiKeys, isEmpty);
-    expect(decoded.toJson()['schemaVersion'], 22);
+    expect(decoded.toJson()['schemaVersion'], 23);
     final legacy = StoredData.decode(
       '{"schemaVersion":16,"apiKeys":{"bfl":"old-bfl","ltx":"old-ltx"},"generations":[]}',
     );
     expect(legacy.apiKeyFor('bfl'), 'old-bfl');
     expect(legacy.apiKeyFor('ltx'), 'old-ltx');
   });
+
+  test(
+    'retention acknowledgement resets only when its provider key changes',
+    () {
+      final accepted = const StoredData()
+          .withApiKey('bfl', 'bfl-key-one')
+          .withApiKey('runway', 'runway-key')
+          .withProviderRetentionAcknowledged(
+            'bfl',
+            providerCredentialAcknowledgementId('bfl', 'bfl-key-one'),
+          )
+          .withProviderRetentionAcknowledged(
+            'runway',
+            providerCredentialAcknowledgementId('runway', 'runway-key'),
+          );
+
+      final unchanged = accepted.withApiKey('bfl', 'bfl-key-one');
+      expect(unchanged.providerRetentionAcknowledgements, <String, String>{
+        'bfl': providerCredentialAcknowledgementId('bfl', 'bfl-key-one'),
+        'runway': providerCredentialAcknowledgementId('runway', 'runway-key'),
+      });
+
+      final changed = unchanged.withApiKey('bfl', 'bfl-key-two');
+      expect(changed.providerRetentionAcknowledgements.keys, <String>{
+        'runway',
+      });
+
+      final decoded = StoredData.decode(changed.encode());
+      expect(decoded.providerRetentionAcknowledgements.keys, <String>{
+        'runway',
+      });
+    },
+  );
 
   test('ArtCraft resolutions survive history serialization', () {
     for (final resolution in <String>['sd', 'fhd', 'qhd', '4k']) {

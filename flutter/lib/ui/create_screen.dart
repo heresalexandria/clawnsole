@@ -3952,6 +3952,115 @@ class _BalanceLine extends StatelessWidget {
   }
 }
 
+Future<void> _submitWithProviderRetentionWarning(
+  BuildContext context,
+  AppController controller,
+) async {
+  if (controller.requiresProviderRetentionAcknowledgement) {
+    final accepted = await _showProviderRetentionWarning(
+      context,
+      controller.selectedProvider,
+    );
+    if (!accepted || !context.mounted) return;
+    try {
+      await controller.acknowledgeProviderRetentionRisk();
+    } on Object catch (error) {
+      controller.showErrorNotice(error);
+      return;
+    }
+  }
+  await controller.submit();
+}
+
+Future<bool> _showProviderRetentionWarning(
+  BuildContext context,
+  VideoProviderDefinition provider,
+) async {
+  var understood = false;
+  return await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            icon: Icon(
+              Icons.warning_amber_rounded,
+              color: context.colors.error,
+              size: 30,
+            ),
+            title: Text('Keep Clawnsole open for ${provider.name}'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      'When generating with ${provider.name}, keep Clawnsole '
+                      'open and active and maintain an internet connection '
+                      'until Clawnsole confirms the result is saved.',
+                    ),
+                    const SizedBox(height: 12),
+                    Text(_providerRetentionDetail(provider)),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'If Clawnsole cannot retrieve the completed result in '
+                      'time, you may lose access to the generation even if '
+                      'the provider charged for it.',
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      key: const ValueKey(
+                        'provider-retention-warning-checkbox',
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: understood,
+                      onChanged: (value) =>
+                          setState(() => understood = value ?? false),
+                      title: const Text(
+                        'I understand that closing or backgrounding the app '
+                        'or going offline may cause me to lose this result.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('accept-provider-retention-warning'),
+                onPressed: understood
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                child: const Text('Accept & generate'),
+              ),
+            ],
+          ),
+        ),
+      ) ??
+      false;
+}
+
+String _providerRetentionDetail(VideoProviderDefinition provider) {
+  final availability = provider.resultDelivery.availability;
+  if (availability == null) {
+    return '${provider.name} does not publish a dependable result-retention '
+        'window, so later retrieval cannot be guaranteed.';
+  }
+  final minutes = availability.inMinutes;
+  final window = minutes % (24 * 60) == 0
+      ? '${minutes ~/ (24 * 60)} ${minutes == 24 * 60 ? 'day' : 'days'}'
+      : minutes % 60 == 0
+      ? '${minutes ~/ 60} ${minutes == 60 ? 'hour' : 'hours'}'
+      : '$minutes ${minutes == 1 ? 'minute' : 'minutes'}';
+  return '${provider.name} hosts completed results for only $window after '
+      'completion.';
+}
+
 class _ComposerFooter extends StatelessWidget {
   const _ComposerFooter({required this.controller});
 
@@ -4014,7 +4123,9 @@ class _ComposerFooter extends StatelessWidget {
     final generate = FilledButton.icon(
       onPressed: controller.submitting
           ? null
-          : () => unawaited(controller.submit()),
+          : () => unawaited(
+              _submitWithProviderRetentionWarning(context, controller),
+            ),
       icon: controller.submitting
           ? SizedBox.square(
               dimension: 16,

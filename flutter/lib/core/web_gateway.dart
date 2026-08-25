@@ -28,6 +28,7 @@ class WebGateway
     implements
         AppGateway,
         ProviderGateway,
+        ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
@@ -380,6 +381,10 @@ class WebGateway
         'provider': provider,
         'apiKey': value,
       });
+
+  @override
+  Future<LocalSnapshot> acknowledgeProviderRetentionRisk(String provider) =>
+      _action('acknowledgeProviderRetentionRisk', provider);
 
   @override
   Future<double> verifyKey([String? candidate]) async {

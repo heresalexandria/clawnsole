@@ -1,6 +1,19 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+
 import 'generation_status.dart';
+
+String providerCredentialAcknowledgementId(
+  String provider,
+  String apiKey,
+) => sha256
+    .convert(
+      utf8.encode(
+        'clawnsole-provider-retention-v1\u0000$provider\u0000${apiKey.trim()}',
+      ),
+    )
+    .toString();
 
 enum AppSection { create, library, references, providers, settings }
 
@@ -1371,6 +1384,7 @@ class StoredData {
   const StoredData({
     this.apiKey = '',
     this.apiKeys = const <String, String>{},
+    this.providerRetentionAcknowledgements = const <String, String>{},
     this.rejectedIosReviewApiKeyId = '',
     this.rejectedIosReviewApiKeyIds = const <String, String>{},
     this.preferences = const AppPreferences(),
@@ -1385,6 +1399,7 @@ class StoredData {
 
   final String apiKey;
   final Map<String, String> apiKeys;
+  final Map<String, String> providerRetentionAcknowledgements;
   final String rejectedIosReviewApiKeyId;
   final Map<String, String> rejectedIosReviewApiKeyIds;
   final AppPreferences preferences;
@@ -1399,6 +1414,7 @@ class StoredData {
   StoredData copyWith({
     String? apiKey,
     Map<String, String>? apiKeys,
+    Map<String, String>? providerRetentionAcknowledgements,
     String? rejectedIosReviewApiKeyId,
     Map<String, String>? rejectedIosReviewApiKeyIds,
     AppPreferences? preferences,
@@ -1414,6 +1430,9 @@ class StoredData {
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
+    providerRetentionAcknowledgements:
+        providerRetentionAcknowledgements ??
+        this.providerRetentionAcknowledgements,
     rejectedIosReviewApiKeyId:
         rejectedIosReviewApiKeyId ?? this.rejectedIosReviewApiKeyId,
     rejectedIosReviewApiKeyIds:
@@ -1440,17 +1459,34 @@ class StoredData {
       (provider == 'bfl' ? rejectedIosReviewApiKeyId : '');
 
   StoredData withApiKey(String provider, String value) {
+    final clean = value.trim();
+    final changed = apiKeyFor(provider).trim() != clean;
     final next = Map<String, String>.from(apiKeys);
-    if (value.trim().isEmpty) {
+    if (clean.isEmpty) {
       next.remove(provider);
     } else {
-      next[provider] = value.trim();
+      next[provider] = clean;
     }
+    final acknowledgements = Map<String, String>.from(
+      providerRetentionAcknowledgements,
+    );
+    if (changed) acknowledgements.remove(provider);
     return copyWith(
-      apiKey: provider == 'bfl' ? value.trim() : apiKey,
+      apiKey: provider == 'bfl' ? clean : apiKey,
       apiKeys: next,
+      providerRetentionAcknowledgements: acknowledgements,
     );
   }
+
+  StoredData withProviderRetentionAcknowledged(
+    String provider,
+    String credentialId,
+  ) => copyWith(
+    providerRetentionAcknowledgements: <String, String>{
+      ...providerRetentionAcknowledgements,
+      provider: credentialId,
+    },
+  );
 
   StoredData withRejectedReviewKeyId(String provider, String value) {
     final next = Map<String, String>.from(rejectedIosReviewApiKeyIds);
@@ -1468,7 +1504,12 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 22,
+    'schemaVersion': 23,
+    if (providerRetentionAcknowledgements.isNotEmpty)
+      'providerRetentionAcknowledgements': Map<String, String>.fromEntries(
+        providerRetentionAcknowledgements.entries.toList()
+          ..sort((left, right) => left.key.compareTo(right.key)),
+      ),
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1588,6 +1629,18 @@ class StoredData {
       apiKeys: apiKeys.map(
         (key, value) => MapEntry(key, value is String ? value : ''),
       )..removeWhere((key, value) => value.isEmpty),
+      providerRetentionAcknowledgements:
+          (json['providerRetentionAcknowledgements']
+                      as Map<Object?, Object?>? ??
+                  const <Object?, Object?>{})
+              .map(
+                (provider, credentialId) =>
+                    MapEntry(provider.toString(), credentialId.toString()),
+              )
+            ..removeWhere(
+              (provider, credentialId) =>
+                  provider.trim().isEmpty || credentialId.trim().isEmpty,
+            ),
       rejectedIosReviewApiKeyId:
           json['rejectedIosReviewApiKeyId'] as String? ?? '',
       rejectedIosReviewApiKeyIds: rejectedIds,
@@ -1725,6 +1778,7 @@ class LocalSnapshot {
     required this.storage,
     this.connectedProviders = const <String>{},
     this.availableProviders = const <String>{},
+    this.providerRetentionAcknowledgements = const <String>{},
     this.folders = const <LibraryFolder>[],
     this.savedReferences = const <SavedReference>[],
     this.settingsVault = const SettingsVaultStatus.unavailable(),
@@ -1736,6 +1790,7 @@ class LocalSnapshot {
   final StorageStats storage;
   final Set<String> connectedProviders;
   final Set<String> availableProviders;
+  final Set<String> providerRetentionAcknowledgements;
   final List<LibraryFolder> folders;
   final List<SavedReference> savedReferences;
   final SettingsVaultStatus settingsVault;
@@ -1747,6 +1802,7 @@ class LocalSnapshot {
     StorageStats? storage,
     Set<String>? connectedProviders,
     Set<String>? availableProviders,
+    Set<String>? providerRetentionAcknowledgements,
     List<LibraryFolder>? folders,
     List<SavedReference>? savedReferences,
     SettingsVaultStatus? settingsVault,
@@ -1757,6 +1813,9 @@ class LocalSnapshot {
     storage: storage ?? this.storage,
     connectedProviders: connectedProviders ?? this.connectedProviders,
     availableProviders: availableProviders ?? this.availableProviders,
+    providerRetentionAcknowledgements:
+        providerRetentionAcknowledgements ??
+        this.providerRetentionAcknowledgements,
     folders: folders ?? this.folders,
     savedReferences: savedReferences ?? this.savedReferences,
     settingsVault: settingsVault ?? this.settingsVault,
@@ -1771,6 +1830,8 @@ class LocalSnapshot {
     'hasBflApiKey': hasApiKey,
     'connectedProviders': connectedProviders.toList()..sort(),
     'availableProviders': availableProviders.toList()..sort(),
+    'providerRetentionAcknowledgements':
+        providerRetentionAcknowledgements.toList()..sort(),
     'folders': folders.map((folder) => folder.toJson()).toList(),
     'savedReferences': savedReferences.map((item) => item.toJson()).toList(),
     'settingsVault': settingsVault.toJson(),
@@ -1798,6 +1859,11 @@ class LocalSnapshot {
             .toSet(),
     availableProviders:
         (json['availableProviders'] as List<Object?>? ?? const <Object?>[])
+            .whereType<String>()
+            .toSet(),
+    providerRetentionAcknowledgements:
+        (json['providerRetentionAcknowledgements'] as List<Object?>? ??
+                const <Object?>[])
             .whereType<String>()
             .toSet(),
     folders: (json['folders'] as List<Object?>? ?? const <Object?>[])

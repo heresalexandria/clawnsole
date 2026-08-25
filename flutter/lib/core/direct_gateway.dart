@@ -42,6 +42,7 @@ class DirectGateway
     implements
         AppGateway,
         ProviderGateway,
+        ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
@@ -177,6 +178,12 @@ class DirectGateway
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
       availableProviders: availableProviders,
+      providerRetentionAcknowledgements: connected.where((provider) {
+        final credential = activeApiKey(provider, data);
+        return credential != null &&
+            data.providerRetentionAcknowledgements[provider] ==
+                providerCredentialAcknowledgementId(provider, credential.value);
+      }).toSet(),
       storage: await _store.stats(
         data.generations.length + data.savedReferences.length,
       ),
@@ -237,6 +244,26 @@ class DirectGateway
       throw StateError('The provider API key is unexpectedly long.');
     }
     final next = (await _store.read()).withApiKey(provider, clean);
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> acknowledgeProviderRetentionRisk(
+    String provider,
+  ) async {
+    final current = await _store.read();
+    if (!providerById(provider).resultDelivery.keepOpenRecommended) {
+      throw StateError('$provider does not require a retention warning.');
+    }
+    final credential = activeApiKey(provider, current);
+    if (credential == null) {
+      throw StateError('An API key is required.');
+    }
+    final next = current.withProviderRetentionAcknowledged(
+      provider,
+      providerCredentialAcknowledgementId(provider, credential.value),
+    );
     await _store.write(next);
     return _snapshot(next);
   }
