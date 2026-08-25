@@ -680,16 +680,16 @@ void main() {
     );
   });
 
-  test('FLUX 3 visual routes declare the audited four megapixel cap', () {
-    expect(modelById('bfl', 'flux-3-video').maxInputImagePixels, 4000000);
-    expect(modelById('artcraft', 'flux_3').maxInputImagePixels, 4000000);
-    expect(modelById('artcraft', 'flux_3_draft').maxInputImagePixels, 4000000);
+  test('FLUX 3 visual routes leave headroom below the four megapixel cap', () {
+    expect(modelById('bfl', 'flux-3-video').maxInputImagePixels, 3800000);
+    expect(modelById('artcraft', 'flux_3').maxInputImagePixels, 3800000);
+    expect(modelById('artcraft', 'flux_3_draft').maxInputImagePixels, 3800000);
     expect(
       modelById(
         'atlas',
         'black-forest-labs/flux-3/image-to-video',
       ).maxInputImagePixels,
-      4000000,
+      3800000,
     );
 
     for (final provider in videoProviders) {
