@@ -1438,10 +1438,16 @@ class _ChangedReferenceMediaNormalizer
 
   final String derivative;
   List<String> sources = const <String>[];
+  ReferenceImageCompatibilityProfile? imageProfile;
 
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async {
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async {
     this.sources = List<String>.of(sources);
+    imageProfile = profile;
     return PreparedReferenceImages(
       sources: <String>[derivative],
       changedIndexes: const <int>{0},

@@ -22,6 +22,24 @@ const _appleLocalLarge = VideoResolutionDefinition(
 
 enum ReferenceVideoCompatibilityProfile { generic, seedance }
 
+/// Provider/model limits that can be satisfied without changing image
+/// composition. Normalization may decode and proportionally downscale the full
+/// frame, but it never crops to an output aspect ratio.
+class ReferenceImageCompatibilityProfile {
+  const ReferenceImageCompatibilityProfile({this.maxPixels, this.maxBytes});
+
+  final int? maxPixels;
+  final int? maxBytes;
+
+  String get cacheKey =>
+      'pixels-${maxPixels ?? 'unbounded'}-bytes-${maxBytes ?? 'unbounded'}';
+
+  bool acceptsPixels(int width, int height) =>
+      maxPixels == null || width * height <= maxPixels!;
+
+  bool acceptsBytes(int length) => maxBytes == null || length <= maxBytes!;
+}
+
 /// Whether a provider/model route supplies a meaningful completion percentage.
 ///
 /// Unknown routes deliberately default to [none]. A progress-shaped response
@@ -78,6 +96,8 @@ class VideoModelDefinition {
     this.referenceUsdPerSecond,
     this.supportsStartFrame = false,
     this.supportsEndFrame = false,
+    this.maxInputImagePixels,
+    this.maxInputImageBytes,
     this.maxImageReferences = 0,
     this.maxVideoReferences = 0,
     this.maxAudioReferences = 0,
@@ -139,6 +159,15 @@ class VideoModelDefinition {
   final double? referenceUsdPerSecond;
   final bool supportsStartFrame;
   final bool supportsEndFrame;
+
+  /// Hard provider/model ceiling for each pinned or creative input image.
+  /// Null means no dependable pixel ceiling is published for this route.
+  final int? maxInputImagePixels;
+
+  /// Hard file-byte ceiling for each pinned or creative input image.
+  /// This is the source file size, before any data-URI base64 expansion.
+  final int? maxInputImageBytes;
+
   final int maxImageReferences;
   final int maxVideoReferences;
   final int maxAudioReferences;
@@ -220,6 +249,8 @@ class VideoModelDefinition {
     referenceUsdPerSecond: referenceUsdPerSecond,
     supportsStartFrame: supportsStartFrame,
     supportsEndFrame: supportsEndFrame,
+    maxInputImagePixels: maxInputImagePixels,
+    maxInputImageBytes: maxInputImageBytes,
     maxImageReferences: maxImageReferences,
     maxVideoReferences: maxVideoReferences,
     maxAudioReferences: maxAudioReferences,
@@ -287,6 +318,12 @@ class VideoModelDefinition {
       : canonicalId.startsWith('seedance-') || id.startsWith('seedance_')
       ? ReferenceVideoCompatibilityProfile.seedance
       : ReferenceVideoCompatibilityProfile.generic;
+
+  ReferenceImageCompatibilityProfile get referenceImageCompatibilityProfile =>
+      ReferenceImageCompatibilityProfile(
+        maxPixels: maxInputImagePixels,
+        maxBytes: maxInputImageBytes,
+      );
 
   bool get isUpscaler => modes.length == 1 && modes.single == VideoMode.upscale;
 
@@ -437,6 +474,7 @@ class _ArtCraftModel extends VideoModelDefinition {
     required super.usdPerSecond,
     super.supportsStartFrame = true,
     super.supportsEndFrame = true,
+    super.maxInputImagePixels,
     super.maxImageReferences,
     super.maxVideoReferences,
     super.maxAudioReferences,
@@ -539,6 +577,7 @@ const _bflProvider = VideoProviderDefinition(
       maxDuration: 20,
       durationStep: 1,
       maxKeyframes: 10,
+      maxInputImagePixels: 4000000,
       usdPerSecond: .17,
       referenceUsdPerSecond: .17,
       supportsStartFrame: true,
@@ -592,6 +631,7 @@ const _ltxProvider = VideoProviderDefinition(
       maxDuration: 20,
       durationStep: 2,
       maxKeyframes: 2,
+      maxInputImageBytes: 5000000,
       usdPerSecond: .03,
       referenceUsdPerSecond: .03,
       supportsStartFrame: true,
@@ -609,6 +649,7 @@ const _ltxProvider = VideoProviderDefinition(
       maxDuration: 10,
       durationStep: 2,
       maxKeyframes: 2,
+      maxInputImageBytes: 5000000,
       usdPerSecond: .04,
       referenceUsdPerSecond: .04,
       supportsStartFrame: true,
@@ -1308,6 +1349,7 @@ const _artCraftProvider = VideoProviderDefinition(
       minDuration: 5,
       maxDuration: 20,
       maxKeyframes: 2,
+      maxInputImagePixels: 4000000,
       usdPerSecond: .196,
       supportsAudio: true,
     ),
@@ -1321,6 +1363,7 @@ const _artCraftProvider = VideoProviderDefinition(
       minDuration: 5,
       maxDuration: 20,
       maxKeyframes: 2,
+      maxInputImagePixels: 4000000,
       usdPerSecond: .07,
       supportsAudio: true,
     ),
@@ -1527,6 +1570,7 @@ class _AtlasRouteModel extends VideoModelDefinition {
     super.durationStep = 1,
     super.supportsAudio = true,
     super.supportsSeed = false,
+    super.maxInputImagePixels,
     bool imageRoute = false,
     bool supportsEndFrame = false,
   }) : super(
@@ -1981,6 +2025,7 @@ const _atlasProvider = VideoProviderDefinition(
       maxDuration: 20,
       usdPerSecond: .17,
       imageRoute: true,
+      maxInputImagePixels: 4000000,
     ),
   ],
 );

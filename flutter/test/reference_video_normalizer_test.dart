@@ -13,6 +13,36 @@ import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/reference_video_normalizer_mobile.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+Uint8List _jpegWithDimensions(int width, int height) =>
+    Uint8List.fromList(<int>[
+      0xff,
+      0xd8,
+      0xff,
+      0xc0,
+      0x00,
+      0x11,
+      0x08,
+      (height >> 8) & 0xff,
+      height & 0xff,
+      (width >> 8) & 0xff,
+      width & 0xff,
+      0x03,
+      0x01,
+      0x11,
+      0x00,
+      0x02,
+      0x11,
+      0x00,
+      0x03,
+      0x11,
+      0x00,
+      0xff,
+      0xd9,
+    ]);
+
+({int width, int height}) _testJpegDimensions(Uint8List bytes) =>
+    (width: (bytes[9] << 8) | bytes[10], height: (bytes[7] << 8) | bytes[8]);
+
 void main() {
   test('every video-reference model declares a compatibility profile', () {
     for (final provider in videoProviders) {
@@ -65,6 +95,88 @@ void main() {
     expect(backend.ffmpegArguments, isEmpty);
   });
 
+  test(
+    'oversized compatible images are downscaled without changing aspect ratio',
+    () async {
+      final cache = await Directory.systemTemp.createTemp(
+        'clawnsole-image-downscale-',
+      );
+      addTearDown(() => cache.delete(recursive: true));
+      final backend = _ImageBackend();
+      final sourceBytes = _jpegWithDimensions(2316, 3088);
+      final source = 'data:image/jpeg;base64,${base64Encode(sourceBytes)}';
+      final normalizer = ReferenceVideoNormalizer(
+        backend: backend,
+        cacheDirectory: () async => cache,
+      );
+
+      final normalized = await normalizer.normalizeImages(<String>[
+        source,
+      ], profile: const ReferenceImageCompatibilityProfile(maxPixels: 4000000));
+
+      expect(normalized.changedIndexes, <int>{0});
+      expect(backend.ffmpegArguments, hasLength(1));
+      final arguments = backend.ffmpegArguments.single;
+      expect(arguments, contains('-vf'));
+      expect(arguments[arguments.indexOf('-vf') + 1], contains('4000000'));
+      expect(arguments[arguments.indexOf('-vf') + 1], isNot(contains('crop')));
+      final output = base64Decode(normalized.sources.single.split(',').last);
+      expect(_testJpegDimensions(output), (width: 1728, height: 2304));
+      expect(1728 / 2304, closeTo(2316 / 3088, 0.000001));
+      expect(1728 * 2304, lessThanOrEqualTo(4000000));
+    },
+  );
+
+  test('compatible images under the model cap stay byte-for-byte', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-image-under-cap-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _ImageBackend();
+    final bytes = _jpegWithDimensions(1600, 1200);
+    final source = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final normalized = await normalizer.normalizeImages(<String>[
+      source,
+    ], profile: const ReferenceImageCompatibilityProfile(maxPixels: 4000000));
+
+    expect(normalized.sources, <String>[source]);
+    expect(normalized.changedIndexes, isEmpty);
+    expect(backend.ffmpegArguments, isEmpty);
+  });
+
+  test('byte-limited routes downscale until the encoded image fits', () async {
+    final cache = await Directory.systemTemp.createTemp(
+      'clawnsole-image-byte-cap-',
+    );
+    addTearDown(() => cache.delete(recursive: true));
+    final backend = _ImageBackend();
+    final bytes = Uint8List.fromList(<int>[
+      ..._jpegWithDimensions(1600, 1200),
+      ...List<int>.filled(80, 0),
+    ]);
+    final source = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+    final normalizer = ReferenceVideoNormalizer(
+      backend: backend,
+      cacheDirectory: () async => cache,
+    );
+
+    final normalized = await normalizer.normalizeImages(<String>[
+      source,
+    ], profile: const ReferenceImageCompatibilityProfile(maxBytes: 50));
+
+    expect(normalized.changedIndexes, <int>{0});
+    expect(backend.ffmpegArguments, hasLength(1));
+    final output = base64Decode(normalized.sources.single.split(',').last);
+    expect(output.length, lessThanOrEqualTo(50));
+    expect(_testJpegDimensions(output), (width: 800, height: 600));
+    expect(800 / 600, closeTo(1600 / 1200, 0.000001));
+  });
+
   test('HEIF reference images are converted to JPEG and cached', () async {
     final cache = await Directory.systemTemp.createTemp(
       'clawnsole-image-normalizer-',
@@ -100,7 +212,7 @@ void main() {
     expect(second.sources.single, first.sources.first);
     expect(backend.ffmpegArguments, hasLength(1));
     expect(backend.ffmpegArguments.single, isNot(contains('-map')));
-    expect(backend.ffmpegArguments.single.last, contains('image-jpeg-v3'));
+    expect(backend.ffmpegArguments.single.last, contains('image-jpeg-v4'));
   });
 
   test(
@@ -138,7 +250,12 @@ void main() {
       expect(normalized.changedIndexes, <int>{0});
       expect(normalized.sources.single, startsWith('data:image/jpeg;base64,'));
       expect(platform.inputs, hasLength(1));
-      expect(platform.outputs.single, contains('image-jpeg-v3.jpg.tmp-$pid-'));
+      expect(
+        platform.outputs.single,
+        contains(
+          'image-jpeg-v4-pixels-unbounded-bytes-unbounded.jpg.tmp-$pid-',
+        ),
+      );
       expect(ffmpeg.ffmpegArguments, isEmpty);
     },
   );
@@ -764,7 +881,7 @@ void main() {
           record: Generation(
             localId: 'image-reference-submit',
             provider: 'artcraft',
-            model: 'veo_3_fast',
+            model: 'flux_3_draft',
             status: 'submitting',
             prompt: 'Animate the frame',
             mode: VideoMode.i2v,
@@ -793,7 +910,8 @@ void main() {
         ),
       );
 
-      expect(modelById('artcraft', 'veo_3_fast').maxVideoReferences, 0);
+      expect(modelById('artcraft', 'flux_3_draft').maxVideoReferences, 0);
+      expect(normalizer.imageProfile?.maxPixels, 4000000);
       expect(api.input['keyframes'], <String>['image-fixed']);
       expect(store.persistedSources, <String>['image-fixed']);
       expect(submitted.config.keyframes!.single.source!.value, 'image-fixed');
@@ -1087,27 +1205,38 @@ class _FailingNormalizer implements ReferenceVideoNormalizationService {
 
 class _ChangedImageNormalizer implements ReferenceImageNormalizationService {
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
-      PreparedReferenceImages(
-        sources: List<String>.filled(sources.length, 'image-fixed'),
-        changedIndexes: Set<int>.from(
-          List<int>.generate(sources.length, (index) => index),
-        ),
-      );
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async => PreparedReferenceImages(
+    sources: List<String>.filled(sources.length, 'image-fixed'),
+    changedIndexes: Set<int>.from(
+      List<int>.generate(sources.length, (index) => index),
+    ),
+  );
 }
 
 class _ChangedMediaNormalizer
     implements
         ReferenceVideoNormalizationService,
         ReferenceImageNormalizationService {
+  ReferenceImageCompatibilityProfile? imageProfile;
+
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
-      PreparedReferenceImages(
-        sources: List<String>.filled(sources.length, 'image-fixed'),
-        changedIndexes: Set<int>.from(
-          List<int>.generate(sources.length, (index) => index),
-        ),
-      );
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async {
+    imageProfile = profile;
+    return PreparedReferenceImages(
+      sources: List<String>.filled(sources.length, 'image-fixed'),
+      changedIndexes: Set<int>.from(
+        List<int>.generate(sources.length, (index) => index),
+      ),
+    );
+  }
 
   @override
   Future<PreparedReferenceVideos> normalize(
@@ -1121,8 +1250,11 @@ class _FailingMediaNormalizer
         ReferenceVideoNormalizationService,
         ReferenceImageNormalizationService {
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) =>
-      throw StateError('Image normalization should not run.');
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) => throw StateError('Image normalization should not run.');
 
   @override
   Future<PreparedReferenceVideos> normalize(
@@ -1140,7 +1272,16 @@ class _ImageBackend implements ReferenceVideoToolBackend {
   @override
   Future<ReferenceVideoToolResult> runFfmpeg(List<String> arguments) async {
     ffmpegArguments.add(List<String>.of(arguments));
-    await File(arguments.last).writeAsBytes(<int>[0xff, 0xd8, 0xff, 0xd9]);
+    final filter = arguments.contains('-vf')
+        ? arguments[arguments.indexOf('-vf') + 1]
+        : null;
+    await File(arguments.last).writeAsBytes(
+      filter != null
+          ? filter.contains('4000000')
+                ? _jpegWithDimensions(1728, 2304)
+                : _jpegWithDimensions(800, 600)
+          : <int>[0xff, 0xd8, 0xff, 0xd9],
+    );
     return const ReferenceVideoToolResult(exitCode: 0, output: '');
   }
 
@@ -1157,6 +1298,7 @@ class _ImageConverterBackend implements ReferenceImageToolBackend {
   Future<ReferenceVideoToolResult> convertToJpeg({
     required File input,
     required File output,
+    required ReferenceImageCompatibilityProfile profile,
   }) async {
     inputs.add(input.path);
     outputs.add(output.path);

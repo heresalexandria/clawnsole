@@ -680,6 +680,37 @@ void main() {
     );
   });
 
+  test('FLUX 3 visual routes declare the audited four megapixel cap', () {
+    expect(modelById('bfl', 'flux-3-video').maxInputImagePixels, 4000000);
+    expect(modelById('artcraft', 'flux_3').maxInputImagePixels, 4000000);
+    expect(modelById('artcraft', 'flux_3_draft').maxInputImagePixels, 4000000);
+    expect(
+      modelById(
+        'atlas',
+        'black-forest-labs/flux-3/image-to-video',
+      ).maxInputImagePixels,
+      4000000,
+    );
+
+    for (final provider in videoProviders) {
+      for (final model in provider.models) {
+        final maxPixels = model.maxInputImagePixels;
+        if (maxPixels == null) continue;
+        expect(maxPixels, greaterThan(0), reason: '${provider.id}/${model.id}');
+        expect(
+          model.maxKeyframes > 0 || model.maxImageReferences > 0,
+          isTrue,
+          reason: '${provider.id}/${model.id}',
+        );
+      }
+    }
+  });
+
+  test('LTX visual routes leave headroom for the encoded data URI cap', () {
+    expect(modelById('ltx', 'ltx-2-3-fast').maxInputImageBytes, 5000000);
+    expect(modelById('ltx', 'ltx-2-3-pro').maxInputImageBytes, 5000000);
+  });
+
   test('ArtCraft maps generation input and retains its quoted cost', () async {
     final requestBodies = <String, Map<String, Object?>>{};
     final api = ArtCraftApi(

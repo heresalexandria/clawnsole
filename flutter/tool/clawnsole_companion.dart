@@ -1881,10 +1881,9 @@ class CompanionApp {
       final bool value => value,
       _ => data.preferences.autoFixReferenceVideos,
     };
-    final referenceVideoProfile = modelById(
-      provider,
-      generation.model,
-    ).referenceVideoCompatibilityProfile;
+    final model = modelById(provider, generation.model);
+    final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
+    final referenceImageProfile = model.referenceImageCompatibilityProfile;
     if (autoFixReferenceVideos) {
       final ReferenceImageNormalizationService imageNormalizer =
           _referenceVideoNormalizer is ReferenceImageNormalizationService
@@ -1896,6 +1895,7 @@ class CompanionApp {
         videoNormalizer: _referenceVideoNormalizer,
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
+        imageProfile: referenceImageProfile,
       );
       cleanInput = prepared.input;
       generation = generation.copyWith(config: prepared.config);
