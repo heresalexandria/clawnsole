@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:reference_video_tools/reference_video_tools.dart';
 
+import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
 
 ReferenceVideoToolBackend nativeReferenceVideoToolBackend() {
@@ -81,10 +82,12 @@ class MobileReferenceImageToolBackend implements ReferenceImageToolBackend {
   Future<ReferenceVideoToolResult> convertToJpeg({
     required File input,
     required File output,
+    required ReferenceImageCompatibilityProfile profile,
   }) async {
     final result = await ReferenceVideoTools.convertImageToJpeg(
       inputPath: input.path,
       outputPath: output.path,
+      maxPixels: profile.maxPixels,
     );
     final nativeResult = ReferenceVideoToolResult(
       exitCode: result.exitCode,
@@ -98,6 +101,6 @@ class MobileReferenceImageToolBackend implements ReferenceImageToolBackend {
     // auxiliary portrait/depth image instead of the primary photo.
     return FfmpegReferenceImageToolBackend(
       const MobileReferenceVideoToolBackend(),
-    ).convertToJpeg(input: input, output: output);
+    ).convertToJpeg(input: input, output: output, profile: profile);
   }
 }

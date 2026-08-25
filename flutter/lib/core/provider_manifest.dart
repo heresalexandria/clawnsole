@@ -441,6 +441,8 @@ VideoModelDefinition _parseModel(Map<String, Object?> manifest) {
     ),
     supportsStartFrame: _boolean(manifest, 'supports_start_frame'),
     supportsEndFrame: _boolean(manifest, 'supports_end_frame'),
+    maxInputImagePixels: _positiveInteger(manifest, 'max_input_image_pixels'),
+    maxInputImageBytes: _positiveInteger(manifest, 'max_input_image_bytes'),
     maxImageReferences: _integer(manifest['max_image_references']) ?? 0,
     maxVideoReferences: _integer(manifest['max_video_references']) ?? 0,
     maxAudioReferences: _integer(manifest['max_audio_references']) ?? 0,
@@ -521,6 +523,14 @@ VideoModelDefinition _parseModel(Map<String, Object?> manifest) {
         ? null
         : _progress(manifest['progress_reporting']),
   );
+}
+
+int? _positiveInteger(Map<String, Object?> value, String key) {
+  final parsed = _integer(value[key]);
+  if (parsed != null && parsed <= 0) {
+    throw ProviderCatalogManifestException('$key must be positive.');
+  }
+  return parsed;
 }
 
 String _requiredHttpsUrl(Map<String, Object?> value, String key) {

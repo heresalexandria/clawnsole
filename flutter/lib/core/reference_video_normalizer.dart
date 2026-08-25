@@ -143,7 +143,11 @@ abstract interface class ReferenceVideoNormalizationService {
 }
 
 abstract interface class ReferenceImageNormalizationService {
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources);
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  });
 }
 
 /// Converts an unsupported still image into the canonical JPEG form.
@@ -156,6 +160,7 @@ abstract interface class ReferenceImageToolBackend {
   Future<ReferenceVideoToolResult> convertToJpeg({
     required File input,
     required File output,
+    required ReferenceImageCompatibilityProfile profile,
   });
 }
 
@@ -168,30 +173,40 @@ class FfmpegReferenceImageToolBackend implements ReferenceImageToolBackend {
   Future<ReferenceVideoToolResult> convertToJpeg({
     required File input,
     required File output,
-  }) => _backend.runFfmpeg(<String>[
-    '-hide_banner',
-    '-loglevel',
-    'warning',
-    '-nostdin',
-    '-y',
-    '-i',
-    input.path,
-    '-frames:v',
-    '1',
-    '-c:v',
-    'mjpeg',
-    '-q:v',
-    '2',
-    '-pix_fmt',
-    'yuvj420p',
-    '-map_metadata',
-    '-1',
-    '-update',
-    '1',
-    '-f',
-    'image2',
-    output.path,
-  ]);
+    required ReferenceImageCompatibilityProfile profile,
+  }) {
+    final maxPixels = profile.maxPixels;
+    return _backend.runFfmpeg(<String>[
+      '-hide_banner',
+      '-loglevel',
+      'warning',
+      '-nostdin',
+      '-y',
+      '-i',
+      input.path,
+      if (maxPixels != null) ...<String>[
+        '-vf',
+        "scale=w='min(iw\\,sqrt($maxPixels*iw/ih))':"
+            "h='min(ih\\,sqrt($maxPixels*ih/iw))':"
+            'force_original_aspect_ratio=decrease:flags=lanczos',
+      ],
+      '-frames:v',
+      '1',
+      '-c:v',
+      'mjpeg',
+      '-q:v',
+      '2',
+      '-pix_fmt',
+      'yuvj420p',
+      '-map_metadata',
+      '-1',
+      '-update',
+      '1',
+      '-f',
+      'image2',
+      output.path,
+    ]);
+  }
 }
 
 class DisabledReferenceVideoNormalizationService
@@ -207,8 +222,11 @@ class DisabledReferenceVideoNormalizationService
   }) async => PreparedReferenceVideos(sources: List<String>.of(sources));
 
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async =>
-      PreparedReferenceImages(sources: List<String>.of(sources));
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async => PreparedReferenceImages(sources: List<String>.of(sources));
 }
 
 class PreparedGenerationReferences {
@@ -245,6 +263,8 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   required ReferenceVideoNormalizationService videoNormalizer,
   required ReferenceImageNormalizationService imageNormalizer,
   ReferenceVideoCompatibilityProfile? videoProfile,
+  ReferenceImageCompatibilityProfile imageProfile =
+      const ReferenceImageCompatibilityProfile(),
 }) async {
   var nextInput = input;
   var nextConfig = config;
@@ -252,7 +272,10 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   final rawFrames = input['keyframes'];
   if (rawFrames is List<Object?> && rawFrames.isNotEmpty) {
     final frameSources = rawFrames.map(_keyframeImageSource).toList();
-    final prepared = await imageNormalizer.normalizeImages(frameSources);
+    final prepared = await imageNormalizer.normalizeImages(
+      frameSources,
+      profile: imageProfile,
+    );
     if (prepared.changedIndexes.isNotEmpty) {
       nextInput = Map<String, Object?>.of(nextInput)
         ..['keyframes'] = rawFrames
@@ -282,7 +305,10 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   final rawImages = input['reference_images'];
   if (rawImages is List<Object?> && rawImages.isNotEmpty) {
     final sources = rawImages.map((source) => source.toString()).toList();
-    final prepared = await imageNormalizer.normalizeImages(sources);
+    final prepared = await imageNormalizer.normalizeImages(
+      sources,
+      profile: imageProfile,
+    );
     if (prepared.changedIndexes.isNotEmpty) {
       nextInput = Map<String, Object?>.of(nextInput)
         ..['reference_images'] = prepared.sources;
@@ -385,24 +411,37 @@ class ReferenceVideoNormalizer
   final Map<String, Future<String>> _imageInFlight = <String, Future<String>>{};
 
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async {
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async {
     final prepared = <String>[];
     final changed = <int>{};
     for (var index = 0; index < sources.length; index += 1) {
       final original = sources[index];
-      final normalized = await _normalizeImage(original);
+      final normalized = await _normalizeImage(original, profile);
       prepared.add(normalized);
       if (normalized != original) changed.add(index);
     }
     return PreparedReferenceImages(sources: prepared, changedIndexes: changed);
   }
 
-  Future<String> _normalizeImage(String source) async {
-    if (!_imageSourceNeedsInspection(source)) return source;
-    final sourceKey = sha256.convert(utf8.encode(source)).toString();
+  Future<String> _normalizeImage(
+    String source,
+    ReferenceImageCompatibilityProfile profile,
+  ) async {
+    if (profile.maxPixels == null &&
+        profile.maxBytes == null &&
+        !_imageSourceNeedsInspection(source)) {
+      return source;
+    }
+    final sourceKey = sha256
+        .convert(utf8.encode('${profile.cacheKey}\u0000$source'))
+        .toString();
     final existing = _imageInFlight[sourceKey];
     if (existing != null) return existing;
-    final operation = _normalizeImageUncached(source);
+    final operation = _normalizeImageUncached(source, profile);
     _imageInFlight[sourceKey] = operation;
     try {
       return await operation;
@@ -411,14 +450,24 @@ class ReferenceVideoNormalizer
     }
   }
 
-  Future<String> _normalizeImageUncached(String source) async {
+  Future<String> _normalizeImageUncached(
+    String source,
+    ReferenceImageCompatibilityProfile profile,
+  ) async {
     final cache = await _cacheDirectory();
     await cache.create(recursive: true);
     final working = await cache.createTemp('working-image-');
     try {
       final materialized = await _materializeImage(source, working);
       final compatibleMime = _compatibleImageMime(materialized.bytes);
-      if (compatibleMime != null) {
+      final dimensions = _imageDimensions(materialized.bytes);
+      final requiresNormalization = !_imageProfileAccepts(
+        profile,
+        dimensions,
+        materialized.bytes.length,
+      );
+      if (compatibleMime != null && !requiresNormalization) {
+        if (!source.toLowerCase().startsWith('data:')) return source;
         final expectedPrefix = 'data:$compatibleMime;base64,';
         return source.startsWith(expectedPrefix)
             ? source
@@ -426,11 +475,13 @@ class ReferenceVideoNormalizer
       }
       final cacheFile = File(
         '${cache.path}${Platform.pathSeparator}'
-        '${materialized.digest}-image-jpeg-v3.jpg',
+        '${materialized.digest}-image-jpeg-v4-${profile.cacheKey}.jpg',
       );
       if (await cacheFile.exists()) {
         final bytes = await cacheFile.readAsBytes();
-        if (_isJpeg(bytes)) {
+        final cachedDimensions = _imageDimensions(bytes);
+        if (_isJpeg(bytes) &&
+            _imageProfileAccepts(profile, cachedDimensions, bytes.length)) {
           await cacheFile.setLastModified(DateTime.now().toUtc());
           return _imageDataUrl(bytes);
         }
@@ -440,20 +491,56 @@ class ReferenceVideoNormalizer
         '${cacheFile.path}.tmp-$pid-${DateTime.now().microsecondsSinceEpoch}',
       );
       try {
-        final result = await _imageBackend.convertToJpeg(
-          input: materialized.file,
-          output: temporary,
+        var attemptProfile = _initialImageConversionProfile(
+          profile,
+          dimensions,
+          materialized.bytes.length,
         );
-        final valid =
-            result.succeeded &&
-            await temporary.exists() &&
-            _isJpeg(await temporary.readAsBytes());
+        var outputBytes = Uint8List(0);
+        _ImageDimensions? outputDimensions;
+        var toolOutput = '';
+        var valid = false;
+        for (var attempt = 0; attempt < 4; attempt += 1) {
+          if (await temporary.exists()) await temporary.delete();
+          final result = await _imageBackend.convertToJpeg(
+            input: materialized.file,
+            output: temporary,
+            profile: attemptProfile,
+          );
+          toolOutput = result.output;
+          outputBytes = await temporary.exists()
+              ? await temporary.readAsBytes()
+              : Uint8List(0);
+          outputDimensions = _imageDimensions(outputBytes);
+          valid =
+              result.succeeded &&
+              _isJpeg(outputBytes) &&
+              _imageProfileAccepts(
+                profile,
+                outputDimensions,
+                outputBytes.length,
+              );
+          if (valid) break;
+          if (!result.succeeded ||
+              !_isJpeg(outputBytes) ||
+              outputDimensions == null ||
+              profile.maxBytes == null ||
+              profile.acceptsBytes(outputBytes.length)) {
+            break;
+          }
+          attemptProfile = _tighterImageConversionProfile(
+            attemptProfile,
+            outputDimensions,
+            outputBytes.length,
+            profile.maxBytes!,
+          );
+        }
         if (!valid) {
-          final detail = _lastToolLine(result.output);
+          final detail = _lastToolLine(toolOutput);
           throw StateError(
             detail.isEmpty
-                ? 'The reference image could not be converted to JPEG.'
-                : 'The reference image could not be converted to JPEG: $detail',
+                ? 'The reference image could not be normalized within this model’s input limits.'
+                : 'The reference image could not be normalized: $detail',
           );
         }
         await temporary.rename(cacheFile.path);
@@ -1498,6 +1585,170 @@ String? _compatibleImageMime(Uint8List bytes) {
   }
   return null;
 }
+
+bool _imageProfileAccepts(
+  ReferenceImageCompatibilityProfile profile,
+  _ImageDimensions? dimensions,
+  int bytes,
+) =>
+    profile.acceptsBytes(bytes) &&
+    (profile.maxPixels == null ||
+        (dimensions != null &&
+            profile.acceptsPixels(dimensions.width, dimensions.height)));
+
+ReferenceImageCompatibilityProfile _initialImageConversionProfile(
+  ReferenceImageCompatibilityProfile profile,
+  _ImageDimensions? dimensions,
+  int bytes,
+) {
+  var maxPixels = profile.maxPixels;
+  if (profile.maxBytes != null &&
+      bytes > profile.maxBytes! &&
+      dimensions != null) {
+    final sourcePixels = dimensions.width * dimensions.height;
+    final byteTarget = math.max(
+      1,
+      (sourcePixels * profile.maxBytes! / bytes * .8).floor(),
+    );
+    maxPixels = maxPixels == null
+        ? byteTarget
+        : math.min(maxPixels, byteTarget);
+  }
+  return ReferenceImageCompatibilityProfile(
+    maxPixels: maxPixels,
+    maxBytes: profile.maxBytes,
+  );
+}
+
+ReferenceImageCompatibilityProfile _tighterImageConversionProfile(
+  ReferenceImageCompatibilityProfile profile,
+  _ImageDimensions dimensions,
+  int bytes,
+  int maxBytes,
+) {
+  final outputPixels = dimensions.width * dimensions.height;
+  var byteTarget = math.max(1, (outputPixels * maxBytes / bytes * .8).floor());
+  if (byteTarget >= outputPixels) byteTarget = math.max(1, outputPixels - 1);
+  return ReferenceImageCompatibilityProfile(
+    maxPixels: profile.maxPixels == null
+        ? byteTarget
+        : math.min(profile.maxPixels!, byteTarget),
+    maxBytes: profile.maxBytes,
+  );
+}
+
+class _ImageDimensions {
+  const _ImageDimensions(this.width, this.height);
+
+  final int width;
+  final int height;
+}
+
+_ImageDimensions? _imageDimensions(List<int> bytes) {
+  if (_isJpeg(bytes)) return _jpegDimensions(bytes);
+  if (bytes.length >= 24 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4e &&
+      bytes[3] == 0x47 &&
+      bytes[4] == 0x0d &&
+      bytes[5] == 0x0a &&
+      bytes[6] == 0x1a &&
+      bytes[7] == 0x0a) {
+    return _validImageDimensions(
+      _uint32BigEndian(bytes, 16),
+      _uint32BigEndian(bytes, 20),
+    );
+  }
+  if (bytes.length >= 10) {
+    final signature = ascii.decode(bytes.sublist(0, 6), allowInvalid: true);
+    if (signature == 'GIF87a' || signature == 'GIF89a') {
+      return _validImageDimensions(
+        bytes[6] | (bytes[7] << 8),
+        bytes[8] | (bytes[9] << 8),
+      );
+    }
+  }
+  if (bytes.length >= 30 &&
+      ascii.decode(bytes.sublist(0, 4), allowInvalid: true) == 'RIFF' &&
+      ascii.decode(bytes.sublist(8, 12), allowInvalid: true) == 'WEBP') {
+    final chunk = ascii.decode(bytes.sublist(12, 16), allowInvalid: true);
+    if (chunk == 'VP8X') {
+      return _validImageDimensions(
+        1 + bytes[24] + (bytes[25] << 8) + (bytes[26] << 16),
+        1 + bytes[27] + (bytes[28] << 8) + (bytes[29] << 16),
+      );
+    }
+    if (chunk == 'VP8 ' &&
+        bytes.length >= 30 &&
+        bytes[23] == 0x9d &&
+        bytes[24] == 0x01 &&
+        bytes[25] == 0x2a) {
+      return _validImageDimensions(
+        (bytes[26] | (bytes[27] << 8)) & 0x3fff,
+        (bytes[28] | (bytes[29] << 8)) & 0x3fff,
+      );
+    }
+    if (chunk == 'VP8L' && bytes[20] == 0x2f) {
+      return _validImageDimensions(
+        1 + bytes[21] + ((bytes[22] & 0x3f) << 8),
+        1 +
+            ((bytes[22] & 0xc0) >> 6) +
+            (bytes[23] << 2) +
+            ((bytes[24] & 0x0f) << 10),
+      );
+    }
+  }
+  return null;
+}
+
+_ImageDimensions? _jpegDimensions(List<int> bytes) {
+  var offset = 2;
+  while (offset + 8 < bytes.length) {
+    if (bytes[offset] != 0xff) {
+      offset += 1;
+      continue;
+    }
+    while (offset < bytes.length && bytes[offset] == 0xff) {
+      offset += 1;
+    }
+    if (offset >= bytes.length) return null;
+    final marker = bytes[offset++];
+    if (marker == 0xd8 ||
+        marker == 0xd9 ||
+        marker == 0x01 ||
+        (marker >= 0xd0 && marker <= 0xd7)) {
+      continue;
+    }
+    if (offset + 1 >= bytes.length) return null;
+    final segmentLength = (bytes[offset] << 8) | bytes[offset + 1];
+    if (segmentLength < 2 || offset + segmentLength > bytes.length) {
+      return null;
+    }
+    final isStartOfFrame =
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf);
+    if (isStartOfFrame && segmentLength >= 7) {
+      return _validImageDimensions(
+        (bytes[offset + 5] << 8) | bytes[offset + 6],
+        (bytes[offset + 3] << 8) | bytes[offset + 4],
+      );
+    }
+    offset += segmentLength;
+  }
+  return null;
+}
+
+int _uint32BigEndian(List<int> bytes, int offset) =>
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3];
+
+_ImageDimensions? _validImageDimensions(int width, int height) =>
+    width > 0 && height > 0 ? _ImageDimensions(width, height) : null;
 
 bool _isJpeg(List<int> bytes) =>
     bytes.length >= 3 &&

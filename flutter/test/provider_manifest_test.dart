@@ -85,6 +85,29 @@ void main() {
     ]);
   });
 
+  test('model image pixel ceilings must be positive', () {
+    final cache = _cache(<Map<String, Object?>>[
+      _provider(<Map<String, Object?>>[
+        _model('invalid-image-cap', maxInputImagePixels: 0),
+      ]),
+    ]);
+
+    expect(
+      () => ProviderCatalogBundle.fromCache(cache, appVersion: '1.2.3'),
+      throwsA(isA<ProviderCatalogManifestException>()),
+    );
+
+    final byteCache = _cache(<Map<String, Object?>>[
+      _provider(<Map<String, Object?>>[
+        _model('invalid-image-byte-cap', maxInputImageBytes: -1),
+      ]),
+    ]);
+    expect(
+      () => ProviderCatalogBundle.fromCache(byteCache, appVersion: '1.2.3'),
+      throwsA(isA<ProviderCatalogManifestException>()),
+    );
+  });
+
   test('mobile test versions keep constrained Seedance and Apple local', () {
     final cache = _cache(
       <Map<String, Object?>>[
@@ -372,6 +395,8 @@ Map<String, Object?> _model(
   ],
   int minDuration = 1,
   int maxDuration = 2,
+  int? maxInputImagePixels,
+  int? maxInputImageBytes,
 }) => <String, Object?>{
   'schema_version': 1,
   'id': id,
@@ -384,6 +409,9 @@ Map<String, Object?> _model(
   'max_duration': maxDuration,
   'duration_step': 1,
   'max_keyframes': 0,
+  if (maxInputImagePixels != null)
+    'max_input_image_pixels': maxInputImagePixels,
+  if (maxInputImageBytes != null) 'max_input_image_bytes': maxInputImageBytes,
   'usd_per_second': .1,
   if (availability != null) 'availability': availability,
 };

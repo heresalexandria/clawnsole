@@ -1,6 +1,7 @@
 #import "ReferenceVideoToolsPlugin.h"
 
 #import <ImageIO/ImageIO.h>
+#import <math.h>
 #import <ffmpegkit/FFmpegKit.h>
 #import <ffmpegkit/FFprobeKit.h>
 #import <ffmpegkit/ReturnCode.h>
@@ -19,14 +20,20 @@
   if ([call.method isEqualToString:@"convertImageToJpeg"]) {
     NSString* inputPath = call.arguments[@"inputPath"];
     NSString* outputPath = call.arguments[@"outputPath"];
+    NSNumber* maxPixels = call.arguments[@"maxPixels"];
     if (![inputPath isKindOfClass:[NSString class]] ||
-        ![outputPath isKindOfClass:[NSString class]]) {
+        ![outputPath isKindOfClass:[NSString class]] ||
+        (maxPixels != nil &&
+         (![maxPixels isKindOfClass:[NSNumber class]] || maxPixels.longLongValue <= 0))) {
       result([FlutterError errorWithCode:@"invalid_arguments"
-                                 message:@"Image conversion paths are missing."
+                                 message:@"Image conversion paths are missing or the pixel limit is invalid."
                                  details:nil]);
       return;
     }
-    [self convertImageAtPath:inputPath toJpegAtPath:outputPath result:result];
+    [self convertImageAtPath:inputPath
+               toJpegAtPath:outputPath
+                  maxPixels:maxPixels
+                      result:result];
     return;
   }
   if (![call.method isEqualToString:@"execute"]) {
@@ -64,11 +71,13 @@
 
 - (void)convertImageAtPath:(NSString*)inputPath
               toJpegAtPath:(NSString*)outputPath
+                 maxPixels:(NSNumber*)maxPixels
                     result:(FlutterResult)result {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     NSString* message = nil;
     BOOL succeeded = [self renderPrimaryImageAtPath:inputPath
                                       toJpegAtPath:outputPath
+                                         maxPixels:maxPixels
                                              error:&message];
     NSDictionary* response = @{
       @"exitCode": succeeded ? @(0) : @(-1),
@@ -82,6 +91,7 @@
 
 - (BOOL)renderPrimaryImageAtPath:(NSString*)inputPath
                     toJpegAtPath:(NSString*)outputPath
+                       maxPixels:(NSNumber*)maxPixels
                            error:(NSString**)error {
   NSURL* inputUrl = [NSURL fileURLWithPath:inputPath];
   CGImageSourceRef source = CGImageSourceCreateWithURL(
@@ -97,20 +107,31 @@
       CGImageSourceCopyPropertiesAtIndex(source, 0, nil));
   NSNumber* pixelWidth = sourceProperties[(id)kCGImagePropertyPixelWidth];
   NSNumber* pixelHeight = sourceProperties[(id)kCGImagePropertyPixelHeight];
-  NSInteger maximumDimension = MAX(pixelWidth.integerValue, pixelHeight.integerValue);
+  NSInteger width = pixelWidth.integerValue;
+  NSInteger height = pixelHeight.integerValue;
+  NSInteger maximumDimension = MAX(width, height);
   if (maximumDimension <= 0) {
     CFRelease(source);
     if (error != nil) *error = @"The primary reference image dimensions are invalid.";
     return NO;
   }
 
+  double scale = 1.0;
+  if (maxPixels != nil) {
+    double sourcePixels = (double)width * (double)height;
+    if (sourcePixels > maxPixels.doubleValue) {
+      scale = sqrt(maxPixels.doubleValue / sourcePixels);
+    }
+  }
+  NSInteger thumbnailDimension = MAX(1, (NSInteger)floor(maximumDimension * scale));
+
   // ImageIO resolves the HEIC primary item rather than an auxiliary depth or
-  // portrait-matte item. The transform applies orientation while retaining
-  // the complete image at its original resolution; no crop is performed.
+  // portrait-matte item. The transform applies orientation and any requested
+  // proportional downscale to the complete image; no crop is performed.
   NSDictionary* thumbnailOptions = @{
     (id)kCGImageSourceCreateThumbnailFromImageAlways : @YES,
     (id)kCGImageSourceCreateThumbnailWithTransform : @YES,
-    (id)kCGImageSourceThumbnailMaxPixelSize : @(maximumDimension),
+    (id)kCGImageSourceThumbnailMaxPixelSize : @(thumbnailDimension),
     (id)kCGImageSourceShouldCacheImmediately : @YES,
   };
   CGImageRef primary = CGImageSourceCreateThumbnailAtIndex(
@@ -121,16 +142,16 @@
     return NO;
   }
 
-  size_t width = CGImageGetWidth(primary);
-  size_t height = CGImageGetHeight(primary);
+  size_t renderedWidth = CGImageGetWidth(primary);
+  size_t renderedHeight = CGImageGetHeight(primary);
   CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
   CGContextRef context = colorSpace == nil
       ? nil
       : CGBitmapContextCreate(nil,
-                              width,
-                              height,
+                              renderedWidth,
+                              renderedHeight,
                               8,
-                              width * 4,
+                              renderedWidth * 4,
                               colorSpace,
                               (CGBitmapInfo)kCGImageAlphaPremultipliedLast |
                                   kCGBitmapByteOrder32Big);
@@ -142,7 +163,8 @@
   }
   CGContextSetBlendMode(context, kCGBlendModeCopy);
   CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
-  CGContextDrawImage(context, CGRectMake(0, 0, width, height), primary);
+  CGContextDrawImage(
+      context, CGRectMake(0, 0, renderedWidth, renderedHeight), primary);
   CGImageRelease(primary);
   CGImageRef rendered = CGBitmapContextCreateImage(context);
   CGContextRelease(context);

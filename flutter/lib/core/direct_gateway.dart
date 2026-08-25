@@ -888,10 +888,9 @@ class DirectGateway
         'Add a ${providerById(provider).name} API key before generating.',
       );
     }
-    final referenceVideoProfile = modelById(
-      provider,
-      record.model,
-    ).referenceVideoCompatibilityProfile;
+    final model = modelById(provider, record.model);
+    final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
+    final referenceImageProfile = model.referenceImageCompatibilityProfile;
     if (submission.autoFixReferenceVideos ??
         data.preferences.autoFixReferenceVideos) {
       final ReferenceImageNormalizationService imageNormalizer =
@@ -904,6 +903,7 @@ class DirectGateway
         videoNormalizer: _referenceVideoNormalizer,
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
+        imageProfile: referenceImageProfile,
       );
       input = prepared.input;
       record = record.copyWith(config: prepared.config);
