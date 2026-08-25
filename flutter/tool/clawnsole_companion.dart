@@ -2404,10 +2404,10 @@ class CompanionApp {
       if (reference.kind == 'drive' && _isVideoAsset(reference)) {
         final cache = await _syncedVideoCache(data);
         if (cache != null && cache.enabled) {
-          return _driveVideoAsset(request, reference, cache);
+          return await _driveVideoAsset(request, reference, cache);
         }
       }
-      return _serveAssetBytes(
+      return await _serveAssetBytes(
         request,
         reference,
         await _store.readAsset(reference),
