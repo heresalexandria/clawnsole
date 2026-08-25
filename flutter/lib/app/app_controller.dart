@@ -80,6 +80,54 @@ class PickedAsset {
   );
 }
 
+enum ReferenceImportStage { queued, preparing, uploading }
+
+/// Lightweight presentation state for a file selected from References.
+///
+/// The durable [SavedReference] is still created only after its media and
+/// metadata have been retained successfully. Keeping this separate lets the
+/// library render every selected file immediately without polluting persisted
+/// history with partial records.
+class ReferenceImportProgress {
+  const ReferenceImportProgress({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.storage,
+    required this.stage,
+    required this.position,
+    required this.total,
+    this.folderId,
+  });
+
+  final String id;
+  final String name;
+  final MediaReferenceKind kind;
+  final LibraryStorage storage;
+  final ReferenceImportStage stage;
+  final int position;
+  final int total;
+  final String? folderId;
+
+  String get statusLabel => switch (stage) {
+    ReferenceImportStage.queued => 'Waiting to upload',
+    ReferenceImportStage.preparing => 'Preparing upload',
+    ReferenceImportStage.uploading => 'Uploading $position of $total',
+  };
+
+  ReferenceImportProgress copyWith({ReferenceImportStage? stage}) =>
+      ReferenceImportProgress(
+        id: id,
+        name: name,
+        kind: kind,
+        storage: storage,
+        stage: stage ?? this.stage,
+        position: position,
+        total: total,
+        folderId: folderId,
+      );
+}
+
 class KeyframeDraft {
   const KeyframeDraft({
     required this.id,
@@ -385,6 +433,8 @@ class AppController extends ChangeNotifier {
   final Map<String, Uint8List> _restoredAssetBytes = <String, Uint8List>{};
   final Map<String, Future<Uint8List>> _assetReadJobs =
       <String, Future<Uint8List>>{};
+  final List<ReferenceImportProgress> _referenceImports =
+      <ReferenceImportProgress>[];
   bool _reconcilingGenerationWork = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -406,6 +456,9 @@ class AppController extends ChangeNotifier {
   int get videoPreviewSourceRevision => _videoPreviewSourceRevision;
 
   bool get referenceUploadInProgress => _referenceUploadDepth > 0;
+
+  List<ReferenceImportProgress> get referenceImports =>
+      List<ReferenceImportProgress>.unmodifiable(_referenceImports);
 
   void _beginReferenceUpload(String status) {
     _referenceUploadDepth += 1;
@@ -1000,6 +1053,56 @@ class AppController extends ChangeNotifier {
     return values;
   }
 
+  /// In-flight imports follow the same listing filters as durable references
+  /// so their placeholder cards appear exactly where the completed items will
+  /// land.
+  List<ReferenceImportProgress> get filteredReferenceImports {
+    final query = referenceSearch.trim().toLowerCase();
+    final selectedBranch =
+        referenceFolderView != libraryFolderAll &&
+            referenceFolderView != libraryFolderUnfiled
+        ? folderBranch(
+            referenceFolderView,
+            collection: LibraryCollection.references,
+          )
+        : const <String>{};
+    return _referenceImports
+        .where((item) {
+          if (!referenceStorageFilter.matches(item.storage)) return false;
+          if (!referenceFavoriteFilter.matches(false) ||
+              !referenceVisibilityFilter.matches(false)) {
+            return false;
+          }
+          final folderName = item.folderId == null
+              ? ''
+              : folderPath(
+                  item.folderId!,
+                  collection: LibraryCollection.references,
+                ).toLowerCase();
+          if (query.isNotEmpty &&
+              !item.name.toLowerCase().contains(query) &&
+              !folderName.contains(query)) {
+            return false;
+          }
+          if (referenceFolderView == libraryFolderUnfiled &&
+              folderById(
+                    item.folderId,
+                    collection: LibraryCollection.references,
+                  ) !=
+                  null) {
+            return false;
+          }
+          if (referenceFolderView != libraryFolderAll &&
+              referenceFolderView != libraryFolderUnfiled &&
+              !selectedBranch.contains(item.folderId)) {
+            return false;
+          }
+          if (referenceTag != null) return false;
+          return referenceKind == null || item.kind == referenceKind;
+        })
+        .toList(growable: false);
+  }
+
   AssetReference? _reference(PickedAsset? asset, String url, String label) {
     if (asset?.retained != null) return asset!.retained;
     final remote = Uri.tryParse(url.trim());
@@ -1500,13 +1603,22 @@ class AppController extends ChangeNotifier {
   Future<void> navigate(AppSection value) async {
     section = value;
     _scheduleListingPrefetch();
-    await _restoreCachedFirstPage();
     notifyListeners();
+    // A cache warm-up must never sit between a navigation tap and the first
+    // frame of the destination screen. Cards already render their own loading
+    // state, so fold retained preview bytes in after the tab is visible.
+    unawaited(_restoreCachedPageAfterNavigation(value));
     try {
       await _savePreferences(_preferences(activeSection: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
+  }
+
+  Future<void> _restoreCachedPageAfterNavigation(AppSection value) async {
+    await _restoreCachedFirstPage(targetSection: value);
+    if (_disposed || section != value) return;
+    notifyListeners();
   }
 
   Future<void> setLibraryFilter(LibraryFilter value) async {
@@ -1768,9 +1880,10 @@ class AppController extends ChangeNotifier {
   /// Restores only the first page and only from local storage. Cache misses
   /// remain misses until a card is actually viewed, at which point its normal
   /// read path downloads and persists the Drive asset.
-  Future<void> _restoreCachedFirstPage() async {
+  Future<void> _restoreCachedFirstPage({AppSection? targetSection}) async {
     final cache = _mediaCacheGateway;
     if (cache == null) return;
+    final listingSection = targetSection ?? section;
     final references = <String, AssetReference>{};
     void add(AssetReference? reference) {
       if (reference != null) {
@@ -1778,8 +1891,9 @@ class AppController extends ChangeNotifier {
       }
     }
 
-    if (section == AppSection.create || section == AppSection.library) {
-      final generationPage = section == AppSection.library
+    if (listingSection == AppSection.create ||
+        listingSection == AppSection.library) {
+      final generationPage = listingSection == AppSection.library
           ? filteredGenerations
           : visibleGenerations;
       for (final item in generationPage.take(20)) {
@@ -1789,7 +1903,7 @@ class AppController extends ChangeNotifier {
           add(item.thumbnailAsset);
         }
       }
-    } else if (section == AppSection.references) {
+    } else if (listingSection == AppSection.references) {
       for (final item in filteredSavedReferences.take(20)) {
         if (item.kind == MediaReferenceKind.image) {
           add(item.asset);
@@ -2581,30 +2695,53 @@ class AppController extends ChangeNotifier {
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
+    final importIds = <String>[];
     try {
       final picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
         MediaReferenceKind.video => FileType.video,
         MediaReferenceKind.audio => FileType.audio,
       }, source: source);
+      if (picked.isEmpty) return;
+      final destination =
+          folderById(
+            folderId,
+            collection: LibraryCollection.references,
+          )?.storage ??
+          storage ??
+          effectiveStorage;
+      if (destination == LibraryStorage.drive && !googleDriveConnected) {
+        throw StateError(
+          'Connect Google Drive before importing Drive references.',
+        );
+      }
+      final startedAt = DateTime.now().toUtc();
+      final imports = <ReferenceImportProgress>[
+        for (final entry in picked.indexed)
+          ReferenceImportProgress(
+            id: 'reference-${startedAt.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
+            name: entry.$2.name,
+            kind: kind,
+            storage: destination,
+            folderId: folderId,
+            stage: ReferenceImportStage.queued,
+            position: entry.$1 + 1,
+            total: picked.length,
+          ),
+      ];
+      importIds.addAll(imports.map((item) => item.id));
+      _referenceImports.addAll(imports);
+      notifyListeners();
+
       var saved = 0;
+      var failed = 0;
+      Object? lastError;
       for (final entry in picked.indexed) {
         final asset = entry.$2;
         final now = DateTime.now().toUtc();
-        final destination =
-            folderById(
-              folderId,
-              collection: LibraryCollection.references,
-            )?.storage ??
-            storage ??
-            effectiveStorage;
-        if (destination == LibraryStorage.drive && !googleDriveConnected) {
-          throw StateError(
-            'Connect Google Drive before importing Drive references.',
-          );
-        }
+        final progress = imports[entry.$1];
         final reference = SavedReference(
-          id: 'reference-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
+          id: progress.id,
           name: _uniqueSavedReferenceName(asset.name),
           kind: kind,
           asset: AssetReference(
@@ -2620,26 +2757,51 @@ class AppController extends ChangeNotifier {
           folderId: folderId,
           storage: destination,
         );
-        _updateReferenceUpload(
-          'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
-        );
-        final dataUrl = await _dataUrlForAsset(asset);
-        _apply(
-          await (gateway as ReferenceLibraryGateway).saveReference(
-            reference,
-            source: dataUrl,
-          ),
-        );
-        saved += 1;
+        try {
+          _setReferenceImportStage(progress.id, ReferenceImportStage.preparing);
+          _updateReferenceUpload(
+            'Preparing ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
+          );
+          final dataUrl = await _dataUrlForAsset(asset);
+          _setReferenceImportStage(progress.id, ReferenceImportStage.uploading);
+          _updateReferenceUpload(
+            'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
+          );
+          _apply(
+            await (gateway as ReferenceLibraryGateway).saveReference(
+              reference,
+              source: dataUrl,
+            ),
+          );
+          saved += 1;
+        } on Object catch (error) {
+          failed += 1;
+          lastError = error;
+        } finally {
+          _referenceImports.removeWhere((item) => item.id == progress.id);
+          notifyListeners();
+        }
       }
-      if (saved > 0) {
+      if (failed > 0) {
+        showNotice('$saved saved, $failed failed. ${_message(lastError!)}');
+      } else if (saved > 0) {
         showNotice('$saved ${kind.pluralLabel} saved to References.');
       }
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
+      if (importIds.isNotEmpty) {
+        _referenceImports.removeWhere((item) => importIds.contains(item.id));
+      }
       _finishReferenceUpload();
     }
+  }
+
+  void _setReferenceImportStage(String id, ReferenceImportStage stage) {
+    final index = _referenceImports.indexWhere((item) => item.id == id);
+    if (index < 0 || _referenceImports[index].stage == stage) return;
+    _referenceImports[index] = _referenceImports[index].copyWith(stage: stage);
+    notifyListeners();
   }
 
   Future<bool> deleteSavedReference(String referenceId) async {
@@ -2892,7 +3054,11 @@ class AppController extends ChangeNotifier {
   }
 
   Future<String> _dataUrlForAsset(PickedAsset asset) async {
-    final payload = await compute(_base64Payload, asset.bytes);
+    // Spinning up a worker costs more than the encoding for small images and
+    // audio snippets. Larger media still stays off the UI isolate.
+    final payload = asset.bytes.length < 256 * 1024
+        ? _base64Payload(asset.bytes)
+        : await compute(_base64Payload, asset.bytes);
     return 'data:${asset.mimeType};base64,$payload';
   }
 

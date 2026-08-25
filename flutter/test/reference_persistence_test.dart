@@ -7,6 +7,7 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/references_screen.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -125,6 +126,88 @@ void main() {
       expect(controller.form.references, hasLength(1));
     },
   );
+
+  testWidgets('References shows one progress card per selected file', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1000));
+    final saveStarted = Completer<void>();
+    final finishSave = Completer<void>();
+    final gateway = _ReferenceGateway(
+      emptySnapshot,
+      beforeSave: () async {
+        if (!saveStarted.isCompleted) saveStarted.complete();
+        await finishSave.future;
+      },
+    );
+    final first = Uint8List.fromList(<int>[1, 2, 3]);
+    final second = Uint8List.fromList(<int>[4, 5, 6]);
+    final controller =
+        AppController(
+            gateway: gateway,
+            filePicker:
+                ({
+                  required FileType type,
+                  required bool allowMultiple,
+                  required bool withData,
+                }) async => FilePickerResult(<PlatformFile>[
+                  PlatformFile(
+                    name: 'one.png',
+                    size: first.length,
+                    bytes: first,
+                  ),
+                  PlatformFile(
+                    name: 'two.png',
+                    size: second.length,
+                    bytes: second,
+                  ),
+                ]),
+          )
+          ..snapshot = emptySnapshot
+          ..loading = false;
+    var disposed = false;
+    addTearDown(() async {
+      if (!finishSave.isCompleted) finishSave.complete();
+      if (!disposed) {
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+      }
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => ReferencesScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    final upload = controller.importSavedReferences(MediaReferenceKind.image);
+    await tester.pump();
+
+    expect(saveStarted.isCompleted, isTrue, reason: controller.notice);
+    expect(controller.referenceImports, hasLength(2));
+    expect(find.text('one.png'), findsOneWidget);
+    expect(find.text('two.png'), findsOneWidget);
+    expect(find.text('Uploading 1 of 2'), findsOneWidget);
+    expect(find.text('Waiting to upload'), findsOneWidget);
+
+    finishSave.complete();
+    await tester.pump();
+    await upload;
+
+    expect(controller.referenceImports, isEmpty);
+    expect(controller.savedReferences, hasLength(2));
+    expect(find.text('Uploading 1 of 2'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    disposed = true;
+  });
 
   test(
     'Create image uploads auto-save once and keep durable identity',

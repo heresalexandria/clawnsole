@@ -314,6 +314,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
   @override
   Widget build(BuildContext context) {
     final filtered = controller.filteredSavedReferences;
+    final imports = controller.filteredReferenceImports;
     final shown = filtered.take(widget.itemLimit).toList();
     final selected = controller.savedReferences
         .where((item) => selectedIds.contains(item.id))
@@ -372,7 +373,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
           ),
         ],
         const SizedBox(height: 18),
-        if (filtered.isEmpty)
+        if (filtered.isEmpty && imports.isEmpty)
           _ReferenceEmpty(controller: controller)
         else
           LayoutBuilder(
@@ -389,49 +390,52 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
               return Wrap(
                 spacing: gap,
                 runSpacing: gap,
-                children: shown
-                    .map(
-                      (item) => SizedBox(
-                        width: width,
-                        child: Stack(
-                          children: <Widget>[
-                            _ReferenceCard(
-                              controller: controller,
-                              reference: item,
-                            ),
-                            if (selecting)
-                              Positioned(
-                                top: 8,
-                                left: 8,
-                                child: Material(
-                                  elevation: 7,
-                                  color: context.colors.surface,
-                                  borderRadius: BorderRadius.circular(9),
-                                  child: IconButton(
-                                    key: ValueKey(
-                                      'select-reference-${item.id}',
-                                    ),
-                                    tooltip: selectedIds.contains(item.id)
-                                        ? 'Deselect ${item.name}'
-                                        : 'Select ${item.name}',
-                                    onPressed: () => _toggle(item.id),
-                                    icon: Icon(
-                                      selectedIds.contains(item.id)
-                                          ? Icons.check_box_rounded
-                                          : Icons
-                                                .check_box_outline_blank_rounded,
-                                      color: selectedIds.contains(item.id)
-                                          ? context.tokens.brass
-                                          : null,
-                                    ),
+                children: <Widget>[
+                  ...imports.map(
+                    (item) => SizedBox(
+                      width: width,
+                      child: _ReferenceImportCard(import: item),
+                    ),
+                  ),
+                  ...shown.map(
+                    (item) => SizedBox(
+                      width: width,
+                      child: Stack(
+                        children: <Widget>[
+                          _ReferenceCard(
+                            controller: controller,
+                            reference: item,
+                          ),
+                          if (selecting)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Material(
+                                elevation: 7,
+                                color: context.colors.surface,
+                                borderRadius: BorderRadius.circular(9),
+                                child: IconButton(
+                                  key: ValueKey('select-reference-${item.id}'),
+                                  tooltip: selectedIds.contains(item.id)
+                                      ? 'Deselect ${item.name}'
+                                      : 'Select ${item.name}',
+                                  onPressed: () => _toggle(item.id),
+                                  icon: Icon(
+                                    selectedIds.contains(item.id)
+                                        ? Icons.check_box_rounded
+                                        : Icons.check_box_outline_blank_rounded,
+                                    color: selectedIds.contains(item.id)
+                                        ? context.tokens.brass
+                                        : null,
                                   ),
                                 ),
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
-                    )
-                    .toList(),
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -451,6 +455,90 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
       ],
     );
   }
+}
+
+class _ReferenceImportCard extends StatelessWidget {
+  const _ReferenceImportCard({required this.import});
+
+  final ReferenceImportProgress import;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    label: '${import.name}: ${import.statusLabel}',
+    child: SurfaceCard(
+      key: ValueKey('reference-import-${import.id}'),
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: context.colors.surfaceContainerLow,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: <Widget>[
+                  Icon(
+                    _kindIcon(import.kind),
+                    size: 46,
+                    color: context.colors.onSurfaceVariant.withValues(
+                      alpha: .34,
+                    ),
+                  ),
+                  const SizedBox.square(
+                    dimension: 34,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  import.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: <Widget>[
+                    const SizedBox.square(
+                      dimension: 13,
+                      child: CircularProgressIndicator(strokeWidth: 1.8),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        import.statusLabel,
+                        key: ValueKey('reference-import-status-${import.id}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ReferenceToolbar extends StatelessWidget {
@@ -2490,9 +2578,10 @@ Future<void> _showReferenceFolderEditor(
           folder.id,
           collection: LibraryCollection.references,
         );
+  var saving = false;
   await showDialog<void>(
     context: context,
-    builder: (context) => StatefulBuilder(
+    builder: (dialogContext) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
         title: Text(folder == null ? 'New reference folder' : 'Rename folder'),
         content: SizedBox(
@@ -2516,15 +2605,18 @@ Future<void> _showReferenceFolderEditor(
                         ),
                       )
                       .toList(),
-                  onChanged: (value) => setState(() {
-                    destination = value ?? destination;
-                    selectedParent = null;
-                  }),
+                  onChanged: saving
+                      ? null
+                      : (value) => setState(() {
+                          destination = value ?? destination;
+                          selectedParent = null;
+                        }),
                 ),
                 const SizedBox(height: 8),
               ],
               TextField(
                 controller: name,
+                enabled: !saving,
                 autofocus: true,
                 maxLength: 48,
                 decoration: const InputDecoration(labelText: 'Folder name'),
@@ -2553,28 +2645,43 @@ Future<void> _showReferenceFolderEditor(
                         ),
                       ),
                 ],
-                onChanged: (value) => setState(() => selectedParent = value),
+                onChanged: saving
+                    ? null
+                    : (value) => setState(() => selectedParent = value),
               ),
             ],
           ),
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: saving ? null : () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () async {
-              final saved = await controller.saveLibraryFolder(
-                name.text,
-                existing: folder,
-                parentId: selectedParent,
-                collection: LibraryCollection.references,
-                storage: destination,
-              );
-              if (saved && context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Save'),
+          FilledButton.icon(
+            onPressed: saving
+                ? null
+                : () async {
+                    setState(() => saving = true);
+                    final saved = await controller.saveLibraryFolder(
+                      name.text,
+                      existing: folder,
+                      parentId: selectedParent,
+                      collection: LibraryCollection.references,
+                      storage: destination,
+                    );
+                    if (saved && dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    } else if (dialogContext.mounted) {
+                      setState(() => saving = false);
+                    }
+                  },
+            icon: saving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.folder_outlined, size: 18),
+            label: Text(saving ? 'Saving…' : 'Save'),
           ),
         ],
       ),

@@ -5734,6 +5734,54 @@ void main() {
     expect(gateway.snapshot.preferences.activeSection, AppSection.references);
   });
 
+  testWidgets('References opens before its retained preview cache responds', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    final now = DateTime.utc(2026, 8, 25, 12);
+    final gateway = _BlockingCacheGateway(
+      LocalSnapshot(
+        generations: const <Generation>[],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'cached-reference',
+            name: 'Cached character',
+            kind: MediaReferenceKind.image,
+            asset: const AssetReference(
+              kind: 'drive',
+              value: 'cached-character-image',
+              label: 'character.png',
+              contentType: 'image/png',
+            ),
+            createdAt: now,
+            updatedAt: now,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+    addTearDown(() async {
+      gateway.completeCache();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('References'));
+    await tester.pump();
+
+    expect(gateway.cacheReads, 1);
+    expect(gateway.cacheCompleted, isFalse);
+    expect(find.text('Your creative ingredients.'), findsOneWidget);
+    expect(find.text('Cached character'), findsOneWidget);
+  });
+
   test(
     'keeps the latest tab selected while preference writes finish',
     () async {
@@ -7401,6 +7449,26 @@ class _CacheRestoringGateway extends _MemoryGateway
   Future<Uint8List> readAsset(AssetReference reference) async {
     assetReads += 1;
     return super.readAsset(reference);
+  }
+}
+
+class _BlockingCacheGateway extends _MemoryGateway
+    implements MediaCacheGateway {
+  _BlockingCacheGateway(super.snapshot);
+
+  final Completer<Uint8List?> _cache = Completer<Uint8List?>();
+  int cacheReads = 0;
+
+  bool get cacheCompleted => _cache.isCompleted;
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) {
+    cacheReads += 1;
+    return _cache.future;
+  }
+
+  void completeCache() {
+    if (!_cache.isCompleted) _cache.complete(null);
   }
 }
 
