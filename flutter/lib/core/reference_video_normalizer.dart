@@ -142,6 +142,15 @@ abstract interface class ReferenceVideoNormalizationService {
   });
 }
 
+abstract interface class ReferenceVideoEditingService {
+  /// Produces a frame-accurate MP4 derivative while leaving [source] intact.
+  Future<Uint8List> trimVideo(
+    Uint8List source, {
+    required double startSeconds,
+    required double endSeconds,
+  });
+}
+
 abstract interface class ReferenceImageNormalizationService {
   Future<PreparedReferenceImages> normalizeImages(
     List<String> sources, {
@@ -394,7 +403,8 @@ Future<PreparedGenerationReferenceVideos> prepareGenerationReferenceVideos({
 class ReferenceVideoNormalizer
     implements
         ReferenceVideoNormalizationService,
-        ReferenceImageNormalizationService {
+        ReferenceImageNormalizationService,
+        ReferenceVideoEditingService {
   ReferenceVideoNormalizer({
     required ReferenceVideoToolBackend backend,
     ReferenceImageToolBackend? imageBackend,
@@ -409,6 +419,56 @@ class ReferenceVideoNormalizer
 
   final Map<String, Future<String>> _inFlight = <String, Future<String>>{};
   final Map<String, Future<String>> _imageInFlight = <String, Future<String>>{};
+
+  @override
+  Future<Uint8List> trimVideo(
+    Uint8List source, {
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    if (source.isEmpty) throw StateError('The reference video is empty.');
+    if (source.length > _maxReferenceVideoBytes) {
+      throw StateError('Reference videos must be 512 MB or smaller.');
+    }
+    if (!startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds - startSeconds < .1) {
+      throw StateError('Choose a video range at least 0.1 seconds long.');
+    }
+    final cache = await _cacheDirectory();
+    await cache.create(recursive: true);
+    final working = await cache.createTemp('working-trim-');
+    try {
+      final input = File(
+        '${working.path}${Platform.pathSeparator}reference-video.input',
+      );
+      final output = File(
+        '${working.path}${Platform.pathSeparator}trimmed-reference.mp4',
+      );
+      await input.writeAsBytes(source, flush: true);
+      final probe = await _probe(
+        input,
+        profile: ReferenceVideoCompatibilityProfile.generic,
+        requireHighProfile: false,
+      );
+      await _transcodeWithFallback(
+        input: input,
+        output: output,
+        probe: probe,
+        profile: ReferenceVideoCompatibilityProfile.generic,
+        trimStartSeconds: startSeconds,
+        trimDurationSeconds: endSeconds - startSeconds,
+      );
+      final bytes = await output.readAsBytes();
+      if (bytes.isEmpty) {
+        throw StateError('The trimmed reference video is empty.');
+      }
+      return bytes;
+    } finally {
+      if (await working.exists()) await working.delete(recursive: true);
+    }
+  }
 
   @override
   Future<PreparedReferenceImages> normalizeImages(
@@ -890,6 +950,8 @@ class ReferenceVideoNormalizer
     required ReferenceVideoNormalizationAction action,
     required ReferenceVideoCompatibilityProfile profile,
     ReferenceVideoEncoderAttempt? encoderAttempt,
+    double? trimStartSeconds,
+    double? trimDurationSeconds,
   }) async {
     final arguments = <String>[
       '-hide_banner',
@@ -901,6 +963,14 @@ class ReferenceVideoNormalizer
       '+genpts+discardcorrupt',
       '-i',
       input.path,
+      if (trimStartSeconds != null) ...<String>[
+        '-ss',
+        trimStartSeconds.toStringAsFixed(6),
+      ],
+      if (trimDurationSeconds != null) ...<String>[
+        '-t',
+        trimDurationSeconds.toStringAsFixed(6),
+      ],
       '-map',
       '0:v:0',
       if (probe.hasAudio) ...<String>['-map', '0:a:0'],
@@ -1008,6 +1078,8 @@ class ReferenceVideoNormalizer
     required File output,
     required _ReferenceVideoProbe probe,
     required ReferenceVideoCompatibilityProfile profile,
+    double? trimStartSeconds,
+    double? trimDurationSeconds,
   }) async {
     Object? lastError;
     for (final attempt in _backend.h264EncoderAttempts) {
@@ -1021,6 +1093,8 @@ class ReferenceVideoNormalizer
           action: ReferenceVideoNormalizationAction.transcode,
           profile: profile,
           encoderAttempt: attempt,
+          trimStartSeconds: trimStartSeconds,
+          trimDurationSeconds: trimDurationSeconds,
         );
         // Seedance inputs retain the script's strict High-profile requirement.
         // Hardware encoders may legitimately negotiate Baseline or Main, so

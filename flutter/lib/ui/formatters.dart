@@ -53,3 +53,19 @@ String formatElapsedDuration(Duration value) {
   if (minutes > 0) return '${minutes}m ${seconds}s';
   return '${seconds}s';
 }
+
+String formatMediaDuration(double seconds) {
+  if (!seconds.isFinite || seconds < 0) return 'Unknown';
+  final tenths = (seconds * 10).round();
+  final hours = tenths ~/ 36000;
+  final minutes = tenths.remainder(36000) ~/ 600;
+  final wholeSeconds = tenths.remainder(600) ~/ 10;
+  final decimal = tenths.remainder(10);
+  final secondLabel = wholeSeconds.toString().padLeft(2, '0');
+  final fraction = decimal == 0 ? '' : '.$decimal';
+  if (hours > 0) {
+    return '$hours:${minutes.toString().padLeft(2, '0')}:$secondLabel$fraction';
+  }
+  if (minutes > 0) return '$minutes:$secondLabel$fraction';
+  return '$wholeSeconds$fraction s';
+}

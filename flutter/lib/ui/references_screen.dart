@@ -775,6 +775,22 @@ class _ReferenceCard extends StatelessWidget {
           ? (bytes) =>
                 unawaited(controller.cacheReferencePreview(reference, bytes))
           : null,
+      onVideoMetadata: isVideo
+          ? (metadata) {
+              if (!metadata.isUsable) return;
+              unawaited(
+                controller.rememberSavedReferenceDuration(
+                  reference,
+                  metadata.durationSeconds,
+                ),
+              );
+            }
+          : null,
+      onMediaDuration: reference.kind == MediaReferenceKind.audio
+          ? (seconds) => unawaited(
+              controller.rememberSavedReferenceDuration(reference, seconds),
+            )
+          : null,
     );
     return SurfaceCard(
       padding: EdgeInsets.zero,
@@ -814,6 +830,14 @@ class _ReferenceCard extends StatelessWidget {
                             ],
                           ),
                         ),
+                      if (reference.durationSeconds != null)
+                        Positioned(
+                          left: 8,
+                          bottom: 8,
+                          child: _ReferenceDurationBadge(
+                            seconds: reference.durationSeconds!,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -851,7 +875,7 @@ class _ReferenceCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        '${reference.kind.label} · ${reference.storage.shortLabel}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
+                        '${reference.kind.label}${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'} · ${reference.storage.shortLabel}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -911,6 +935,10 @@ class _ReferenceCard extends StatelessWidget {
                           reference.id,
                         }),
                       );
+                    } else if (value == 'trim') {
+                      unawaited(
+                        showReferenceTrimDialog(context, controller, reference),
+                      );
                     } else if (value == 'tag') {
                       unawaited(
                         _showReferenceTagDialog(context, controller, reference),
@@ -938,6 +966,11 @@ class _ReferenceCard extends StatelessWidget {
                       value: 'edit',
                       child: Text('Edit details'),
                     ),
+                    if (reference.kind == MediaReferenceKind.video)
+                      const PopupMenuItem(
+                        value: 'trim',
+                        child: Text('Trim as new reference'),
+                      ),
                     const PopupMenuItem(value: 'move', child: Text('Move')),
                     const PopupMenuItem(value: 'tag', child: Text('Tag')),
                     PopupMenuItem(
@@ -982,6 +1015,31 @@ class _ReferenceCard extends StatelessWidget {
   }
 }
 
+class _ReferenceDurationBadge extends StatelessWidget {
+  const _ReferenceDurationBadge({required this.seconds});
+
+  final double seconds;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: .78),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      child: Text(
+        formatMediaDuration(seconds),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
 Future<void> showReferenceDetails(
   BuildContext context,
   AppController controller,
@@ -993,7 +1051,7 @@ Future<void> showReferenceDetails(
   ),
 );
 
-class ReferenceDetailsScreen extends StatelessWidget {
+class ReferenceDetailsScreen extends StatefulWidget {
   const ReferenceDetailsScreen({
     required this.controller,
     required this.reference,
@@ -1004,7 +1062,37 @@ class ReferenceDetailsScreen extends StatelessWidget {
   final SavedReference reference;
 
   @override
+  State<ReferenceDetailsScreen> createState() => _ReferenceDetailsScreenState();
+}
+
+class _ReferenceDetailsScreenState extends State<ReferenceDetailsScreen> {
+  AppController get controller => widget.controller;
+
+  SavedReference get reference =>
+      controller.savedReferences
+          .where((item) => item.id == widget.reference.id)
+          .firstOrNull ??
+      widget.reference;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final reference = this.reference;
     final usages = controller.generationsUsingReference(reference);
     final folder = reference.folderId == null
         ? null
@@ -1032,6 +1120,7 @@ class ReferenceDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   '${reference.kind.label} · ${reference.storage.label}'
+                  '${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'}'
                   '${folder == null ? '' : ' · $folder'}',
                   style: TextStyle(color: context.colors.onSurfaceVariant),
                 ),
@@ -1103,6 +1192,26 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                           ),
                                         )
                                       : null,
+                                  onVideoMetadata:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? (metadata) => unawaited(
+                                          controller
+                                              .rememberSavedReferenceDuration(
+                                                reference,
+                                                metadata.durationSeconds,
+                                              ),
+                                        )
+                                      : null,
+                                  onMediaDuration:
+                                      reference.kind == MediaReferenceKind.audio
+                                      ? (seconds) => unawaited(
+                                          controller
+                                              .rememberSavedReferenceDuration(
+                                                reference,
+                                                seconds,
+                                              ),
+                                        )
+                                      : null,
                                 ),
                               ),
                               if (reference.kind == MediaReferenceKind.video &&
@@ -1130,6 +1239,20 @@ class ReferenceDetailsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (reference.kind == MediaReferenceKind.video) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.tonalIcon(
+                      key: ValueKey('trim-reference-details-${reference.id}'),
+                      onPressed: () => unawaited(
+                        showReferenceTrimDialog(context, controller, reference),
+                      ),
+                      icon: const Icon(Icons.content_cut_rounded, size: 18),
+                      label: const Text('Trim as new reference'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SurfaceCard(
                   child: Wrap(
@@ -1144,6 +1267,13 @@ class ReferenceDetailsScreen extends StatelessWidget {
                         label: 'Updated',
                         value: formatTimestamp(reference.updatedAt),
                       ),
+                      if (reference.durationSeconds != null)
+                        _ReferenceDetailFact(
+                          label: 'Duration',
+                          value: formatMediaDuration(
+                            reference.durationSeconds!,
+                          ),
+                        ),
                       if (reference.tags.isNotEmpty)
                         _ReferenceDetailFact(
                           label: 'Tags',
@@ -2032,6 +2162,18 @@ Future<bool> showReferenceMetadataDialog(
                 ),
                 const SizedBox(height: 10),
               ],
+              if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
+                  null) ...<Widget>[
+                Text(
+                  'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
+                  style: TextStyle(
+                    color: context.colors.onSurfaceVariant,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               TextField(
                 controller: name,
                 autofocus: true,
@@ -2108,6 +2250,252 @@ Future<bool> showReferenceMetadataDialog(
   return saved == true;
 }
 
+Future<bool> showReferenceTrimDialog(
+  BuildContext context,
+  AppController controller,
+  SavedReference reference,
+) async =>
+    (await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          _ReferenceTrimDialog(controller: controller, reference: reference),
+    )) ==
+    true;
+
+class _ReferenceTrimDialog extends StatefulWidget {
+  const _ReferenceTrimDialog({
+    required this.controller,
+    required this.reference,
+  });
+
+  final AppController controller;
+  final SavedReference reference;
+
+  @override
+  State<_ReferenceTrimDialog> createState() => _ReferenceTrimDialogState();
+}
+
+class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
+  late final TextEditingController _name;
+  double? _duration;
+  double _startSeconds = 0;
+  double? _endSeconds;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(
+      text: widget.controller.suggestedTrimmedReferenceName(widget.reference),
+    );
+    _duration = widget.reference.durationSeconds;
+    _endSeconds = _duration;
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _rememberMetadata(VideoSourceMetadata metadata) {
+    if (!metadata.isUsable) return;
+    unawaited(
+      widget.controller.rememberSavedReferenceDuration(
+        widget.reference,
+        metadata.durationSeconds,
+      ),
+    );
+    if (_duration != null || !mounted) return;
+    setState(() {
+      _duration = metadata.durationSeconds;
+      _endSeconds = metadata.durationSeconds;
+    });
+  }
+
+  Future<void> _save() async {
+    final end = _endSeconds;
+    if (_saving || _duration == null || end == null) return;
+    setState(() => _saving = true);
+    final saved = await widget.controller.trimSavedReference(
+      widget.reference,
+      name: _name.text,
+      startSeconds: _startSeconds,
+      endSeconds: end,
+    );
+    if (!mounted) return;
+    if (saved != null) {
+      Navigator.pop(context, true);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = _duration;
+    final end = _endSeconds;
+    final selectedDuration = end == null ? null : end - _startSeconds;
+    final changed =
+        duration != null &&
+        end != null &&
+        (_startSeconds >= .001 || (end - duration).abs() >= .001);
+    return AlertDialog(
+      key: ValueKey('trim-reference-dialog-${widget.reference.id}'),
+      title: const Text('Trim as new reference'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      InkWell(
+                        onTap: () => unawaited(
+                          showSavedReferenceViewer(
+                            context,
+                            widget.controller,
+                            widget.reference,
+                          ),
+                        ),
+                        child: MediaThumbnail(
+                          gateway: widget.controller.gateway,
+                          kind: MediaReferenceKind.video,
+                          reference: widget.reference.asset,
+                          thumbnailReference: widget.reference.thumbnailAsset,
+                          thumbnailBytes: widget.controller.cachedAssetBytes(
+                            widget.reference.thumbnailAsset,
+                          ),
+                          fit: BoxFit.cover,
+                          semanticsLabel:
+                              '${widget.reference.name} trim preview',
+                          onVideoMetadata: _rememberMetadata,
+                        ),
+                      ),
+                      const Center(
+                        child: IgnorePointer(
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            size: 52,
+                            color: Colors.white,
+                            shadows: <Shadow>[
+                              Shadow(color: Colors.black54, blurRadius: 12),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                key: const ValueKey('trim-reference-name'),
+                controller: _name,
+                enabled: !_saving,
+                onChanged: (_) => setState(() {}),
+                maxLength: 80,
+                decoration: const InputDecoration(
+                  labelText: 'New reference name',
+                ),
+              ),
+              const SizedBox(height: 6),
+              if (duration == null || end == null)
+                const Row(
+                  children: <Widget>[
+                    SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 10),
+                    Text('Reading video duration…'),
+                  ],
+                )
+              else ...<Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        'Beginning · ${formatMediaDuration(_startSeconds)}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    Text(
+                      'Ending · ${formatMediaDuration(end)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                RangeSlider(
+                  key: const ValueKey('trim-reference-range'),
+                  min: 0,
+                  max: duration,
+                  values: RangeValues(_startSeconds, end),
+                  labels: RangeLabels(
+                    formatMediaDuration(_startSeconds),
+                    formatMediaDuration(end),
+                  ),
+                  onChanged: _saving
+                      ? null
+                      : (range) {
+                          if (range.end - range.start < .1) return;
+                          setState(() {
+                            _startSeconds = range.start;
+                            _endSeconds = range.end;
+                          });
+                        },
+                ),
+                Text(
+                  'New duration · ${formatMediaDuration(selectedDuration!)} '
+                  'of ${formatMediaDuration(duration)}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                'The original reference stays unchanged. The selected range is encoded as a separate MP4 in the same folder and storage.',
+                style: TextStyle(
+                  color: context.colors.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('save-trimmed-reference'),
+          onPressed: !_saving && changed && _name.text.trim().isNotEmpty
+              ? _save
+              : null,
+          icon: _saving
+              ? const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.content_cut_rounded, size: 17),
+          label: Text(_saving ? 'Trimming…' : 'Save new reference'),
+        ),
+      ],
+    );
+  }
+}
+
 Future<List<ReferenceCandidate>?> showReferencePicker(
   BuildContext context,
   AppController controller, {
@@ -2167,6 +2555,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                   folderId: item.folderId,
                   tags: item.tags,
                   storage: item.storage,
+                  durationSeconds: item.durationSeconds,
                 ),
               )
               .toList();
@@ -2229,6 +2618,29 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
       unawaited(widget.controller.cacheReferencePreview(reference, bytes));
       return;
     }
+  }
+
+  void _rememberDuration(ReferenceCandidate item, double seconds) {
+    if (item.generated) return;
+    final reference = widget.controller.savedReferences
+        .where((reference) => reference.id == item.id)
+        .firstOrNull;
+    if (reference == null) return;
+    unawaited(() async {
+      await widget.controller.rememberSavedReferenceDuration(
+        reference,
+        seconds,
+      );
+      if (!mounted) return;
+      setState(() {
+        final refreshed = candidates
+            .where((candidate) => candidate.id == item.id)
+            .firstOrNull;
+        if (refreshed != null && selected.containsKey(item.id)) {
+          selected[item.id] = refreshed;
+        }
+      });
+    }());
   }
 
   @override
@@ -2356,6 +2768,8 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                               onThumbnail: item.kind == MediaReferenceKind.video
                                   ? (bytes) => _cacheThumbnail(item, bytes)
                                   : null,
+                              onDuration: (seconds) =>
+                                  _rememberDuration(item, seconds),
                             );
                           },
                         );
@@ -2393,6 +2807,7 @@ class _ReferenceCandidateCard extends StatelessWidget {
     required this.enabled,
     required this.onTap,
     this.onThumbnail,
+    this.onDuration,
   });
 
   final AppController controller;
@@ -2401,12 +2816,15 @@ class _ReferenceCandidateCard extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
   final ValueChanged<Uint8List>? onThumbnail;
+  final ValueChanged<double>? onDuration;
 
   String get details {
     final collection = item.generated
         ? LibraryCollection.generated
         : LibraryCollection.references;
     final values = <String>[
+      if (item.durationSeconds != null)
+        formatMediaDuration(item.durationSeconds!),
       if (item.folderId != null)
         controller.folderPath(item.folderId!, collection: collection),
       ...item.tags.map((tag) => '#$tag'),
@@ -2464,6 +2882,17 @@ class _ReferenceCandidateCard extends StatelessWidget {
                             : null,
                         semanticsLabel: '${item.name} thumbnail',
                         onThumbnail: onThumbnail,
+                        onVideoMetadata:
+                            item.kind == MediaReferenceKind.video &&
+                                !item.generated
+                            ? (metadata) =>
+                                  onDuration?.call(metadata.durationSeconds)
+                            : null,
+                        onMediaDuration:
+                            item.kind == MediaReferenceKind.audio &&
+                                !item.generated
+                            ? onDuration
+                            : null,
                       ),
                       Positioned(
                         top: 8,

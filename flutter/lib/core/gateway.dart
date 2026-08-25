@@ -79,6 +79,20 @@ abstract interface class ReferenceLibraryGateway {
   Future<LocalSnapshot> deleteReference(String referenceId);
 }
 
+/// Non-destructive edits that create new durable reference media.
+///
+/// The renderer sends only compact edit metadata. Native builds and the
+/// Electron companion perform the media work beside the durable asset store,
+/// keeping large video bytes out of web-renderer messages and history JSON.
+abstract interface class ReferenceVideoEditingGateway {
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  });
+}
+
 abstract interface class FavoriteGateway {
   Future<LocalSnapshot> setGenerationFavorite(String localId, bool favorite);
   Future<LocalSnapshot> setReferenceFavorite(String referenceId, bool favorite);

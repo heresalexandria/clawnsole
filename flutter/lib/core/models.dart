@@ -91,7 +91,14 @@ extension LibraryStorageFilterValue on LibraryStorageFilter {
   };
 }
 
-enum ReferenceSort { newest, oldest, name, kind }
+enum ReferenceSort {
+  newest,
+  oldest,
+  name,
+  kind,
+  durationShortest,
+  durationLongest,
+}
 
 extension MediaReferenceTaskValue on MediaReferenceTask {
   String get label => switch (this) {
@@ -616,6 +623,7 @@ class SavedReference {
     this.hidden = false,
     this.storage = LibraryStorage.local,
     this.contentDigest,
+    this.durationSeconds,
   });
 
   final String id;
@@ -635,6 +643,11 @@ class SavedReference {
   /// idempotent without storing the media bytes in history JSON.
   final String? contentDigest;
 
+  /// Measured playback length for video and audio references. Older records
+  /// leave this null until a media surface measures them, then persist it so
+  /// sorting, model-capacity gauges, and future launches stay deterministic.
+  final double? durationSeconds;
+
   SavedReference copyWith({
     String? name,
     AssetReference? asset,
@@ -647,6 +660,8 @@ class SavedReference {
     bool? hidden,
     LibraryStorage? storage,
     String? contentDigest,
+    double? durationSeconds,
+    bool clearDurationSeconds = false,
   }) => SavedReference(
     id: id,
     name: name ?? this.name,
@@ -661,6 +676,9 @@ class SavedReference {
     hidden: hidden ?? this.hidden,
     storage: storage ?? this.storage,
     contentDigest: contentDigest ?? this.contentDigest,
+    durationSeconds: clearDurationSeconds
+        ? null
+        : durationSeconds ?? this.durationSeconds,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -677,6 +695,7 @@ class SavedReference {
     if (hidden) 'hidden': true,
     if (storage != LibraryStorage.local) 'storage': storage.name,
     if (contentDigest != null) 'contentDigest': contentDigest,
+    if (durationSeconds != null) 'durationSeconds': durationSeconds,
   };
 
   factory SavedReference.fromJson(Map<String, Object?> json) {
@@ -719,6 +738,10 @@ class SavedReference {
               (json['contentDigest']! as String).trim().isNotEmpty
           ? (json['contentDigest']! as String).trim()
           : null,
+      durationSeconds: switch ((json['durationSeconds'] as num?)?.toDouble()) {
+        final double seconds when seconds.isFinite && seconds > 0 => seconds,
+        _ => null,
+      },
     );
   }
 }
@@ -1468,7 +1491,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 22,
+    'schemaVersion': 23,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)

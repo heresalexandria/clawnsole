@@ -390,6 +390,7 @@ class HybridDataStore implements DurableDataStore {
           hidden: reference.hidden,
           storage: LibraryStorage.drive,
           contentDigest: reference.contentDigest,
+          durationSeconds: reference.durationSeconds,
         ),
       );
       remoteReferenceIds.add(id);
