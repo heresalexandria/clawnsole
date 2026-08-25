@@ -1224,8 +1224,7 @@ class _GuidanceInputsSection extends StatelessWidget {
     final model = controller.selectedModel;
     final showFrames =
         controller.keyframeLimit > 0 || controller.form.keyframes.isNotEmpty;
-    final showReferences =
-        model.supportsMediaReferences || controller.form.references.isNotEmpty;
+    final showReferences = model.supportsMediaReferences;
     if (!showFrames && !showReferences) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

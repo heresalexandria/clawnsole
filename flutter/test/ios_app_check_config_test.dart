@@ -68,4 +68,18 @@ void main() {
       contains('Clawnsole does not request your current location.'),
     );
   });
+
+  test('Apple image sequences preserve their prompt and frame progress', () {
+    final plugin = File(
+      'ios/Runner/AppleLocalGenerationPlugin.swift',
+    ).readAsStringSync();
+
+    expect(plugin, contains('.text(request.prompt)'));
+    expect(plugin, contains(r'\(index + 1) of \(frameCount)'));
+    expect(
+      plugin,
+      contains(r'Generating image \(index + 1) of \(request.frameCount)'),
+    );
+    expect(plugin, isNot(contains('request.promptForFrame')));
+  });
 }

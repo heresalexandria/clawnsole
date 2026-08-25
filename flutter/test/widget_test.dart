@@ -3891,6 +3891,81 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets(
+    'models without reference inputs hide and disable attached references',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1000));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = AppController(
+        gateway: _MemoryGateway(
+          const LocalSnapshot(
+            generations: <Generation>[],
+            preferences: AppPreferences(),
+            hasApiKey: false,
+            availableProviders: <String>{'atlas', 'apple-local'},
+            storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+          ),
+        ),
+      );
+      await controller.initialize();
+      await controller.selectProviderModel(
+        'atlas',
+        'bytedance/seedance-2.5/reference-to-video',
+      );
+      controller.addUrlReference(MediaReferenceKind.image);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => CreateScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsOneWidget,
+      );
+
+      await controller.selectProviderModel(
+        'apple-local',
+        'apple-local-animation',
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.mode, VideoMode.t2v);
+      expect(controller.currentConfig.references, isNull);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsNothing,
+      );
+
+      await controller.selectProviderModel(
+        'atlas',
+        'bytedance/seedance-2.5/reference-to-video',
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsOneWidget,
+      );
+      controller.dispose();
+    },
+  );
+
   testWidgets('provider picker filters models and provider sections', (
     tester,
   ) async {

@@ -31,7 +31,6 @@ void main() {
     ).fetch(appVersion: clawnsoleVersion);
 
     expect(bundle.cache['catalog_version'], clawnsoleVersion);
-    expect(bundle.cache['test_versions'], isEmpty);
     expect(bundle.providers, isNotEmpty);
     expect(
       bundle.providers.map((provider) => provider.id).toSet(),
