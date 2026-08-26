@@ -116,7 +116,10 @@ void main() {
         controller.referenceUploadStatus,
         'Uploading large-reference.heic…',
       );
-      expect(controller.form.references, isEmpty);
+      // Append-first: the draft is attached and usable immediately while
+      // retention continues in the background.
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.references.single.savedReferenceId, isNull);
 
       finishSave.complete();
       await upload;
@@ -124,6 +127,7 @@ void main() {
       expect(controller.referenceUploadInProgress, isFalse);
       expect(controller.referenceUploadStatus, isNull);
       expect(controller.form.references, hasLength(1));
+      expect(controller.form.references.single.savedReferenceId, isNotNull);
     },
   );
 
@@ -689,6 +693,219 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('add buttons stay usable while an earlier add processes', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1400));
+    final pickerResult = Completer<FilePickerResult?>();
+    final gateway = _ReferenceGateway(emptySnapshot);
+    final controller =
+        AppController(
+            gateway: gateway,
+            filePicker:
+                ({
+                  required FileType type,
+                  required bool allowMultiple,
+                  required bool withData,
+                }) => pickerResult.future,
+          )
+          ..snapshot = emptySnapshot
+          ..loading = false
+          ..selectedProviderId = 'artcraft'
+          ..selectedModelId = 'seedance_2p5';
+    addTearDown(() async {
+      if (!pickerResult.isCompleted) pickerResult.complete(null);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+      controller.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    final upload = controller.addMediaReferences(MediaReferenceKind.image);
+    await tester.pump();
+
+    expect(controller.referenceUploadInProgress, isTrue);
+    // The status chip stays informational: buttons never lock, and the whole
+    // references section doubles as a drop target.
+    final button = tester.widget<PopupMenuButton<String>>(
+      find.byKey(const ValueKey('add-image-reference'), skipOffstage: false),
+    );
+    expect(
+      button.enabled,
+      isTrue,
+      reason: 'in-flight work must not lock further adds',
+    );
+    expect(
+      find.byKey(const ValueKey('reference-drop-zone'), skipOffstage: false),
+      findsOne,
+    );
+
+    pickerResult.complete(null);
+    await upload;
+    await tester.pump();
+    expect(controller.referenceUploadInProgress, isFalse);
+  });
+
+  testWidgets('trim dialog surfaces duration failures with a retry', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.utc(2026, 8, 26);
+    final reference = SavedReference(
+      id: 'clip',
+      name: 'clip.mp4',
+      kind: MediaReferenceKind.video,
+      asset: const AssetReference(
+        kind: 'local',
+        value: 'clip-bytes',
+        label: 'clip.mp4',
+        contentType: 'video/mp4',
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final snapshot = emptySnapshot.copyWith(
+      savedReferences: <SavedReference>[reference],
+    );
+    final controller = AppController(gateway: _ReferenceGateway(snapshot))
+      ..snapshot = snapshot
+      ..loading = false;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => unawaited(
+                showReferenceTrimDialog(context, controller, reference),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    // The fake gateway's memory: URI has no readable duration; give the
+    // deliberate loader (and its internal probe timeout) room to settle.
+    await tester.pump(const Duration(seconds: 20));
+
+    expect(find.byKey(const ValueKey('trim-duration-failed')), findsOneWidget);
+    expect(find.text('Reading video duration…'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('trim-duration-retry')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 20));
+    expect(
+      find.byKey(const ValueKey('trim-duration-failed')),
+      findsOneWidget,
+      reason: 'a failed retry lands back on the error row, never a spinner',
+    );
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  test('choosing saved references hydrates media in the background', () async {
+    final readGate = Completer<void>();
+    final gateway = _ReferenceGateway(
+      emptySnapshot,
+      beforeRead: () => readGate.future,
+    );
+    gateway._assets['subject-bytes'] = Uint8List.fromList(<int>[8, 8, 8]);
+    final controller = AppController(gateway: gateway)
+      ..snapshot = emptySnapshot
+      ..loading = false
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'seedance_2p5';
+    addTearDown(() {
+      if (!readGate.isCompleted) readGate.complete();
+      controller.dispose();
+    });
+    final candidate = ReferenceCandidate(
+      id: 'saved-1',
+      name: 'Subject',
+      kind: MediaReferenceKind.image,
+      asset: const AssetReference(
+        kind: 'local',
+        value: 'subject-bytes',
+        label: 'subject.png',
+        contentType: 'image/png',
+      ),
+      createdAt: DateTime.utc(2026, 8, 26),
+    );
+
+    final adding = controller.addReferenceCandidates(
+      MediaReferenceKind.image,
+      <ReferenceCandidate>[candidate],
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final draft = controller.form.references.single;
+    expect(draft.requestSource, isEmpty);
+    expect(controller.isReferenceDraftHydrating(draft.id), isTrue);
+    expect(controller.referenceUploadInProgress, isTrue);
+
+    readGate.complete();
+    await adding;
+
+    final hydrated = controller.form.references.single;
+    expect(controller.isReferenceDraftHydrating(hydrated.id), isFalse);
+    expect(hydrated.requestSource, isNotEmpty);
+    expect(controller.referenceUploadInProgress, isFalse);
+  });
+
+  test('dropped files sort into reference kinds by type', () async {
+    final gateway = _ReferenceGateway(emptySnapshot);
+    final controller = AppController(gateway: gateway)
+      ..snapshot = emptySnapshot
+      ..loading = false
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'seedance_2p5';
+    addTearDown(controller.dispose);
+    DroppedFile file(String name) =>
+        DroppedFile(name: name, bytes: Uint8List.fromList(<int>[1, 2, 3]));
+
+    expect(
+      controller.classifyDroppedFile('clip.MOV', Uint8List(0)),
+      MediaReferenceKind.video,
+    );
+    expect(controller.classifyDroppedFile('notes.txt', Uint8List(0)), isNull);
+
+    await controller.addDroppedReferenceFiles(<DroppedFile>[
+      file('subject.png'),
+      file('motion.mp4'),
+      file('voice.mp3'),
+      file('notes.txt'),
+    ]);
+
+    expect(
+      controller.form.references.map((item) => item.kind),
+      containsAll(<MediaReferenceKind>[
+        MediaReferenceKind.image,
+        MediaReferenceKind.video,
+        MediaReferenceKind.audio,
+      ]),
+    );
+    expect(controller.form.references, hasLength(3));
+    expect(controller.notice, contains('not supported'));
+  });
+
   test('schema v21 migrates asset-linked reference usage ids', () {
     final now = DateTime.utc(2026, 8, 23);
     const asset = AssetReference(
@@ -759,11 +976,17 @@ FilePickerInvocation _picker(Map<FileType, PlatformFile> files) =>
 
 class _ReferenceGateway
     implements AppGateway, ReferenceLibraryGateway, MediaPreviewGateway {
-  _ReferenceGateway(this.snapshot, {this.beforeSave, this.beforePreviewSave});
+  _ReferenceGateway(
+    this.snapshot, {
+    this.beforeSave,
+    this.beforePreviewSave,
+    this.beforeRead,
+  });
 
   LocalSnapshot snapshot;
   final Future<void> Function()? beforeSave;
   final Future<void> Function()? beforePreviewSave;
+  final Future<void> Function()? beforeRead;
   final Map<String, Uint8List> _assets = <String, Uint8List>{};
 
   @override
@@ -858,8 +1081,10 @@ class _ReferenceGateway
   }
 
   @override
-  Future<Uint8List> readAsset(AssetReference reference) async =>
-      _assets[reference.value] ?? Uint8List(0);
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    await beforeRead?.call();
+    return _assets[reference.value] ?? Uint8List(0);
+  }
 
   @override
   Future<Uri> assetUri(AssetReference reference) async =>

@@ -1836,14 +1836,18 @@ class CompanionApp {
         }
       }
       // An undelivered record keeps its links past the retention estimate
-      // until at least one status check ran after the estimate lapsed: the
-      // estimate can expire entirely while the process is suspended or dead,
-      // and purging on the next load would destroy the delivery link before
-      // the recovery poll gets its one chance to download from it.
+      // until a result download was actually attempted after the estimate
+      // lapsed. A mere status check is not enough: lastCheckedAt is shared
+      // across devices, so another device's routine poll would otherwise
+      // authorize purging the last delivery link before any device tried to
+      // download from it.
       final attemptedAfterExpiry =
           next.resultAsset != null ||
           (next.deliveryExpiresAt != null &&
-              next.lastCheckedAt?.isAfter(next.deliveryExpiresAt!) == true);
+              next.lastResultRetentionAttemptAt?.isAfter(
+                    next.deliveryExpiresAt!,
+                  ) ==
+                  true);
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
           (next.resultUrl == null && next.draftCacheUrl == null) ||
@@ -1860,7 +1864,13 @@ class CompanionApp {
     }).toList();
     if (changed) {
       data = data.copyWith(generations: generations);
-      await _store.replace(data);
+      try {
+        await _store.replace(data);
+      } on Object {
+        // Drive-tagged records cannot be rewritten while Drive is
+        // disconnected, and a transient Drive failure must not fail every
+        // /state response. Serve the swept view; the write reruns later.
+      }
     }
     final connected = videoProviders
         .where((provider) => _activeKey(data, provider.id).isNotEmpty)

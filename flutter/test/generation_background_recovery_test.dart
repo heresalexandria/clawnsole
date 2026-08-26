@@ -362,8 +362,15 @@ void main() {
       final unattempted = base.copyWith(
         lastCheckedAt: now.subtract(const Duration(minutes: 20)),
       );
+      // A status check after expiry is not a download attempt. lastCheckedAt
+      // is shared across devices, so another device's routine poll must not
+      // authorize destroying the last delivery link.
+      final polledOnly = base.copyWith(
+        lastCheckedAt: now.subtract(const Duration(minutes: 1)),
+      );
       final attempted = base.copyWith(
         lastCheckedAt: now.subtract(const Duration(minutes: 1)),
+        lastResultRetentionAttemptAt: now.subtract(const Duration(minutes: 1)),
       );
       final api = _PollBflApi(() async => <String, Object?>{'status': 'Ready'});
 
@@ -373,6 +380,13 @@ void main() {
       final kept = await _gateway(store: keptStore, api: api).load();
       expect(kept.generations.single.resultUrl, _storedResultUrl);
       expect(kept.generations.single.deliveryExpired, isFalse);
+
+      final polledStore = _MemoryStore(
+        StoredData(generations: <Generation>[polledOnly]),
+      );
+      final polled = await _gateway(store: polledStore, api: api).load();
+      expect(polled.generations.single.resultUrl, _storedResultUrl);
+      expect(polled.generations.single.deliveryExpired, isFalse);
 
       final purgedStore = _MemoryStore(
         StoredData(generations: <Generation>[attempted]),

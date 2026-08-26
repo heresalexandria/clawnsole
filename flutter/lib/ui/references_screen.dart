@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
@@ -894,7 +895,7 @@ class _ReferenceCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        '${reference.kind.label}${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'} · ${reference.storage.shortLabel}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
+                        '${reference.kind.label}${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'} · ${reference.storage.shortLabel}${savedReferencePendingDriveUpload(reference) ? ' · Syncing…' : ''}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

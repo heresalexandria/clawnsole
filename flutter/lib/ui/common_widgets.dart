@@ -188,10 +188,19 @@ class ReferenceUploadIndicator extends StatelessWidget {
 }
 
 class StorageBadge extends StatelessWidget {
-  const StorageBadge({required this.storage, super.key, this.compact = false});
+  const StorageBadge({
+    required this.storage,
+    super.key,
+    this.compact = false,
+    this.pendingUpload = false,
+  });
 
   final LibraryStorage storage;
   final bool compact;
+
+  /// The record is Drive-tagged but its media is still staged on this device
+  /// waiting for the background upload pass to publish it.
+  final bool pendingUpload;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -210,14 +219,16 @@ class StorageBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Icon(
-          storage == LibraryStorage.drive
+          pendingUpload
+              ? Icons.cloud_upload_outlined
+              : storage == LibraryStorage.drive
               ? Icons.cloud_outlined
               : Icons.devices_outlined,
           size: compact ? 12 : 14,
         ),
         const SizedBox(width: 5),
         Text(
-          storage.shortLabel,
+          pendingUpload ? 'Syncing…' : storage.shortLabel,
           style: TextStyle(
             fontSize: compact ? 9.5 : 10.5,
             fontWeight: FontWeight.w700,

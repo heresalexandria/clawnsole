@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
@@ -163,7 +164,11 @@ class MiniGenerationCard extends StatelessWidget {
               const SizedBox(height: 7),
               Row(
                 children: <Widget>[
-                  StorageBadge(storage: item.storage, compact: true),
+                  StorageBadge(
+                    storage: item.storage,
+                    compact: true,
+                    pendingUpload: generationPendingDriveUpload(item),
+                  ),
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
@@ -264,7 +269,11 @@ class CompactGenerationRow extends StatelessWidget {
               const SizedBox(height: 5),
               Row(
                 children: <Widget>[
-                  StorageBadge(storage: item.storage, compact: true),
+                  StorageBadge(
+                    storage: item.storage,
+                    compact: true,
+                    pendingUpload: generationPendingDriveUpload(item),
+                  ),
                   const SizedBox(width: 7),
                   Expanded(
                     child: Text(

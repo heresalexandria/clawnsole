@@ -102,6 +102,20 @@ Iterable<AssetReference> pendingDriveUploadAssets(
   }
 }
 
+/// True when this Drive-tagged reference's media is still staged locally,
+/// waiting for the background upload pass to publish it.
+bool savedReferencePendingDriveUpload(SavedReference reference) =>
+    reference.storage == LibraryStorage.drive &&
+    savedReferenceAssetReferences(
+      reference,
+    ).any((asset) => asset.kind == 'local');
+
+/// True when this Drive-tagged generation still holds locally staged media,
+/// waiting for the background upload pass to publish it.
+bool generationPendingDriveUpload(Generation generation) =>
+    generation.storage == LibraryStorage.drive &&
+    generationAssetReferences(generation).any((asset) => asset.kind == 'local');
+
 /// Rewrites every retained-media slot on [generation] through [transform].
 Generation mapGenerationAssets(
   Generation generation,

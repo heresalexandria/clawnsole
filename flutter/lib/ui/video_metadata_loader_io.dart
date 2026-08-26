@@ -37,7 +37,10 @@ Future<VideoSourceMetadata?> _loadWithVideoPlayer(Uri uri) async {
   } on Object {
     return null;
   } finally {
-    await controller.dispose();
+    // dispose() waits on the platform's create call, which never completes
+    // when create itself failed — awaiting it here would wedge the probe (and
+    // the caller's loading state) forever. Release without blocking.
+    unawaited(controller.dispose().catchError((_) {}));
   }
 }
 
