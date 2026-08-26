@@ -708,6 +708,14 @@ void main() {
       },
     );
     expect(modelById('runway', 'seedance2_5').maxPromptCharacters, 15000);
+    // BFL's playground caps prompts at 10000 characters (the OpenAPI spec
+    // declares no maxLength); the upscale route's optional detail guidance
+    // has no published ceiling.
+    expect(modelById('bfl', 'flux-3-video').maxPromptCharacters, 10000);
+    expect(
+      modelById('bfl', 'flux-tools-video-upscale-v1').maxPromptCharacters,
+      isNull,
+    );
   });
 
   test('FLUX 3 visual routes leave headroom below the four megapixel cap', () {

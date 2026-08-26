@@ -38,6 +38,7 @@
   "max_keyframes": 10,
   "max_input_image_pixels": 3800000,
   "usd_per_second": 0.17,
+  "max_prompt_characters": 10000,
   "reference_usd_per_second": 0.17,
   "supports_start_frame": true,
   "supports_end_frame": true,

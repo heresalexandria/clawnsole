@@ -591,6 +591,9 @@ const _bflProvider = VideoProviderDefinition(
       supportsAutoDuration: true,
       supportsDraft: true,
       supportsTimedKeyframes: true,
+      // The OpenAPI spec declares no maxLength, but BFL's playground caps
+      // prompts at 10000 characters.
+      maxPromptCharacters: 10000,
     ),
     VideoModelDefinition(
       id: 'flux-tools-video-upscale-v1',
