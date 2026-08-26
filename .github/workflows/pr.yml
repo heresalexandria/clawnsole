@@ -24,6 +24,7 @@ jobs:
       electron: ${{ steps.paths.outputs.electron }}
       macos: ${{ steps.paths.outputs.macos }}
       windows: ${{ steps.paths.outputs.windows }}
+      release_scripts: ${{ steps.paths.outputs.release_scripts }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,6 +41,7 @@ jobs:
           electron=false
           macos=false
           windows=false
+          release_scripts=false
 
           while IFS= read -r path; do
             case "$path" in
@@ -58,6 +60,10 @@ jobs:
                 electron=true
                 macos=true
                 windows=true
+                release_scripts=true
+                ;;
+              scripts/release/*)
+                release_scripts=true
                 ;;
               .github/workflows/release.yml|claw.png|icon.png|scripts/prepare_platform_icons|scripts/render_platform_icon.swift)
                 macos=true
@@ -70,7 +76,7 @@ jobs:
               docs/*|scripts/check_site_indexing.py)
                 site=true
                 ;;
-              .github/pull_request_template.md|.github/workflows/labels.yml|.github/workflows/release-label.yml|.gitignore|AGENTS.md|LICENSE|PRIVACY.md|README.md|scripts/release/*)
+              .github/pull_request_template.md|.github/workflows/labels.yml|.github/workflows/release-label.yml|.gitignore|AGENTS.md|LICENSE|PRIVACY.md|README.md)
                 ;;
               *)
                 # New product paths should receive full coverage until they are
@@ -89,6 +95,7 @@ jobs:
             echo "electron=$electron"
             echo "macos=$macos"
             echo "windows=$windows"
+            echo "release_scripts=$release_scripts"
           } >> "$GITHUB_OUTPUT"
 
   site:
@@ -99,6 +106,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/check_site_indexing.py
+
+  release-scripts:
+    name: Release script checks
+    needs: changes
+    if: needs.changes.outputs.release_scripts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
 
   flutter:
     name: Flutter checks
