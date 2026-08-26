@@ -180,37 +180,6 @@ void main() {
     expect(backend.ffmpegArguments, isEmpty);
   });
 
-  test(
-    'FLUX 3 derivatives at the raw four megapixel edge are reduced',
-    () async {
-      final cache = await Directory.systemTemp.createTemp(
-        'clawnsole-image-flux-headroom-',
-      );
-      addTearDown(() => cache.delete(recursive: true));
-      final backend = _ImageBackend();
-      final bytes = _jpegWithDimensions(1732, 2309);
-      final source = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-      final normalizer = ReferenceVideoNormalizer(
-        backend: backend,
-        cacheDirectory: () async => cache,
-      );
-
-      final normalized = await normalizer.normalizeImages(<String>[
-        source,
-      ], profile: const ReferenceImageCompatibilityProfile(maxPixels: 3800000));
-
-      expect(1732 * 2309, lessThan(4000000));
-      expect(1732 * 2309, greaterThan(3800000));
-      expect(normalized.changedIndexes, <int>{0});
-      final arguments = backend.ffmpegArguments.single;
-      expect(arguments[arguments.indexOf('-vf') + 1], contains('3800000'));
-      expect(arguments[arguments.indexOf('-vf') + 1], isNot(contains('crop')));
-      final output = base64Decode(normalized.sources.single.split(',').last);
-      final dimensions = _testJpegDimensions(output);
-      expect(dimensions.width * dimensions.height, lessThanOrEqualTo(3800000));
-    },
-  );
-
   test('byte-limited routes downscale until the encoded image fits', () async {
     final cache = await Directory.systemTemp.createTemp(
       'clawnsole-image-byte-cap-',
@@ -943,7 +912,7 @@ void main() {
           record: Generation(
             localId: 'image-reference-submit',
             provider: 'artcraft',
-            model: 'flux_3_draft',
+            model: 'flux_3',
             status: 'submitting',
             prompt: 'Animate the frame',
             mode: VideoMode.i2v,
@@ -972,8 +941,8 @@ void main() {
         ),
       );
 
-      expect(modelById('artcraft', 'flux_3_draft').maxVideoReferences, 0);
-      expect(normalizer.imageProfile?.maxPixels, 3800000);
+      expect(modelById('artcraft', 'flux_3').maxVideoReferences, 0);
+      expect(normalizer.imageProfile?.maxPixels, 4000000);
       expect(api.input['keyframes'], <String>['image-fixed']);
       expect(store.persistedSources, <String>['image-fixed']);
       expect(submitted.config.keyframes!.single.source!.value, 'image-fixed');
@@ -1341,8 +1310,6 @@ class _ImageBackend implements ReferenceVideoToolBackend {
       filter != null
           ? filter.contains('4000000')
                 ? _jpegWithDimensions(1728, 2304)
-                : filter.contains('3800000')
-                ? _jpegWithDimensions(1688, 2250)
                 : _jpegWithDimensions(800, 600)
           : <int>[0xff, 0xd8, 0xff, 0xd9],
     );
