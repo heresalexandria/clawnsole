@@ -19,6 +19,11 @@ These instructions apply to the whole repository.
 - Open normal, ready-for-review pull requests. Never open a draft pull request.
 - Label every pull request with exactly one release-impact label: `patch`,
   `minor`, or `major`.
+- A pull request is not done until its checks are green. After every push,
+  watch the checks through to completion and fix any failure before reporting
+  the work finished — local verification does not substitute for CI, which
+  pins a newer Flutter whose analyzer flags more than older local SDKs.
+  Prefer verifying with the same Flutter version CI pins before pushing.
 - Do not add forks or remotes owned by another account as a workaround for an
   authentication or permission failure. Stop and repair the
   `heresalexandria` authentication path instead.

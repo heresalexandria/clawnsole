@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
+import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
@@ -337,11 +338,14 @@ class AppController extends ChangeNotifier {
     AppGateway? gateway,
     FilePickerInvocation? filePicker,
     ProviderCatalogClient? providerCatalogClient,
+    BackgroundActivityCoordinator? backgroundActivity,
     bool mobileTestBuild = clawnsoleMobileTestBuild,
   }) : gateway = gateway ?? createGateway(),
        _filePicker = filePicker ?? _pickFiles,
        _providerCatalogClient =
            providerCatalogClient ?? ProviderCatalogClient(),
+       _backgroundActivity =
+           backgroundActivity ?? MethodChannelBackgroundActivity(),
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
@@ -350,6 +354,7 @@ class AppController extends ChangeNotifier {
   final AppGateway gateway;
   final FilePickerInvocation _filePicker;
   final ProviderCatalogClient _providerCatalogClient;
+  final BackgroundActivityCoordinator _backgroundActivity;
   final bool _mobileTestBuild;
   final GenerationFormState form = GenerationFormState();
   final List<MediaReferenceDraft> _disabledReferences = <MediaReferenceDraft>[];
@@ -430,6 +435,7 @@ class AppController extends ChangeNotifier {
   CostEstimate? _liveEstimate;
   Timer? _noticeTimer;
   bool _polling = false;
+  bool _pollAgainIgnoringSchedule = false;
   Timer? _prefetchDebounce;
   int _prefetchRevision = 0;
   int _videoPreviewSourceRevision = 0;
@@ -441,6 +447,8 @@ class AppController extends ChangeNotifier {
   final List<ReferenceImportProgress> _referenceImports =
       <ReferenceImportProgress>[];
   bool _reconcilingGenerationWork = false;
+  LocalSnapshot? _pendingWorkSnapshot;
+  bool _pendingWorkCache = false;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
   final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
@@ -681,6 +689,35 @@ class AppController extends ChangeNotifier {
   bool get hasAnyApiKey =>
       snapshot?.connectedProviders.isNotEmpty == true ||
       snapshot?.hasApiKey == true;
+
+  /// True while any pollable provider work is unfinished: an in-flight
+  /// submission, a working generation, or a ready result that has not been
+  /// retained locally yet. The platform shell uses this to keep the process
+  /// executing briefly after backgrounding so that work can land.
+  bool get hasPendingProviderWork {
+    final current = snapshot;
+    if (current == null) return false;
+    if (!identical(current, _pendingWorkSnapshot)) {
+      _pendingWorkSnapshot = current;
+      _pendingWorkCache = current.generations.any(
+        (item) =>
+            (item.isWorking || item.needsResultRetention) &&
+            hasApiKeyFor(item.provider),
+      );
+    }
+    return _pendingWorkCache;
+  }
+
+  @override
+  void notifyListeners() {
+    // dispose() reports idle to the shell; a straggling poll completion must
+    // not re-arm the process-global background hint after that.
+    if (!_disposed) {
+      unawaited(_backgroundActivity.setPendingWork(hasPendingProviderWork));
+    }
+    super.notifyListeners();
+  }
+
   bool get supportsPhotoLibrarySave => gateway.supportsPhotoLibrarySave;
   StorageStats get storage =>
       snapshot?.storage ?? const StorageStats(path: '', bytes: 0, records: 0);
@@ -1296,6 +1333,7 @@ class AppController extends ChangeNotifier {
       if (selectedProvider.requiresApiKey && hasApiKey) {
         unawaited(refreshCredits());
       }
+      unawaited(_recoverBackgroundDeliveries());
       if (hasAnyApiKey) unawaited(pollWorking());
       for (final provider in providers.where((item) => item.requiresApiKey)) {
         unawaited(refreshProviderModels(provider.id));
@@ -1443,6 +1481,32 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Imports result downloads the platform transfer service finished while
+  /// the process was suspended or terminated, then refreshes the snapshot so
+  /// the recovered films appear immediately.
+  Future<void> _recoverBackgroundDeliveries() async {
+    if (gateway is! BackgroundDeliveryGateway) return;
+    try {
+      // Bounded like gateway.poll: a Drive-backed import can hang on a
+      // socket the platform killed during suspension, and an unbounded wait
+      // here would wedge foreground reconciliation until relaunch.
+      final recovered = await (gateway as BackgroundDeliveryGateway)
+          .recoverBackgroundDeliveries()
+          .timeout(const Duration(minutes: 10));
+      if (recovered > 0 && !_disposed) {
+        _apply(await gateway.load());
+        showNotice(
+          recovered == 1
+              ? 'A film finished downloading in the background and is safely saved.'
+              : '$recovered films finished downloading in the background and are safely saved.',
+        );
+      }
+    } on Object {
+      // Recovery is best effort; the retention poller still retries from the
+      // provider's delivery link.
+    }
+  }
+
   /// Reloads durable generation receipts and immediately resumes polling.
   ///
   /// The app shell calls this when the process returns to the foreground, so
@@ -1452,9 +1516,21 @@ class AppController extends ChangeNotifier {
     if (_reconcilingGenerationWork) return;
     _reconcilingGenerationWork = true;
     try {
+      // Films the platform transfer service finished while the app was away
+      // import first — they remove records from the working set entirely.
+      await _recoverBackgroundDeliveries();
+      // The process may have been suspended for minutes with polls frozen or
+      // failed mid-flight, so the return to the foreground checks every
+      // working record immediately instead of honoring failure backoff. This
+      // runs before gateway.load(): loading prunes delivery links whose
+      // provider retention estimate lapsed while the app was suspended, and a
+      // link just past that estimate deserves one recovery attempt first.
+      if (hasAnyApiKey) await pollWorking(ignoreSchedule: true);
       _apply(await gateway.load());
-      await resumeGoogleDrive();
-      if (hasAnyApiKey) await pollWorking();
+      // Drive reconnection can stall on sockets the platform killed during
+      // suspension; a bounded wait keeps this reconcile hook responsive for
+      // the next foreground return.
+      await resumeGoogleDrive().timeout(const Duration(seconds: 30));
     } on Object {
       // Foreground reconciliation is best effort. The global poll timer keeps
       // retrying, and individual records retain their last provider failure.
@@ -4791,24 +4867,44 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> pollWorking() async {
-    if (_polling || !hasAnyApiKey) return;
+  Future<void> pollWorking({bool ignoreSchedule = false}) async {
+    if (!hasAnyApiKey) return;
+    if (_polling) {
+      // A pass blocked behind an in-flight poll must not silently drop a
+      // foreground-return reconcile: that in-flight request may be a stale
+      // pre-suspension call that is about to time out. Queue one follow-up.
+      if (ignoreSchedule) _pollAgainIgnoringSchedule = true;
+      return;
+    }
+    // A full pass is starting; it subsumes any queued follow-up request.
+    _pollAgainIgnoringSchedule = false;
     final now = DateTime.now().toUtc();
     final working = generations.where((item) {
       if (!item.canCheckStatus || _statusChecks.contains(item.localId)) {
         return false;
       }
       if (!hasApiKeyFor(item.provider)) return false;
+      final due = ignoreSchedule || item.isStatusCheckDue(now);
       final needsRetention =
-          item.isResultRetentionDue(now) && item.isStatusCheckDue(now);
-      return needsRetention || (item.isWorking && item.isStatusCheckDue(now));
+          (ignoreSchedule
+              ? item.needsResultRetention
+              : item.isResultRetentionDue(now)) &&
+          due;
+      return needsRetention || (item.isWorking && due);
     }).toList();
     if (working.isEmpty) return;
     _polling = true;
     try {
       for (final item in working) {
         try {
-          final updated = await gateway.poll(item);
+          // Provider requests carry their own timeouts, but Drive-backed
+          // record and asset writes inside poll do not, and a socket the
+          // platform killed during suspension can otherwise hang this loop —
+          // and with it all polling — until relaunch. The ceiling is generous
+          // enough for a large result upload on a slow connection.
+          final updated = await gateway
+              .poll(item)
+              .timeout(const Duration(minutes: 10));
           _replaceInMemory(updated);
           if (await _invalidateRejectedApiKey(
             updated.lastProviderStatusCode,
@@ -4858,6 +4954,10 @@ class AppController extends ChangeNotifier {
       }
     } finally {
       _polling = false;
+      if (_pollAgainIgnoringSchedule && !_disposed) {
+        _pollAgainIgnoringSchedule = false;
+        unawaited(pollWorking(ignoreSchedule: true));
+      }
     }
   }
 
@@ -4869,7 +4969,11 @@ class AppController extends ChangeNotifier {
     if (!_statusChecks.add(item.localId)) return;
     notifyListeners();
     try {
-      final updated = await gateway.poll(item);
+      // Bounded like pollWorking: a hung poll would otherwise exclude this
+      // record from automatic polling for the rest of the process lifetime.
+      final updated = await gateway
+          .poll(item)
+          .timeout(const Duration(minutes: 10));
       _replaceInMemory(updated);
       if (await _invalidateRejectedApiKey(
         updated.lastProviderStatusCode,
@@ -6138,6 +6242,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_backgroundActivity.setPendingWork(false));
     _providerCatalogClient.close();
     _pollTimer?.cancel();
     _creditTimer?.cancel();
