@@ -8,6 +8,7 @@ import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
+import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
@@ -1066,6 +1067,8 @@ class _GenerationCardState extends State<GenerationCard> {
             style: widget.controller.generationPlaceholderStyle,
             progressEstimate: progressEstimate,
           )
+        else if (GenerationErrorThumbnail.shouldShow(item))
+          GenerationErrorThumbnail(item: item)
         else
           GenerationInputPreview(controller: widget.controller, item: item),
         // Status, storage, and age share the top-left corner so the card
@@ -1085,12 +1088,7 @@ class _GenerationCardState extends State<GenerationCard> {
             ],
           ),
         ),
-        if (generationDurationLabel(item) != null)
-          Positioned(
-            left: 10,
-            bottom: 10,
-            child: MediaDurationBadge(text: generationDurationLabel(item)!),
-          ),
+        GenerationThumbnailFooter(item: item),
         Positioned(
           top: 7,
           right: 7,
@@ -1150,8 +1148,11 @@ class _GenerationCardState extends State<GenerationCard> {
                       ),
                       // With no film to show, the media zone is dead space —
                       // the status panel lives there instead of stretching
-                      // the card body past its delivered neighbors.
-                      if (GenerationStatusDetails.shouldShow(item))
+                      // the card body past its delivered neighbors. A dead
+                      // render skips the panel: its error already sits on the
+                      // test-bars thumbnail band.
+                      if (!GenerationErrorThumbnail.shouldShow(item) &&
+                          GenerationStatusDetails.shouldShow(item))
                         Positioned.fill(
                           key: const ValueKey('generation-status-overlay'),
                           child: Padding(

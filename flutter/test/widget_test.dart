@@ -29,6 +29,7 @@ import 'package:clawnsole/core/update_status.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/generation_error_thumbnail.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
@@ -450,6 +451,9 @@ void main() {
     );
     expect(trulyFailed.hasDeliveredMedia, isFalse);
     expect(GenerationStatusDetails.shouldShow(trulyFailed), isTrue);
+    // The test-bars thumbnail follows the same ground truth.
+    expect(GenerationErrorThumbnail.shouldShow(delivered), isFalse);
+    expect(GenerationErrorThumbnail.shouldShow(trulyFailed), isTrue);
   });
 
   test(
@@ -1021,7 +1025,7 @@ void main() {
     expect(find.textContaining('not safely retained'), findsOneWidget);
   });
 
-  testWidgets('a failed card overlays its status panel on the media zone', (
+  testWidgets('a failed card centers its error on a test-bars thumbnail', (
     tester,
   ) async {
     final now = DateTime.utc(2026, 8, 26, 12);
@@ -1058,21 +1062,164 @@ void main() {
       ),
     );
 
-    // The panel renders once, over the dead media zone — never in the card
-    // body, where it would stretch the card past delivered neighbors.
-    final details = find.byType(GenerationStatusDetails);
-    expect(details, findsOneWidget);
+    // The dead media zone shows SMPTE bars with the error on a full-width
+    // black band centered on the thumbnail; the status panel never mounts.
+    expect(find.byType(GenerationStatusDetails), findsNothing);
+    final bars = find.byType(GenerationErrorThumbnail);
+    expect(bars, findsOneWidget);
+    final band = find.byKey(
+      const ValueKey('generation-error-band-failed-overlay'),
+    );
     expect(
       find.descendant(
-        of: find.byKey(const ValueKey('generation-status-overlay')),
-        matching: details,
+        of: band,
+        matching: find.text('BFL reported that this generation failed.'),
       ),
       findsOneWidget,
     );
+    final barsRect = tester.getRect(bars);
+    final bandRect = tester.getRect(band);
+    expect(bandRect.left, barsRect.left);
+    expect(bandRect.right, barsRect.right);
+    expect(bandRect.center.dx, closeTo(barsRect.center.dx, .5));
+    expect(bandRect.center.dy, closeTo(barsRect.center.dy, .5));
+
+    // The corner chrome keeps its usual places over the bars.
     expect(
-      find.textContaining('BFL reported that this generation failed.'),
+      find.byKey(const ValueKey('generation-meta-overlay-failed-overlay')),
       findsOneWidget,
     );
+    expect(find.byType(StatusBadge), findsOneWidget);
+    expect(find.byIcon(Icons.star_border_rounded), findsOneWidget);
+    expect(find.byType(ProviderBadge), findsOneWidget);
+  });
+
+  testWidgets('dense previews show test bars for dead renders', (tester) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'failed-dense',
+      status: 'Error',
+      error: 'BFL reported that this generation failed.',
+      prompt: 'A doomed render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(GenerationErrorThumbnail), findsOneWidget);
+    expect(
+      find.text('BFL reported that this generation failed.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('cards anchor the provider chip to the thumbnail, not the body', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'provider-chip',
+      provider: atlasProvider.id,
+      model: atlasProvider.defaultModel.id,
+      status: 'Ready',
+      prompt: 'A finished render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    Widget host(Widget child) => MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(body: SingleChildScrollView(child: child)),
+    );
+
+    await tester.pumpWidget(
+      host(GenerationCard(controller: controller, item: item)),
+    );
+
+    // The provider lives on the thumbnail's bottom-right corner and nowhere
+    // else — the spec row below keeps its width for the actual settings.
+    final badgeText = find.descendant(
+      of: find.byType(ProviderBadge),
+      matching: find.text('Atlas Cloud'),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(badgeText, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(GenerationSpecChips),
+        matching: find.text('Atlas Cloud'),
+      ),
+      findsNothing,
+    );
+    final thumb = tester.getRect(
+      find.descendant(
+        of: find.byType(StaticMediaBox),
+        matching: find.byType(AspectRatio),
+      ),
+    );
+    final badge = tester.getRect(find.byType(ProviderBadge));
+    expect(badge.right, closeTo(thumb.right - 10, .5));
+    expect(badge.bottom, closeTo(thumb.bottom - 10, .5));
+
+    await tester.pumpWidget(
+      host(
+        SizedBox(
+          width: 260,
+          child: MiniGenerationCard(controller: controller, item: item),
+        ),
+      ),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ProviderBadge),
+        matching: find.text('Atlas Cloud'),
+      ),
+      findsOneWidget,
+    );
+
+    // Compact rows keep the provider in their metadata line: on the 92-px
+    // thumbnail the pill could only ellipsize the name into noise.
+    await tester.pumpWidget(
+      host(CompactGenerationRow(controller: controller, item: item)),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(find.byType(ProviderBadge), findsNothing);
   });
 
   testWidgets(

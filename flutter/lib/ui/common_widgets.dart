@@ -13,6 +13,7 @@ import '../core/provider_catalog.dart';
 import '../core/shell_bridge.dart';
 import 'estimated_progress_bar.dart';
 import 'formatters.dart';
+import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'generation_view_widgets.dart';
@@ -665,6 +666,79 @@ String? generationDurationLabel(Generation item) {
   return duration == 'auto' ? 'Auto' : '$duration s';
 }
 
+/// Provider pill overlaid on a generation thumbnail's bottom-right corner,
+/// matching the duration pill's chrome so the card body below keeps its
+/// width for the prompt and specs.
+class ProviderBadge extends StatelessWidget {
+  const ProviderBadge({required this.item, super.key});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: .78),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      child: Text(
+        providerNameForHistory(item.provider),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Bottom overlay row shared by every generation thumbnail: clip duration in
+/// the left corner, provider in the right, laid out as one row so the pills
+/// never collide on narrow tiles.
+class GenerationThumbnailFooter extends StatelessWidget {
+  const GenerationThumbnailFooter({
+    required this.item,
+    super.key,
+    this.inset = 10,
+    this.showProvider = true,
+  });
+
+  final Generation item;
+
+  /// Distance from the thumbnail edges, matching the surface's other overlays.
+  final double inset;
+
+  /// Compact rows opt out: on their 92-px thumbnails the provider pill can
+  /// only ellipsize, so the name stays in the row's metadata line instead.
+  final bool showProvider;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    left: inset,
+    right: inset,
+    bottom: inset,
+    child: Row(
+      children: <Widget>[
+        if (generationDurationLabel(item) != null) ...<Widget>[
+          MediaDurationBadge(text: generationDurationLabel(item)!),
+          const SizedBox(width: 6),
+        ],
+        if (showProvider)
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: ProviderBadge(item: item),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 /// Every setting used for a generation, shown as compact chips.
 class GenerationSpecChips extends StatelessWidget {
   const GenerationSpecChips({required this.item, super.key});
@@ -679,7 +753,8 @@ class GenerationSpecChips extends StatelessWidget {
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
-        _SpecChip(label: providerNameForHistory(item.provider)),
+        // The provider rides the thumbnail's bottom-right corner
+        // (GenerationThumbnailFooter), not the spec row.
         _SpecChip(
           label: item.isImage
               ? (item.mode == VideoMode.i2v
@@ -2696,15 +2771,12 @@ class ActivityCard extends StatelessWidget {
             style: controller.generationPlaceholderStyle,
             progressEstimate: progressEstimate,
           )
+        else if (GenerationErrorThumbnail.shouldShow(item))
+          GenerationErrorThumbnail(item: item, dense: true)
         else
           GenerationInputPreview(controller: controller, item: item),
         Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
-        if (generationDurationLabel(item) != null)
-          Positioned(
-            left: 8,
-            bottom: 8,
-            child: MediaDurationBadge(text: generationDurationLabel(item)!),
-          ),
+        GenerationThumbnailFooter(item: item, inset: 8),
       ],
     );
     return SurfaceCard(
@@ -2774,7 +2846,10 @@ class ActivityCard extends StatelessWidget {
                     color: context.colors.primary,
                   ),
                 ],
-                if (GenerationStatusDetails.shouldShow(item)) ...<Widget>[
+                // A dead render already carries its error on the thumbnail
+                // band; repeating it below would just double the obituary.
+                if (GenerationStatusDetails.shouldShow(item) &&
+                    !GenerationErrorThumbnail.shouldShow(item)) ...<Widget>[
                   const SizedBox(height: 8),
                   GenerationStatusDetails(item: item),
                 ],
