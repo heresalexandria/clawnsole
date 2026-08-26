@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
+import '../core/asset_extensions.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/data_location.dart';
@@ -82,6 +83,15 @@ class PickedAsset {
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
     thumbnailBytes: thumbnailBytes ?? this.thumbnailBytes,
   );
+}
+
+/// One local file dropped onto a reference surface, before classification.
+class DroppedFile {
+  const DroppedFile({required this.name, required this.bytes, this.path});
+
+  final String name;
+  final Uint8List bytes;
+  final String? path;
 }
 
 enum ReferenceImportStage { queued, preparing, uploading }
@@ -447,9 +457,15 @@ class AppController extends ChangeNotifier {
       <String, Future<Uint8List>>{};
   final List<ReferenceImportProgress> _referenceImports =
       <ReferenceImportProgress>[];
+  Future<void> _referenceWorkQueue = Future<void>.value();
+  final Set<String> _hydratingReferenceDraftIds = <String>{};
+  bool _refreshingDriveLibrary = false;
+  int _driveRefreshTick = 0;
   bool _reconcilingGenerationWork = false;
   LocalSnapshot? _pendingWorkSnapshot;
   bool _pendingWorkCache = false;
+  LocalSnapshot? _pendingDriveUploadSnapshot;
+  int _pendingDriveUploadCache = 0;
   final Set<String> _statusChecks = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
   final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
@@ -494,6 +510,22 @@ class AppController extends ChangeNotifier {
     if (_referenceUploadDepth == 0) referenceUploadStatus = null;
     notifyListeners();
   }
+
+  /// Serializes reference persistence so several adds can be in flight from
+  /// the user's point of view without interleaving the gateway's
+  /// read-modify-write cycles. Callers still await their own enqueued work;
+  /// the add buttons never lock.
+  Future<T> _enqueueReferenceWork<T>(Future<T> Function() task) {
+    final result = _referenceWorkQueue.then((_) => task());
+    _referenceWorkQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// True while a draft picked from References is still loading its media
+  /// bytes in the background. Such a draft renders normally but cannot enter
+  /// a generation until the bytes arrive.
+  bool isReferenceDraftHydrating(String draftId) =>
+      _hydratingReferenceDraftIds.contains(draftId);
 
   List<Generation> get generations => snapshot?.generations ?? const [];
 
@@ -709,12 +741,34 @@ class AppController extends ChangeNotifier {
     return _pendingWorkCache;
   }
 
+  /// Media staged on this device that a background pass still needs to
+  /// publish to Google Drive: Drive-tagged records whose assets are still
+  /// local-kind. Drives the non-blocking "backing up to Drive" indicators.
+  int get pendingDriveUploadCount {
+    final current = snapshot;
+    if (current == null) return 0;
+    if (!identical(current, _pendingDriveUploadSnapshot)) {
+      _pendingDriveUploadSnapshot = current;
+      _pendingDriveUploadCache = pendingDriveUploadAssets(
+        current.generations,
+        current.savedReferences,
+      ).map((reference) => reference.value).toSet().length;
+    }
+    return _pendingDriveUploadCache;
+  }
+
   @override
   void notifyListeners() {
     // dispose() reports idle to the shell; a straggling poll completion must
-    // not re-arm the process-global background hint after that.
+    // not re-arm the process-global background hint after that. Pending Drive
+    // uploads count as background work so iOS keeps the process running long
+    // enough for staged media to publish after an app switch.
     if (!_disposed) {
-      unawaited(_backgroundActivity.setPendingWork(hasPendingProviderWork));
+      unawaited(
+        _backgroundActivity.setPendingWork(
+          hasPendingProviderWork || pendingDriveUploadCount > 0,
+        ),
+      );
     }
     super.notifyListeners();
   }
@@ -1359,10 +1413,10 @@ class AppController extends ChangeNotifier {
       unawaited(_restoreLocalStartupPresentation());
       unawaited(_reconcileDriveAfterStartup(preferenceRevision));
     }
-    _pollTimer = Timer.periodic(
-      const Duration(seconds: 4),
-      (_) => unawaited(pollWorking()),
-    );
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      unawaited(pollWorking());
+      unawaited(_refreshDriveLibraryIfDue());
+    });
     _creditTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (selectedProvider.requiresApiKey && hasApiKey) {
         unawaited(refreshCredits());
@@ -2822,124 +2876,154 @@ class AppController extends ChangeNotifier {
   }) async {
     if (gateway is! ReferenceLibraryGateway) return;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
-    final importIds = <String>[];
+    List<PickedAsset> picked;
     try {
-      final picked = await _pickMany(switch (kind) {
+      picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
         MediaReferenceKind.video => FileType.video,
         MediaReferenceKind.audio => FileType.audio,
       }, source: source);
-      if (picked.isEmpty) return;
-      final destination =
-          folderById(
-            folderId,
-            collection: LibraryCollection.references,
-          )?.storage ??
-          storage ??
-          effectiveStorage;
-      if (destination == LibraryStorage.drive && !googleDriveConnected) {
-        throw StateError(
-          'Connect Google Drive before importing Drive references.',
-        );
-      }
-      final startedAt = DateTime.now().toUtc();
-      final imports = <ReferenceImportProgress>[
-        for (final entry in picked.indexed)
-          ReferenceImportProgress(
-            id: 'reference-${startedAt.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
-            name: entry.$2.name,
-            kind: kind,
-            storage: destination,
-            folderId: folderId,
-            stage: ReferenceImportStage.queued,
-            position: entry.$1 + 1,
-            total: picked.length,
-          ),
-      ];
-      importIds.addAll(imports.map((item) => item.id));
-      _referenceImports.addAll(imports);
-      notifyListeners();
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return;
+    } finally {
+      _finishReferenceUpload();
+    }
+    await importPickedReferences(
+      kind,
+      picked,
+      folderId: folderId,
+      storage: storage,
+      previewLoader: previewLoader,
+    );
+  }
 
-      var saved = 0;
-      var failed = 0;
-      Object? lastError;
-      for (final entry in picked.indexed) {
-        final asset = entry.$2;
-        final now = DateTime.now().toUtc();
-        final progress = imports[entry.$1];
-        final reference = SavedReference(
-          id: progress.id,
-          name: _uniqueSavedReferenceName(asset.name),
+  /// Saves already-picked media into the References library. Progress cards
+  /// appear immediately; the saves run on the background work queue so the
+  /// add buttons never lock while files process.
+  Future<void> importPickedReferences(
+    MediaReferenceKind kind,
+    List<PickedAsset> picked, {
+    String? folderId,
+    LibraryStorage? storage,
+    ReferencePreviewLoader? previewLoader,
+  }) async {
+    if (gateway is! ReferenceLibraryGateway || picked.isEmpty) return;
+    final destination =
+        folderById(
+          folderId,
+          collection: LibraryCollection.references,
+        )?.storage ??
+        storage ??
+        effectiveStorage;
+    if (destination == LibraryStorage.drive && !googleDriveConnected) {
+      showNotice('Connect Google Drive before importing Drive references.');
+      return;
+    }
+    final startedAt = DateTime.now().toUtc();
+    final imports = <ReferenceImportProgress>[
+      for (final entry in picked.indexed)
+        ReferenceImportProgress(
+          id: 'reference-${startedAt.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
+          name: entry.$2.name,
           kind: kind,
-          asset: AssetReference(
-            kind: 'remote',
-            value: '',
-            label: asset.name,
-            contentType: asset.mimeType,
-            bytes: asset.bytes.length,
-          ),
-          thumbnailAsset: asset.thumbnailAsset,
-          createdAt: now,
-          updatedAt: now,
-          folderId: folderId,
           storage: destination,
-        );
-        try {
-          _setReferenceImportStage(progress.id, ReferenceImportStage.preparing);
-          _updateReferenceUpload(
-            'Preparing ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
-          );
-          final dataUrl = await _dataUrlForAsset(asset);
-          var thumbnailBytes = asset.thumbnailBytes;
-          if (kind == MediaReferenceKind.video &&
-              thumbnailBytes == null &&
-              previewLoader != null) {
-            try {
-              thumbnailBytes = await previewLoader(asset, dataUrl);
-            } on Object {
-              // Preview creation is best effort; the retained video can also
-              // backfill its frame after the card is rendered.
-            }
-          }
-          _setReferenceImportStage(progress.id, ReferenceImportStage.uploading);
-          _updateReferenceUpload(
-            'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
-          );
-          _apply(
-            await (gateway as ReferenceLibraryGateway).saveReference(
-              reference,
-              source: dataUrl,
+          folderId: folderId,
+          stage: ReferenceImportStage.queued,
+          position: entry.$1 + 1,
+          total: picked.length,
+        ),
+    ];
+    final importIds = imports.map((item) => item.id).toList();
+    _referenceImports.addAll(imports);
+    _beginReferenceUpload('Preparing ${picked.first.name}…');
+    try {
+      await _enqueueReferenceWork(() async {
+        var saved = 0;
+        var failed = 0;
+        Object? lastError;
+        for (final entry in picked.indexed) {
+          final asset = entry.$2;
+          final now = DateTime.now().toUtc();
+          final progress = imports[entry.$1];
+          final reference = SavedReference(
+            id: progress.id,
+            name: _uniqueSavedReferenceName(asset.name),
+            kind: kind,
+            asset: AssetReference(
+              kind: 'remote',
+              value: '',
+              label: asset.name,
+              contentType: asset.mimeType,
+              bytes: asset.bytes.length,
             ),
+            thumbnailAsset: asset.thumbnailAsset,
+            createdAt: now,
+            updatedAt: now,
+            folderId: folderId,
+            storage: destination,
           );
-          final savedReference = savedReferences
-              .where((item) => item.id == reference.id)
-              .firstOrNull;
-          if (savedReference != null &&
-              savedReference.thumbnailAsset == null &&
-              thumbnailBytes != null &&
-              thumbnailBytes.isNotEmpty) {
-            await cacheReferencePreview(savedReference, thumbnailBytes);
+          try {
+            _setReferenceImportStage(
+              progress.id,
+              ReferenceImportStage.preparing,
+            );
+            _updateReferenceUpload(
+              'Preparing ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
+            );
+            final dataUrl = await _dataUrlForAsset(asset);
+            var thumbnailBytes = asset.thumbnailBytes;
+            if (kind == MediaReferenceKind.video &&
+                thumbnailBytes == null &&
+                previewLoader != null) {
+              try {
+                thumbnailBytes = await previewLoader(asset, dataUrl);
+              } on Object {
+                // Preview creation is best effort; the retained video can
+                // also backfill its frame after the card is rendered.
+              }
+            }
+            _setReferenceImportStage(
+              progress.id,
+              ReferenceImportStage.uploading,
+            );
+            _updateReferenceUpload(
+              'Uploading ${asset.name} (${entry.$1 + 1} of ${picked.length})…',
+            );
+            _apply(
+              await (gateway as ReferenceLibraryGateway).saveReference(
+                reference,
+                source: dataUrl,
+              ),
+            );
+            final savedReference = savedReferences
+                .where((item) => item.id == reference.id)
+                .firstOrNull;
+            if (savedReference != null &&
+                savedReference.thumbnailAsset == null &&
+                thumbnailBytes != null &&
+                thumbnailBytes.isNotEmpty) {
+              await cacheReferencePreview(savedReference, thumbnailBytes);
+            }
+            saved += 1;
+          } on Object catch (error) {
+            failed += 1;
+            lastError = error;
+          } finally {
+            _referenceImports.removeWhere((item) => item.id == progress.id);
+            notifyListeners();
           }
-          saved += 1;
-        } on Object catch (error) {
-          failed += 1;
-          lastError = error;
-        } finally {
-          _referenceImports.removeWhere((item) => item.id == progress.id);
-          notifyListeners();
         }
-      }
-      if (failed > 0) {
-        showNotice('$saved saved, $failed failed. ${_message(lastError!)}');
-      } else if (saved > 0) {
-        showNotice('$saved ${kind.pluralLabel} saved to References.');
-      }
+        if (failed > 0) {
+          showNotice('$saved saved, $failed failed. ${_message(lastError!)}');
+        } else if (saved > 0) {
+          showNotice('$saved ${kind.pluralLabel} saved to References.');
+        }
+      });
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
-      if (importIds.isNotEmpty) {
-        _referenceImports.removeWhere((item) => importIds.contains(item.id));
-      }
+      _referenceImports.removeWhere((item) => importIds.contains(item.id));
       _finishReferenceUpload();
     }
   }
@@ -3027,11 +3111,13 @@ class AppController extends ChangeNotifier {
     _beginReferenceUpload('Trimming ${current.name}…');
     try {
       _apply(
-        await (gateway as ReferenceVideoEditingGateway).trimReferenceVideo(
-          sourceReferenceId: current.id,
-          output: output,
-          startSeconds: startSeconds,
-          endSeconds: endSeconds,
+        await _enqueueReferenceWork(
+          () => (gateway as ReferenceVideoEditingGateway).trimReferenceVideo(
+            sourceReferenceId: current.id,
+            output: output,
+            startSeconds: startSeconds,
+            endSeconds: endSeconds,
+          ),
         ),
       );
       final saved = savedReferences
@@ -3101,88 +3187,151 @@ class AppController extends ChangeNotifier {
     final available = referenceLimit(kind) - form.referenceCount(kind);
     final selected = candidates
         .where((item) => item.kind == kind)
-        .take(available)
+        .take(available < 0 ? 0 : available)
         .toList();
     if (selected.isEmpty) return;
+    // Drafts appear immediately; media bytes hydrate on the background work
+    // queue so choosing saved references never blocks further adds — even
+    // when the media has to come down from Google Drive first.
+    final hydrating = <(String, ReferenceCandidate)>[];
+    for (final candidate in selected) {
+      if (!candidate.generated &&
+          form.references.any(
+            (reference) => reference.savedReferenceId == candidate.id,
+          )) {
+        showNotice('“${candidate.name}” is already attached.');
+        continue;
+      }
+      final promptName = candidate.generated
+          ? _nextReferencePromptName(kind)
+          : candidate.name.trim();
+      final nameProblem = candidate.generated
+          ? null
+          : referenceNameProblem(
+              promptName,
+              excludeSavedReferenceId: candidate.id,
+            );
+      if (nameProblem != null) {
+        showNotice(nameProblem);
+        continue;
+      }
+      final draftId = _uid();
+      form.references = <MediaReferenceDraft>[
+        ...form.references,
+        MediaReferenceDraft(
+          id: draftId,
+          label: candidate.name,
+          kind: kind,
+          source: candidate.asset.isLocal ? '' : candidate.asset.value,
+          promptName: promptName,
+          retained: candidate.asset,
+          thumbnailAsset: _previewForStorage(
+            candidate.thumbnailAsset,
+            effectiveStorage,
+          ),
+          savedReferenceId: candidate.generated ? null : candidate.id,
+          durationSeconds: candidate.durationSeconds,
+        ),
+      ];
+      if (candidate.asset.isLocal) {
+        hydrating.add((draftId, candidate));
+        _hydratingReferenceDraftIds.add(draftId);
+      }
+    }
+    _selectCompatibleModel();
+    _normalizeFormForModel();
+    _invalidateProviderEstimate();
+    notifyListeners();
+    if (hydrating.isEmpty) return;
     _beginReferenceUpload('Loading ${kind.pluralLabel}…');
     try {
-      for (final entry in selected.indexed) {
-        final candidate = entry.$2;
-        _updateReferenceUpload(
-          'Loading ${candidate.name} (${entry.$1 + 1} of ${selected.length})…',
-        );
-        if (!candidate.generated &&
-            form.references.any(
-              (reference) => reference.savedReferenceId == candidate.id,
-            )) {
-          showNotice('“${candidate.name}” is already attached.');
-          continue;
-        }
-        final promptName = candidate.generated
-            ? _nextReferencePromptName(kind)
-            : candidate.name.trim();
-        final nameProblem = candidate.generated
-            ? null
-            : referenceNameProblem(
-                promptName,
-                excludeSavedReferenceId: candidate.id,
-              );
-        if (nameProblem != null) {
-          showNotice(nameProblem);
-          continue;
-        }
-        PickedAsset? picked;
-        Uint8List? thumbnailBytes;
-        var source = candidate.asset.isLocal ? '' : candidate.asset.value;
-        if (candidate.thumbnailAsset != null) {
+      await _enqueueReferenceWork(() async {
+        for (final entry in hydrating.indexed) {
+          final (draftId, candidate) = entry.$2;
+          if (!form.references.any((item) => item.id == draftId)) {
+            _hydratingReferenceDraftIds.remove(draftId);
+            continue; // Removed while queued.
+          }
+          _updateReferenceUpload(
+            'Loading ${candidate.name} '
+            '(${entry.$1 + 1} of ${hydrating.length})…',
+          );
           try {
-            thumbnailBytes = await gateway.readAsset(candidate.thumbnailAsset!);
-          } on Object {
-            // The original media can still be selected and make a new frame.
+            Uint8List? thumbnailBytes;
+            if (candidate.thumbnailAsset != null) {
+              try {
+                thumbnailBytes = await gateway.readAsset(
+                  candidate.thumbnailAsset!,
+                );
+              } on Object {
+                // The media itself can still make a fresh preview frame.
+              }
+            }
+            final bytes = await gateway.readAsset(candidate.asset);
+            _hydrateReferenceDraft(draftId, candidate, bytes, thumbnailBytes);
+          } on Object catch (error) {
+            _dropUnhydratedReferenceDraft(draftId, candidate.name, error);
+          } finally {
+            _hydratingReferenceDraftIds.remove(draftId);
           }
         }
-        if (candidate.asset.isLocal) {
-          final bytes = await gateway.readAsset(candidate.asset);
-          picked = PickedAsset(
-            name: candidate.name,
-            bytes: bytes,
-            mimeType:
-                candidate.asset.contentType ??
-                _fallbackMimeType(candidate.kind),
-            retained: candidate.asset,
-            thumbnailAsset: candidate.thumbnailAsset,
-            thumbnailBytes: thumbnailBytes,
-          );
-        }
-        form.references = <MediaReferenceDraft>[
-          ...form.references,
-          MediaReferenceDraft(
-            id: _uid(),
-            label: candidate.name,
-            kind: kind,
-            source: source,
-            promptName: promptName,
-            asset: picked,
-            retained: candidate.asset,
-            thumbnailAsset: _previewForStorage(
-              candidate.thumbnailAsset,
-              effectiveStorage,
-            ),
-            thumbnailBytes: thumbnailBytes,
-            savedReferenceId: candidate.generated ? null : candidate.id,
-            durationSeconds: candidate.durationSeconds,
-          ),
-        ];
-      }
-      _selectCompatibleModel();
-      _normalizeFormForModel();
-      _invalidateProviderEstimate();
-      notifyListeners();
-    } on Object catch (error) {
-      showNotice(_message(error));
+      });
     } finally {
       _finishReferenceUpload();
     }
+  }
+
+  void _hydrateReferenceDraft(
+    String draftId,
+    ReferenceCandidate candidate,
+    Uint8List bytes,
+    Uint8List? thumbnailBytes,
+  ) {
+    final index = form.references.indexWhere((item) => item.id == draftId);
+    if (index < 0) return;
+    final current = form.references[index];
+    final references = List<MediaReferenceDraft>.from(form.references);
+    references[index] = MediaReferenceDraft(
+      id: current.id,
+      label: current.label,
+      kind: current.kind,
+      source: current.source,
+      promptName: current.promptName,
+      asset: PickedAsset(
+        name: candidate.name,
+        bytes: bytes,
+        mimeType:
+            candidate.asset.contentType ?? _fallbackMimeType(candidate.kind),
+        retained: candidate.asset,
+        thumbnailAsset: candidate.thumbnailAsset,
+        thumbnailBytes: thumbnailBytes,
+      ),
+      retained: current.retained,
+      thumbnailAsset: current.thumbnailAsset,
+      thumbnailBytes: thumbnailBytes ?? current.thumbnailBytes,
+      savedReferenceId: current.savedReferenceId,
+      durationSeconds: current.durationSeconds,
+    );
+    form.references = references;
+    notifyListeners();
+  }
+
+  /// Media that cannot be loaded cannot join a generation, so the draft is
+  /// withdrawn instead of blocking Generate with an empty source forever.
+  void _dropUnhydratedReferenceDraft(
+    String draftId,
+    String name,
+    Object error,
+  ) {
+    final before = form.references.length;
+    form.references = form.references
+        .where((item) => item.id != draftId)
+        .toList();
+    if (form.references.length != before) {
+      _invalidateProviderEstimate();
+      notifyListeners();
+    }
+    showNotice('“$name” could not be loaded. ${_message(error)}');
   }
 
   String _fallbackMimeType(MediaReferenceKind kind) => switch (kind) {
@@ -3937,18 +4086,19 @@ class AppController extends ChangeNotifier {
   void addUrlFrame(KeyframeRole role) =>
       _appendFrame(role, label: '${role.label} URL');
 
-  void _appendReference(
+  String? _appendReference(
     MediaReferenceKind kind, {
     required String label,
     PickedAsset? asset,
     AssetReference? retained,
     String? savedReferenceId,
   }) {
-    if (!canAddReference(kind)) return;
+    if (!canAddReference(kind)) return null;
+    final id = _uid();
     form.references = <MediaReferenceDraft>[
       ...form.references,
       MediaReferenceDraft(
-        id: _uid(),
+        id: id,
         label: label,
         kind: kind,
         source: '',
@@ -3962,6 +4112,7 @@ class AppController extends ChangeNotifier {
     _normalizeFormForModel();
     _invalidateProviderEstimate();
     notifyListeners();
+    return id;
   }
 
   Future<void> addMediaReferences(
@@ -3970,46 +4121,206 @@ class AppController extends ChangeNotifier {
   }) async {
     if (!canAddReference(kind)) return;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
+    List<PickedAsset> picked;
     try {
-      final picked = await _pickMany(switch (kind) {
+      picked = await _pickMany(switch (kind) {
         MediaReferenceKind.image => FileType.image,
         MediaReferenceKind.video => FileType.video,
         MediaReferenceKind.audio => FileType.audio,
       }, source: source);
-      final available = referenceLimit(kind) - form.referenceCount(kind);
-      final totalAvailable = selectedModel.maxTotalReferences == null
-          ? available
-          : selectedModel.maxTotalReferences! - form.references.length;
-      final accepted = available < totalAvailable ? available : totalAvailable;
-      final uploads = picked.take(accepted).toList();
-      for (final entry in uploads.indexed) {
-        final asset = entry.$2;
-        _updateReferenceUpload(
-          'Processing ${asset.name} (${entry.$1 + 1} of ${uploads.length})…',
-        );
-        final saved = await _retainCreateUpload(kind, asset);
-        _appendReference(
-          kind,
-          label: asset.name,
-          asset: saved == null ? asset : _withSavedReference(asset, saved),
-          retained: saved?.asset,
-          savedReferenceId: saved?.id,
-        );
-      }
-      if (picked.length > accepted) {
-        final totalLimit = selectedModel.maxTotalReferences;
-        showNotice(
-          totalLimit != null && totalAvailable <= available
-              ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
-              : '${selectedModel.label} accepts up to '
-                    '${referenceLimit(kind)} ${kind.pluralLabel}.',
-        );
-      }
     } on Object catch (error) {
       showNotice(_message(error));
+      return;
     } finally {
       _finishReferenceUpload();
     }
+    await attachPickedReferences(kind, picked);
+  }
+
+  /// Attaches [picked] as creative references. Drafts appear immediately and
+  /// are usable for the current generation right away; retention into
+  /// References (and any Drive publish) continues on the background work
+  /// queue without locking the add buttons.
+  Future<void> attachPickedReferences(
+    MediaReferenceKind kind,
+    List<PickedAsset> picked,
+  ) async {
+    if (picked.isEmpty) return;
+    final available = referenceLimit(kind) - form.referenceCount(kind);
+    final totalAvailable = selectedModel.maxTotalReferences == null
+        ? available
+        : selectedModel.maxTotalReferences! - form.references.length;
+    final accepted = available < totalAvailable ? available : totalAvailable;
+    final uploads = picked.take(accepted < 0 ? 0 : accepted).toList();
+    if (picked.length > uploads.length) {
+      final totalLimit = selectedModel.maxTotalReferences;
+      showNotice(
+        totalLimit != null && totalAvailable <= available
+            ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
+            : '${selectedModel.label} accepts up to '
+                  '${referenceLimit(kind)} ${kind.pluralLabel}.',
+      );
+    }
+    if (uploads.isEmpty) return;
+    final attached = <(String, PickedAsset)>[];
+    for (final asset in uploads) {
+      final draftId = _appendReference(kind, label: asset.name, asset: asset);
+      if (draftId == null) break;
+      attached.add((draftId, asset));
+    }
+    if (attached.isEmpty) return;
+    _beginReferenceUpload('Processing ${attached.first.$2.name}…');
+    try {
+      await _enqueueReferenceWork(() async {
+        for (final entry in attached.indexed) {
+          final (draftId, asset) = entry.$2;
+          if (!form.references.any((item) => item.id == draftId)) {
+            continue; // Removed while queued.
+          }
+          _updateReferenceUpload(
+            'Processing ${asset.name} (${entry.$1 + 1} of ${attached.length})…',
+          );
+          final saved = await _retainCreateUpload(kind, asset);
+          if (saved != null) {
+            _linkDraftToSavedReference(draftId, asset, saved);
+          }
+        }
+      });
+    } finally {
+      _finishReferenceUpload();
+    }
+  }
+
+  /// The reference kind a dropped file belongs to, by MIME type (sniffed
+  /// from the name and leading bytes) with a file-extension fallback.
+  /// Returns null for files that cannot serve as reference media.
+  MediaReferenceKind? classifyDroppedFile(String name, Uint8List bytes) {
+    final mimeType = (lookupMimeType(name, headerBytes: bytes) ?? '')
+        .toLowerCase();
+    if (mimeType.startsWith('image/') ||
+        _matchesExtension(name, FileType.image)) {
+      return MediaReferenceKind.image;
+    }
+    if (mimeType.startsWith('video/') ||
+        _matchesExtension(name, FileType.video)) {
+      return MediaReferenceKind.video;
+    }
+    if (mimeType.startsWith('audio/') ||
+        _matchesExtension(name, FileType.audio)) {
+      return MediaReferenceKind.audio;
+    }
+    return null;
+  }
+
+  Map<MediaReferenceKind, List<PickedAsset>> _classifyDroppedFiles(
+    List<DroppedFile> files,
+    void Function(int unsupported) onUnsupported,
+  ) {
+    final grouped = <MediaReferenceKind, List<PickedAsset>>{};
+    var unsupported = 0;
+    for (final file in files) {
+      final kind = classifyDroppedFile(file.name, file.bytes);
+      if (kind == null) {
+        unsupported += 1;
+        continue;
+      }
+      grouped
+          .putIfAbsent(kind, () => <PickedAsset>[])
+          .add(
+            PickedAsset(
+              name: file.name,
+              bytes: file.bytes,
+              mimeType:
+                  lookupMimeType(file.name, headerBytes: file.bytes) ??
+                  _fallbackMimeType(kind),
+              path: file.path,
+            ),
+          );
+    }
+    if (unsupported > 0) onUnsupported(unsupported);
+    return grouped;
+  }
+
+  /// Attaches files dropped on the Create screen's references area, sorting
+  /// each file into its reference kind by MIME type or extension.
+  Future<void> addDroppedReferenceFiles(List<DroppedFile> files) async {
+    if (files.isEmpty) return;
+    final grouped = _classifyDroppedFiles(files, (unsupported) {
+      showNotice(
+        unsupported == files.length
+            ? 'Drop images, videos, or audio files to add references.'
+            : '$unsupported dropped '
+                  '${unsupported == 1 ? 'file is' : 'files are'} not '
+                  'supported reference media.',
+      );
+    });
+    for (final entry in grouped.entries) {
+      if (referenceLimit(entry.key) <= 0) {
+        showNotice(
+          '${selectedModel.label} does not accept reference '
+          '${entry.key.pluralLabel}.',
+        );
+        continue;
+      }
+      await attachPickedReferences(entry.key, entry.value);
+    }
+  }
+
+  /// Imports files dropped on the References library, sorting each file into
+  /// its reference kind by MIME type or extension.
+  Future<void> importDroppedReferenceFiles(
+    List<DroppedFile> files, {
+    String? folderId,
+    ReferencePreviewLoader? videoPreviewLoader,
+  }) async {
+    if (files.isEmpty) return;
+    final grouped = _classifyDroppedFiles(files, (unsupported) {
+      showNotice(
+        unsupported == files.length
+            ? 'Drop images, videos, or audio files to save references.'
+            : '$unsupported dropped '
+                  '${unsupported == 1 ? 'file is' : 'files are'} not '
+                  'supported reference media.',
+      );
+    });
+    for (final entry in grouped.entries) {
+      await importPickedReferences(
+        entry.key,
+        entry.value,
+        folderId: folderId,
+        previewLoader: entry.key == MediaReferenceKind.video
+            ? videoPreviewLoader
+            : null,
+      );
+    }
+  }
+
+  /// Back-fills a draft once its media has been retained in References. The
+  /// draft may have been removed (or the form cleared) while retention ran.
+  void _linkDraftToSavedReference(
+    String draftId,
+    PickedAsset asset,
+    SavedReference saved,
+  ) {
+    final index = form.references.indexWhere((item) => item.id == draftId);
+    if (index < 0) return;
+    final current = form.references[index];
+    final references = List<MediaReferenceDraft>.from(form.references);
+    references[index] = MediaReferenceDraft(
+      id: current.id,
+      label: current.label,
+      kind: current.kind,
+      source: current.source,
+      promptName: current.promptName,
+      asset: _withSavedReference(asset, saved),
+      retained: saved.asset,
+      thumbnailAsset: current.thumbnailAsset ?? saved.thumbnailAsset,
+      thumbnailBytes: current.thumbnailBytes,
+      savedReferenceId: saved.id,
+      durationSeconds: current.durationSeconds ?? saved.durationSeconds,
+    );
+    form.references = references;
+    notifyListeners();
   }
 
   void addUrlReference(MediaReferenceKind kind) =>
@@ -4413,9 +4724,8 @@ class AppController extends ChangeNotifier {
       if (totalLimit != null && form.references.length > totalLimit) {
         return '${model.label} accepts up to $totalLimit creative references total.';
       }
-      if (form.references.any((item) => item.requestSource.isEmpty)) {
-        return 'Every reference needs an upload or HTTPS URL.';
-      }
+      final sourceProblem = _referenceSourceProblem();
+      if (sourceProblem != null) return sourceProblem;
       if (form.referenceTask != MediaReferenceTask.reference) {
         if (form.referenceCount(MediaReferenceKind.video) != 1) {
           return '${form.referenceTask.label} needs exactly one reference video.';
@@ -4488,9 +4798,8 @@ class AppController extends ChangeNotifier {
       if (totalLimit != null && form.references.length > totalLimit) {
         return '${model.label} accepts up to $totalLimit creative references total.';
       }
-      if (form.references.any((item) => item.requestSource.isEmpty)) {
-        return 'Every reference needs an upload or HTTPS URL.';
-      }
+      final sourceProblem = _referenceSourceProblem();
+      if (sourceProblem != null) return sourceProblem;
       final durationProblem = _referenceDurationProblem(model);
       if (durationProblem != null) return durationProblem;
       if (model.id == 'act_two' && form.references.length != 1) {
@@ -4563,6 +4872,18 @@ class AppController extends ChangeNotifier {
       return '${model.label} needs a fixed duration.';
     }
     return null;
+  }
+
+  String? _referenceSourceProblem() {
+    if (!form.references.any((item) => item.requestSource.isEmpty)) {
+      return null;
+    }
+    return form.references.any(
+          (item) =>
+              item.requestSource.isEmpty && isReferenceDraftHydrating(item.id),
+        )
+        ? 'References are still loading from your library…'
+        : 'Every reference needs an upload or HTTPS URL.';
   }
 
   String? _referenceDurationProblem(VideoModelDefinition model) {
@@ -4885,6 +5206,27 @@ class AppController extends ChangeNotifier {
       settingsVault: current.settingsVault,
     );
     notifyListeners();
+  }
+
+  /// Cross-device visibility: while Drive is connected, periodically re-read
+  /// the library so generations and references created or updated on other
+  /// devices appear here without any user action — including in-progress
+  /// generations this device can then pick up and poll. Runs faster while
+  /// staged uploads are draining so the sync indicators stay current.
+  Future<void> _refreshDriveLibraryIfDue() async {
+    if (_disposed || _refreshingDriveLibrary || loading) return;
+    if (!googleDriveConnected) return;
+    _driveRefreshTick += 1;
+    final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
+    if (_driveRefreshTick % everyTicks != 0) return;
+    _refreshingDriveLibrary = true;
+    try {
+      _apply(await gateway.load());
+    } on Object {
+      // Periodic reconciliation is best-effort; the next tick retries.
+    } finally {
+      _refreshingDriveLibrary = false;
+    }
   }
 
   Future<void> pollWorking({bool ignoreSchedule = false}) async {

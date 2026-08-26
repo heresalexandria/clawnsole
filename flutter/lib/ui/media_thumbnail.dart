@@ -197,7 +197,15 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<void> _loadVideoMetadata() async {
-    final uri = await _mediaUri();
+    Uri? uri;
+    try {
+      uri = await _mediaUri();
+    } on Object {
+      // Metadata is a best-effort enhancement launched unawaited; a failing
+      // URI resolution (a disconnected Drive, a missing file) must not become
+      // an unhandled async error.
+      return;
+    }
     if (uri == null) return;
     final key = _fingerprint;
     var job = _videoMetadataJobs[key];
@@ -226,7 +234,14 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<void> _loadMediaDuration() async {
-    final uri = await _mediaUri();
+    Uri? uri;
+    try {
+      uri = await _mediaUri();
+    } on Object {
+      // Same contract as _loadVideoMetadata: never leak an unhandled error
+      // from an unawaited best-effort probe.
+      return;
+    }
     if (uri == null) return;
     final key = _fingerprint;
     var job = _mediaDurationJobs[key];

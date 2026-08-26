@@ -32,6 +32,7 @@ StoredData mergeGoogleDriveData({
     id: (item) => item.localId,
     json: (item) => item.toJson(),
     updatedAt: (item) => item.updatedAt,
+    resolveConflict: _preferDeliveredGeneration,
   )..sort((a, b) => b.createdAt.compareTo(a.createdAt));
   final folders = _mergeById<LibraryFolder>(
     base: base.folders,
@@ -56,6 +57,23 @@ StoredData mergeGoogleDriveData({
   );
 }
 
+/// Cross-device result reconciliation: when two devices both updated the same
+/// generation, the version carrying the retained result (or at least a live
+/// delivery link) must win regardless of timestamps. Device clocks skew, so a
+/// plain updatedAt contest would otherwise let one device's routine status
+/// poll deterministically discard the film another device just uploaded.
+Generation? _preferDeliveredGeneration(Generation next, Generation remote) {
+  int rank(Generation item) => item.resultAsset != null
+      ? 2
+      : item.hasDeliveredMedia
+      ? 1
+      : 0;
+  final nextRank = rank(next);
+  final remoteRank = rank(remote);
+  if (nextRank == remoteRank) return null;
+  return nextRank > remoteRank ? next : remote;
+}
+
 List<T> _mergeById<T>({
   required List<T> base,
   required List<T> next,
@@ -63,6 +81,7 @@ List<T> _mergeById<T>({
   required String Function(T item) id,
   required Map<String, Object?> Function(T item) json,
   required DateTime Function(T item) updatedAt,
+  T? Function(T next, T remote)? resolveConflict,
 }) {
   final baseById = <String, T>{for (final item in base) id(item): item};
   final nextById = <String, T>{for (final item in next) id(item): item};
@@ -84,6 +103,11 @@ List<T> _mergeById<T>({
           jsonEncode(json(previous)) != jsonEncode(json(remoteItem));
       if (!remoteAlsoChanged) {
         merged[key] = item;
+        continue;
+      }
+      final resolved = resolveConflict?.call(item, remoteItem);
+      if (resolved != null) {
+        merged[key] = resolved;
         continue;
       }
       final timestamp = updatedAt(item).compareTo(updatedAt(remoteItem));

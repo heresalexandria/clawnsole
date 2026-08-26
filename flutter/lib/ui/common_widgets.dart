@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -22,6 +23,111 @@ import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
 import 'visual_reference_viewer.dart';
+
+/// Accepts local files dragged from the OS anywhere over [child] and hands
+/// their bytes to [onDropFiles]. A themed overlay confirms the target while a
+/// drag hovers. Inert on platforms without OS file drops (iPhone): the drag
+/// events simply never fire and [child] renders untouched.
+class ReferenceDropZone extends StatefulWidget {
+  const ReferenceDropZone({
+    required this.onDropFiles,
+    required this.label,
+    required this.child,
+    this.enabled = true,
+    super.key,
+  });
+
+  final Future<void> Function(List<DroppedFile> files) onDropFiles;
+  final String label;
+  final bool enabled;
+  final Widget child;
+
+  @override
+  State<ReferenceDropZone> createState() => _ReferenceDropZoneState();
+}
+
+class _ReferenceDropZoneState extends State<ReferenceDropZone> {
+  bool _hovering = false;
+
+  Future<void> _handleDrop(DropDoneDetails details) async {
+    final files = <DroppedFile>[];
+    for (final item in details.files) {
+      try {
+        files.add(
+          DroppedFile(
+            name: item.name,
+            bytes: await item.readAsBytes(),
+            path: item.path.isEmpty ? null : item.path,
+          ),
+        );
+      } on Object {
+        // An unreadable item (a folder, a permission failure) is skipped;
+        // every readable file in the same drop still lands.
+      }
+    }
+    await widget.onDropFiles(files);
+  }
+
+  @override
+  Widget build(BuildContext context) => DropTarget(
+    key: const ValueKey('reference-drop-zone'),
+    enable: widget.enabled,
+    onDragEntered: (_) => setState(() => _hovering = true),
+    onDragExited: (_) => setState(() => _hovering = false),
+    onDragDone: (details) {
+      setState(() => _hovering = false);
+      unawaited(_handleDrop(details));
+    },
+    child: Stack(
+      children: <Widget>[
+        widget.child,
+        if (_hovering)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: context.colors.primaryContainer.withValues(alpha: .3),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: context.colors.primary, width: 2),
+                ),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.colors.surface.withValues(alpha: .92),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: context.colors.outlineVariant),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          Icons.file_download_outlined,
+                          size: 17,
+                          color: context.colors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.label,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
 
 class ReferenceUploadIndicator extends StatelessWidget {
   const ReferenceUploadIndicator({

@@ -12,6 +12,7 @@ import 'formatters.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
+import 'video_metadata_loader.dart';
 import 'visual_reference_viewer.dart';
 
 Future<Uint8List?> _loadReferenceVideoPreview(
@@ -109,47 +110,64 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
       builder: (context, constraints) {
         final desktop = constraints.maxWidth >= 960;
         final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
-        return SingleChildScrollView(
-          controller: _scrollController,
-          padding: EdgeInsets.all(padding),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  _ReferencesHeading(controller: controller),
-                  const SizedBox(height: 22),
-                  if (desktop)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        SizedBox(
-                          width: 228,
-                          child: _ReferenceFolderSidebar(
-                            controller: controller,
+        // The whole library is a drop target: local files dropped anywhere on
+        // this screen save into the current folder, sorted into their kind by
+        // MIME type or extension.
+        return ReferenceDropZone(
+          label: 'Drop to save references',
+          onDropFiles: (files) => controller.importDroppedReferenceFiles(
+            files,
+            folderId:
+                controller.referenceFolderView ==
+                        AppController.libraryFolderAll ||
+                    controller.referenceFolderView ==
+                        AppController.libraryFolderUnfiled
+                ? null
+                : controller.referenceFolderView,
+            videoPreviewLoader: _loadReferenceVideoPreview,
+          ),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: EdgeInsets.all(padding),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _ReferencesHeading(controller: controller),
+                    const SizedBox(height: 22),
+                    if (desktop)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 228,
+                            child: _ReferenceFolderSidebar(
+                              controller: controller,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: _ReferenceResults(
-                            controller: controller,
-                            itemLimit: _itemLimit,
-                            onLoadMore: _loadMore,
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: _ReferenceResults(
+                              controller: controller,
+                              itemLimit: _itemLimit,
+                              onLoadMore: _loadMore,
+                            ),
                           ),
-                        ),
-                      ],
-                    )
-                  else ...<Widget>[
-                    _ReferenceFolderPicker(controller: controller),
-                    const SizedBox(height: 12),
-                    _ReferenceResults(
-                      controller: controller,
-                      itemLimit: _itemLimit,
-                      onLoadMore: _loadMore,
-                    ),
+                        ],
+                      )
+                    else ...<Widget>[
+                      _ReferenceFolderPicker(controller: controller),
+                      const SizedBox(height: 12),
+                      _ReferenceResults(
+                        controller: controller,
+                        itemLimit: _itemLimit,
+                        onLoadMore: _loadMore,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -206,6 +224,8 @@ class _ReferencesHeading extends StatelessWidget {
           ListenableBuilder(
             listenable: controller,
             builder: (context, _) {
+              // Imports run on the background work queue, so the button stays
+              // available while earlier files are still processing.
               final uploading = controller.referenceUploadInProgress;
               return Wrap(
                 spacing: 8,
@@ -217,10 +237,7 @@ class _ReferencesHeading extends StatelessWidget {
                       keyPrefix: 'references',
                     ),
                   PopupMenuButton<MediaReferenceKind>(
-                    enabled: !uploading,
-                    tooltip: uploading
-                        ? controller.referenceUploadStatus
-                        : 'Add references',
+                    tooltip: 'Add references',
                     onSelected: (kind) => unawaited(() async {
                       final source = await chooseMediaPickerSource(
                         context,
@@ -258,7 +275,7 @@ class _ReferencesHeading extends StatelessWidget {
                         .toList(),
                     child: FilledButtonIconVisual(
                       icon: Icons.add_rounded,
-                      label: uploading ? 'Adding…' : 'Add references',
+                      label: 'Add references',
                       loading: uploading,
                     ),
                   ),
@@ -2259,6 +2276,9 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
   double _startSeconds = 0;
   double? _endSeconds;
   bool _saving = false;
+  bool _loadingDuration = false;
+  bool _durationFailed = false;
+  ValueListenable<double?>? _downloadProgress;
 
   @override
   void initState() {
@@ -2268,12 +2288,44 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
     );
     _duration = widget.reference.durationSeconds;
     _endSeconds = _duration;
+    if (_duration == null) unawaited(_loadDuration());
   }
 
   @override
   void dispose() {
     _name.dispose();
     super.dispose();
+  }
+
+  /// Reads the video duration deliberately instead of waiting on the
+  /// thumbnail's silent best-effort probe: a Drive-backed video shows its
+  /// download progress here, and any failure surfaces as a Retry instead of
+  /// an endless spinner.
+  Future<void> _loadDuration() async {
+    if (_loadingDuration || _duration != null) return;
+    final delivery = widget.controller.referenceMediaDelivery(widget.reference);
+    setState(() {
+      _loadingDuration = true;
+      _durationFailed = false;
+      _downloadProgress = delivery.progress;
+    });
+    try {
+      final uri = await delivery.uri;
+      if (uri == null) {
+        throw StateError('The reference video is unavailable.');
+      }
+      final metadata = await loadVideoMetadata(uri);
+      if (metadata == null || !metadata.isUsable) {
+        throw StateError('The video duration could not be read.');
+      }
+      _rememberMetadata(metadata);
+    } on Object {
+      if (mounted && _duration == null) {
+        setState(() => _durationFailed = true);
+      }
+    } finally {
+      if (mounted) setState(() => _loadingDuration = false);
+    }
   }
 
   void _rememberMetadata(VideoSourceMetadata metadata) {
@@ -2288,6 +2340,7 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
     setState(() {
       _duration = metadata.durationSeconds;
       _endSeconds = metadata.durationSeconds;
+      _durationFailed = false;
     });
   }
 
@@ -2386,16 +2439,50 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
               ),
               const SizedBox(height: 6),
               if (duration == null || end == null)
-                const Row(
-                  children: <Widget>[
-                    SizedBox.square(
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 10),
-                    Text('Reading video duration…'),
-                  ],
-                )
+                _durationFailed
+                    ? Row(
+                        key: const ValueKey('trim-duration-failed'),
+                        children: <Widget>[
+                          Icon(
+                            Icons.error_outline_rounded,
+                            size: 17,
+                            color: context.colors.error,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'The video duration could not be read.',
+                            ),
+                          ),
+                          TextButton(
+                            key: const ValueKey('trim-duration-retry'),
+                            onPressed: () => unawaited(_loadDuration()),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : Row(
+                        children: <Widget>[
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ValueListenableBuilder<double?>(
+                              valueListenable:
+                                  _downloadProgress ??
+                                  const AlwaysStoppedAnimation<double?>(null),
+                              builder: (context, fraction, _) => Text(
+                                fraction == null
+                                    ? 'Reading video duration…'
+                                    : 'Downloading video · '
+                                          '${(fraction * 100).round()}%',
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
               else ...<Widget>[
                 Row(
                   children: <Widget>[

@@ -148,14 +148,18 @@ class DirectGateway
         }
       }
       // An undelivered record keeps its links past the retention estimate
-      // until at least one status check ran after the estimate lapsed: the
-      // estimate can expire entirely while the process is suspended or dead,
-      // and purging on the next load would destroy the delivery link before
-      // the recovery poll gets its one chance to download from it.
+      // until a result download was actually attempted after the estimate
+      // lapsed. A mere status check is not enough: lastCheckedAt is shared
+      // across devices, so another device's routine poll would otherwise
+      // authorize purging the last delivery link before this device (or any
+      // device) ever tried to download from it.
       final attemptedAfterExpiry =
           next.resultAsset != null ||
           (next.deliveryExpiresAt != null &&
-              next.lastCheckedAt?.isAfter(next.deliveryExpiresAt!) == true);
+              next.lastResultRetentionAttemptAt?.isAfter(
+                    next.deliveryExpiresAt!,
+                  ) ==
+                  true);
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
           (next.resultUrl == null && next.draftCacheUrl == null) ||
@@ -174,7 +178,16 @@ class DirectGateway
     }).toList();
     if (!changed) return current;
     final next = current.copyWith(generations: generations);
-    await _store.write(next);
+    try {
+      await _store.write(next);
+    } on Object {
+      // Drive-tagged records cannot be rewritten while Drive is disconnected,
+      // and a transient Drive failure must not take down every read (a throw
+      // here would surface as a full-screen startup error and skip Drive
+      // reconciliation for the whole session). Serve the stored state
+      // unchanged; the sweep reruns on a later read.
+      return current;
+    }
     return next;
   }
 

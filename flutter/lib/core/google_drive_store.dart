@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'asset_extensions.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_asset_presenter.dart';
@@ -36,7 +37,14 @@ class GoogleDriveStore implements DurableDataStore {
   GoogleDriveFile? _stateFile;
   String _assetsFolderId = '';
   StoredData? _lastData;
+  List<GoogleDriveFile>? _statsAssetListing;
+  DateTime? _statsAssetListingAt;
   final Map<String, DateTime> _pendingAssetIds = <String, DateTime>{};
+
+  /// How long [stats] may reuse the last assets-folder listing. A snapshot is
+  /// rebuilt after every gateway action, and a fresh Drive listing for each
+  /// one slows every interaction while burning Drive request quota.
+  static const _statsListingLifetime = Duration(minutes: 2);
   GoogleDriveConnection _connection = const GoogleDriveConnection(
     state: GoogleDriveConnectionState.disconnected,
   );
@@ -60,6 +68,7 @@ class GoogleDriveStore implements DurableDataStore {
       state: GoogleDriveConnectionState.connecting,
       folderName: name,
     );
+    _invalidateStatsListing();
     try {
       _api =
           _apiFactory?.call(token) ??
@@ -119,6 +128,7 @@ class GoogleDriveStore implements DurableDataStore {
     _stateFile = null;
     _assetsFolderId = '';
     _lastData = null;
+    _invalidateStatsListing();
     _connection = GoogleDriveConnection(
       state: GoogleDriveConnectionState.disconnected,
       folderName: connection.folderName,
@@ -242,6 +252,7 @@ class GoogleDriveStore implements DurableDataStore {
       // write confirms the reference, so concurrent preview cleanup cannot
       // delete a just-uploaded result in that gap.
       _pendingAssetIds[file.id] = _now();
+      _invalidateStatsListing();
       if (_isLocallyCacheable(reference)) {
         try {
           // The uploaded bytes are already in hand. Materialize films and
@@ -451,13 +462,16 @@ class GoogleDriveStore implements DurableDataStore {
     final cutoff = _now().subtract(pruneGracePeriod);
     _pendingAssetIds.removeWhere((_, createdAt) => createdAt.isBefore(cutoff));
     retained.addAll(_pendingAssetIds.keys);
+    var deleted = false;
     for (final file in await _driveAssets()) {
       final recentlyUploaded =
           file.modifiedTime != null && !file.modifiedTime!.isBefore(cutoff);
       if (!retained.contains(file.id) && !recentlyUploaded) {
         await _api!.deleteFile(file.id);
+        deleted = true;
       }
     }
+    if (deleted) _invalidateStatsListing();
   }
 
   @override
@@ -469,6 +483,7 @@ class GoogleDriveStore implements DurableDataStore {
     if (_stateFile != null) await _api!.deleteFile(_stateFile!.id);
     _stateFile = null;
     _lastData = const StoredData();
+    _invalidateStatsListing();
   }
 
   @override
@@ -476,7 +491,7 @@ class GoogleDriveStore implements DurableDataStore {
     var assetBytes = 0;
     var assets = 0;
     if (_api != null && _assetsFolderId.isNotEmpty) {
-      final files = await _driveAssets();
+      final files = await _statsAssets();
       assetBytes = files.fold(0, (sum, file) => sum + file.size);
       assets = files.length;
     }
@@ -493,8 +508,31 @@ class GoogleDriveStore implements DurableDataStore {
     );
   }
 
-  Future<List<GoogleDriveFile>> _driveAssets() =>
-      _api!.listChildren(_assetsFolderId, appPropertyKey: 'clawnsoleAsset');
+  Future<List<GoogleDriveFile>> _driveAssets() async {
+    final files = await _api!.listChildren(
+      _assetsFolderId,
+      appPropertyKey: 'clawnsoleAsset',
+    );
+    _statsAssetListing = files;
+    _statsAssetListingAt = _now();
+    return files;
+  }
+
+  Future<List<GoogleDriveFile>> _statsAssets() async {
+    final cached = _statsAssetListing;
+    final fetchedAt = _statsAssetListingAt;
+    if (cached != null &&
+        fetchedAt != null &&
+        _now().difference(fetchedAt) < _statsListingLifetime) {
+      return cached;
+    }
+    return _driveAssets();
+  }
+
+  void _invalidateStatsListing() {
+    _statsAssetListing = null;
+    _statsAssetListingAt = null;
+  }
 
   Set<String> _referencedAssetIds(
     List<Generation> generations,
@@ -506,31 +544,17 @@ class GoogleDriveStore implements DurableDataStore {
     List<SavedReference> references,
   ) {
     final retained = <String, AssetReference>{};
-    void add(AssetReference? reference) {
-      if (reference?.kind == 'drive' && reference!.value.isNotEmpty) {
+    void add(AssetReference reference) {
+      if (reference.kind == 'drive' && reference.value.isNotEmpty) {
         retained.putIfAbsent(reference.value, () => reference);
       }
     }
 
     for (final generation in generations) {
-      add(generation.resultAsset);
-      add(generation.thumbnailAsset);
-      add(generation.timelineThumbnailAsset);
-      add(generation.config.source);
-      add(generation.config.sourceThumbnailAsset);
-      for (final frame
-          in generation.config.keyframes ?? const <KeyframeLabel>[]) {
-        add(frame.source);
-      }
-      for (final media
-          in generation.config.references ?? const <MediaReferenceLabel>[]) {
-        add(media.source);
-        add(media.thumbnailAsset);
-      }
+      generationAssetReferences(generation).forEach(add);
     }
     for (final reference in references) {
-      add(reference.asset);
-      add(reference.thumbnailAsset);
+      savedReferenceAssetReferences(reference).forEach(add);
     }
     return retained;
   }
@@ -546,76 +570,22 @@ class GoogleDriveStore implements DurableDataStore {
   Generation _replaceGenerationAssets(
     Generation item,
     Map<String, AssetReference> replacements,
-  ) {
-    AssetReference? replace(AssetReference? reference) =>
-        reference?.kind == 'drive'
-        ? replacements[reference!.value] ?? reference
-        : reference;
-    final config = item.config;
-    return item.copyWith(
-      config: GenerationConfig(
-        aspectRatio: config.aspectRatio,
-        duration: config.duration,
-        resolution: config.resolution,
-        generateAudio: config.generateAudio,
-        safetyTolerance: config.safetyTolerance,
-        draft: config.draft,
-        frameRate: config.frameRate,
-        exactTiming: config.exactTiming,
-        keyframes: config.keyframes
-            ?.map(
-              (frame) => KeyframeLabel(
-                label: frame.label,
-                role: frame.role,
-                seconds: frame.seconds,
-                referenceId: frame.referenceId,
-                source: replace(frame.source),
-              ),
-            )
-            .toList(),
-        references: config.references
-            ?.map(
-              (media) => MediaReferenceLabel(
-                label: media.label,
-                kind: media.kind,
-                promptName: media.promptName,
-                referenceId: media.referenceId,
-                source: replace(media.source),
-                thumbnailAsset: replace(media.thumbnailAsset),
-                durationSeconds: media.durationSeconds,
-              ),
-            )
-            .toList(),
-        referenceTask: config.referenceTask,
-        sourceLabel: config.sourceLabel,
-        sourceReferenceId: config.sourceReferenceId,
-        source: replace(config.source),
-        sourceThumbnailAsset: replace(config.sourceThumbnailAsset),
-        upscaleFactor: config.upscaleFactor,
-        upscaleCreativity: config.upscaleCreativity,
-        seed: config.seed,
-      ),
-      resultAsset: replace(item.resultAsset),
-      thumbnailAsset: replace(item.thumbnailAsset),
-      timelineThumbnailAsset: replace(item.timelineThumbnailAsset),
-    );
-  }
+  ) => mapGenerationAssets(
+    item,
+    (reference) => reference.kind == 'drive'
+        ? replacements[reference.value] ?? reference
+        : reference,
+  );
 
   SavedReference _replaceSavedReferenceAssets(
     SavedReference item,
     Map<String, AssetReference> replacements,
-  ) {
-    AssetReference replace(AssetReference reference) =>
-        reference.kind == 'drive'
+  ) => mapSavedReferenceAssets(
+    item,
+    (reference) => reference.kind == 'drive'
         ? replacements[reference.value] ?? reference
-        : reference;
-    return item.copyWith(
-      asset: replace(item.asset),
-      thumbnailAsset: item.thumbnailAsset == null
-          ? null
-          : replace(item.thumbnailAsset!),
-    );
-  }
+        : reference,
+  );
 
   bool _isLocallyCacheable(AssetReference reference) {
     final contentType = reference.contentType?.toLowerCase() ?? '';

@@ -19,6 +19,7 @@ import 'google_drive.dart';
 import 'google_drive_asset_presenter_io.dart';
 import 'google_drive_auth.dart';
 import 'google_drive_store.dart';
+import 'google_drive_upload_pump.dart';
 import 'generation_status.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
@@ -268,9 +269,19 @@ class NativeGateway extends DirectGateway
          referenceVideoNormalizer: referenceVideoNormalizer,
          persistenceDescription:
              'Combined local app documents and optional Google Drive library',
-       );
+       ) {
+    _driveUploadPump = DriveUploadPump(
+      flush: () => runDriveUploadPass(
+        hybrid: _hybrid,
+        read: _vault.read,
+        write: _vault.write,
+      ),
+    );
+    _hybrid.onDeferredDriveUpload = _driveUploadPump.schedule;
+  }
 
   final HybridDataStore _hybrid;
+  late final DriveUploadPump _driveUploadPump;
   final LocalDataStore? _localStore;
   final SettingsVaultDataStore _vault;
   final VideoCache _videoCache;
@@ -419,10 +430,22 @@ class NativeGateway extends DirectGateway
     );
   }
 
+  /// Publishes any staged Drive media left over from before this connection
+  /// (an interrupted upload pass, or a previous run that quit mid-upload).
+  void _resumeDeferredDriveUploads(StoredData data) {
+    if (HybridDataStore.pendingDriveUploads(data).isNotEmpty) {
+      _driveUploadPump.schedule();
+    }
+  }
+
+  /// Stops the background Drive upload pump. Production gateways live for
+  /// the whole process; tests call this to avoid leaking retry timers.
+  void dispose() => _driveUploadPump.dispose();
+
   @override
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async {
     final token = await _driveAuthorizer.authorize();
-    await _hybrid.connect(token, folderName);
+    _resumeDeferredDriveUploads(await _hybrid.connect(token, folderName));
     await _vault.connectRemote(token, _hybrid.connection.folderId);
     return load();
   }
@@ -438,7 +461,9 @@ class NativeGateway extends DirectGateway
   @override
   Future<LocalSnapshot> refreshGoogleDrive() async {
     final token = await _driveAuthorizer.authorize();
-    await _hybrid.connect(token, googleDriveConnection.folderName);
+    _resumeDeferredDriveUploads(
+      await _hybrid.connect(token, googleDriveConnection.folderName),
+    );
     await _vault.connectRemote(token, _hybrid.connection.folderId);
     return load();
   }
@@ -455,7 +480,9 @@ class NativeGateway extends DirectGateway
       }
       final token = await _driveAuthorizer.authorizeSilently();
       if (token == null || token.isEmpty) return null;
-      await _hybrid.connect(token, connection.folderName);
+      _resumeDeferredDriveUploads(
+        await _hybrid.connect(token, connection.folderName),
+      );
       await _vault.connectRemote(token, _hybrid.connection.folderId);
       return await load();
     } on Object {

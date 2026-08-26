@@ -12,6 +12,7 @@ import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
+import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
@@ -576,13 +577,43 @@ class StoreChange<T> {
 }
 
 class CompanionHybridStore {
-  CompanionHybridStore(this.hybrid, {this.vault});
+  CompanionHybridStore(this.hybrid, {this.vault}) {
+    _driveUploadPump = DriveUploadPump(flush: _flushDriveUploads);
+    hybrid.onDeferredDriveUpload = _driveUploadPump.schedule;
+  }
 
   final HybridDataStore hybrid;
   final SettingsVaultDataStore? vault;
+  late final DriveUploadPump _driveUploadPump;
   Future<void> _queue = Future<void>.value();
 
   DurableDataStore get _dataStore => vault ?? hybrid;
+
+  /// One background pass: publishes staged Drive media, then swaps records
+  /// over inside the serialized mutate queue so it cannot race other writes.
+  Future<bool> _flushDriveUploads() async {
+    if (!hybrid.isDriveConnected) return true;
+    final result = await hybrid.uploadQueuedDriveAssets(await read());
+    if (result.replacements.isNotEmpty) {
+      await mutate<void>(
+        (current) => StoreChange<void>(
+          HybridDataStore.applyDriveAssetReplacements(
+            current,
+            result.replacements,
+          ),
+          null,
+        ),
+      );
+    }
+    return result.failures == 0;
+  }
+
+  /// Publishes staged Drive media left over from an interrupted upload pass.
+  void _resumeDeferredDriveUploads(StoredData data) {
+    if (HybridDataStore.pendingDriveUploads(data).isNotEmpty) {
+      _driveUploadPump.schedule();
+    }
+  }
 
   GoogleDriveConnection get connection => hybrid.connection;
 
@@ -657,7 +688,7 @@ class CompanionHybridStore {
     // Migrate any legacy plaintext credentials before HybridDataStore copies
     // the portable library into Drive.
     await _dataStore.read();
-    await hybrid.connect(accessToken, folderName);
+    _resumeDeferredDriveUploads(await hybrid.connect(accessToken, folderName));
     await vault?.connectRemote(accessToken, connection.folderId);
     return _dataStore.read();
   }
@@ -669,7 +700,9 @@ class CompanionHybridStore {
   }
 
   Future<StoredData> refreshDrive(String accessToken) async {
-    await hybrid.connect(accessToken, hybrid.connection.folderName);
+    _resumeDeferredDriveUploads(
+      await hybrid.connect(accessToken, hybrid.connection.folderName),
+    );
     await vault?.connectRemote(accessToken, connection.folderId);
     return _dataStore.read();
   }
@@ -1154,6 +1187,7 @@ class CompanionApp {
 
   Future<void> _stateAction(String action, Object? value) async {
     if (action == 'clearAll') return _store.delete();
+    if (action == 'trimReferenceVideo') return _trimReferenceVideo(value);
     await _store.mutate<void>((current) async {
       StoredData next;
       if (action == 'setApiKey') {
@@ -1568,86 +1602,6 @@ class CompanionApp {
           references[index] = clean;
         }
         next = current.copyWith(savedReferences: references);
-      } else if (action == 'trimReferenceVideo') {
-        final editor = _referenceVideoEditingService;
-        if (editor == null) {
-          throw StateError('Video trimming is unavailable on this build.');
-        }
-        final map = value is Map<Object?, Object?> ? value : const {};
-        final sourceReferenceId = map['sourceReferenceId']?.toString() ?? '';
-        final source = current.savedReferences
-            .where((item) => item.id == sourceReferenceId)
-            .firstOrNull;
-        if (source == null || source.kind != MediaReferenceKind.video) {
-          throw StateError('That reference video no longer exists.');
-        }
-        final rawOutput = map['output'];
-        final output = SavedReference.fromJson(
-          rawOutput is Map<Object?, Object?>
-              ? rawOutput.map((key, child) => MapEntry(key.toString(), child))
-              : const <String, Object?>{},
-        );
-        final startSeconds = (map['startSeconds'] as num?)?.toDouble();
-        final endSeconds = (map['endSeconds'] as num?)?.toDouble();
-        final sourceDuration = source.durationSeconds;
-        if (sourceDuration == null ||
-            startSeconds == null ||
-            endSeconds == null ||
-            !startSeconds.isFinite ||
-            !endSeconds.isFinite ||
-            startSeconds < 0 ||
-            endSeconds > sourceDuration + .001 ||
-            endSeconds - startSeconds < .1) {
-          throw StateError('Choose a valid range within the reference video.');
-        }
-        final name = output.name.trim();
-        if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
-          throw StateError(
-            'Reference names must be between 1 and 80 characters.',
-          );
-        }
-        if (current.savedReferences.any((item) => item.id == output.id)) {
-          throw StateError('That reference already exists.');
-        }
-        if (output.storage != source.storage ||
-            (output.folderId != null &&
-                !current.folders.any(
-                  (folder) =>
-                      folder.id == output.folderId &&
-                      folder.collection == LibraryCollection.references &&
-                      folder.storage == source.storage,
-                ))) {
-          throw StateError('That reference folder no longer exists.');
-        }
-        final trimmed = await editor.trimVideo(
-          await _referenceVideoBytes(source.asset),
-          startSeconds: startSeconds,
-          endSeconds: endSeconds,
-        );
-        final asset = await _store.writeAsset(
-          trimmed,
-          label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
-          contentType: 'video/mp4',
-          storage: source.storage,
-        );
-        final now = DateTime.now().toUtc();
-        final saved = SavedReference(
-          id: output.id,
-          name: name,
-          kind: MediaReferenceKind.video,
-          asset: asset,
-          createdAt: now,
-          updatedAt: now,
-          folderId: output.folderId,
-          tags: _cleanLibraryTags(output.tags),
-          favorite: output.favorite,
-          hidden: output.hidden,
-          storage: source.storage,
-          durationSeconds: endSeconds - startSeconds,
-        );
-        next = current.copyWith(
-          savedReferences: <SavedReference>[saved, ...current.savedReferences],
-        );
       } else if (action == 'deleteReference') {
         final id = value?.toString() ?? '';
         next = current.copyWith(
@@ -1682,6 +1636,122 @@ class CompanionApp {
       final data = await _store.read();
       await _store.pruneAssets(data.generations, data.savedReferences);
     }
+  }
+
+  /// Trims outside the serialized mutate queue: the source download and the
+  /// ffmpeg encode can take minutes, and holding the queue for them would
+  /// block every other state read and write across the app. Only the final
+  /// record insert runs inside the queue, re-validated against fresh state.
+  Future<void> _trimReferenceVideo(Object? value) async {
+    final editor = _referenceVideoEditingService;
+    if (editor == null) {
+      throw StateError('Video trimming is unavailable on this build.');
+    }
+    final map = value is Map<Object?, Object?> ? value : const {};
+    final sourceReferenceId = map['sourceReferenceId']?.toString() ?? '';
+    final rawOutput = map['output'];
+    final output = SavedReference.fromJson(
+      rawOutput is Map<Object?, Object?>
+          ? rawOutput.map((key, child) => MapEntry(key.toString(), child))
+          : const <String, Object?>{},
+    );
+    final startSeconds = (map['startSeconds'] as num?)?.toDouble();
+    final endSeconds = (map['endSeconds'] as num?)?.toDouble();
+    final source = _validatedTrimSource(
+      await _store.read(),
+      sourceReferenceId: sourceReferenceId,
+      output: output,
+      startSeconds: startSeconds,
+      endSeconds: endSeconds,
+    );
+    final trimmed = await editor.trimVideo(
+      await _referenceVideoBytes(source.asset),
+      startSeconds: startSeconds!,
+      endSeconds: endSeconds!,
+    );
+    final name = output.name.trim();
+    final asset = await _store.writeAsset(
+      trimmed,
+      label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
+      contentType: 'video/mp4',
+      storage: source.storage,
+    );
+    final now = DateTime.now().toUtc();
+    final saved = SavedReference(
+      id: output.id,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      createdAt: now,
+      updatedAt: now,
+      folderId: output.folderId,
+      tags: _cleanLibraryTags(output.tags),
+      favorite: output.favorite,
+      hidden: output.hidden,
+      storage: source.storage,
+      durationSeconds: endSeconds - startSeconds,
+    );
+    await _store.mutate<void>((latest) {
+      // The source may have been deleted or the output id taken while the
+      // encode ran; an orphaned trimmed asset is reclaimed by a later prune.
+      _validatedTrimSource(
+        latest,
+        sourceReferenceId: sourceReferenceId,
+        output: output,
+        startSeconds: startSeconds,
+        endSeconds: endSeconds,
+      );
+      return StoreChange<void>(
+        latest.copyWith(
+          savedReferences: <SavedReference>[saved, ...latest.savedReferences],
+        ),
+        null,
+      );
+    });
+  }
+
+  SavedReference _validatedTrimSource(
+    StoredData current, {
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double? startSeconds,
+    required double? endSeconds,
+  }) {
+    final source = current.savedReferences
+        .where((item) => item.id == sourceReferenceId)
+        .firstOrNull;
+    if (source == null || source.kind != MediaReferenceKind.video) {
+      throw StateError('That reference video no longer exists.');
+    }
+    final sourceDuration = source.durationSeconds;
+    if (sourceDuration == null ||
+        startSeconds == null ||
+        endSeconds == null ||
+        !startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds > sourceDuration + .001 ||
+        endSeconds - startSeconds < .1) {
+      throw StateError('Choose a valid range within the reference video.');
+    }
+    final name = output.name.trim();
+    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+      throw StateError('Reference names must be between 1 and 80 characters.');
+    }
+    if (current.savedReferences.any((item) => item.id == output.id)) {
+      throw StateError('That reference already exists.');
+    }
+    if (output.storage != source.storage ||
+        (output.folderId != null &&
+            !current.folders.any(
+              (folder) =>
+                  folder.id == output.folderId &&
+                  folder.collection == LibraryCollection.references &&
+                  folder.storage == source.storage,
+            ))) {
+      throw StateError('That reference folder no longer exists.');
+    }
+    return source;
   }
 
   Future<Uint8List> _referenceVideoBytes(AssetReference asset) async {
