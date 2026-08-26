@@ -67,6 +67,30 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n")
 
 
+def write_version_files(version: str, build: int) -> None:
+    package = json.loads(ELECTRON_PACKAGE.read_text())
+    package["version"] = version
+    write_json(ELECTRON_PACKAGE, package)
+
+    lock = json.loads(ELECTRON_LOCK.read_text())
+    lock["version"] = version
+    if "" in lock.get("packages", {}):
+        lock["packages"][""]["version"] = version
+    write_json(ELECTRON_LOCK, lock)
+
+    source = FLUTTER_PACKAGE.read_text()
+    source = VERSION_PATTERN.sub(f"version: {version}+{build}", source, count=1)
+    FLUTTER_PACKAGE.write_text(source)
+
+    dart_source = FLUTTER_VERSION_SOURCE.read_text()
+    if not SOURCE_VERSION_PATTERN.search(dart_source):
+        raise SystemExit("error: lib/core/app_version.dart has no version constant")
+    dart_source = SOURCE_VERSION_PATTERN.sub(
+        f"const clawnsoleVersion = '{version}';", dart_source, count=1
+    )
+    FLUTTER_VERSION_SOURCE.write_text(dart_source)
+
+
 def emit(version: str, build: int, *, changed: bool | None = None) -> None:
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
@@ -84,15 +108,9 @@ def main() -> None:
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--current", action="store_true")
     parser.add_argument("--show", action="store_true")
-    parser.add_argument(
-        "--base-ref",
-        help="treat an exact bump already prepared relative to this Git ref as current",
-    )
     args = parser.parse_args()
     if args.build_only and (args.kind or args.current or args.show):
         parser.error("--build-only cannot be combined with another version action")
-    if args.base_ref and not args.kind:
-        parser.error("--base-ref requires a version bump kind")
 
     current, build = versions()
     if args.show:
@@ -114,47 +132,8 @@ def main() -> None:
     if not args.kind:
         parser.error("a bump kind is required")
 
-    if args.base_ref:
-        base_version, base_build = versions_at(args.base_ref)
-        expected = bumped(base_version, args.kind)
-        if current == expected:
-            if build != base_build + 1:
-                raise SystemExit(
-                    "error: the prepared version must advance the build number exactly once "
-                    f"from {base_version}+{base_build}; found {current}+{build}"
-                )
-            emit(current, build, changed=False)
-            print(f"{current}+{build} (already prepared)")
-            return
-        if current != base_version:
-            raise SystemExit(
-                f"error: expected {base_version} or prepared {expected} relative to "
-                f"{args.base_ref}; found {current}"
-            )
-
     version = bumped(current, args.kind)
-    package = json.loads(ELECTRON_PACKAGE.read_text())
-    package["version"] = version
-    write_json(ELECTRON_PACKAGE, package)
-
-    lock = json.loads(ELECTRON_LOCK.read_text())
-    lock["version"] = version
-    if "" in lock.get("packages", {}):
-        lock["packages"][""]["version"] = version
-    write_json(ELECTRON_LOCK, lock)
-
-    source = FLUTTER_PACKAGE.read_text()
-    source = VERSION_PATTERN.sub(f"version: {version}+{build + 1}", source, count=1)
-    FLUTTER_PACKAGE.write_text(source)
-
-    dart_source = FLUTTER_VERSION_SOURCE.read_text()
-    if not SOURCE_VERSION_PATTERN.search(dart_source):
-        raise SystemExit("error: lib/core/app_version.dart has no version constant")
-    dart_source = SOURCE_VERSION_PATTERN.sub(
-        f"const clawnsoleVersion = '{version}';", dart_source, count=1
-    )
-    FLUTTER_VERSION_SOURCE.write_text(dart_source)
-
+    write_version_files(version, build + 1)
     emit(version, build + 1, changed=True)
     print(f"{version}+{build + 1}")
 

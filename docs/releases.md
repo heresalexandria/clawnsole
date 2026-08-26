@@ -15,6 +15,32 @@ PR labelled minor -> merge -> bump Flutter and Electron together
                                   `-> checksum -> publish desktop GitHub release
 ```
 
+## Parallel merges
+
+Merges do not need to wait for each other or for running releases. The
+workflow guarantees, in every interleaving, that the newest release wins and
+the iOS bundle version only moves forward:
+
+- The prepare run decides against the merge commit's first parent — main
+  immediately before that merge — never a stale snapshot of the pull request's
+  base, so releases cut while a PR was open are counted correctly.
+- The push of the `Release vX.Y.Z` commit to `main` is the lock. A prepare run
+  that loses the race re-reads `main` and recomputes; if a release prepared
+  after its merge has already landed (which necessarily contains that merge),
+  it stands down green and lets the newer release ship alone.
+- The trusted build run re-checks that its prepared commit still carries
+  `main`'s newest version before building. A superseded or re-run stale
+  dispatch skips instead of rebuilding an old bundle version.
+- A newer release cancels a superseded release's still-running macOS, Windows,
+  and iOS builds. Publishing is serialized, never cancelled, so a release is
+  not torn down half-published.
+- Uploading a build number App Store Connect has already accepted (the exact
+  same number) is treated as already-complete with a warning — re-runs after a
+  desktop failure and locally uploaded prepared builds do not fail the
+  release. A *lower* build number still fails: that run is stale.
+
+A `no-release` merge never cancels or displaces a running release.
+
 ## Release labels
 
 Every PR needs exactly one:
@@ -39,9 +65,10 @@ workflow enforces the decision. A manual **Release** dispatch accepts the bump
 kind directly and is useful for the first release. Select `current` to rebuild
 and publish the already-synchronized version after a recoverable CI or signing
 failure, without creating another version bump. Manual dispatches include iOS
-by default. Clear **Build and upload iOS to App Store Connect** only when that
-exact semantic version and build number was already accepted by Apple, such as
-when retrying a later desktop or GitHub publishing failure.
+by default, and a rebuild whose exact build number was already accepted by
+Apple uploads nothing and continues, so leaving iOS enabled on a retry is
+safe; clear **Build and upload iOS to App Store Connect** only to skip the
+iOS build entirely.
 
 ## Required repository setup
 

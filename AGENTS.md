@@ -116,6 +116,11 @@ desktop entry points live beside the other Flutter scripts:
   asset. It stops after upload acceptance and does not poll Apple's processing,
   TestFlight, review, or release state. Android release jobs can be added later
   without changing product code.
+- Merges may land and release in parallel: the push of the release commit to
+  `main` is the lock, a release superseded by a newer one stands down green,
+  and a newer release cancels the older one's in-flight builds. Bundle build
+  numbers only move forward. `scripts/release/` changes must keep
+  `test_release_scripts.py` green; the Pull request workflow runs it.
 
 ## Verification
 
