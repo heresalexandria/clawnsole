@@ -982,6 +982,12 @@ MockClient _stateFileClient({
         ? <Object?>[
             entry('assets-1', 'assets', 'application/vnd.google-apps.folder'),
           ]
+        : query.contains('clawnsoleRecords')
+        ? <Object?>[
+            entry('records-1', 'records', 'application/vnd.google-apps.folder'),
+          ]
+        : query.contains('clawnsoleGeneration')
+        ? <Object?>[]
         : query.contains('clawnsoleState')
         ? <Object?>[entry('state-1', 'clawnsole.json', 'application/json')]
         : <Object?>[];
