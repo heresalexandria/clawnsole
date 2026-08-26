@@ -622,6 +622,15 @@ class CompanionHybridStore {
     return _dataStore.read();
   }
 
+  /// Reads the persisted library without any Google Drive traffic. Media and
+  /// cache routes resolve their references through this: while connected,
+  /// [read] revalidates the remote state file, and that network round trip
+  /// must never gate serving bytes that are already on this disk.
+  Future<StoredData> readLocal() async {
+    await _queue;
+    return hybrid.readCached();
+  }
+
   Future<T> mutate<T>(
     FutureOr<StoreChange<T>> Function(StoredData data) callback,
   ) {
@@ -1009,7 +1018,7 @@ class CompanionApp {
         return await _media(request);
       }
       if (request.method == 'GET' && path == '/video-cache') {
-        final cache = await _syncedVideoCache(await _store.read());
+        final cache = await _syncedVideoCache(await _store.readLocal());
         return await _json(request.response, 200, <String, Object?>{
           'usedBytes': cache == null ? 0 : await cache.usedBytes(),
           'capBytes': cache?.maxBytes ?? 0,
@@ -1022,7 +1031,7 @@ class CompanionApp {
         });
       }
       if (request.method == 'GET' && path == '/thumbnail-cache') {
-        final cache = await _syncedThumbnailCache(await _store.read());
+        final cache = await _syncedThumbnailCache(await _store.readLocal());
         return await _json(request.response, 200, <String, Object?>{
           'usedBytes': cache == null ? 0 : await cache.usedBytes(),
           'capBytes': cache?.maxBytes ?? 0,
@@ -2629,7 +2638,7 @@ class CompanionApp {
         status: 400,
       );
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
@@ -2674,7 +2683,7 @@ class CompanionApp {
     if (id == null || id.isEmpty) {
       throw const ProviderException('An asset id is required.', status: 400);
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
@@ -2796,7 +2805,7 @@ class CompanionApp {
     if (id.isEmpty) {
       throw const ProviderException('An asset id is required.', status: 400);
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
