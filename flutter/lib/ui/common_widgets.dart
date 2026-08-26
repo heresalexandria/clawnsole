@@ -567,12 +567,15 @@ class StatusBadge extends StatelessWidget {
 
   final Generation item;
 
+  /// A delivered thumbnail already says "ready" — no chip needed. The same
+  /// goes for a delivered film whose record picked up a late failure status
+  /// (an expired provider job, or a cross-device merge): the film is proof.
+  static bool shouldShow(Generation item) =>
+      !item.isReady && !(item.hasDeliveredMedia && !item.isWorking);
+
   @override
   Widget build(BuildContext context) {
-    // A delivered thumbnail already says "ready" — no chip needed. The same
-    // goes for a delivered film whose record picked up a late failure status
-    // (an expired provider job, or a cross-device merge): the film is proof.
-    if (item.isReady || (item.hasDeliveredMedia && !item.isWorking)) {
+    if (!shouldShow(item)) {
       return const SizedBox.shrink();
     }
     final (background, foreground) = item.isStatusUnavailable
@@ -1337,9 +1340,18 @@ Future<void> showSourceReferenceSheet(
 );
 
 class GenerationStatusDetails extends StatelessWidget {
-  const GenerationStatusDetails({required this.item, super.key});
+  const GenerationStatusDetails({
+    required this.item,
+    super.key,
+    this.maxProblemLines,
+  });
 
   final Generation item;
+
+  /// Clamp for the problem message when the panel overlays a bounded media
+  /// zone; the full text stays available in the details dialog. Null keeps
+  /// the message unclamped for in-body placements.
+  final int? maxProblemLines;
 
   /// Whether the status panel has anything worth saying for [item]. A
   /// delivered film is its own proof of success: stale poll metadata or a
@@ -1397,6 +1409,10 @@ class GenerationStatusDetails extends StatelessWidget {
                 Expanded(
                   child: Text(
                     problem,
+                    maxLines: maxProblemLines,
+                    overflow: maxProblemLines == null
+                        ? null
+                        : TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isTerminal
                           ? context.colors.onErrorContainer
@@ -1900,60 +1916,32 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: <Widget>[
-      SizedBox(
-        height: 46,
-        width: double.infinity,
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: Colors.white30)),
-          ),
-          child: FutureBuilder<Uint8List?>(
-            future: _timeline,
-            initialData: _restoredTimeline,
-            builder: (context, snapshot) {
-              final bytes = snapshot.data;
-              if (bytes == null) return const SizedBox.expand();
-              return Image.memory(
-                bytes,
-                key: const ValueKey('generation-idle-filmstrip'),
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-              );
-            },
-          ),
+  Widget build(BuildContext context) => InkWell(
+    // The thumbnail's play button is the affordance; the strip just accepts
+    // the same tap. The filmstrip fills the whole reserved chrome zone, so
+    // playback (timeline + transport) still swaps in at an equal height.
+    onTap: _playable ? () => unawaited(_play()) : null,
+    child: SizedBox.expand(
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: Colors.white30)),
+        ),
+        child: FutureBuilder<Uint8List?>(
+          future: _timeline,
+          initialData: _restoredTimeline,
+          builder: (context, snapshot) {
+            final bytes = snapshot.data;
+            if (bytes == null) return const SizedBox.expand();
+            return Image.memory(
+              bytes,
+              key: const ValueKey('generation-idle-filmstrip'),
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            );
+          },
         ),
       ),
-      Expanded(
-        child: !_playable
-            ? const SizedBox.expand()
-            : InkWell(
-                key: const ValueKey('generation-idle-transport'),
-                onTap: () => unawaited(_play()),
-                child: Row(
-                  children: <Widget>[
-                    const SizedBox(width: 14),
-                    const Icon(
-                      Icons.play_arrow_rounded,
-                      size: 20,
-                      color: Colors.white70,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      'TAP TO PLAY',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: .62),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.4,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-      ),
-    ],
+    ),
   );
 }
 

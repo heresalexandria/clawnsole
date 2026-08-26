@@ -1068,7 +1068,23 @@ class _GenerationCardState extends State<GenerationCard> {
           )
         else
           GenerationInputPreview(controller: widget.controller, item: item),
-        Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
+        // Status, storage, and age share the top-left corner so the card
+        // body below keeps the full width for the prompt.
+        Positioned(
+          key: ValueKey('generation-meta-overlay-${item.localId}'),
+          top: 10,
+          left: 10,
+          right: 48,
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              if (StatusBadge.shouldShow(item)) StatusBadge(item: item),
+              StorageBadge(storage: item.storage, compact: true),
+              MediaDurationBadge(text: relativeTime(item.createdAt)),
+            ],
+          ),
+        ),
         if (generationDurationLabel(item) != null)
           Positioned(
             left: 10,
@@ -1123,10 +1139,37 @@ class _GenerationCardState extends State<GenerationCard> {
                             item: item,
                           ),
                   )
-                : StaticMediaBox(
-                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
-                    reserveChrome: !item.isImage,
-                    child: preview,
+                : Stack(
+                    children: <Widget>[
+                      StaticMediaBox(
+                        aspectRatio: generationAspectRatio(
+                          item.config.aspectRatio,
+                        ),
+                        reserveChrome: !item.isImage,
+                        child: preview,
+                      ),
+                      // With no film to show, the media zone is dead space —
+                      // the status panel lives there instead of stretching
+                      // the card body past its delivered neighbors.
+                      if (GenerationStatusDetails.shouldShow(item))
+                        Positioned.fill(
+                          key: const ValueKey('generation-status-overlay'),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 52, 16, 16),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 520,
+                                ),
+                                child: GenerationStatusDetails(
+                                  item: item,
+                                  maxProblemLines: 6,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
           ),
           Padding(
@@ -1134,31 +1177,11 @@ class _GenerationCardState extends State<GenerationCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      child: GenerationPrompt(
-                        controller: widget.controller,
-                        prompt: item.displayPrompt,
-                        style: Theme.of(context).textTheme.titleLarge,
-                        reserveCollapsedHeight: true,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    StorageBadge(storage: item.storage, compact: true),
-                    const SizedBox(width: 7),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        relativeTime(item.createdAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
+                GenerationPrompt(
+                  controller: widget.controller,
+                  prompt: item.displayPrompt,
+                  style: Theme.of(context).textTheme.titleLarge,
+                  reserveCollapsedHeight: true,
                 ),
                 if (folder != null || item.tags.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 9),
@@ -1205,7 +1228,8 @@ class _GenerationCardState extends State<GenerationCard> {
                 ],
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
-                if (GenerationStatusDetails.shouldShow(item)) ...<Widget>[
+                if (GenerationStatusDetails.shouldShow(item) &&
+                    (hasMedia || isGeneratingVideo)) ...<Widget>[
                   const SizedBox(height: 9),
                   GenerationStatusDetails(item: item),
                 ],
