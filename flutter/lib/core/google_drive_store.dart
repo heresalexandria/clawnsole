@@ -140,7 +140,15 @@ class GoogleDriveStore implements DurableDataStore {
     if (_stateFile == null) return const StoredData();
     try {
       final current = _stateFile!;
-      final content = await _api!.readFile(current.id);
+      final cached = _lastData;
+      // Reads dominate this store's Drive traffic (every write also reads to
+      // merge). Once one full read has landed, later reads validate the held
+      // copy with If-None-Match instead of re-downloading the whole file.
+      final content = await _api!.readFile(
+        current.id,
+        ifNoneMatch: cached == null ? null : current.etag,
+      );
+      if (content == null) return cached!;
       _stateFile = GoogleDriveFile(
         id: current.id,
         name: current.name,
@@ -631,6 +639,10 @@ class GoogleDriveStore implements DurableDataStore {
   }
 
   void _handleDriveError(GoogleDriveException error) {
+    // A quota burst also answers 403, and treating it as an expired grant
+    // would flap the connection into a reconnect loop that burns yet more
+    // quota. Only genuine authorization failures forget the session.
+    if (error.isRateLimited) return;
     if (error.status == 401 || error.status == 403) {
       _api = null;
       _connection = GoogleDriveConnection(

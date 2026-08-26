@@ -70,6 +70,15 @@ class HybridDataStore implements DurableDataStore {
     return combined;
   }
 
+  /// The last reconciled library exactly as this device persisted it: local
+  /// records combined with the compact Drive metadata mirror, with no Drive
+  /// traffic even while connected. Routes that serve already-retained media
+  /// use this so a cached thumbnail or film never waits on the network.
+  Future<StoredData> readCached() async {
+    final persisted = await _local.read();
+    return _combine(_asLocal(persisted), _asCachedDrive(persisted));
+  }
+
   @override
   Future<StoredData> read() async {
     final persisted = await _local.read();

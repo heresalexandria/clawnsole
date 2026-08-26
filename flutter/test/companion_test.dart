@@ -1280,6 +1280,105 @@ void main() {
       }
     },
   );
+
+  test('companion media routes never re-read Drive state', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-local-read-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final drive = _StateCountingDriveStore();
+    final thumbnail = Uint8List.fromList(<int>[5, 6, 7]);
+    drive.assets['drive-thumb-one'] = thumbnail;
+    final now = DateTime.utc(2026, 8, 26);
+    drive.data = StoredData(
+      generations: <Generation>[
+        Generation(
+          localId: 'one',
+          status: 'Ready',
+          prompt: 'a mirrored film',
+          mode: VideoMode.t2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 8,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+          ),
+          createdAt: now,
+          updatedAt: now,
+          resultAsset: const AssetReference(
+            kind: 'drive',
+            value: 'drive-film-one',
+            label: 'clip.mp4',
+            contentType: 'video/mp4',
+            bytes: 8,
+          ),
+          thumbnailAsset: const AssetReference(
+            kind: 'drive',
+            value: 'drive-thumb-one',
+            label: 'thumb.jpg',
+            contentType: 'image/jpeg',
+            bytes: 3,
+          ),
+        ),
+      ],
+    );
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    await store.connectDrive('token', 'Cached Studio');
+    final application = CompanionApp.hybrid(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      // Resolving media references must run against the persisted metadata
+      // mirror. Before this contract, every one of these requests re-fetched
+      // the whole Drive state file, so a reopened library crawled (and burned
+      // Drive quota) even with all of its bytes already on disk.
+      drive.stateReads = 0;
+      final served = await http.get(base.resolve('/assets?id=drive-thumb-one'));
+      expect(served.statusCode, 200);
+      expect(served.bodyBytes, thumbnail);
+
+      final cacheProbe = await http.get(
+        base.resolve('/asset-cache?id=drive-thumb-one'),
+      );
+      expect(cacheProbe.statusCode, 404);
+
+      final videoCacheStats = await http.get(base.resolve('/video-cache'));
+      expect(videoCacheStats.statusCode, 200);
+      final thumbnailCacheStats = await http.get(
+        base.resolve('/thumbnail-cache'),
+      );
+      expect(thumbnailCacheStats.statusCode, 200);
+
+      final prefetch = await http.post(
+        base.resolve('/video-cache/prefetch'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'id': 'drive-film-one'}),
+      );
+      expect(prefetch.statusCode, 200);
+
+      expect(drive.stateReads, 0);
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+}
+
+class _StateCountingDriveStore extends _MemoryDriveStore {
+  int stateReads = 0;
+
+  @override
+  Future<StoredData> read() async {
+    stateReads += 1;
+    return super.read();
+  }
 }
 
 class _StreamingDriveStore extends _MemoryDriveStore {

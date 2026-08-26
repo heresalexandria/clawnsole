@@ -450,13 +450,23 @@ class GoogleDriveApi {
     );
   }
 
-  Future<GoogleDriveContent> readFile(String fileId) async {
+  /// Reads a file body. With [ifNoneMatch], an unchanged file answers 304 and
+  /// this returns null instead of re-downloading the same bytes.
+  Future<GoogleDriveContent?> readFile(
+    String fileId, {
+    String? ifNoneMatch,
+  }) async {
     final response = await _client.get(
       _apiBase
           .resolve('files/${Uri.encodeComponent(fileId)}')
           .replace(queryParameters: const <String, String>{'alt': 'media'}),
-      headers: _headers,
+      headers: <String, String>{
+        ..._headers,
+        if (ifNoneMatch != null && ifNoneMatch.isNotEmpty)
+          'If-None-Match': ifNoneMatch,
+      },
     );
+    if (ifNoneMatch != null && response.statusCode == 304) return null;
     await _expect(response, decodeBody: false);
     return GoogleDriveContent(
       response.bodyBytes,
@@ -465,7 +475,7 @@ class GoogleDriveApi {
   }
 
   Future<Uint8List> downloadFile(String fileId) async =>
-      (await readFile(fileId)).bytes;
+      (await readFile(fileId))!.bytes;
 
   Uri _mediaUri(String fileId) => _apiBase
       .resolve('files/${Uri.encodeComponent(fileId)}')
@@ -525,18 +535,31 @@ class GoogleDriveApi {
       return response;
     }
     var message = 'Google Drive returned HTTP ${response.statusCode}.';
+    String? reason;
     if (decodeBody || response.body.isNotEmpty) {
       try {
         final payload = _json(response);
         final error = payload['error'];
         if (error is Map<Object?, Object?>) {
           message = error['message']?.toString() ?? message;
+          final errors = error['errors'];
+          reason = errors is List<Object?>
+              ? errors
+                    .whereType<Map<Object?, Object?>>()
+                    .map((item) => item['reason']?.toString())
+                    .firstWhere((value) => value != null, orElse: () => null)
+              : null;
+          reason ??= error['status']?.toString();
         }
       } on FormatException {
         // Keep the status-based message for a non-JSON response.
       }
     }
-    throw GoogleDriveException(message, status: response.statusCode);
+    throw GoogleDriveException(
+      message,
+      status: response.statusCode,
+      reason: reason,
+    );
   }
 
   Map<String, Object?> _json(http.Response response) {
@@ -552,10 +575,34 @@ class GoogleDriveApi {
 }
 
 class GoogleDriveException implements Exception {
-  const GoogleDriveException(this.message, {this.status});
+  const GoogleDriveException(this.message, {this.status, this.reason});
 
   final String message;
   final int? status;
+
+  /// Drive's machine-readable error reason, e.g. `userRateLimitExceeded` or
+  /// `insufficientFilePermissions`, when the response body carried one.
+  final String? reason;
+
+  static const Set<String> _rateLimitReasons = <String>{
+    'ratelimitexceeded',
+    'userratelimitexceeded',
+    'dailylimitexceeded',
+    'quotaexceeded',
+    'sharingratelimitexceeded',
+    'resource_exhausted',
+  };
+
+  /// True when Drive rejected the call for quota or rate reasons. Such a
+  /// failure is transient: the authorization is still valid, so callers must
+  /// retry later rather than tear down the connection.
+  bool get isRateLimited =>
+      status == 429 ||
+      (status == 403 &&
+          (_rateLimitReasons.contains(reason?.toLowerCase()) ||
+              (reason == null &&
+                  (message.toLowerCase().contains('rate limit') ||
+                      message.toLowerCase().contains('quota')))));
 
   @override
   String toString() => message;
