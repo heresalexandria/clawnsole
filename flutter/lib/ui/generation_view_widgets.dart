@@ -156,6 +156,7 @@ class MiniGenerationCard extends StatelessWidget {
                 prompt: item.prompt,
                 collapsedLines: 2,
                 style: Theme.of(context).textTheme.titleSmall,
+                reserveCollapsedHeight: true,
               ),
               const SizedBox(height: 7),
               _DenseGenerationMetadata(item: item),
@@ -336,6 +337,12 @@ class _DenseGenerationPreview extends StatelessWidget {
           )
         else
           GenerationInputPreview(controller: controller, item: item),
+        if (generationDurationLabel(item) != null)
+          Positioned(
+            left: 6,
+            bottom: 6,
+            child: MediaDurationBadge(text: generationDurationLabel(item)!),
+          ),
         if (item.isWorking && !item.isStatusUnavailable)
           Positioned(
             bottom: 0,
@@ -401,7 +408,10 @@ class GenerationActionsMenu extends StatelessWidget {
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
     if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
     if (onCopyToDrive != null) _DenseGenerationAction.copyToDrive,
-    if (includeCheckStatus && item.canCheckStatus && !item.isReady)
+    if (includeCheckStatus &&
+        item.canCheckStatus &&
+        !item.isReady &&
+        !(item.hasDeliveredMedia && !item.isWorking))
       _DenseGenerationAction.checkStatus,
     if (item.hasProviderDetails) _DenseGenerationAction.details,
     if (onDelete != null) _DenseGenerationAction.delete,
@@ -540,9 +550,6 @@ class _DenseGenerationMetadata extends StatelessWidget {
 }
 
 List<String> _denseGenerationMetadata(Generation item) {
-  final duration = item.config.duration == 'auto'
-      ? 'Auto duration'
-      : '${item.config.duration}s';
   final kind = item.isImage
       ? 'Image'
       : item.provider == 'apple-local'
@@ -552,6 +559,5 @@ List<String> _denseGenerationMetadata(Generation item) {
     providerNameForHistory(item.provider),
     kind,
     item.config.aspectRatio,
-    duration,
   ];
 }

@@ -867,6 +867,12 @@ class Generation {
   }
 
   bool get isFailed => isGenerationFailureStatus(status);
+
+  /// The media actually arrived (a stored asset or a playable delivery URL).
+  /// Delivered media is ground truth: a late poll or a cross-device merge may
+  /// still stamp a failure status on such a record, and surfaces must not
+  /// present it as a failure.
+  bool get hasDeliveredMedia => resultAsset != null || resultUrl != null;
   bool get needsResultRetention =>
       isReady && resultAsset == null && canCheckStatus;
   bool get isStatusUnavailable =>

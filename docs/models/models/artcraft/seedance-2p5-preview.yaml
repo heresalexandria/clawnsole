@@ -37,5 +37,6 @@
   "max_audio_references": 10,
   "max_reference_video_seconds": 30,
   "max_reference_audio_seconds": 30,
+  "max_prompt_characters": 10000,
   "supports_audio": false
 }

@@ -50,11 +50,28 @@ String generationStatusLabel(String status) =>
       final other => other,
     };
 
+final RegExp _identifierShapedToken = RegExp(
+  r'^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+  r'[0-9a-fA-F]{12}|[0-9a-fA-F]{16,}|[A-Za-z0-9_-]{22,})$',
+);
+
+/// Whether [value] reads as a job id, hash, or URL rather than a sentence a
+/// person should be shown as an error message.
+bool _identifierLike(String value) =>
+    !value.contains(' ') &&
+    (_identifierShapedToken.hasMatch(value) ||
+        value.startsWith('http://') ||
+        value.startsWith('https://'));
+
 String providerFailureMessage(Object? payload, {required String fallback}) {
-  String? find(Object? value) {
+  String? find(Object? value, {bool guessing = false}) {
     if (value is String) {
       final clean = value.trim();
-      return clean.isEmpty ? null : clean;
+      if (clean.isEmpty) return null;
+      // A speculative sweep over unnamed fields must never surface a job id
+      // or URL as the user-facing failure copy.
+      if (guessing && _identifierLike(clean)) return null;
+      return clean;
     }
     if (value is Map<Object?, Object?>) {
       for (final key in <String>[
@@ -67,17 +84,24 @@ String providerFailureMessage(Object? payload, {required String fallback}) {
         final match = value.entries
             .where((entry) => entry.key.toString().toLowerCase() == key)
             .firstOrNull;
-        final found = find(match?.value);
+        final found = find(match?.value, guessing: guessing);
         if (found != null) return found;
       }
-      for (final child in value.values) {
-        final found = find(child);
+      for (final entry in value.entries) {
+        final key = entry.key.toString().toLowerCase();
+        if (key == 'id' ||
+            key == 'uuid' ||
+            key.endsWith('_id') ||
+            key.contains('url')) {
+          continue;
+        }
+        final found = find(entry.value, guessing: true);
         if (found != null) return found;
       }
     }
     if (value is List<Object?>) {
       for (final child in value) {
-        final found = find(child);
+        final found = find(child, guessing: guessing);
         if (found != null) return found;
       }
     }
