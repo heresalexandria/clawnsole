@@ -15,7 +15,12 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
 
   private var session: URLSession?
   private var waiters: [String: [FlutterResult]] = [:]
-  private var failures: [String: FlutterError] = [:]
+  // Failures key by task identifier and waiter attribution goes through
+  // activeTasks so a superseded transfer's outcome — for example a stale
+  // pre-relaunch task holding an expired link — is never attributed to the
+  // current transfer of the same generation.
+  private var failures: [Int: FlutterError] = [:]
+  private var activeTasks: [String: Int] = [:]
   private var backgroundCompletionHandlers: [() -> Void] = []
 
   func register(with controller: FlutterViewController) {
@@ -53,10 +58,13 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
     let configuration = URLSessionConfiguration.background(
       withIdentifier: Self.sessionIdentifier
     )
-    // Stall detection between bytes; the overall transfer may take as long
-    // as a large film on a slow connection needs.
+    // Background sessions do not honor the per-request timeout on device —
+    // nsurlsessiond retries transient failures on its own — so the resource
+    // timeout is the only real bound on a dead transfer. Thirty minutes is
+    // generous for the largest provider film on a slow connection while
+    // keeping a wedged link from pinning its generation for hours.
     configuration.timeoutIntervalForRequest = 60
-    configuration.timeoutIntervalForResource = 4 * 60 * 60
+    configuration.timeoutIntervalForResource = 30 * 60
     configuration.isDiscretionary = false
     configuration.sessionSendsLaunchEvents = true
     let session = URLSession(
@@ -96,15 +104,21 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
         guard let self else { return }
         // The waiter may already have been resolved by a completing task.
         guard self.waiters[id] != nil else { return }
-        let inFlight = tasks.contains { task in
+        let inFlight = tasks.first { task in
           task.taskDescription == id
             && (task.state == .running || task.state == .suspended)
         }
-        if !inFlight {
-          let task = session.downloadTask(with: url)
-          task.taskDescription = id
-          task.resume()
+        if let inFlight, inFlight.originalRequest?.url == url {
+          self.activeTasks[id] = inFlight.taskIdentifier
+          return
         }
+        // A leftover transfer holding a different — likely expired — link
+        // must not have its outcome bound to this fresh one.
+        inFlight?.cancel()
+        let task = session.downloadTask(with: url)
+        task.taskDescription = id
+        self.activeTasks[id] = task.taskIdentifier
+        task.resume()
       }
     }
   }
@@ -139,7 +153,7 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
     guard let id = downloadTask.taskDescription else { return }
     let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200...299).contains(status) else {
-      failures[id] = FlutterError(
+      failures[downloadTask.taskIdentifier] = FlutterError(
         code: "http",
         message: "The provider result download returned HTTP \(status).",
         details: status
@@ -160,7 +174,7 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
       ]
       manifest = entries
     } catch {
-      failures[id] = FlutterError(
+      failures[downloadTask.taskIdentifier] = FlutterError(
         code: "io",
         message: error.localizedDescription,
         details: nil
@@ -174,24 +188,54 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
     didCompleteWithError error: Error?
   ) {
     guard let id = task.taskDescription else { return }
+    let failure = failures.removeValue(forKey: task.taskIdentifier)
+    if let active = activeTasks[id], active != task.taskIdentifier {
+      // A superseded transfer finished; its outcome belongs to nobody. Any
+      // file it retained is already in the manifest for the current
+      // transfer's completion (or the recovery pass) to pick up.
+      return
+    }
+    activeTasks.removeValue(forKey: id)
     let pending = waiters.removeValue(forKey: id) ?? []
-    if let failure = failures.removeValue(forKey: id) {
+    // Bytes retained under this id satisfy the request no matter how this
+    // particular transfer ended.
+    if let payload = retainedPayload(for: id) {
+      pending.forEach { $0(payload) }
+      return
+    }
+    if let failure {
       pending.forEach { $0(failure) }
       return
     }
     if let error {
       let code = (error as NSError).code == NSURLErrorTimedOut
         ? "timeout" : "network"
-      let failure = FlutterError(
+      let flutterError = FlutterError(
         code: code,
         message: error.localizedDescription,
         details: nil
       )
-      pending.forEach { $0(failure) }
+      pending.forEach { $0(flutterError) }
       return
     }
-    let payload = retainedPayload(for: id)
-    pending.forEach { $0(payload) }
+    pending.forEach { $0(nil) }
+  }
+
+  func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+    // Invalidation would otherwise strand every waiter forever and leave a
+    // dead session cached; report a retryable failure and start over.
+    let stranded = waiters
+    waiters = [:]
+    activeTasks = [:]
+    failures = [:]
+    self.session = nil
+    let failure = FlutterError(
+      code: "network",
+      message: error?.localizedDescription
+        ?? "The background transfer session became invalid.",
+      details: nil
+    )
+    stranded.values.forEach { callbacks in callbacks.forEach { $0(failure) } }
   }
 
   func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {

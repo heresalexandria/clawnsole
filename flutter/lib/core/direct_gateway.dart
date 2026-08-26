@@ -1158,19 +1158,26 @@ class DirectGateway
     // in-process HTTP path below remains for platforms without a service.
     final delivery = _backgroundDelivery;
     if (delivery != null) {
-      final delivered = await delivery.download(
-        id: generation.localId,
-        url: validatedProviderUrl(url).toString(),
-      );
+      // The bounded wait keeps this poll's classification honest — a slow
+      // transfer becomes a retryable stall, not an abandoned poll — while
+      // the platform keeps transferring; the finished file then lands
+      // through a later retry or the recovery pass. The platform's retained
+      // copy is deliberately NOT released here: the record referencing the
+      // asset persists only at poll end, and the recovery pass releases
+      // copies whose record already holds its result.
+      final delivered = await delivery
+          .download(
+            id: generation.localId,
+            url: validatedProviderUrl(url).toString(),
+          )
+          .timeout(const Duration(minutes: 8));
       if (delivered != null) {
-        final asset = await _store.writeAsset(
+        return _store.writeAsset(
           delivered.bytes,
           label: 'clawnsole-${generation.localId}.mp4',
           contentType: delivered.contentType ?? 'video/mp4',
           storage: generation.storage,
         );
-        await delivery.completeResult(generation.localId);
-        return asset;
       }
     }
     final request = http.Request('GET', validatedProviderUrl(url));
@@ -1255,6 +1262,11 @@ class DirectGateway
     return persisted;
   }
 
+  /// Whether a failure status reads as provider-side retention expiry — the
+  /// one terminal verdict the arrival of the film itself overrules.
+  static bool _expiryShaped(String status) =>
+      normalizeGenerationStatus(status) == 'Task not found';
+
   @override
   Future<int> recoverBackgroundDeliveries() async {
     final delivery = _backgroundDelivery;
@@ -1268,6 +1280,15 @@ class DirectGateway
           .where((item) => item.localId == id)
           .firstOrNull;
       if (generation == null || generation.resultAsset != null) {
+        await delivery.completeResult(id);
+        continue;
+      }
+      if (generation.isFailed &&
+          !generation.isReady &&
+          !_expiryShaped(generation.status)) {
+        // A moderation or cancellation verdict stands even though the bytes
+        // arrived; only expiry-shaped failures — the provider forgetting a
+        // task the OS was still downloading — are restored by the film.
         await delivery.completeResult(id);
         continue;
       }
@@ -1286,16 +1307,21 @@ class DirectGateway
         final now = DateTime.now().toUtc();
         // The film itself arrived, so a record the retention machinery gave
         // up on — the provider expired the task while the OS was still
-        // downloading — completes as ready rather than staying failed.
+        // downloading — completes as ready rather than staying failed. The
+        // statusCheckCount bump is the write version: without it a poll in
+        // flight against the same baseline would pass the CAS and clobber
+        // the imported film after its platform copy is released.
         final persisted = await _persistPollUpdate(
           generation.copyWith(
             status: 'Ready',
             resultAsset: asset,
             clearError: true,
             clearProgress: true,
+            deliveryExpired: false,
             resultRetentionFailures: 0,
             clearResultRetentionError: true,
             lastResultRetentionAttemptAt: now,
+            statusCheckCount: generation.statusCheckCount + 1,
             updatedAt: now,
           ),
           expected: generation,

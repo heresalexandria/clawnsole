@@ -139,7 +139,11 @@ class MethodChannelBackgroundResultDelivery
   }
 
   Object _deliveryError(PlatformException error) => switch (error.code) {
-    'timeout' => TimeoutException(
+    // Stalls, lost connectivity, and local write hiccups say nothing about
+    // the delivery link itself, so they stay retryable — connectivity is
+    // often still re-establishing at the exact moment a foreground return
+    // runs this code. Only an HTTP answer from the link is definitive.
+    'timeout' || 'network' || 'io' => TimeoutException(
       error.message ?? 'The provider result download stalled.',
     ),
     'http' => ProviderException(

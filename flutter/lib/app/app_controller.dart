@@ -1487,8 +1487,12 @@ class AppController extends ChangeNotifier {
   Future<void> _recoverBackgroundDeliveries() async {
     if (gateway is! BackgroundDeliveryGateway) return;
     try {
+      // Bounded like gateway.poll: a Drive-backed import can hang on a
+      // socket the platform killed during suspension, and an unbounded wait
+      // here would wedge foreground reconciliation until relaunch.
       final recovered = await (gateway as BackgroundDeliveryGateway)
-          .recoverBackgroundDeliveries();
+          .recoverBackgroundDeliveries()
+          .timeout(const Duration(minutes: 10));
       if (recovered > 0 && !_disposed) {
         _apply(await gateway.load());
         showNotice(

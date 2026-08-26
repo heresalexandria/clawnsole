@@ -199,7 +199,13 @@ void main() {
 
     expect(updated.resultAsset, isNotNull);
     expect(store.writtenAssets.single, <int>[9, 9]);
-    expect(delivery.completed, <String>[record.localId]);
+    expect(
+      delivery.completed,
+      isEmpty,
+      reason:
+          'the retained copy is released by the recovery pass only after '
+          'the record referencing the asset has been persisted',
+    );
   });
 
   test(
@@ -247,7 +253,7 @@ void main() {
       final record = _generation(
         status: 'Task not found',
         resultUrl: _storedResultUrl,
-      );
+      ).copyWith(deliveryExpired: true);
       final store = _MemoryStore(_dataWith(record));
       final delivery = _FakeDelivery(
         retained: <String, DeliveredResult>{
@@ -263,10 +269,39 @@ void main() {
       expect(persisted.isReady, isTrue);
       expect(persisted.resultAsset, isNotNull);
       expect(persisted.error, isNull);
+      expect(persisted.deliveryExpired, isFalse);
+      expect(
+        persisted.statusCheckCount,
+        record.statusCheckCount + 1,
+        reason:
+            'the import must advance the CAS write version so an '
+            'in-flight poll against the old baseline cannot clobber it',
+      );
       expect(store.writtenAssets.single, <int>[7, 7]);
       expect(delivery.completed, <String>[record.localId]);
     },
   );
+
+  test('recovery discards films for moderated or cancelled records', () async {
+    final record = _generation(
+      status: 'Content Moderated',
+      resultUrl: _storedResultUrl,
+    );
+    final store = _MemoryStore(_dataWith(record));
+    final delivery = _FakeDelivery(
+      retained: <String, DeliveredResult>{
+        record.localId: _film(<int>[3]),
+      },
+    );
+    final gateway = _gateway(store: store, delivery: delivery);
+
+    final recovered = await gateway.recoverBackgroundDeliveries();
+
+    expect(recovered, 0);
+    expect(store.writtenAssets, isEmpty);
+    expect(store.data.generations.single.isFailed, isTrue);
+    expect(delivery.completed, <String>[record.localId]);
+  });
 
   test(
     'recovery releases retained films that no longer match a record',
