@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_version.dart';
 import 'apple_local_runtime.dart';
+import 'background_delivery.dart';
 import 'bfl_api.dart';
 import 'asset_extensions.dart';
 import 'data_location.dart';
@@ -108,6 +109,7 @@ class NativeGateway extends DirectGateway
     String? mobileTestArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     AppleLocalRuntime? appleLocalRuntime,
+    BackgroundResultDelivery? backgroundDelivery,
     bool? isIos,
     bool? isMobile,
     SecureValueStore? secureValueStore,
@@ -178,6 +180,7 @@ class NativeGateway extends DirectGateway
       mobileTestArtCraftApiKeyId: mobileTestArtCraftApiKeyId,
       providerRouter: providerRouter,
       appleLocalRuntime: appleLocalRuntime,
+      backgroundDelivery: backgroundDelivery,
       isIos: isIos,
       isMobile: isMobile,
       referenceVideoNormalizer:
@@ -215,6 +218,7 @@ class NativeGateway extends DirectGateway
     String? mobileTestArtCraftApiKeyId,
     ProviderApiRouter? providerRouter,
     AppleLocalRuntime? appleLocalRuntime,
+    BackgroundResultDelivery? backgroundDelivery,
     bool? isIos,
     bool? isMobile,
     required ReferenceVideoNormalizationService referenceVideoNormalizer,
@@ -258,6 +262,8 @@ class NativeGateway extends DirectGateway
          api: api,
          client: client,
          providerRouter: providerRouter,
+         backgroundDelivery:
+             backgroundDelivery ?? MethodChannelBackgroundResultDelivery(),
          availableProviders: _nativeAvailableProviders(isIos ?? Platform.isIOS),
          referenceVideoNormalizer: referenceVideoNormalizer,
          persistenceDescription:

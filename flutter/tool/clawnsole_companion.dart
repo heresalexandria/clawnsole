@@ -1756,9 +1756,19 @@ class CompanionApp {
           next = next.copyWith(deliveryExpiresAt: expectedExpiry);
         }
       }
+      // An undelivered record keeps its links past the retention estimate
+      // until at least one status check ran after the estimate lapsed: the
+      // estimate can expire entirely while the process is suspended or dead,
+      // and purging on the next load would destroy the delivery link before
+      // the recovery poll gets its one chance to download from it.
+      final attemptedAfterExpiry =
+          next.resultAsset != null ||
+          (next.deliveryExpiresAt != null &&
+              next.lastCheckedAt?.isAfter(next.deliveryExpiresAt!) == true);
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
-          (next.resultUrl == null && next.draftCacheUrl == null)) {
+          (next.resultUrl == null && next.draftCacheUrl == null) ||
+          !attemptedAfterExpiry) {
         return next;
       }
       changed = true;
@@ -1971,6 +1981,83 @@ class CompanionApp {
     }
   }
 
+  /// Retains a ready result through its previously captured delivery link
+  /// after a status check failed. `stalled` distinguishes a timed-out
+  /// download — which says nothing about the link itself and must keep the
+  /// generation retryable — from a definitive link failure.
+  Future<({AssetReference? asset, bool stalled})> _downloadRetainedResult(
+    Generation current,
+  ) async {
+    final url = current.resultUrl;
+    if (!current.isReady || current.resultAsset != null || url == null) {
+      return (asset: null, stalled: false);
+    }
+    try {
+      return (
+        asset: await _retainResult(
+          url,
+          'clawnsole-${current.localId}.mp4',
+          current.storage,
+        ),
+        stalled: false,
+      );
+    } on ProviderException catch (error) {
+      // _retainResult reports a timed-out download as a status-less
+      // ProviderException.
+      return (asset: null, stalled: error.status == null);
+    } on Object {
+      return (asset: null, stalled: false);
+    }
+  }
+
+  /// Persists a poll outcome unless the stored record advanced past the
+  /// [expected] baseline while this poll ran, returning null when it did.
+  ///
+  /// A poll abandoned by its caller's timeout keeps running on a dead socket
+  /// and can complete much later; without this guard its stale write would
+  /// overwrite a newer poll's outcome — even discarding a delivered result
+  /// asset — or resurrect a deleted record. Every persisted poll outcome
+  /// advances statusCheckCount, so it serves as the write version.
+  Future<Generation?> _persistPollUpdate(
+    Generation next, {
+    required Generation expected,
+  }) {
+    return _store.mutate<Generation?>((current) {
+      final generations = List<Generation>.from(current.generations);
+      final index = generations.indexWhere(
+        (item) => item.localId == next.localId,
+      );
+      if (index < 0) return StoreChange<Generation?>(current, null);
+      final existing = generations[index];
+      if (existing.statusCheckCount != expected.statusCheckCount) {
+        return StoreChange<Generation?>(current, null);
+      }
+      final persisted = next.copyWith(
+        folderId: existing.folderId,
+        clearFolder: existing.folderId == null,
+        tags: existing.tags,
+        favorite: existing.favorite,
+        hidden: existing.hidden,
+        storage: existing.storage,
+      );
+      generations[index] = persisted;
+      return StoreChange<Generation?>(
+        current.copyWith(generations: generations),
+        persisted,
+      );
+    });
+  }
+
+  /// The stored version of [generation], or the caller's copy when the
+  /// record no longer exists.
+  Future<Generation> _storedOrInput(Generation generation) async {
+    final data = await _store.read();
+    return data.generations
+            .where((item) => item.localId == generation.localId)
+            .firstOrNull ??
+        generation;
+  }
+
   Future<Generation> _submit(Map<String, Object?> body) async {
     final input = body['input'];
     final rawRecord = body['record'];
@@ -2168,10 +2255,22 @@ class CompanionApp {
     late Generation next;
     try {
       final payload = await _providers.poll(current.provider, key, pollingUrl);
-      var status = normalizeGenerationStatus(payload['status']);
+      final reportedStatus = normalizeGenerationStatus(payload['status']);
+      var status = reportedStatus;
+      if (isGenerationFailureStatus(status) && current.hasDeliveredMedia) {
+        // A provider expiring or forgetting a task whose film — or still-held
+        // delivery link — already arrived must not fail the generation; a
+        // restored ready status lets retention keep trying the link below.
+        status = normalizeGenerationStatus(current.status);
+      }
       final result = payload['result'] ?? payload['outputs'] ?? payload;
-      final resultUrl = status == 'Ready'
+      // Fresh links come only from a payload that itself reported ready — a
+      // failure payload must never have an incidental URL mistaken for one.
+      final resultUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: false)
+          : null;
+      final draftUrl = reportedStatus == 'Ready'
+          ? findResultUrl(result, draft: true)
           : null;
       var failureMessage = isGenerationFailureStatus(status)
           ? providerNamedFailureMessage(
@@ -2184,16 +2283,53 @@ class CompanionApp {
       var retentionFailures = current.resultRetentionFailures;
       String? retentionError;
       var attemptedRetention = false;
-      if (status == 'Ready' && resultAsset == null && resultUrl == null) {
+      // A previously captured delivery link often outlives the provider's
+      // status payload, so retention falls back to it whenever this poll's
+      // payload no longer carries a fresh link.
+      final downloadUrl = status == 'Ready'
+          ? (resultUrl ?? current.resultUrl)
+          : resultUrl;
+      final deliveryAvailability = providerById(
+        current.provider,
+      ).resultDelivery.availability;
+      if (status == 'Ready' && resultAsset == null && resultUrl != null) {
+        // The ready status and its delivery link are an irreplaceable receipt:
+        // they must survive a crash or shutdown during the download attempt
+        // below, so they are persisted now rather than only at poll end.
+        final receipt = await _persistPollUpdate(
+          expected: current,
+          current.copyWith(
+            status: status,
+            resultUrl: resultUrl,
+            draftCacheUrl: draftUrl,
+            deliveryExpiresAt: deliveryAvailability != null
+                ? current.deliveryExpiresAt ??
+                      checkedAt.add(deliveryAvailability)
+                : null,
+            clearDeliveryExpiresAt: deliveryAvailability == null,
+            deliveryExpired: false,
+            lastProviderResponse: compactProviderResponse(payload),
+            lastProviderResponseAt: checkedAt,
+            updatedAt: checkedAt,
+          ),
+        );
+        if (receipt == null) {
+          // A newer poll outcome (or a deletion) superseded this one while
+          // it ran; downloading against the stale baseline would only race
+          // that winner's write.
+          return await _storedOrInput(current);
+        }
+      }
+      if (status == 'Ready' && resultAsset == null && downloadUrl == null) {
         attemptedRetention = true;
         retentionFailures += 1;
         retentionError =
             '${providerById(current.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
-      } else if (resultUrl != null && resultAsset == null) {
+      } else if (downloadUrl != null && resultAsset == null) {
         attemptedRetention = true;
         try {
           resultAsset = await _retainResult(
-            resultUrl,
+            downloadUrl,
             'clawnsole-${current.localId}.mp4',
             current.storage,
           );
@@ -2215,9 +2351,6 @@ class CompanionApp {
         allowDeterministicQuote: status == 'Ready',
         terminal: terminal,
       );
-      final deliveryAvailability = providerById(
-        current.provider,
-      ).resultDelivery.availability;
       next = current.copyWith(
         status: status,
         progress: status == 'Ready'
@@ -2226,9 +2359,7 @@ class CompanionApp {
         resultUrl: resultUrl,
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
-        draftCacheUrl: status == 'Ready'
-            ? findResultUrl(result, draft: true)
-            : null,
+        draftCacheUrl: draftUrl,
         deliveryExpiresAt: status == 'Ready' && deliveryAvailability != null
             ? current.deliveryExpiresAt ?? checkedAt.add(deliveryAvailability)
             : null,
@@ -2255,13 +2386,33 @@ class CompanionApp {
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
+      final rescue = await _downloadRetainedResult(current);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
-      if (payload != null &&
+      if (rescue.asset != null) {
+        // The status check failed, but the film itself was still available at
+        // the previously captured delivery link, so the generation completes.
+        next = current.copyWith(
+          resultAsset: rescue.asset,
+          lastResultRetentionAttemptAt: checkedAt,
+          resultRetentionFailures: 0,
+          clearResultRetentionError: true,
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null &&
           isGenerationFailureStatus(providerStatus) &&
           current.hasDeliveredMedia) {
-        // The film already arrived; an expired or failed provider job cannot
-        // retract it. Record the check without downgrading the delivery.
+        // The film — or its still-held delivery link — already arrived; an
+        // expired or failed provider job cannot retract it, and the rescue
+        // above will keep retrying the link until the delivery window purge
+        // releases it. Record the check without downgrading the delivery.
         next = current.copyWith(
           lastCheckedAt: checkedAt,
           statusCheckCount: current.statusCheckCount + 1,
@@ -2318,7 +2469,8 @@ class CompanionApp {
         );
       }
     }
-    return _upsert(next);
+    return await _persistPollUpdate(next, expected: current) ??
+        await _storedOrInput(current);
   }
 
   AssetReference? _findAsset(

@@ -61,6 +61,14 @@ abstract interface class ProviderCatalogCacheGateway {
   Future<void> saveProviderCatalogCache(Map<String, Object?> cache);
 }
 
+/// Recovery of result downloads a platform background transfer service
+/// finished while the process was suspended or terminated.
+abstract interface class BackgroundDeliveryGateway {
+  /// Imports every retained platform download whose generation still lacks a
+  /// saved result, returning how many films were recovered.
+  Future<int> recoverBackgroundDeliveries();
+}
+
 abstract interface class LibraryOrganizationGateway {
   Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder);
   Future<LocalSnapshot> deleteLibraryFolder(String folderId);

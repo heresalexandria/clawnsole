@@ -5,6 +5,8 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private let appleLocalPlugin = AppleLocalGenerationPlugin()
+  private let backgroundActivityPlugin = BackgroundActivityPlugin()
+  private let backgroundDeliveryPlugin = BackgroundDeliveryPlugin()
 
   override func application(
     _ application: UIApplication,
@@ -14,8 +16,26 @@ import UIKit
     GeneratedPluginRegistrant.register(with: self)
     if let controller = window?.rootViewController as? FlutterViewController {
       appleLocalPlugin.register(with: controller)
+      backgroundActivityPlugin.register(with: controller)
+      backgroundDeliveryPlugin.register(with: controller)
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    handleEventsForBackgroundURLSession identifier: String,
+    completionHandler: @escaping () -> Void
+  ) {
+    if identifier == BackgroundDeliveryPlugin.sessionIdentifier {
+      backgroundDeliveryPlugin.handleSessionEvents(completionHandler: completionHandler)
+      return
+    }
+    super.application(
+      application,
+      handleEventsForBackgroundURLSession: identifier,
+      completionHandler: completionHandler
+    )
   }
 
   private func configureGoogleSignInAppCheck() {
