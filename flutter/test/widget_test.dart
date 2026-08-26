@@ -7237,6 +7237,38 @@ void main() {
     controller.dispose();
   });
 
+  test(
+    'FLUX 3 defaults audio on after audio-less models unless user disabled it',
+    () async {
+      final controller = AppController(
+        gateway: _MemoryGateway(
+          const LocalSnapshot(
+            generations: <Generation>[],
+            preferences: AppPreferences(),
+            hasApiKey: false,
+            storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+          ),
+        ),
+      );
+      await controller.initialize();
+
+      expect(controller.selectedModelId, 'flux-3-video');
+      expect(controller.form.generateAudio, isTrue);
+
+      await controller.selectModel('flux-tools-video-upscale-v1');
+      expect(controller.form.generateAudio, isFalse);
+      await controller.selectModel('flux-3-video');
+      expect(controller.form.generateAudio, isTrue);
+
+      controller.setGenerateAudio(false);
+      await controller.selectModel('flux-tools-video-upscale-v1');
+      await controller.selectModel('flux-3-video');
+      expect(controller.form.generateAudio, isFalse);
+
+      controller.dispose();
+    },
+  );
+
   testWidgets('video upscale exposes finishing controls on Create', (
     tester,
   ) async {

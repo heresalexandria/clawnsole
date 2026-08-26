@@ -2950,9 +2950,7 @@ class _SettingsGrid extends StatelessWidget {
             subtitle: 'Dialogue, ambience, and sound',
             value: controller.form.generateAudio,
             onChanged: controller.selectedModel.supportsAudio
-                ? (value) => controller.updateForm(
-                    (form) => form.generateAudio = value,
-                  )
+                ? controller.setGenerateAudio
                 : null,
           ),
         if (controller.selectedModel.supportsDraft)
