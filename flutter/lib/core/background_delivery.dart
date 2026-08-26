@@ -103,7 +103,7 @@ class MethodChannelBackgroundResultDelivery
         'pendingResult',
         <String, Object?>{'id': id},
       );
-      return _readDelivered(value);
+      return await _readDelivered(value);
     } on MissingPluginException {
       _unsupported = true;
       return null;
