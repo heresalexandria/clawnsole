@@ -825,8 +825,10 @@ class _UploadDriveApi extends GoogleDriveApi {
   }
 
   @override
-  Future<GoogleDriveContent> readFile(String fileId) async =>
-      GoogleDriveContent(stateBytes!, etag: 'state-etag');
+  Future<GoogleDriveContent?> readFile(
+    String fileId, {
+    String? ifNoneMatch,
+  }) async => GoogleDriveContent(stateBytes!, etag: 'state-etag');
 
   @override
   Future<GoogleDriveFile> updateFile(

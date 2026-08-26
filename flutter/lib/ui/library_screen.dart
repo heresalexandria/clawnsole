@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
@@ -1083,7 +1084,11 @@ class _GenerationCardState extends State<GenerationCard> {
             runSpacing: 6,
             children: <Widget>[
               if (StatusBadge.shouldShow(item)) StatusBadge(item: item),
-              StorageBadge(storage: item.storage, compact: true),
+              StorageBadge(
+                storage: item.storage,
+                compact: true,
+                pendingUpload: generationPendingDriveUpload(item),
+              ),
               MediaDurationBadge(text: relativeTime(item.createdAt)),
             ],
           ),
@@ -2057,7 +2062,10 @@ class _GenerationTagEditorState extends State<_GenerationTagEditor> {
           const SizedBox(height: 9),
           Align(
             alignment: Alignment.centerLeft,
-            child: StorageBadge(storage: widget.item.storage),
+            child: StorageBadge(
+              storage: widget.item.storage,
+              pendingUpload: generationPendingDriveUpload(widget.item),
+            ),
           ),
           const SizedBox(height: 22),
           Text('Tags', style: Theme.of(context).textTheme.titleMedium),

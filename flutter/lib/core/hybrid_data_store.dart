@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'asset_extensions.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_store.dart';
@@ -13,12 +14,24 @@ class HybridDataStore implements DurableDataStore {
     required DurableDataStore local,
     GoogleDriveStore? drive,
     this.localLibraryAvailable = true,
+    this.deferDriveUploads = true,
   }) : _local = local,
        _drive = drive ?? GoogleDriveStore();
 
   final DurableDataStore _local;
   final GoogleDriveStore _drive;
   final bool localLibraryAvailable;
+
+  /// When set, Drive-tagged media writes stage into the local store and are
+  /// published to Drive by a background upload pass, so saving media finishes
+  /// at local-disk speed. Disabled on builds without a local library.
+  final bool deferDriveUploads;
+
+  /// Invoked whenever a Drive-tagged media write was staged locally, so the
+  /// owner can schedule a background upload pass.
+  void Function()? onDeferredDriveUpload;
+
+  bool get _stagesDriveUploads => deferDriveUploads && localLibraryAvailable;
 
   StoredData? _lastLocal;
   StoredData? _lastRemote;
@@ -70,6 +83,15 @@ class HybridDataStore implements DurableDataStore {
     return combined;
   }
 
+  /// The last reconciled library exactly as this device persisted it: local
+  /// records combined with the compact Drive metadata mirror, with no Drive
+  /// traffic even while connected. Routes that serve already-retained media
+  /// use this so a cached thumbnail or film never waits on the network.
+  Future<StoredData> readCached() async {
+    final persisted = await _local.read();
+    return _combine(_asLocal(persisted), _asCachedDrive(persisted));
+  }
+
   @override
   Future<StoredData> read() async {
     final persisted = await _local.read();
@@ -119,10 +141,22 @@ class HybridDataStore implements DurableDataStore {
     required String label,
     required String contentType,
     LibraryStorage storage = LibraryStorage.local,
-  }) {
+  }) async {
     if (storage == LibraryStorage.drive) {
       if (!isDriveConnected) {
         throw StateError('Connect Google Drive before storing this media.');
+      }
+      if (_stagesDriveUploads) {
+        // Stage locally so the save finishes at disk speed; the background
+        // upload pass publishes the bytes and swaps the record to the Drive
+        // file afterwards.
+        final staged = await _local.writeAsset(
+          bytes,
+          label: label,
+          contentType: contentType,
+        );
+        onDeferredDriveUpload?.call();
+        return staged;
       }
       return _drive.writeAsset(
         bytes,
@@ -148,10 +182,28 @@ class HybridDataStore implements DurableDataStore {
     required String label,
     AssetReference? retained,
     LibraryStorage storage = LibraryStorage.local,
-  }) {
+  }) async {
     if (storage == LibraryStorage.drive) {
       if (!isDriveConnected) {
         throw StateError('Connect Google Drive before storing this media.');
+      }
+      if (_stagesDriveUploads) {
+        if (retained?.kind == 'drive' && retained!.value.isNotEmpty) {
+          return AssetReference(
+            kind: 'drive',
+            value: retained.value,
+            label: label,
+            contentType: retained.contentType,
+            bytes: retained.bytes,
+          );
+        }
+        final staged = await _local.persistSource(
+          source,
+          label: label,
+          retained: retained,
+        );
+        if (staged?.kind == 'local') onDeferredDriveUpload?.call();
+        return staged;
       }
       return _drive.persistSource(
         source,
@@ -168,6 +220,87 @@ class HybridDataStore implements DurableDataStore {
       label: label,
       retained: retained,
       storage: storage,
+    );
+  }
+
+  /// Local-kind media still referenced by Drive-tagged records: bytes staged
+  /// by a deferred Drive write that a background pass has not yet published.
+  static Map<String, AssetReference> pendingDriveUploads(StoredData data) {
+    final pending = <String, AssetReference>{};
+    for (final reference in pendingDriveUploadAssets(
+      data.generations,
+      data.savedReferences,
+    )) {
+      pending.putIfAbsent(reference.value, () => reference);
+    }
+    return pending;
+  }
+
+  /// Uploads the staged media referenced by [data] to Drive without touching
+  /// any records. Returns the published Drive files keyed by staged local
+  /// asset id. [DriveUploadPassResult.failures] counts uploads this device
+  /// holds bytes for that did not reach Drive and should be retried; staged
+  /// media whose bytes live on another device is skipped silently, because
+  /// only that device can publish it.
+  Future<DriveUploadPassResult> uploadQueuedDriveAssets(StoredData data) async {
+    if (!isDriveConnected) {
+      return const DriveUploadPassResult(<String, AssetReference>{}, 0);
+    }
+    final replacements = <String, AssetReference>{};
+    var failures = 0;
+    for (final entry in pendingDriveUploads(data).entries) {
+      Uint8List bytes;
+      try {
+        bytes = await _local.readAsset(entry.value);
+      } on Object {
+        continue;
+      }
+      try {
+        replacements[entry.key] = await _drive.writeAsset(
+          bytes,
+          label: entry.value.label,
+          contentType: entry.value.contentType ?? 'application/octet-stream',
+        );
+      } on Object {
+        failures += 1;
+      }
+    }
+    return DriveUploadPassResult(replacements, failures);
+  }
+
+  /// Points Drive-tagged records at their published Drive files. Changed
+  /// records get a fresh updatedAt so cross-device merges keep the swap.
+  static StoredData applyDriveAssetReplacements(
+    StoredData data,
+    Map<String, AssetReference> replacements,
+  ) {
+    if (replacements.isEmpty) return data;
+    final now = DateTime.now().toUtc();
+    AssetReference? lookup(AssetReference reference) =>
+        reference.kind == 'local' ? replacements[reference.value] : null;
+    return data.copyWith(
+      generations: data.generations.map((item) {
+        if (item.storage != LibraryStorage.drive) return item;
+        var changed = false;
+        final swapped = mapGenerationAssets(item, (reference) {
+          final next = lookup(reference);
+          if (next == null) return reference;
+          changed = true;
+          return next;
+        });
+        return changed ? swapped.copyWith(updatedAt: now) : item;
+      }).toList(),
+      savedReferences: data.savedReferences.map((item) {
+        if (item.storage != LibraryStorage.drive) return item;
+        var changed = false;
+        final swapped = mapSavedReferenceAssets(item, (reference) {
+          final next = lookup(reference);
+          if (next == null) return reference;
+          changed = true;
+          return next;
+        });
+        return changed ? swapped.copyWith(updatedAt: now) : item;
+      }).toList(),
     );
   }
 
@@ -243,10 +376,12 @@ class HybridDataStore implements DurableDataStore {
         savedReferences: driveReferences,
       ),
     );
-    // Clearing the local library still clears every local media byte. The
-    // Drive records above are metadata only and their originals remain in
-    // Drive (with any bounded read-through copies owned by the media caches).
-    await _local.pruneAssets(const <Generation>[], const <SavedReference>[]);
+    // Clearing the local library clears every local media byte that only
+    // local records used. The kept Drive records are metadata whose originals
+    // remain in Drive — except staged media a deferred upload has not
+    // published yet, which those records still reference by local kind and
+    // which must survive until the background pass uploads it.
+    await _local.pruneAssets(driveGenerations, driveReferences);
     _lastLocal = null;
   }
 
@@ -732,6 +867,17 @@ class GoogleDriveCopyCounts {
 
   final int generations;
   final int references;
+}
+
+/// The outcome of one background Drive upload pass.
+class DriveUploadPassResult {
+  const DriveUploadPassResult(this.replacements, this.failures);
+
+  /// Published Drive files keyed by the staged local asset id they replace.
+  final Map<String, AssetReference> replacements;
+
+  /// Uploads this device holds bytes for that failed and should be retried.
+  final int failures;
 }
 
 extension on LibraryFolder {

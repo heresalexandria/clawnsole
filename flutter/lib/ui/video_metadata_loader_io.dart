@@ -7,7 +7,11 @@ import '../core/models.dart';
 import 'video_controller.dart';
 
 Future<VideoSourceMetadata?> loadVideoMetadata(Uri uri) async {
-  if (!Platform.isWindows && !Platform.isLinux) {
+  // Windows registers media_kit as its video_player backend (main.dart), so
+  // the player probe works there too. Only Linux has no backend; it goes
+  // straight to the MP4 box parse. Without the probe, any video over the
+  // parse's size cap would dead-end into an unreadable duration.
+  if (!Platform.isLinux) {
     final playerMetadata = await _loadWithVideoPlayer(uri);
     if (playerMetadata != null) return playerMetadata;
   }
@@ -33,7 +37,10 @@ Future<VideoSourceMetadata?> _loadWithVideoPlayer(Uri uri) async {
   } on Object {
     return null;
   } finally {
-    await controller.dispose();
+    // dispose() waits on the platform's create call, which never completes
+    // when create itself failed — awaiting it here would wedge the probe (and
+    // the caller's loading state) forever. Release without blocking.
+    unawaited(controller.dispose().catchError((_) {}));
   }
 }
 

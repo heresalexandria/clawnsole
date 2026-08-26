@@ -1711,83 +1711,91 @@ class _ReferencesSection extends StatelessWidget {
       fontSize: 10.5,
       height: 1.35,
     );
-    if (compact) {
-      return Column(
-        key: const ValueKey('media-references-section'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _SectionLabelChip(
-            icon: Icons.perm_media_rounded,
-            label: 'References',
-            hint: limitSummary,
-          ),
-          if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 7),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[...addButtons, ...startActions],
-            ),
-          ],
-          if (taskChips != null) ...<Widget>[
-            const SizedBox(height: 6),
-            taskChips,
-          ],
-          if (!setAside) ...<Widget>[
-            const SizedBox(height: 8),
-            _ReferenceCapacityGauges(controller: controller),
-          ],
-          for (final note in notes) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(note, style: noteStyle),
-          ],
-          ReferenceUploadIndicator(controller: controller),
-          if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-        ],
-      );
-    }
-    return Column(
-      key: const ValueKey('media-references-section'),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        const FieldLabel(
-          'Creative references · optional',
-          icon: Icons.perm_media_rounded,
-        ),
-        const SizedBox(height: 7),
-        if (taskChips != null) ...<Widget>[
-          taskChips,
-          const SizedBox(height: 7),
-        ],
-        Text(
-          limitSummary,
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 11.5,
-            height: 1.4,
-          ),
-        ),
-        if (!setAside) ...<Widget>[
-          const SizedBox(height: 10),
-          _ReferenceCapacityGauges(controller: controller),
-        ],
-        for (final note in notes) ...<Widget>[
-          const SizedBox(height: 5),
-          Text(note, style: noteStyle),
-        ],
-        ReferenceUploadIndicator(controller: controller),
-        if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-        if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[...addButtons, ...startActions],
-          ),
-        ],
-      ],
+    final content = compact
+        ? Column(
+            key: const ValueKey('media-references-section'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _SectionLabelChip(
+                icon: Icons.perm_media_rounded,
+                label: 'References',
+                hint: limitSummary,
+              ),
+              if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[...addButtons, ...startActions],
+                ),
+              ],
+              if (taskChips != null) ...<Widget>[
+                const SizedBox(height: 6),
+                taskChips,
+              ],
+              if (!setAside) ...<Widget>[
+                const SizedBox(height: 8),
+                _ReferenceCapacityGauges(controller: controller),
+              ],
+              for (final note in notes) ...<Widget>[
+                const SizedBox(height: 5),
+                Text(note, style: noteStyle),
+              ],
+              ReferenceUploadIndicator(controller: controller),
+              if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+            ],
+          )
+        : Column(
+            key: const ValueKey('media-references-section'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              const FieldLabel(
+                'Creative references · optional',
+                icon: Icons.perm_media_rounded,
+              ),
+              const SizedBox(height: 7),
+              if (taskChips != null) ...<Widget>[
+                taskChips,
+                const SizedBox(height: 7),
+              ],
+              Text(
+                limitSummary,
+                style: TextStyle(
+                  color: context.colors.onSurfaceVariant,
+                  fontSize: 11.5,
+                  height: 1.4,
+                ),
+              ),
+              if (!setAside) ...<Widget>[
+                const SizedBox(height: 10),
+                _ReferenceCapacityGauges(controller: controller),
+              ],
+              for (final note in notes) ...<Widget>[
+                const SizedBox(height: 5),
+                Text(note, style: noteStyle),
+              ],
+              ReferenceUploadIndicator(controller: controller),
+              if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+              if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[...addButtons, ...startActions],
+                ),
+              ],
+            ],
+          );
+    // The whole section is a drop target, so local files land as references
+    // without touching the pickers. Files sort into image/video/audio by
+    // MIME type or extension inside the controller.
+    return ReferenceDropZone(
+      enabled: !setAside,
+      label: 'Drop to add references',
+      onDropFiles: controller.addDroppedReferenceFiles,
+      child: content,
     );
   }
 }
@@ -2297,16 +2305,15 @@ class _AddReferenceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uploading = controller.referenceUploadInProgress;
-    final enabled = controller.canAddReference(kind) && !uploading;
+    // Uploads never lock the buttons: adds append instantly and persistence
+    // continues on the controller's background work queue.
+    final enabled = controller.canAddReference(kind);
     final count = controller.form.referenceCount(kind);
     final maximum = controller.referenceLimit(kind);
     return PopupMenuButton<String>(
       key: ValueKey('add-${kind.name}-reference'),
       enabled: enabled,
-      tooltip: uploading
-          ? controller.referenceUploadStatus
-          : enabled
+      tooltip: enabled
           ? 'Add reference ${kind.pluralLabel}'
           : '$maximum ${kind.pluralLabel} attached',
       onSelected: (choice) {
@@ -2378,22 +2385,16 @@ class _AddReferenceButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (uploading)
-              const SizedBox.square(
-                dimension: 15,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              Icon(
-                enabled ? Icons.add_rounded : Icons.check_rounded,
-                size: 15,
-                color: enabled
-                    ? context.colors.primary
-                    : context.colors.onSurfaceVariant,
-              ),
+            Icon(
+              enabled ? Icons.add_rounded : Icons.check_rounded,
+              size: 15,
+              color: enabled
+                  ? context.colors.primary
+                  : context.colors.onSurfaceVariant,
+            ),
             const SizedBox(width: 5),
             Text(
-              uploading ? 'Adding…' : '${kind.label} $count/$maximum',
+              '${kind.label} $count/$maximum',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,

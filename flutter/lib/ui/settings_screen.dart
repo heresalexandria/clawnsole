@@ -771,6 +771,21 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                           ? 'Synced with “${connection.folderName}”.'
                           : 'Use one portable library across every Clawnsole surface.',
                     ),
+                    if (connected &&
+                        widget.controller.pendingDriveUploadCount > 0) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        key: const ValueKey('drive-upload-backlog'),
+                        'Backing up '
+                        '${widget.controller.pendingDriveUploadCount} '
+                        '${widget.controller.pendingDriveUploadCount == 1 ? 'file' : 'files'} '
+                        'to Drive in the background…',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
