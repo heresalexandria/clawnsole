@@ -1252,6 +1252,19 @@ class AppController extends ChangeNotifier {
     };
   }
 
+  /// The freshest retained asset for a draft linked to the library: a
+  /// background upload pass may have swapped the staged local bytes over to
+  /// their published Drive file after the draft captured its pointer.
+  AssetReference? _linkedRetainedAsset(
+    String? savedReferenceId,
+    AssetReference? retained,
+  ) {
+    final saved = savedReferences
+        .where((item) => item.id == savedReferenceId)
+        .firstOrNull;
+    return saved?.asset ?? retained;
+  }
+
   GenerationConfig get currentConfig {
     final orderedFrames = _orderedFrames();
     final upscaling = form.mode == VideoMode.upscale;
@@ -1288,8 +1301,10 @@ class AppController extends ChangeNotifier {
                         : null,
                     referenceId: frame.savedReferenceId,
                     source:
-                        frame.asset?.retained ??
-                        frame.retained ??
+                        _linkedRetainedAsset(
+                          frame.savedReferenceId,
+                          frame.asset?.retained ?? frame.retained,
+                        ) ??
                         _reference(null, frame.source, frame.label),
                   ),
                 )
@@ -1304,8 +1319,10 @@ class AppController extends ChangeNotifier {
                     promptName: referencePromptName(item),
                     referenceId: item.savedReferenceId,
                     source:
-                        item.asset?.retained ??
-                        item.retained ??
+                        _linkedRetainedAsset(
+                          item.savedReferenceId,
+                          item.asset?.retained ?? item.retained,
+                        ) ??
                         _reference(null, item.source, item.label),
                     thumbnailAsset: _previewForStorage(
                       item.thumbnailAsset ?? item.asset?.thumbnailAsset,
