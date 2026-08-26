@@ -709,21 +709,7 @@ class _ComposerState extends State<_Composer> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  if (controller.selectedModel.maxPromptCharacters != null)
-                    Tooltip(
-                      message: '${controller.selectedModel.label} prompt limit',
-                      child: Text(
-                        '≤ ${controller.selectedModel.maxPromptCharacters} chars',
-                        key: const ValueKey('prompt-character-limit'),
-                        style: TextStyle(
-                          color: context.colors.onSurfaceVariant,
-                          fontSize: 10.5,
-                          fontFeatures: const <FontFeature>[
-                            FontFeature.tabularFigures(),
-                          ],
-                        ),
-                      ),
-                    ),
+                  _PromptCharacterCounter(controller: controller),
                   IconButton(
                     key: const ValueKey('prompt-copy-button'),
                     tooltip: 'Copy prompt to clipboard',
@@ -936,12 +922,18 @@ class _FullscreenPromptEditor extends StatelessWidget {
                   FieldLabel(
                     upscaling ? 'Detail guidance · optional' : 'Direction',
                     icon: Icons.edit_note_rounded,
-                    trailing: IconButton(
-                      key: const ValueKey('prompt-fullscreen-minimize'),
-                      tooltip: 'Minimize prompt',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.fullscreen_exit_rounded),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        _PromptCharacterCounter(controller: controller),
+                        IconButton(
+                          key: const ValueKey('prompt-fullscreen-minimize'),
+                          tooltip: 'Minimize prompt',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.fullscreen_exit_rounded),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -969,6 +961,43 @@ class _FullscreenPromptEditor extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PromptCharacterCounter extends StatelessWidget {
+  const _PromptCharacterCounter({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final model = controller.selectedModel;
+      final limit = model.maxPromptCharacters;
+      final typed = controller.form.prompt.length;
+      final nearLimit = limit != null && typed >= limit * .95;
+      return Tooltip(
+        message: limit == null
+            ? '${model.label} does not publish a prompt limit'
+            : '${model.label} accepts up to $limit characters',
+        child: Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: Text(
+            limit == null ? '$typed' : '$typed / $limit',
+            key: const ValueKey('prompt-character-limit'),
+            style: TextStyle(
+              color: nearLimit
+                  ? context.colors.error
+                  : context.colors.onSurfaceVariant,
+              fontSize: 10.5,
+              fontWeight: nearLimit ? FontWeight.w700 : FontWeight.w500,
+              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _GenerationDestinationControls extends StatelessWidget {
@@ -1774,7 +1803,9 @@ class _ReferenceCapacityGauges extends StatelessWidget {
     final model = controller.selectedModel;
     final gauges = <Widget>[];
     final totalMaximum = model.maxTotalReferences;
-    if (totalMaximum != null && totalMaximum > 0) {
+    if (totalMaximum != null &&
+        totalMaximum > 0 &&
+        form.references.isNotEmpty) {
       gauges.add(
         _ReferenceCapacityGauge(
           key: const ValueKey('reference-capacity-total'),
@@ -1790,6 +1821,9 @@ class _ReferenceCapacityGauges extends StatelessWidget {
       final attached = form.references
           .where((reference) => reference.kind == kind)
           .toList();
+      // Gauges appear once a reference of this kind is attached; until then
+      // the summary line above already states the limits.
+      if (attached.isEmpty) continue;
       final kindLabel = switch (kind) {
         MediaReferenceKind.image => 'Images',
         MediaReferenceKind.video => 'Videos',
@@ -2559,9 +2593,9 @@ class _AddFrameButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = controller.canAddFrame(role);
     final label = switch (role) {
-      KeyframeRole.start => 'First frame',
-      KeyframeRole.middle => 'Middle frame',
-      KeyframeRole.end => 'Last frame',
+      KeyframeRole.start => 'First',
+      KeyframeRole.middle => 'Middle',
+      KeyframeRole.end => 'Last',
     };
     final hint = switch (role) {
       KeyframeRole.start => 'Pins the opening at 0 s',

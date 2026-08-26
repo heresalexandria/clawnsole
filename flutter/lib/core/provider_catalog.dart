@@ -491,6 +491,7 @@ class _ArtCraftModel extends VideoModelDefinition {
     super.maxDurationWithImageGuidance,
     super.aspectRatiosWithFrames,
     super.durationStep = 1,
+    super.maxPromptCharacters,
     bool supportsText = true,
     super.supportsAudio = false,
   }) : super(
@@ -1125,6 +1126,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .186,
     ),
     _ArtCraftModel(
@@ -1144,6 +1146,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .128,
     ),
     _ArtCraftModel(
@@ -1162,6 +1165,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .25,
     ),
     _ArtCraftModel(
@@ -1180,6 +1184,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .20,
     ),
     _ArtCraftModel(
@@ -1198,6 +1203,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .25,
     ),
     _ArtCraftModel(
@@ -1216,6 +1222,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .20,
     ),
     _ArtCraftModel(
@@ -1235,6 +1242,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .09,
     ),
     _ArtCraftModel(
@@ -1253,6 +1261,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .092,
     ),
     _ArtCraftModel(
@@ -1271,6 +1280,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 10000,
       usdPerSecond: .092,
     ),
     _ArtCraftModel(
@@ -1291,6 +1301,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
       aspectRatiosWithFrames: <String>['auto'],
+      maxPromptCharacters: 10000,
       usdPerSecond: .268,
     ),
     _ArtCraftModel(
@@ -1310,6 +1321,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
       aspectRatiosWithFrames: <String>['auto'],
+      maxPromptCharacters: 10000,
       usdPerSecond: .316,
     ),
     _ArtCraftModel(
@@ -1329,6 +1341,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxAudioReferences: 10,
       maxReferenceVideoSeconds: 30,
       maxReferenceAudioSeconds: 30,
+      maxPromptCharacters: 10000,
       usdPerSecond: .428,
       supportsText: false,
     ),
@@ -1400,6 +1413,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxKeyframes: 1,
       supportsEndFrame: false,
       maxDurationWithImageGuidance: 10,
+      maxPromptCharacters: 4096,
       usdPerSecond: .1475,
       supportsText: false,
     ),
@@ -1470,6 +1484,7 @@ const _artCraftProvider = VideoProviderDefinition(
       maxReferenceVideoSeconds: 15,
       maxReferenceAudioSeconds: 15,
       requiresVisualReferenceForAudio: true,
+      maxPromptCharacters: 7000,
       usdPerSecond: .30,
     ),
     _ArtCraftModel(

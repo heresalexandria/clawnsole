@@ -450,12 +450,17 @@ class GenerationPrompt extends StatefulWidget {
     super.key,
     this.collapsedLines = 3,
     this.style,
+    this.reserveCollapsedHeight = false,
   });
 
   final AppController controller;
   final String prompt;
   final int collapsedLines;
   final TextStyle? style;
+
+  /// Occupy the full collapsed block (all [collapsedLines] plus the toggle
+  /// row) even for short prompts, so sibling cards in a grid stay level.
+  final bool reserveCollapsedHeight;
 
   @override
   State<GenerationPrompt> createState() => _GenerationPromptState();
@@ -491,6 +496,27 @@ class _GenerationPromptState extends State<GenerationPrompt> {
           textScaler: MediaQuery.textScalerOf(context),
         )..layout(maxWidth: available);
         final truncated = painter.didExceedMaxLines;
+        final promptText = Text(
+          widget.prompt,
+          maxLines: _expanded ? null : widget.collapsedLines,
+          overflow: _expanded ? null : TextOverflow.ellipsis,
+          style: style,
+        );
+        final toggleRow = InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              _expanded ? 'Show less' : 'Show full prompt',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: linkColor,
+              ),
+            ),
+          ),
+        );
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -498,28 +524,22 @@ class _GenerationPromptState extends State<GenerationPrompt> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    widget.prompt,
-                    maxLines: _expanded ? null : widget.collapsedLines,
-                    overflow: _expanded ? null : TextOverflow.ellipsis,
-                    style: style,
-                  ),
-                  if (truncated || _expanded)
-                    InkWell(
-                      borderRadius: BorderRadius.circular(6),
-                      onTap: () => setState(() => _expanded = !_expanded),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          _expanded ? 'Show less' : 'Show full prompt',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: linkColor,
+                  widget.reserveCollapsedHeight && !_expanded
+                      ? ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight:
+                                painter.preferredLineHeight *
+                                widget.collapsedLines,
                           ),
-                        ),
-                      ),
-                    ),
+                          child: promptText,
+                        )
+                      : promptText,
+                  if (truncated || _expanded)
+                    toggleRow
+                  else if (widget.reserveCollapsedHeight)
+                    // An invisible twin of the toggle row keeps short-prompt
+                    // cards level with their truncated neighbors.
+                    IgnorePointer(child: Opacity(opacity: 0, child: toggleRow)),
                 ],
               ),
             ),
@@ -549,8 +569,12 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A delivered thumbnail already says "ready" — no chip needed.
-    if (item.isReady) return const SizedBox.shrink();
+    // A delivered thumbnail already says "ready" — no chip needed. The same
+    // goes for a delivered film whose record picked up a late failure status
+    // (an expired provider job, or a cross-device merge): the film is proof.
+    if (item.isReady || (item.hasDeliveredMedia && !item.isWorking)) {
+      return const SizedBox.shrink();
+    }
     final (background, foreground) = item.isStatusUnavailable
         ? (context.colors.errorContainer, context.colors.onErrorContainer)
         : item.isWorking
@@ -603,6 +627,41 @@ class StatusBadge extends StatelessWidget {
   }
 }
 
+/// Duration pill overlaid on a media thumbnail, shared by reference and
+/// generation cards.
+class MediaDurationBadge extends StatelessWidget {
+  const MediaDurationBadge({required this.text, super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: .78),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
+/// The duration to overlay on a generation thumbnail, or null when duration
+/// does not apply (images, upscales that keep their source's length).
+String? generationDurationLabel(Generation item) {
+  if (item.isImage || item.mode == VideoMode.upscale) return null;
+  final duration = item.config.duration;
+  return duration == 'auto' ? 'Auto' : '$duration s';
+}
+
 /// Every setting used for a generation, shown as compact chips.
 class GenerationSpecChips extends StatelessWidget {
   const GenerationSpecChips({required this.item, super.key});
@@ -638,11 +697,6 @@ class GenerationSpecChips extends StatelessWidget {
           _SpecChip(
             label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
             leading: _MiniRatioGlyph(ratio: config.aspectRatio),
-          ),
-        if (!item.isImage && !upscaling)
-          _SpecChip(
-            icon: Icons.timelapse_rounded,
-            label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
           ),
         if (item.provider == 'apple-local' && !item.isImage)
           _SpecChip(icon: Icons.animation_rounded, label: '1 frame / s'),
@@ -1287,13 +1341,27 @@ class GenerationStatusDetails extends StatelessWidget {
 
   final Generation item;
 
+  /// Whether the status panel has anything worth saying for [item]. A
+  /// delivered film is its own proof of success: stale poll metadata or a
+  /// late failure status must not dress a playable card in error colors.
+  static bool shouldShow(Generation item) {
+    if (item.hasDeliveredMedia && !item.needsResultRetention) return false;
+    final problem =
+        item.error ?? item.resultRetentionError ?? item.lastCheckError;
+    if (problem != null || item.isLongRunning || item.needsResultRetention) {
+      return true;
+    }
+    // Otherwise only in-flight records surface their polling cadence.
+    return item.isWorking && item.lastCheckedAt != null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final problem =
         item.error ?? item.resultRetentionError ?? item.lastCheckError;
     final isTerminal = item.error != null || item.isFailed;
     final checked = item.lastCheckedAt;
-    if (problem == null && checked == null && !item.isLongRunning) {
+    if (!shouldShow(item)) {
       return const SizedBox.shrink();
     }
     return Container(
@@ -1407,7 +1475,11 @@ class GenerationStatusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!item.canCheckStatus || (item.isReady && !item.needsResultRetention)) {
+    if (!item.canCheckStatus ||
+        (item.hasDeliveredMedia &&
+            !item.needsResultRetention &&
+            !item.isWorking) ||
+        (item.isReady && !item.needsResultRetention)) {
       return const SizedBox.shrink();
     }
     final checking = controller.isCheckingStatus(item.localId);
@@ -1630,10 +1702,16 @@ class GenerationMedia extends StatefulWidget {
     required this.controller,
     required this.item,
     super.key,
+    this.showTimelineOverlay = true,
   });
 
   final AppController controller;
   final Generation item;
+
+  /// Whether the cached filmstrip may overlay the bottom of the thumbnail.
+  /// Cards that render [GenerationIdleChrome] show the strip below the frame
+  /// instead, so they pass false to avoid doubling it.
+  final bool showTimelineOverlay;
 
   @override
   State<GenerationMedia> createState() => _GenerationMediaState();
@@ -1712,6 +1790,7 @@ class _GenerationMediaState extends State<GenerationMedia> {
       controller: widget.controller,
       item: widget.item,
       uri: _uri,
+      showTimelineOverlay: widget.showTimelineOverlay,
     );
   }
 }
@@ -1719,6 +1798,164 @@ class _GenerationMediaState extends State<GenerationMedia> {
 final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
     <String, _GeneratedVideoPreviewJob>{};
 final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
+
+String _generationPreviewJobKey(Generation item) =>
+    '${item.storage.name}:${item.localId}:${item.resultAsset?.value ?? item.resultUrl}';
+
+/// The idle chrome bar a full video card renders under its film: the cached
+/// filmstrip occupies the exact band the player's live timeline will use, and
+/// a static transport row sits where the controls will appear — so starting
+/// playback replaces content without resizing the card.
+class GenerationIdleChrome extends StatefulWidget {
+  const GenerationIdleChrome({
+    required this.controller,
+    required this.item,
+    super.key,
+  });
+
+  final AppController controller;
+  final Generation item;
+
+  @override
+  State<GenerationIdleChrome> createState() => _GenerationIdleChromeState();
+}
+
+class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
+  Future<Uint8List?>? _timeline;
+  Uint8List? _restoredTimeline;
+  late int _sourceRevision;
+
+  bool get _playable =>
+      widget.item.resultAsset != null || widget.item.resultUrl != null;
+
+  void _load() {
+    _sourceRevision = widget.controller.videoPreviewSourceRevision;
+    final asset = widget.item.timelineThumbnailAsset;
+    _restoredTimeline = widget.controller.cachedAssetBytes(asset);
+    if (_restoredTimeline != null) {
+      _timeline = null;
+      return;
+    }
+    if (asset != null) {
+      _timeline = widget.controller
+          .readPreviewAsset(asset)
+          .then<Uint8List?>((bytes) => bytes)
+          .catchError((Object _) => null);
+      return;
+    }
+    // The thumbnail preview above shares its extraction job; piggyback on it
+    // instead of running a second frame pass for the same film.
+    _timeline = _previewJobs[_generationPreviewJobKey(widget.item)]?.future
+        .then((preview) => preview?.timeline);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant GenerationIdleChrome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_sourceRevision != widget.controller.videoPreviewSourceRevision ||
+        oldWidget.item.timelineThumbnailAsset?.value !=
+            widget.item.timelineThumbnailAsset?.value ||
+        oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value ||
+        oldWidget.item.resultUrl != widget.item.resultUrl) {
+      _load();
+    }
+  }
+
+  Future<void> _download(VideoSaveDestination destination) async {
+    try {
+      await widget.controller.saveMedia(widget.item, destination: destination);
+    } on Object catch (error) {
+      widget.controller.showErrorNotice(error);
+    }
+  }
+
+  Future<void> _play() async {
+    final delivery = widget.controller.generationMediaDelivery(widget.item);
+    final inline = InlineVideoPlayback.of(context);
+    if (inline != null) {
+      inline(
+        InlineVideoRequest(
+          deferredUri: delivery.uri,
+          progress: delivery.progress,
+          onDownload: _download,
+          supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+        ),
+      );
+      return;
+    }
+    await showVideoPlayerModal(
+      context,
+      deferredUri: delivery.uri,
+      progress: delivery.progress,
+      supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+      initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
+      onDownload: _download,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: <Widget>[
+      SizedBox(
+        height: 46,
+        width: double.infinity,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: Colors.white30)),
+          ),
+          child: FutureBuilder<Uint8List?>(
+            future: _timeline,
+            initialData: _restoredTimeline,
+            builder: (context, snapshot) {
+              final bytes = snapshot.data;
+              if (bytes == null) return const SizedBox.expand();
+              return Image.memory(
+                bytes,
+                key: const ValueKey('generation-idle-filmstrip'),
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              );
+            },
+          ),
+        ),
+      ),
+      Expanded(
+        child: !_playable
+            ? const SizedBox.expand()
+            : InkWell(
+                key: const ValueKey('generation-idle-transport'),
+                onTap: () => unawaited(_play()),
+                child: Row(
+                  children: <Widget>[
+                    const SizedBox(width: 14),
+                    const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      'TAP TO PLAY',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: .62),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    ],
+  );
+}
 
 class _GeneratedVideoPreview {
   const _GeneratedVideoPreview({required this.thumbnail, this.timeline});
@@ -1744,11 +1981,13 @@ class _CachedVideoPreview extends StatefulWidget {
     required this.controller,
     required this.item,
     required this.uri,
+    this.showTimelineOverlay = true,
   });
 
   final AppController controller;
   final Generation item;
   final Future<Uri?> uri;
+  final bool showTimelineOverlay;
 
   @override
   State<_CachedVideoPreview> createState() => _CachedVideoPreviewState();
@@ -1761,8 +2000,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   late DateTime _previewStartedAt;
   late Duration _previewExpectedDuration;
 
-  String get _jobKey =>
-      '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
+  String get _jobKey => _generationPreviewJobKey(widget.item);
 
   Future<Uint8List> _read(AssetReference reference) =>
       widget.controller.readPreviewAsset(reference);
@@ -1986,6 +2224,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
               // cover frame, so the band disappears there.
               final boxHeight = constraints.maxHeight;
               final showTimeline =
+                  widget.showTimelineOverlay &&
                   preview.timeline != null &&
                   boxHeight.isFinite &&
                   boxHeight >= 110;
@@ -2305,14 +2544,23 @@ class _MediaPlaceholder extends StatelessWidget {
   }
 }
 
-class GenerationCost extends StatelessWidget {
+class GenerationCost extends StatefulWidget {
   const GenerationCost({required this.item, super.key, this.compact = false});
 
   final Generation item;
   final bool compact;
 
   @override
+  State<GenerationCost> createState() => _GenerationCostState();
+}
+
+class _GenerationCostState extends State<GenerationCost> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final item = widget.item;
+    final compact = widget.compact;
     if (item.billingUnit == 'local') return const SizedBox.shrink();
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
@@ -2329,89 +2577,109 @@ class GenerationCost extends StatelessWidget {
     final foreground = exact
         ? context.colors.onPrimaryContainer
         : context.colors.onSecondaryContainer;
-    return Container(
-      padding: EdgeInsets.all(compact ? 9 : 12),
-      decoration: BoxDecoration(
-        color: background,
+    final detailStyle = TextStyle(
+      fontSize: 10.5,
+      color: foreground.withValues(alpha: .8),
+    );
+    final details = <Widget>[
+      if (item.creditsBefore != null && item.creditsAfter != null)
+        Text(
+          usesUsd
+              ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
+              : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
+          style: detailStyle,
+        ),
+      if (exact &&
+          item.quotedCostUsdMin != null &&
+          item.quotedCostUsdMax != null)
+        Text(
+          'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
+          'realized ${formatUsdAmount(realizedUsd)}'
+          '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
+          style: detailStyle,
+        ),
+      if (unconfirmedFailure && realizedUsd != null)
+        Text(
+          'No confirmed charge · submit-time estimate '
+          '${formatUsdAmount(realizedUsd)}',
+          style: detailStyle,
+        ),
+    ];
+    // At a glance a card only needs the realized figure; the balance and
+    // quote trail sit behind the chevron.
+    final expandable = !compact && details.isNotEmpty;
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(11),
+      child: InkWell(
+        key: expandable ? const ValueKey('generation-cost-toggle') : null,
         borderRadius: BorderRadius.circular(11),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
+        onTap: expandable ? () => setState(() => _expanded = !_expanded) : null,
+        child: Padding(
+          padding: EdgeInsets.all(compact ? 9 : 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Icon(
-                Icons.toll_rounded,
-                size: compact ? 13 : 15,
-                color: foreground,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${exact ? 'Realized cost' : 'Estimated'} · '
-                  '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
-                  style: TextStyle(
-                    fontSize: compact ? 11 : 12,
-                    fontWeight: FontWeight.w700,
+              Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.toll_rounded,
+                    size: compact ? 13 : 15,
                     color: foreground,
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${exact ? 'Realized cost' : 'Estimated'} · '
+                      '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
+                      style: TextStyle(
+                        fontSize: compact ? 11 : 12,
+                        fontWeight: FontWeight.w700,
+                        color: foreground,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    usesUsd
+                        ? providerNameForHistory(item.provider)
+                        : formatUsdRange(minimum, maximum),
+                    style: TextStyle(
+                      fontSize: compact ? 11 : 12,
+                      fontWeight: FontWeight.w700,
+                      color: foreground,
+                    ),
+                  ),
+                  if (expandable) ...<Widget>[
+                    const SizedBox(width: 4),
+                    Icon(
+                      _expanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 17,
+                      color: foreground.withValues(alpha: .8),
+                    ),
+                  ],
+                ],
               ),
-              Text(
-                usesUsd
-                    ? providerNameForHistory(item.provider)
-                    : formatUsdRange(minimum, maximum),
-                style: TextStyle(
-                  fontSize: compact ? 11 : 12,
-                  fontWeight: FontWeight.w700,
-                  color: foreground,
-                ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                alignment: Alignment.topCenter,
+                child: !(_expanded && expandable)
+                    ? const SizedBox(width: double.infinity)
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          for (final line in details) ...<Widget>[
+                            const SizedBox(height: 5),
+                            line,
+                          ],
+                        ],
+                      ),
               ),
             ],
           ),
-          if (!compact &&
-              item.creditsBefore != null &&
-              item.creditsAfter != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              usesUsd
-                  ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
-                  : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
-              ),
-            ),
-          ],
-          if (!compact &&
-              exact &&
-              item.quotedCostUsdMin != null &&
-              item.quotedCostUsdMax != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
-              'realized ${formatUsdAmount(realizedUsd)}'
-              '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
-              ),
-            ),
-          ],
-          if (!compact &&
-              unconfirmedFailure &&
-              realizedUsd != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              'No confirmed charge · submit-time estimate '
-              '${formatUsdAmount(realizedUsd)}',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -2443,6 +2711,12 @@ class ActivityCard extends StatelessWidget {
         else
           GenerationInputPreview(controller: controller, item: item),
         Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
+        if (generationDurationLabel(item) != null)
+          Positioned(
+            left: 8,
+            bottom: 8,
+            child: MediaDurationBadge(text: generationDurationLabel(item)!),
+          ),
       ],
     );
     return SurfaceCard(
@@ -2474,6 +2748,7 @@ class ActivityCard extends StatelessWidget {
                         prompt: item.displayPrompt,
                         collapsedLines: 2,
                         style: Theme.of(context).textTheme.titleMedium,
+                        reserveCollapsedHeight: true,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -2511,11 +2786,7 @@ class ActivityCard extends StatelessWidget {
                     color: context.colors.primary,
                   ),
                 ],
-                if (item.error != null ||
-                    item.resultRetentionError != null ||
-                    item.lastCheckError != null ||
-                    item.lastCheckedAt != null ||
-                    item.isLongRunning) ...<Widget>[
+                if (GenerationStatusDetails.shouldShow(item)) ...<Widget>[
                   const SizedBox(height: 8),
                   GenerationStatusDetails(item: item),
                 ],
@@ -2544,7 +2815,7 @@ class ActivityCard extends StatelessWidget {
                                   unawaited(controller.reuse(item)),
                               icon: const Icon(Icons.replay_rounded, size: 15),
                               label: Text(
-                                item.isFailed
+                                item.isFailed && !item.hasDeliveredMedia
                                     ? 'Retry generation'
                                     : 'Reuse inputs',
                               ),

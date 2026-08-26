@@ -1277,7 +1277,28 @@ class DirectGateway
       }
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
-      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+      if (payload != null &&
+          isGenerationFailureStatus(providerStatus) &&
+          generation.hasDeliveredMedia) {
+        // The film already arrived; an expired or failed provider job cannot
+        // retract it. Record the check without downgrading the delivery.
+        next = generation.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastResultRetentionAttemptAt: generation.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: generation.needsResultRetention
+              ? generation.resultRetentionFailures + 1
+              : generation.resultRetentionFailures,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null && isGenerationFailureStatus(providerStatus)) {
         final reportedProgress =
             progressReportingFor(generation.provider, generation.model) ==
                 ProviderProgressReporting.reported
@@ -1307,11 +1328,13 @@ class DirectGateway
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: generation.isReady ? checkedAt : null,
-          resultRetentionFailures: generation.isReady
+          lastResultRetentionAttemptAt: generation.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: generation.needsResultRetention
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
-          resultRetentionError: generation.isReady
+          resultRetentionError: generation.needsResultRetention
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),

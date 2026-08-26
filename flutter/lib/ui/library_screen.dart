@@ -1055,7 +1055,11 @@ class _GenerationCardState extends State<GenerationCard> {
       fit: StackFit.expand,
       children: <Widget>[
         if (hasMedia)
-          GenerationMedia(controller: widget.controller, item: item)
+          GenerationMedia(
+            controller: widget.controller,
+            item: item,
+            showTimelineOverlay: false,
+          )
         else if (isGeneratingVideo)
           GenerationLoadingPlaceholder(
             item: item,
@@ -1065,6 +1069,12 @@ class _GenerationCardState extends State<GenerationCard> {
         else
           GenerationInputPreview(controller: widget.controller, item: item),
         Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
+        if (generationDurationLabel(item) != null)
+          Positioned(
+            left: 10,
+            bottom: 10,
+            child: MediaDurationBadge(text: generationDurationLabel(item)!),
+          ),
         Positioned(
           top: 7,
           right: 7,
@@ -1106,8 +1116,18 @@ class _GenerationCardState extends State<GenerationCard> {
                     playbackId: item.localId,
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),
                     preview: preview,
+                    idleChrome: item.isImage
+                        ? null
+                        : GenerationIdleChrome(
+                            controller: widget.controller,
+                            item: item,
+                          ),
                   )
-                : SizedBox(height: 280, child: preview),
+                : StaticMediaBox(
+                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
+                    reserveChrome: !item.isImage,
+                    child: preview,
+                  ),
           ),
           Padding(
             padding: const EdgeInsets.all(16),
@@ -1122,6 +1142,7 @@ class _GenerationCardState extends State<GenerationCard> {
                         controller: widget.controller,
                         prompt: item.displayPrompt,
                         style: Theme.of(context).textTheme.titleLarge,
+                        reserveCollapsedHeight: true,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1184,11 +1205,7 @@ class _GenerationCardState extends State<GenerationCard> {
                 ],
                 const SizedBox(height: 11),
                 GenerationCost(item: item),
-                if (item.error != null ||
-                    item.resultRetentionError != null ||
-                    item.lastCheckError != null ||
-                    item.lastCheckedAt != null ||
-                    item.isLongRunning) ...<Widget>[
+                if (GenerationStatusDetails.shouldShow(item)) ...<Widget>[
                   const SizedBox(height: 9),
                   GenerationStatusDetails(item: item),
                 ],
@@ -1249,7 +1266,9 @@ class _GenerationCardState extends State<GenerationCard> {
                                   unawaited(widget.controller.reuse(item)),
                               icon: const Icon(Icons.replay_rounded, size: 16),
                               label: Text(
-                                item.isFailed ? 'Retry generation' : 'Reuse',
+                                item.isFailed && !item.hasDeliveredMedia
+                                    ? 'Retry generation'
+                                    : 'Reuse',
                               ),
                             ),
                           GenerationStatusButton(

@@ -680,6 +680,36 @@ void main() {
     );
   });
 
+  test('ArtCraft models pin their published prompt ceilings', () {
+    // Values verified live against the Omni API's text_prompt_max_length
+    // (2026-08-25). Note Seedance 2.5 differs by route: 10000 via ArtCraft,
+    // 15000 via Runway.
+    expect(
+      <String, int?>{
+        for (final model in artCraftProvider.models)
+          if (model.maxPromptCharacters != null)
+            model.id: model.maxPromptCharacters,
+      },
+      <String, int?>{
+        'seedance_2p0': 10000,
+        'seedance_2p0_fast': 10000,
+        'seedance_2p0_bp': 10000,
+        'seedance_2p0_bp_fast': 10000,
+        'seedance_2p0_bpu': 10000,
+        'seedance_2p0_bpu_fast': 10000,
+        'seedance_2p0_mini': 10000,
+        'seedance_2p0_bp_mini': 10000,
+        'seedance_2p0_bpu_mini': 10000,
+        'seedance_2p5': 10000,
+        'seedance_2p5_u': 10000,
+        'seedance_2p5_preview': 10000,
+        'grok_imagine_video_1p5': 4096,
+        'minimax_h3': 7000,
+      },
+    );
+    expect(modelById('runway', 'seedance2_5').maxPromptCharacters, 15000);
+  });
+
   test('FLUX 3 visual routes leave headroom below the four megapixel cap', () {
     expect(modelById('bfl', 'flux-3-video').maxInputImagePixels, 3800000);
     expect(modelById('artcraft', 'flux_3').maxInputImagePixels, 3800000);

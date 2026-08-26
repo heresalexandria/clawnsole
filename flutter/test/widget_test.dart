@@ -392,6 +392,63 @@ void main() {
       }, fallback: 'Error'),
       'Generation dependency unavailable',
     );
+    // A payload with no named error field must not surface a job id, hash,
+    // or URL as user-facing failure copy — fall back to the sentence.
+    expect(
+      providerFailureMessage(<String, Object?>{
+        'status': 'Task not found',
+        'job': '93c9a9a9-92c5-40ac-a12a-d6e6312737a4',
+        'result': <String, Object?>{
+          'video_url': 'https://cdn.example.com/film.mp4',
+        },
+      }, fallback: 'Task not found'),
+      'BFL no longer recognizes this task. The generation receipt may have '
+      'expired or become invalid.',
+    );
+  });
+
+  test('a delivered film never renders failure chrome', () {
+    final now = DateTime.utc(2026, 8, 25, 12);
+    final delivered = Generation(
+      localId: 'delivered-failed',
+      status: 'Task not found',
+      error: '93c9a9a9-92c5-40ac-a12a-d6e6312737a4',
+      resultUrl: 'https://example.com/film.mp4',
+      lastCheckedAt: now,
+      statusCheckCount: 23,
+      prompt: 'A sloth in a bedazzled pink cowboy hat.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 20,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now.subtract(const Duration(hours: 2)),
+      updatedAt: now,
+    );
+    // The record still reads as failed for billing/history purposes, but the
+    // delivered media is ground truth for every surface.
+    expect(delivered.isFailed, isTrue);
+    expect(delivered.hasDeliveredMedia, isTrue);
+    expect(GenerationStatusDetails.shouldShow(delivered), isFalse);
+
+    final trulyFailed = Generation(
+      localId: 'truly-failed',
+      status: 'Task not found',
+      error: 'BFL no longer recognizes this task.',
+      lastCheckedAt: now,
+      statusCheckCount: 3,
+      prompt: 'A sloth in a bedazzled pink cowboy hat.',
+      mode: VideoMode.t2v,
+      config: delivered.config,
+      createdAt: delivered.createdAt,
+      updatedAt: now,
+    );
+    expect(trulyFailed.hasDeliveredMedia, isFalse);
+    expect(GenerationStatusDetails.shouldShow(trulyFailed), isTrue);
   });
 
   test(
@@ -4300,7 +4357,7 @@ void main() {
     );
     expect(find.textContaining('Guide identity'), findsNothing);
     expect(find.textContaining('Type @'), findsNothing);
-    expect(find.text('First frame'), findsOneWidget);
+    expect(find.text('First'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
 
     // A pinned frame sets the references side aside.
@@ -4324,7 +4381,7 @@ void main() {
       find.textContaining('References attached — remove them to add frames'),
       findsOneWidget,
     );
-    expect(find.text('First frame'), findsNothing);
+    expect(find.text('First'), findsNothing);
 
     // A conflicted form (through reuse or a model switch) warns on both
     // sections.
@@ -4380,21 +4437,27 @@ void main() {
       expect(find.textContaining('30 images'), findsOneWidget);
       expect(find.textContaining('10 videos'), findsOneWidget);
       expect(find.textContaining('10 audio clips'), findsOneWidget);
+      // Gauges stay hidden until a reference of that kind is attached; the
+      // summary line above carries the limits in the meantime.
+      expect(
+        find.byKey(const ValueKey('reference-capacity-total')),
+        findsNothing,
+      );
       expect(
         find.byKey(const ValueKey('reference-capacity-image-count')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(const ValueKey('reference-capacity-video-count')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(const ValueKey('reference-capacity-video-duration')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
         find.byKey(const ValueKey('reference-capacity-audio-duration')),
-        findsOneWidget,
+        findsNothing,
       );
       controller.addUrlReference(MediaReferenceKind.video);
       final videoReference = controller.form.references.single;
@@ -4402,6 +4465,14 @@ void main() {
         videoReference.copyWith(durationSeconds: 12),
       ];
       await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reference-capacity-image-count')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-audio-duration')),
+        findsNothing,
+      );
       final videoCountGauge = tester.widget<LinearProgressIndicator>(
         find.descendant(
           of: find.byKey(const ValueKey('reference-capacity-video-count')),
@@ -4547,9 +4618,11 @@ void main() {
       find.byKey(const ValueKey('prompt-character-limit')),
       findsOneWidget,
     );
+    expect(find.text('18 / 1000'), findsOneWidget);
     await tester.enterText(inlinePrompt, List<String>.filled(1001, 'x').join());
     await tester.pump();
     expect(controller.form.prompt.length, 1000);
+    expect(find.text('1000 / 1000'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-button')));
     await tester.pumpAndSettle();

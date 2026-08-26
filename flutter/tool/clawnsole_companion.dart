@@ -2257,7 +2257,28 @@ class CompanionApp {
     } on Object catch (error) {
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
-      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+      if (payload != null &&
+          isGenerationFailureStatus(providerStatus) &&
+          current.hasDeliveredMedia) {
+        // The film already arrived; an expired or failed provider job cannot
+        // retract it. Record the check without downgrading the delivery.
+        next = current.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastResultRetentionAttemptAt: current.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: current.needsResultRetention
+              ? current.resultRetentionFailures + 1
+              : current.resultRetentionFailures,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null && isGenerationFailureStatus(providerStatus)) {
         next = current.copyWith(
           status: providerStatus,
           progress: normalizedProgress(payload['progress']),
@@ -2281,11 +2302,13 @@ class CompanionApp {
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: current.isReady ? checkedAt : null,
-          resultRetentionFailures: current.isReady
+          lastResultRetentionAttemptAt: current.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: current.needsResultRetention
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
-          resultRetentionError: current.isReady
+          resultRetentionError: current.needsResultRetention
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),

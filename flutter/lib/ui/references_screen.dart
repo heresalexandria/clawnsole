@@ -834,8 +834,10 @@ class _ReferenceCard extends StatelessWidget {
                         Positioned(
                           left: 8,
                           bottom: 8,
-                          child: _ReferenceDurationBadge(
-                            seconds: reference.durationSeconds!,
+                          child: MediaDurationBadge(
+                            text: formatMediaDuration(
+                              reference.durationSeconds!,
+                            ),
                           ),
                         ),
                     ],
@@ -1013,31 +1015,6 @@ class _ReferenceCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ReferenceDurationBadge extends StatelessWidget {
-  const _ReferenceDurationBadge({required this.seconds});
-
-  final double seconds;
-
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: .78),
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-      child: Text(
-        formatMediaDuration(seconds),
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ),
-  );
 }
 
 Future<void> showReferenceDetails(
