@@ -33,6 +33,7 @@ import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/inline_video.dart';
+import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
@@ -1018,6 +1019,60 @@ void main() {
 
     expect(find.text('Retry retrieval'), findsOneWidget);
     expect(find.textContaining('not safely retained'), findsOneWidget);
+  });
+
+  testWidgets('a failed card overlays its status panel on the media zone', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'failed-overlay',
+      status: 'Error',
+      error: 'BFL reported that this generation failed.',
+      lastCheckedAt: now,
+      statusCheckCount: 3,
+      prompt: 'A doomed render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GenerationCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+
+    // The panel renders once, over the dead media zone — never in the card
+    // body, where it would stretch the card past delivered neighbors.
+    final details = find.byType(GenerationStatusDetails);
+    expect(details, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('generation-status-overlay')),
+        matching: details,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('BFL reported that this generation failed.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -6167,7 +6222,14 @@ void main() {
     expect(find.byTooltip('Compact'), findsOneWidget);
     expect(find.byTooltip('Mini'), findsOneWidget);
     expect(find.byTooltip('Full'), findsOneWidget);
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
 
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
@@ -6226,7 +6288,14 @@ void main() {
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
     expect(
       gateway.snapshot.preferences.libraryViewMode,
       GenerationViewMode.full,
@@ -6535,7 +6604,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
 
     // Recent work sits below the full-width composer, so bring its view
     // toggle on screen before tapping.
@@ -6583,7 +6659,14 @@ void main() {
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
     expect(
       gateway.snapshot.preferences.recentWorkViewMode,
       GenerationViewMode.full,
