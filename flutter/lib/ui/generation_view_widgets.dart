@@ -8,6 +8,7 @@ import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
+import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'video_save_sheet.dart';
 
@@ -245,7 +246,11 @@ class CompactGenerationRow extends StatelessWidget {
             key: ValueKey('generation-compact-thumbnail-${item.localId}'),
             width: 92,
             height: 68,
-            child: _DenseGenerationPreview(controller: controller, item: item),
+            child: _DenseGenerationPreview(
+              controller: controller,
+              item: item,
+              showProvider: false,
+            ),
           ),
         ),
         const SizedBox(width: 10),
@@ -260,7 +265,7 @@ class CompactGenerationRow extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleSmall,
               ),
               const SizedBox(height: 5),
-              _DenseGenerationMetadata(item: item),
+              _DenseGenerationMetadata(item: item, includeProvider: true),
               const SizedBox(height: 5),
               Row(
                 children: <Widget>[
@@ -313,10 +318,17 @@ class CompactGenerationRow extends StatelessWidget {
 }
 
 class _DenseGenerationPreview extends StatelessWidget {
-  const _DenseGenerationPreview({required this.controller, required this.item});
+  const _DenseGenerationPreview({
+    required this.controller,
+    required this.item,
+    this.showProvider = true,
+  });
 
   final AppController controller;
   final Generation item;
+
+  /// See [GenerationThumbnailFooter.showProvider].
+  final bool showProvider;
 
   @override
   Widget build(BuildContext context) {
@@ -335,14 +347,15 @@ class _DenseGenerationPreview extends StatelessWidget {
             style: controller.generationPlaceholderStyle,
             progressEstimate: progressEstimate,
           )
+        else if (GenerationErrorThumbnail.shouldShow(item))
+          GenerationErrorThumbnail(item: item, dense: true)
         else
           GenerationInputPreview(controller: controller, item: item),
-        if (generationDurationLabel(item) != null)
-          Positioned(
-            left: 6,
-            bottom: 6,
-            child: MediaDurationBadge(text: generationDurationLabel(item)!),
-          ),
+        GenerationThumbnailFooter(
+          item: item,
+          inset: 6,
+          showProvider: showProvider,
+        ),
         if (item.isWorking && !item.isStatusUnavailable)
           Positioned(
             bottom: 0,
@@ -519,13 +532,23 @@ String _denseGenerationActionLabel(
 };
 
 class _DenseGenerationMetadata extends StatelessWidget {
-  const _DenseGenerationMetadata({required this.item});
+  const _DenseGenerationMetadata({
+    required this.item,
+    this.includeProvider = false,
+  });
 
   final Generation item;
 
+  /// Compact rows lead with the provider name here; every other surface
+  /// carries it on the thumbnail (see [GenerationThumbnailFooter]).
+  final bool includeProvider;
+
   @override
   Widget build(BuildContext context) {
-    final parts = _denseGenerationMetadata(item);
+    final parts = _denseGenerationMetadata(
+      item,
+      includeProvider: includeProvider,
+    );
     final style = TextStyle(
       height: 1.35,
       fontSize: 10.5,
@@ -549,14 +572,17 @@ class _DenseGenerationMetadata extends StatelessWidget {
   }
 }
 
-List<String> _denseGenerationMetadata(Generation item) {
+List<String> _denseGenerationMetadata(
+  Generation item, {
+  bool includeProvider = false,
+}) {
   final kind = item.isImage
       ? 'Image'
       : item.provider == 'apple-local'
       ? 'Image sequence'
       : item.mode.shortLabel;
   return <String>[
-    providerNameForHistory(item.provider),
+    if (includeProvider) providerNameForHistory(item.provider),
     kind,
     item.config.aspectRatio,
   ];
