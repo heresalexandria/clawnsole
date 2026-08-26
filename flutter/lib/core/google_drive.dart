@@ -8,6 +8,7 @@ import 'models.dart';
 const googleDriveFileScope = 'https://www.googleapis.com/auth/drive.file';
 const clawnsoleDriveStateFile = 'clawnsole.json';
 const clawnsoleDriveAssetsFolder = 'assets';
+const clawnsoleDriveRecordsFolder = 'records';
 
 /// Removes credentials and preferences before library data is serialized.
 /// Both are synchronized only through the independently encrypted settings
@@ -56,6 +57,35 @@ StoredData mergeGoogleDriveData({
     savedReferences: references,
   );
 }
+
+/// The definitive cross-device winner between two versions of one generation
+/// record: delivered media first, then the newer updatedAt, with a stable
+/// JSON comparison breaking exact timestamp ties.
+Generation resolveGenerationConflict(Generation next, Generation remote) {
+  final delivered = _preferDeliveredGeneration(next, remote);
+  if (delivered != null) return delivered;
+  final timestamp = next.updatedAt.compareTo(remote.updatedAt);
+  if (timestamp > 0) return next;
+  if (timestamp < 0) return remote;
+  return jsonEncode(next.toJson()).compareTo(jsonEncode(remote.toJson())) >= 0
+      ? next
+      : remote;
+}
+
+/// A generation's cross-device-meaningful projection: poll bookkeeping that
+/// changes on every status check is stripped, so change detectors (like the
+/// legacy-mirror writer) only react to transitions a user can actually see.
+Map<String, Object?> generationSyncFingerprint(Generation item) => item.toJson()
+  ..remove('updatedAt')
+  ..remove('progress')
+  ..remove('lastCheckedAt')
+  ..remove('statusCheckCount')
+  ..remove('consecutiveCheckFailures')
+  ..remove('lastCheckError')
+  ..remove('lastProviderResponse')
+  ..remove('lastProviderResponseAt')
+  ..remove('lastResultRetentionAttemptAt')
+  ..remove('resultRetentionFailures');
 
 /// Cross-device result reconciliation: when two devices both updated the same
 /// generation, the version carrying the retained result (or at least a live
@@ -217,6 +247,7 @@ class GoogleDriveFile {
     this.size = 0,
     this.modifiedTime,
     this.etag,
+    this.md5,
   });
 
   final String id;
@@ -226,6 +257,10 @@ class GoogleDriveFile {
   final DateTime? modifiedTime;
   final String? etag;
 
+  /// Content hash from listings; a cheap change index for small JSON records
+  /// (Drive reports it for binary uploads, which app JSON files are).
+  final String? md5;
+
   factory GoogleDriveFile.fromJson(Map<String, Object?> json, {String? etag}) =>
       GoogleDriveFile(
         id: json['id'] as String? ?? '',
@@ -234,6 +269,7 @@ class GoogleDriveFile {
         size: int.tryParse(json['size']?.toString() ?? '') ?? 0,
         modifiedTime: DateTime.tryParse(json['modifiedTime'] as String? ?? ''),
         etag: etag,
+        md5: json['md5Checksum'] as String?,
       );
 }
 
@@ -334,7 +370,7 @@ class GoogleDriveApi {
                 'pageSize': '100',
                 'orderBy': 'modifiedTime desc',
                 'fields':
-                    'nextPageToken,files(id,name,mimeType,size,modifiedTime,appProperties)',
+                    'nextPageToken,files(id,name,mimeType,size,modifiedTime,md5Checksum,appProperties)',
                 if (pageToken != null) 'pageToken': pageToken,
               },
             ),

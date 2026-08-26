@@ -762,6 +762,8 @@ class _UploadDriveApi extends GoogleDriveApi {
   Uint8List? stateBytes;
   final Map<String, Uint8List> assets = <String, Uint8List>{};
   final Map<String, GoogleDriveFile> assetFiles = <String, GoogleDriveFile>{};
+  final Map<String, Uint8List> records = <String, Uint8List>{};
+  final Map<String, GoogleDriveFile> recordFiles = <String, GoogleDriveFile>{};
 
   @override
   Future<GoogleDriveFile?> findRootFolder(String name) async =>
@@ -781,6 +783,12 @@ class _UploadDriveApi extends GoogleDriveApi {
       ? const GoogleDriveFile(
           id: 'assets-folder-0001',
           name: clawnsoleDriveAssetsFolder,
+          mimeType: 'application/vnd.google-apps.folder',
+        )
+      : name == clawnsoleDriveRecordsFolder
+      ? const GoogleDriveFile(
+          id: 'records-folder-0001',
+          name: clawnsoleDriveRecordsFolder,
           mimeType: 'application/vnd.google-apps.folder',
         )
       : name == clawnsoleDriveStateFile && stateBytes != null
@@ -812,6 +820,18 @@ class _UploadDriveApi extends GoogleDriveApi {
         etag: 'state-etag',
       );
     }
+    if (appProperties['clawnsoleGeneration'] == 'true') {
+      final record = GoogleDriveFile(
+        id: 'record-file-${_fileCount.toString().padLeft(4, '0')}',
+        name: name,
+        mimeType: contentType,
+        size: bytes.length,
+        etag: 'record-etag-$_fileCount',
+      );
+      records[record.id] = Uint8List.fromList(bytes);
+      recordFiles[record.id] = record;
+      return record;
+    }
     final file = GoogleDriveFile(
       id: 'uploaded-file-${_fileCount.toString().padLeft(4, '0')}',
       name: name,
@@ -828,7 +848,15 @@ class _UploadDriveApi extends GoogleDriveApi {
   Future<GoogleDriveContent?> readFile(
     String fileId, {
     String? ifNoneMatch,
-  }) async => GoogleDriveContent(stateBytes!, etag: 'state-etag');
+  }) async {
+    final record = records[fileId];
+    if (record != null) {
+      return GoogleDriveContent(record, etag: 'record-etag-$fileId');
+    }
+    final asset = assets[fileId];
+    if (asset != null) return GoogleDriveContent(asset);
+    return GoogleDriveContent(stateBytes!, etag: 'state-etag');
+  }
 
   @override
   Future<GoogleDriveFile> updateFile(
@@ -837,6 +865,10 @@ class _UploadDriveApi extends GoogleDriveApi {
     required String contentType,
     String? etag,
   }) async {
+    if (records.containsKey(fileId)) {
+      records[fileId] = Uint8List.fromList(bytes);
+      return recordFiles[fileId]!;
+    }
     stateBytes = Uint8List.fromList(bytes);
     return GoogleDriveFile(
       id: fileId,
@@ -852,10 +884,14 @@ class _UploadDriveApi extends GoogleDriveApi {
     String parentId, {
     String? appPropertyKey,
     String? appPropertyValue,
-  }) async => assetFiles.values.toList();
+  }) async => appPropertyKey == 'clawnsoleGeneration'
+      ? recordFiles.values.toList()
+      : assetFiles.values.toList();
 
   @override
   Future<void> deleteFile(String fileId) async {
+    records.remove(fileId);
+    recordFiles.remove(fileId);
     assets.remove(fileId);
     assetFiles.remove(fileId);
   }

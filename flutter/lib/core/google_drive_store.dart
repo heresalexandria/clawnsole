@@ -36,7 +36,12 @@ class GoogleDriveStore implements DurableDataStore {
   GoogleDriveApi? _api;
   GoogleDriveFile? _stateFile;
   String _assetsFolderId = '';
+  String _recordsFolderId = '';
   StoredData? _lastData;
+  StoredData? _lastMainData;
+  final Map<String, _GenerationRecordEntry> _recordIndex =
+      <String, _GenerationRecordEntry>{};
+  DateTime? _recordsListedAt;
   List<GoogleDriveFile>? _statsAssetListing;
   DateTime? _statsAssetListingAt;
   final Map<String, DateTime> _pendingAssetIds = <String, DateTime>{};
@@ -45,6 +50,12 @@ class GoogleDriveStore implements DurableDataStore {
   /// rebuilt after every gateway action, and a fresh Drive listing for each
   /// one slows every interaction while burning Drive request quota.
   static const _statsListingLifetime = Duration(minutes: 2);
+
+  /// How long [read] may reuse the last records-folder listing. Reads run on
+  /// every gateway action; the periodic cross-device refresh (and any
+  /// explicit refresh) still sees other devices' records within seconds
+  /// without paying a listing per action.
+  static const _recordListingLifetime = Duration(seconds: 15);
   GoogleDriveConnection _connection = const GoogleDriveConnection(
     state: GoogleDriveConnectionState.disconnected,
   );
@@ -94,6 +105,25 @@ class GoogleDriveStore implements DurableDataStore {
             appProperties: const <String, String>{'clawnsoleAssets': 'true'},
           );
       _assetsFolderId = assets.id;
+      // Schema 3: each generation lives in its own record file so concurrent
+      // devices contend per record instead of on one shared state file. The
+      // state file keeps folders, references, and a generations mirror that
+      // older clients can still read.
+      final records =
+          await _api!.findChild(
+            root.id,
+            clawnsoleDriveRecordsFolder,
+            appPropertyKey: 'clawnsoleRecords',
+          ) ??
+          await _api!.createFolder(
+            clawnsoleDriveRecordsFolder,
+            parentId: root.id,
+            appProperties: const <String, String>{'clawnsoleRecords': 'true'},
+          );
+      _recordsFolderId = records.id;
+      _recordIndex.clear();
+      _recordsListedAt = null;
+      _lastMainData = null;
       _stateFile = await _api!.findChild(
         root.id,
         clawnsoleDriveStateFile,
@@ -109,6 +139,7 @@ class GoogleDriveStore implements DurableDataStore {
         const initial = StoredData();
         await _writeRemote(initial);
         _lastData = initial;
+        _lastMainData = initial;
         return initial;
       }
       return await read();
@@ -127,7 +158,11 @@ class GoogleDriveStore implements DurableDataStore {
     _api = null;
     _stateFile = null;
     _assetsFolderId = '';
+    _recordsFolderId = '';
+    _recordIndex.clear();
+    _recordsListedAt = null;
     _lastData = null;
+    _lastMainData = null;
     _invalidateStatsListing();
     _connection = GoogleDriveConnection(
       state: GoogleDriveConnectionState.disconnected,
@@ -141,6 +176,8 @@ class GoogleDriveStore implements DurableDataStore {
   Future<StoredData> refresh() async {
     _requireConnected();
     _lastData = null;
+    _lastMainData = null;
+    _recordsListedAt = null;
     return read();
   }
 
@@ -149,31 +186,171 @@ class GoogleDriveStore implements DurableDataStore {
     _requireConnected();
     if (_stateFile == null) return const StoredData();
     try {
-      final current = _stateFile!;
-      final cached = _lastData;
-      // Reads dominate this store's Drive traffic (every write also reads to
-      // merge). Once one full read has landed, later reads validate the held
-      // copy with If-None-Match instead of re-downloading the whole file.
-      final content = await _api!.readFile(
-        current.id,
-        ifNoneMatch: cached == null ? null : current.etag,
-      );
-      if (content == null) return cached!;
-      _stateFile = GoogleDriveFile(
-        id: current.id,
-        name: current.name,
-        mimeType: current.mimeType,
-        size: content.bytes.length,
-        modifiedTime: current.modifiedTime,
-        etag: content.etag,
-      );
-      final data = StoredData.decode(utf8.decode(content.bytes));
+      final main = await _readMainFile();
+      await _refreshRecordIndex();
+      final data = _composeData(main);
       _lastData = data;
       return data;
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
     }
+  }
+
+  /// Reads the main state file: folders, references, and the generations
+  /// mirror kept for older clients. Once one full read has landed, later
+  /// reads validate the held copy with If-None-Match instead of
+  /// re-downloading the whole file.
+  Future<StoredData> _readMainFile() async {
+    final current = _stateFile!;
+    final cached = _lastMainData;
+    final content = await _api!.readFile(
+      current.id,
+      ifNoneMatch: cached == null ? null : current.etag,
+    );
+    if (content == null) return cached!;
+    _stateFile = GoogleDriveFile(
+      id: current.id,
+      name: current.name,
+      mimeType: current.mimeType,
+      size: content.bytes.length,
+      modifiedTime: current.modifiedTime,
+      etag: content.etag,
+    );
+    final data = StoredData.decode(utf8.decode(content.bytes));
+    _lastMainData = data;
+    return data;
+  }
+
+  /// Brings the in-memory record index up to date with the records folder.
+  /// One listing call discovers changes; only records whose content hash
+  /// moved are downloaded, and records absent from the listing were deleted
+  /// by another device.
+  Future<void> _refreshRecordIndex({bool force = false}) async {
+    if (_recordsFolderId.isEmpty) return;
+    final listedAt = _recordsListedAt;
+    if (!force &&
+        listedAt != null &&
+        _now().difference(listedAt) < _recordListingLifetime) {
+      return;
+    }
+    final files = await _api!.listChildren(
+      _recordsFolderId,
+      appPropertyKey: 'clawnsoleGeneration',
+    );
+    final byFileId = <String, _GenerationRecordEntry>{
+      for (final entry in _recordIndex.values) entry.fileId: entry,
+    };
+    final fetched = <_GenerationRecordEntry>[];
+    final changed = <GoogleDriveFile>[];
+    for (final file in files) {
+      final known = byFileId[file.id];
+      if (known != null && known.md5 != null && known.md5 == file.md5) {
+        fetched.add(known);
+      } else {
+        changed.add(file);
+      }
+    }
+    // A cold sync fetches every record once; small parallel batches let a
+    // large library attach in seconds instead of a serial crawl. Later
+    // refreshes fetch only records whose content hash moved.
+    const batch = 6;
+    for (var start = 0; start < changed.length; start += batch) {
+      final slice = changed.sublist(
+        start,
+        start + batch > changed.length ? changed.length : start + batch,
+      );
+      for (final entry in await Future.wait(slice.map(_fetchRecord))) {
+        if (entry != null) fetched.add(entry);
+      }
+    }
+    // Two devices can race to publish the same absorbed legacy generation and
+    // leave duplicate files behind. Keep the winning content and clear the
+    // stragglers so the folder stays canonical.
+    final next = <String, _GenerationRecordEntry>{};
+    final duplicates = <_GenerationRecordEntry>[];
+    for (final entry in fetched) {
+      final id = entry.generation.localId;
+      final existing = next[id];
+      if (existing == null) {
+        next[id] = entry;
+        continue;
+      }
+      final winner = resolveGenerationConflict(
+        existing.generation,
+        entry.generation,
+      );
+      if (identical(winner, existing.generation)) {
+        duplicates.add(entry);
+      } else {
+        duplicates.add(existing);
+        next[id] = entry;
+      }
+    }
+    for (final duplicate in duplicates) {
+      try {
+        await _api!.deleteFile(duplicate.fileId);
+      } on GoogleDriveException catch (error) {
+        if (error.status != 404 && !error.isRateLimited) rethrow;
+      }
+    }
+    _recordIndex
+      ..clear()
+      ..addAll(next);
+    _recordsListedAt = _now();
+  }
+
+  Future<_GenerationRecordEntry?> _fetchRecord(GoogleDriveFile file) async {
+    Uint8List bytes;
+    String? etag;
+    try {
+      final content = (await _api!.readFile(file.id))!;
+      bytes = content.bytes;
+      etag = content.etag;
+    } on GoogleDriveException catch (error) {
+      // Deleted between the listing and this fetch: simply not a record.
+      if (error.status == 404) return null;
+      rethrow;
+    }
+    try {
+      final decoded = jsonDecode(utf8.decode(bytes));
+      if (decoded is! Map<Object?, Object?>) return null;
+      final generation = Generation.fromJson(
+        decoded.map((key, value) => MapEntry(key.toString(), value)),
+      );
+      if (generation.localId.trim().isEmpty) return null;
+      return _GenerationRecordEntry(
+        fileId: file.id,
+        generation: generation,
+        etag: etag,
+        md5: file.md5,
+      );
+    } on Object {
+      // A malformed record must not take down the whole library; it simply
+      // stays invisible until a device rewrites it.
+      return null;
+    }
+  }
+
+  /// One library view from both layers: folders and references come from the
+  /// main file, generations from the record files. A generation that exists
+  /// only in the main file — or is newer there — was written by an older
+  /// client and is absorbed; the next write publishes the winner back as a
+  /// record file.
+  StoredData _composeData(StoredData main) {
+    final generations = <String, Generation>{
+      for (final entry in _recordIndex.values)
+        entry.generation.localId: entry.generation,
+    };
+    for (final legacy in main.generations) {
+      final record = generations[legacy.localId];
+      generations[legacy.localId] = record == null
+          ? legacy
+          : resolveGenerationConflict(legacy, record);
+    }
+    final ordered = generations.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return main.copyWith(generations: ordered);
   }
 
   @override
@@ -183,26 +360,186 @@ class GoogleDriveStore implements DurableDataStore {
       if (_stateFile == null) {
         await _writeRemote(data);
         _lastData = data;
+        _lastMainData = data;
         _acknowledgePublishedAssets(data);
         return;
       }
-      final base = _lastData ?? await read();
-      var remote = await read();
-      var merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
-      try {
-        await _writeRemote(merged);
-      } on GoogleDriveException catch (error) {
-        if (error.status != 412) rethrow;
-        remote = await read();
-        merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
-        await _writeRemote(merged);
-      }
-      _lastData = merged;
-      _acknowledgePublishedAssets(merged);
+      final generations = await _writeGenerationRecords(data.generations);
+      final resolved = data.copyWith(generations: generations);
+      await _writeMainFileIfChanged(resolved);
+      final composed = _composeData(_lastMainData ?? resolved);
+      _lastData = composed;
+      _acknowledgePublishedAssets(composed);
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
     }
+  }
+
+  /// Publishes generation changes as individual record files, so two devices
+  /// updating different generations never contend. Returns the records as
+  /// they now stand in Drive: a lost per-record conflict adopts the remote
+  /// winner instead of overwriting it.
+  Future<List<Generation>> _writeGenerationRecords(
+    List<Generation> next,
+  ) async {
+    if (_recordsFolderId.isEmpty) return next;
+    final base = _lastData?.generations ?? const <Generation>[];
+    final nextIds = <String>{for (final item in next) item.localId};
+    // A record present in the previously composed view but absent from this
+    // write was deleted by the caller. A record we have never seen stays: it
+    // is a concurrent remote addition the caller's read simply missed.
+    for (final previous in base) {
+      if (nextIds.contains(previous.localId)) continue;
+      final entry = _recordIndex.remove(previous.localId);
+      if (entry == null) continue;
+      try {
+        await _api!.deleteFile(entry.fileId);
+      } on GoogleDriveException catch (error) {
+        if (error.status != 404) rethrow;
+      }
+    }
+    final resolved = <Generation>[];
+    for (final item in next) {
+      resolved.add(await _writeGenerationRecord(item));
+    }
+    return resolved;
+  }
+
+  Future<Generation> _writeGenerationRecord(Generation item) async {
+    final entry = _recordIndex[item.localId];
+    if (entry == null) {
+      final file = await _api!.createFile(
+        parentId: _recordsFolderId,
+        name: _cleanFileName('${item.localId}.json'),
+        bytes: _recordBytes(item),
+        contentType: 'application/json',
+        appProperties: const <String, String>{'clawnsoleGeneration': 'true'},
+      );
+      _recordIndex[item.localId] = _GenerationRecordEntry(
+        fileId: file.id,
+        generation: item,
+        etag: file.etag,
+        md5: file.md5,
+      );
+      return item;
+    }
+    if (jsonEncode(entry.generation.toJson()) == jsonEncode(item.toJson())) {
+      return item;
+    }
+    try {
+      final file = await _api!.updateFile(
+        entry.fileId,
+        _recordBytes(item),
+        contentType: 'application/json',
+        etag: entry.etag,
+      );
+      entry
+        ..generation = item
+        ..etag = file.etag
+        ..md5 = file.md5;
+      return item;
+    } on GoogleDriveException catch (error) {
+      if (error.status == 404) {
+        // The file vanished (another device deleted and this write revives
+        // it, or a prune misfired): publish it fresh.
+        _recordIndex.remove(item.localId);
+        return _writeGenerationRecord(item);
+      }
+      if (error.status != 412) rethrow;
+      // Another device updated this record concurrently: reconcile against
+      // the remote version and publish the winner — or adopt it outright.
+      final content = await _api!.readFile(entry.fileId);
+      final remote = content == null
+          ? null
+          : await _fetchedGeneration(content.bytes);
+      if (remote == null) {
+        entry.etag = null;
+        return item;
+      }
+      final winner = resolveGenerationConflict(item, remote);
+      if (jsonEncode(winner.toJson()) == jsonEncode(remote.toJson())) {
+        entry
+          ..generation = remote
+          ..etag = content!.etag
+          ..md5 = null;
+        return remote;
+      }
+      final file = await _api!.updateFile(
+        entry.fileId,
+        _recordBytes(winner),
+        contentType: 'application/json',
+        etag: content!.etag,
+      );
+      entry
+        ..generation = winner
+        ..etag = file.etag
+        ..md5 = file.md5;
+      return winner;
+    }
+  }
+
+  Future<Generation?> _fetchedGeneration(Uint8List bytes) async {
+    try {
+      final decoded = jsonDecode(utf8.decode(bytes));
+      if (decoded is! Map<Object?, Object?>) return null;
+      return Generation.fromJson(
+        decoded.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  Uint8List _recordBytes(Generation item) =>
+      Uint8List.fromList(utf8.encode(jsonEncode(item.toJson())));
+
+  /// Rewrites the main state file only when folders or references changed,
+  /// or the generations mirror kept for older clients drifted meaningfully.
+  /// Poll bookkeeping never rewrites it — that churn lives in the record
+  /// files, which is the whole point of the sharded layout.
+  Future<void> _writeMainFileIfChanged(StoredData data) async {
+    final base = _lastMainData;
+    if (base != null && !_mainFileChanged(base, data)) return;
+    final effectiveBase = base ?? await _readMainFile();
+    var remote = await _readMainFile();
+    var merged = mergeGoogleDriveData(
+      base: effectiveBase,
+      next: data,
+      remote: remote,
+    );
+    try {
+      await _writeRemote(merged);
+    } on GoogleDriveException catch (error) {
+      if (error.status != 412) rethrow;
+      remote = await _readMainFile();
+      merged = mergeGoogleDriveData(
+        base: effectiveBase,
+        next: data,
+        remote: remote,
+      );
+      await _writeRemote(merged);
+    }
+    _lastMainData = merged;
+  }
+
+  bool _mainFileChanged(StoredData base, StoredData next) {
+    if (jsonEncode(base.folders.map((item) => item.toJson()).toList()) !=
+        jsonEncode(next.folders.map((item) => item.toJson()).toList())) {
+      return true;
+    }
+    if (jsonEncode(
+          base.savedReferences.map((item) => item.toJson()).toList(),
+        ) !=
+        jsonEncode(
+          next.savedReferences.map((item) => item.toJson()).toList(),
+        )) {
+      return true;
+    }
+    return jsonEncode(
+          base.generations.map(generationSyncFingerprint).toList(),
+        ) !=
+        jsonEncode(next.generations.map(generationSyncFingerprint).toList());
   }
 
   Future<void> _writeRemote(StoredData data) async {
@@ -488,9 +825,20 @@ class GoogleDriveStore implements DurableDataStore {
     for (final file in await _driveAssets()) {
       await _api!.deleteFile(file.id);
     }
+    if (_recordsFolderId.isNotEmpty) {
+      for (final file in await _api!.listChildren(
+        _recordsFolderId,
+        appPropertyKey: 'clawnsoleGeneration',
+      )) {
+        await _api!.deleteFile(file.id);
+      }
+    }
+    _recordIndex.clear();
+    _recordsListedAt = null;
     if (_stateFile != null) await _api!.deleteFile(_stateFile!.id);
     _stateFile = null;
     _lastData = const StoredData();
+    _lastMainData = const StoredData();
     _invalidateStatsListing();
   }
 
@@ -638,4 +986,21 @@ class GoogleDriveStore implements DurableDataStore {
       .toString()
       .replaceFirst('Bad state: ', '')
       .replaceFirst('Exception: ', '');
+}
+
+/// One generation's Drive record file as this device last saw it. The etag
+/// guards concurrent updates; the listing hash spots remote changes without
+/// downloading unchanged records.
+class _GenerationRecordEntry {
+  _GenerationRecordEntry({
+    required this.fileId,
+    required this.generation,
+    this.etag,
+    this.md5,
+  });
+
+  final String fileId;
+  Generation generation;
+  String? etag;
+  String? md5;
 }
