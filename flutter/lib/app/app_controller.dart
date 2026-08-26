@@ -352,6 +352,7 @@ class AppController extends ChangeNotifier {
   final ProviderCatalogClient _providerCatalogClient;
   final bool _mobileTestBuild;
   final GenerationFormState form = GenerationFormState();
+  bool _generateAudioExplicitlyDisabled = false;
   final List<MediaReferenceDraft> _disabledReferences = <MediaReferenceDraft>[];
 
   LocalSnapshot? snapshot;
@@ -3257,6 +3258,21 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setGenerateAudio(bool value) {
+    _generateAudioExplicitlyDisabled = !value;
+    updateForm((form) => form.generateAudio = value);
+  }
+
+  bool _generationExplicitlyDisabledAudio(Generation item) {
+    final provider = providers
+        .where((candidate) => candidate.id == item.provider)
+        .firstOrNull;
+    final model = provider?.models
+        .where((candidate) => candidate.id == item.model)
+        .firstOrNull;
+    return !item.config.generateAudio && model?.supportsAudio == true;
+  }
+
   AppPreferences _preferences({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -3427,7 +3443,11 @@ class AppController extends ChangeNotifier {
     _reconcileReferencesForModel(model);
     form.upscale = model.isUpscaler;
     if (!model.supportsAutoDuration) form.autoDuration = false;
-    if (!model.supportsAudio) form.generateAudio = false;
+    if (!model.supportsAudio) {
+      form.generateAudio = false;
+    } else if (!_generateAudioExplicitlyDisabled) {
+      form.generateAudio = true;
+    }
     if (!model.supportsDraft) form.draft = false;
     if (!model.supportsTimedKeyframes) form.exactTiming = false;
     if (!model.referenceTasks.contains(form.referenceTask)) {
@@ -5869,6 +5889,7 @@ class AppController extends ChangeNotifier {
           item.mode == VideoMode.draftEnhance && durableSource?.kind == 'remote'
           ? durableSource!.value
           : '';
+    _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(item);
     _selectCompatibleModel();
     _normalizeFormForModel();
     _invalidateProviderEstimate();
@@ -5904,6 +5925,7 @@ class AppController extends ChangeNotifier {
       ..draft = false
       ..draftAsset = null
       ..draftUrl = item.draftCacheUrl!;
+    _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(item);
     _invalidateProviderEstimate();
     formRevision += 1;
     notifyListeners();
