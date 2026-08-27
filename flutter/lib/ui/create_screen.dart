@@ -635,6 +635,35 @@ class _ComposerState extends State<_Composer> {
     controller.showNotice('Prompt copied to the clipboard.');
   }
 
+  Future<void> _confirmClearPrompt() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear the prompt?'),
+        content: const Text(
+          'This removes the direction text. Attached frames, references, '
+          'and settings stay.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('prompt-clear-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Clear prompt'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    controller.updateForm((form) => form.prompt = '');
+    // CreateScreen is also used without an AnimatedBuilder in focused widget
+    // tests and development harnesses; refresh the inline editor directly.
+    setState(() {});
+  }
+
   Future<void> _showFullscreenPrompt({required bool upscaling}) async {
     FocusManager.instance.primaryFocus?.unfocus();
     await showGeneralDialog<void>(
@@ -706,6 +735,21 @@ class _ComposerState extends State<_Composer> {
             FieldLabel(
               upscaling ? 'Detail guidance · optional' : 'Direction',
               icon: Icons.edit_note_rounded,
+              inlineAction: IconButton(
+                key: const ValueKey('prompt-clear-button'),
+                tooltip: 'Clear prompt',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                iconSize: 15,
+                onPressed: form.prompt.isEmpty
+                    ? null
+                    : () => unawaited(_confirmClearPrompt()),
+                icon: const Icon(Icons.backspace_outlined),
+              ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -1384,10 +1428,14 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
     final referencesSetAside = controller.referencesBlockedByFrames;
     // A conflicted form (via reuse or a model switch) keeps both sections
     // open so the madder warning and the tiles to remove stay in view; an
-    // in-flight upload keeps its progress line visible.
-    final framesExpanded = _framesOpen || conflicted;
+    // in-flight upload keeps its progress line and loading tiles visible.
+    final framesExpanded =
+        _framesOpen || conflicted || controller.pendingFrameAdds > 0;
     final referencesExpanded =
-        _referencesOpen || conflicted || controller.referenceUploadInProgress;
+        _referencesOpen ||
+        conflicted ||
+        controller.referenceUploadInProgress ||
+        controller.pendingReferenceAdds > 0;
     final frames = !showFrames
         ? null
         : _GuidanceAccordion(
@@ -1416,10 +1464,13 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
         : ReferenceDropZone(
             enabled: !referencesSetAside,
             label: 'Drop to add references',
-            onDropFiles: (files) {
+            // Loading tiles hold the dropped files' spots while their bytes
+            // are read, before the controller can classify and attach them.
+            onDropStarted: (count) {
               setState(() => _referencesOpen = true);
-              return controller.addDroppedReferenceFiles(files);
+              controller.noteIncomingDroppedFiles(count);
             },
+            onDropFiles: controller.addDroppedReferenceFiles,
             child: _GuidanceAccordion(
               key: const ValueKey('media-references-section'),
               toggleKey: const ValueKey('references-accordion-toggle'),
@@ -1715,31 +1766,52 @@ class _QuietAction extends StatelessWidget {
 }
 
 class FieldLabel extends StatelessWidget {
-  const FieldLabel(this.label, {required this.icon, super.key, this.trailing});
+  const FieldLabel(
+    this.label, {
+    required this.icon,
+    super.key,
+    this.inlineAction,
+    this.trailing,
+  });
 
   final String label;
   final IconData icon;
+
+  /// A small control that hugs the label text (e.g. clear-prompt), unlike
+  /// [trailing], which sits at the far end of the row.
+  final Widget? inlineAction;
   final Widget? trailing;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Icon(icon, size: 16, color: context.tokens.brass),
-      const SizedBox(width: 8),
-      Expanded(
-        child: Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.3,
-            fontWeight: FontWeight.w700,
-            color: context.colors.onSurface.withValues(alpha: .82),
-          ),
-        ),
+  Widget build(BuildContext context) {
+    final text = Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        fontSize: 11,
+        letterSpacing: 1.3,
+        fontWeight: FontWeight.w700,
+        color: context.colors.onSurface.withValues(alpha: .82),
       ),
-      if (trailing != null) trailing!,
-    ],
-  );
+    );
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 16, color: context.tokens.brass),
+        const SizedBox(width: 8),
+        Expanded(
+          child: inlineAction == null
+              ? text
+              : Row(
+                  children: <Widget>[
+                    Flexible(child: text),
+                    const SizedBox(width: 4),
+                    inlineAction!,
+                  ],
+                ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
 }
 
 class _FramesSection extends StatelessWidget {
@@ -1795,22 +1867,25 @@ class _FramesSection extends StatelessWidget {
                 (role) => _AddFrameButton(controller: controller, role: role),
               )
               .toList();
-    final tiles = form.keyframes.isEmpty
+    final pendingAdds = controller.pendingFrameAdds;
+    final tiles = form.keyframes.isEmpty && pendingAdds == 0
         ? null
         : Wrap(
             spacing: 10,
             runSpacing: 10,
-            children: form.keyframes
-                .asMap()
-                .entries
-                .map(
-                  (entry) => _FrameTile(
-                    controller: controller,
-                    index: entry.key,
-                    frame: entry.value,
-                  ),
-                )
-                .toList(),
+            children: <Widget>[
+              ...form.keyframes.asMap().entries.map(
+                (entry) => _FrameTile(
+                  controller: controller,
+                  index: entry.key,
+                  frame: entry.value,
+                ),
+              ),
+              for (var index = 0; index < pendingAdds; index += 1)
+                _PendingGuidanceTile(
+                  key: ValueKey('pending-frame-tile-$index'),
+                ),
+            ],
           );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1918,19 +1993,24 @@ class _ReferencesSection extends StatelessWidget {
       if (!setAside && model.requiresVisualReferenceForAudio)
         'Audio guidance requires at least one image or video reference for this model.',
     ];
-    final tiles = form.references.isEmpty
+    final pendingAdds = controller.pendingReferenceAdds;
+    final tiles = form.references.isEmpty && pendingAdds == 0
         ? null
         : Wrap(
             spacing: 10,
             runSpacing: 10,
-            children: form.references
-                .map(
-                  (reference) => _ReferenceTile(
-                    controller: controller,
-                    reference: reference,
-                  ),
-                )
-                .toList(),
+            children: <Widget>[
+              ...form.references.map(
+                (reference) => _ReferenceTile(
+                  controller: controller,
+                  reference: reference,
+                ),
+              ),
+              for (var index = 0; index < pendingAdds; index += 1)
+                _PendingGuidanceTile(
+                  key: ValueKey('pending-reference-tile-$index'),
+                ),
+            ],
           );
     final addButtons = setAside
         ? const <Widget>[]
@@ -2145,6 +2225,58 @@ class _ReferenceNormalizationToggle extends StatelessWidget {
   );
 }
 
+/// Holds the spot where a picked or dropped file's card will land: the same
+/// footprint as a reference/frame tile with a spinner in the thumb zone,
+/// shown while files are chosen, read, or retained.
+class _PendingGuidanceTile extends StatelessWidget {
+  const _PendingGuidanceTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 148,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              height: 76,
+              color: dark
+                  ? ClawnsoleColors.plumInk
+                  : context.colors.surfaceContainer,
+              child: const Center(
+                child: SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Uploading…',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ReferenceTile extends StatelessWidget {
   const _ReferenceTile({required this.controller, required this.reference});
 
@@ -2241,6 +2373,29 @@ class _ReferenceTile extends StatelessWidget {
                 ),
               ),
             ),
+            // A draft picked from References renders immediately but loads
+            // its media bytes in the background; the veil says so until the
+            // real thumbnail is ready.
+            if (controller.isReferenceDraftHydrating(reference.id))
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: .3),
+                      child: const Center(
+                        child: SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               top: 4,
               left: 4,

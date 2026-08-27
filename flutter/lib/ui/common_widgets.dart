@@ -35,12 +35,18 @@ class ReferenceDropZone extends StatefulWidget {
     required this.label,
     required this.child,
     this.enabled = true,
+    this.onDropStarted,
     super.key,
   });
 
   final Future<void> Function(List<DroppedFile> files) onDropFiles;
   final String label;
   final bool enabled;
+
+  /// Called with the dropped item count the moment the drop lands, before
+  /// their bytes are read — so the host can reserve loading tiles for the
+  /// read phase. [onDropFiles] always follows, even for unreadable drops.
+  final ValueChanged<int>? onDropStarted;
   final Widget child;
 
   @override
@@ -51,6 +57,7 @@ class _ReferenceDropZoneState extends State<ReferenceDropZone> {
   bool _hovering = false;
 
   Future<void> _handleDrop(DropDoneDetails details) async {
+    widget.onDropStarted?.call(details.files.length);
     final files = <DroppedFile>[];
     for (final item in details.files) {
       try {

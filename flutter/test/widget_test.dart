@@ -5080,6 +5080,64 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
+  testWidgets('clear prompt asks first and wipes only the direction', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = 'A sloth leans in near the drink.';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The clear control hugs the Direction label, left of the header's
+    // trailing cluster.
+    final clear = find.byKey(const ValueKey('prompt-clear-button'));
+    expect(clear, findsOneWidget);
+    expect(
+      tester.getCenter(clear).dx,
+      lessThan(
+        tester.getCenter(find.byKey(const ValueKey('prompt-copy-button'))).dx,
+      ),
+    );
+
+    // Cancel keeps the direction.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    expect(find.text('Clear the prompt?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, 'A sloth leans in near the drink.');
+
+    // Confirm clears the form and the inline editor follows.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('prompt-clear-confirm')));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, isEmpty);
+    expect(find.text('A sloth leans in near the drink.'), findsNothing);
+
+    // Nothing left to clear: the control disables instead of re-asking.
+    expect(tester.widget<IconButton>(clear).onPressed, isNull);
+  });
+
   testWidgets('prompt reference tags autocomplete and highlight', (
     tester,
   ) async {

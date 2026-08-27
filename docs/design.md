@@ -209,7 +209,10 @@ The current inference is always visible as a quiet chip beside the
 Generate button. Layout order:
 
 1. **Direction**: the prompt field (4–10 lines), set in bundled Courier
-   Prime — the typewriter voice for anything the director types.
+   Prime — the typewriter voice for anything the director types. A quiet
+   clear control sits directly after the label (disabled while empty) and
+   asks before wiping the text; the live counter, copy, and fullscreen
+   controls keep the header's far end.
 2. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny
@@ -218,7 +221,11 @@ Generate button. Layout order:
    URL/timing fields), capacity gauges, provider rules, add buttons, and
    the Custom-timing pill. Media arriving through any path (picker, URL,
    drop, reuse) opens its section; the whole References accordion stays a
-   drop target. Models that take pinned frames **or** creative references
+   drop target. From the moment a picker opens or a drop lands, a
+   **loading tile** with a spinner holds the exact spot the new card will
+   occupy (`pendingFrameAdds` / `pendingReferenceAdds` — keyframes keep
+   theirs through the whole pick-and-retain pipeline), and a draft picked
+   from References wears a spinner veil while its media bytes hydrate. Models that take pinned frames **or** creative references
    but never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
    family) say so inside the body; attaching one side quietly sets the
    other aside, and a conflicted form (via reuse or a model switch) pins
