@@ -1,6 +1,6 @@
 # Clawnsole privacy policy
 
-Effective: August 20, 2026
+Effective: August 27, 2026
 
 Clawnsole is a unified client for third-party video generation services across
 mobile and desktop. The installed desktop and mobile apps contain no
@@ -79,11 +79,21 @@ Clawnsole currently supports these generation providers:
   is an API aggregation platform and may forward prompts and generation inputs
   to the underlying model provider selected for the request; that provider's
   own data-handling and retention policies also apply.
+- **Runway:** Review the
+  [Runway privacy policy](https://runway.com/privacy-policy). Runway's API
+  serves both Runway models and partner models; for a partner model, prompts
+  and generation inputs may also be processed by that model's provider under
+  its own data-handling and retention policies.
+- **Krea:** Review the [Krea privacy policy](https://www.krea.ai/privacy).
+  Krea is an API aggregation platform and may forward prompts and generation
+  inputs to the underlying model provider selected for the request; that
+  provider's own data-handling and retention policies also apply.
 
 Those providers process and may retain data under their own terms and privacy
 policies. Review the applicable documents before sending private or sensitive
 material. Clawnsole is an independent client and is not affiliated with or
-endorsed by Black Forest Labs, Lightricks/LTX, ArtCraft, or Atlas Cloud.
+endorsed by Black Forest Labs, Lightricks/LTX, ArtCraft, Atlas Cloud, Runway,
+or Krea.
 
 ## App Review provider access
 

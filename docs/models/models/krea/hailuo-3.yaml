@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "minimax/hailuo-3",
+  "canonical_model_id": "hailuo-3",
+  "label": "Hailuo 3",
+  "description": "Reference-rich MiniMax generation with pinned frames.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "768p class"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.1365,
+  "reference_usd_per_second": 0.1365,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 9,
+  "max_video_references": 3,
+  "max_audio_references": 3,
+  "max_reference_video_seconds": 15,
+  "supports_audio": false,
+  "max_prompt_characters": 7000
+}

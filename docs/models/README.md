@@ -91,7 +91,7 @@ establish a dependable input ceiling.
 
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
-in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `ltx`, or
+in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `krea`, `ltx`, or
 `runway`. `apple-local` is implemented only by the native iOS app. A genuinely
 new API protocol still requires an app release that implements its adapter;
 older builds safely ignore providers whose adapter they do not understand.

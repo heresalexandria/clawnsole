@@ -19,6 +19,7 @@ const supportedProviderAdapters = <String>{
   'artcraft',
   'atlas',
   'bfl',
+  'krea',
   'ltx',
   'runway',
 };

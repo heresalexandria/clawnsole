@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "alibaba/wan-3.0",
+  "canonical_model_id": "wan-3.0",
+  "label": "Wan 3.0",
+  "description": "Long-form Wan 3.0 with rich references and native audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.075,
+  "reference_usd_per_second": 0.075,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 10,
+  "max_video_references": 5,
+  "max_audio_references": 5,
+  "supports_seed": true,
+  "max_prompt_characters": 5000
+}

@@ -331,6 +331,7 @@ IconData _providerPlaqueIcon(String providerId) => switch (providerId) {
   'artcraft' => Icons.palette_outlined,
   'atlas' => Icons.cloud_outlined,
   'bfl' => Icons.forest_outlined,
+  'krea' => Icons.gesture_outlined,
   'ltx' => Icons.movie_filter_outlined,
   _ => Icons.auto_awesome_motion_outlined,
 };

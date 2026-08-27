@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "lightricks/ltx-video-2.5-pro",
+  "canonical_model_id": "ltx-2.5-pro",
+  "label": "LTX 2.5 Pro",
+  "description": "Full-quality LTX 2.5 generation with native audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 2,
+  "max_keyframes": 2,
+  "usd_per_second": 0.126,
+  "reference_usd_per_second": 0.126,
+  "supports_start_frame": true,
+  "supports_end_frame": true
+}

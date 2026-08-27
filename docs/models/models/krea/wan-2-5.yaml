@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "alibaba/wan-2.5",
+  "canonical_model_id": "wan-2.5",
+  "label": "Wan 2.5",
+  "description": "Wan 2.5 generation with optional synchronized audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 10,
+  "duration_step": 5,
+  "max_keyframes": 1,
+  "usd_per_second": 0.0525,
+  "reference_usd_per_second": 0.0525,
+  "supports_start_frame": true,
+  "supports_seed": true
+}

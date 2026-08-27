@@ -1,6 +1,7 @@
 import 'artcraft_api.dart';
 import 'atlas_cloud_api.dart';
 import 'bfl_api.dart';
+import 'krea_api.dart';
 import 'ltx_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
@@ -13,17 +14,20 @@ class ProviderApiRouter {
     ArtCraftApi? artcraft,
     AtlasCloudApi? atlas,
     RunwayApi? runway,
+    KreaApi? krea,
   }) : bfl = bfl ?? BflApi(),
        ltx = ltx ?? LtxApi(),
        artcraft = artcraft ?? ArtCraftApi(),
        atlas = atlas ?? AtlasCloudApi(),
-       runway = runway ?? RunwayApi();
+       runway = runway ?? RunwayApi(),
+       krea = krea ?? KreaApi();
 
   final BflApi bfl;
   final LtxApi ltx;
   final ArtCraftApi artcraft;
   final AtlasCloudApi atlas;
   final RunwayApi runway;
+  final KreaApi krea;
 
   String _adapter(String provider) {
     final definition = providerByIdForRouting(provider);
@@ -39,6 +43,7 @@ class ProviderApiRouter {
         'artcraft' => artcraft.verify(key),
         'atlas' => atlas.verify(key),
         'runway' => runway.verify(key),
+        'krea' => krea.verify(key),
         'bfl' => ProviderAccountStatus(
           provider: 'bfl',
           balance: await bfl.getCredits(key),
@@ -59,6 +64,7 @@ class ProviderApiRouter {
     'artcraft' => artcraft.submit(key, model, input),
     'atlas' => atlas.submit(key, model, input),
     'runway' => runway.submit(key, model, input),
+    'krea' => krea.submit(key, model, input),
     'bfl' => bfl.submit(key, input, model: model),
     final adapter => throw ProviderException(
       'Provider adapter "$adapter" is not supported by this build.',
@@ -74,6 +80,7 @@ class ProviderApiRouter {
     'artcraft' => artcraft.poll(key, pollingUrl),
     'atlas' => atlas.poll(key, pollingUrl),
     'runway' => runway.poll(key, pollingUrl),
+    'krea' => krea.poll(key, pollingUrl),
     'bfl' => bfl.poll(key, pollingUrl),
     final adapter => throw ProviderException(
       'Provider adapter "$adapter" is not supported by this build.',
@@ -85,6 +92,7 @@ class ProviderApiRouter {
         'atlas' => atlas.listVideoModels(key),
         'artcraft' => artcraft.listVideoModels(),
         'runway' => runway.listVideoModels(),
+        'krea' => krea.listVideoModels(),
         'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
         ),

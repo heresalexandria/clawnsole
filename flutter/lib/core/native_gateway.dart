@@ -74,6 +74,7 @@ Set<String> _nativeAvailableProviders(bool isIos) => <String>{
   'artcraft',
   'atlas',
   'runway',
+  'krea',
   if (isIos) 'apple-local',
 };
 
