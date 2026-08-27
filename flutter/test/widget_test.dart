@@ -1094,6 +1094,72 @@ void main() {
     expect(find.byType(ProviderBadge), findsOneWidget);
   });
 
+  testWidgets('card cost chip opens its breakdown in a popover', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'cost-chip',
+      status: 'Ready',
+      prompt: 'A priced render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      cost: 12,
+      creditsBefore: 100,
+      creditsAfter: 88,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GenerationCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+
+    // At a glance the card carries only the amount chip on its action row;
+    // the wording and balance trail live behind the tap.
+    final chip = find.byKey(const ValueKey('generation-cost-toggle'));
+    expect(chip, findsOneWidget);
+    expect(
+      find.descendant(of: chip, matching: find.text('12 cr')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Realized cost'), findsNothing);
+    expect(find.textContaining('credits available'), findsNothing);
+
+    await tester.ensureVisible(chip);
+    await tester.pumpAndSettle();
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('generation-cost-details')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Realized cost'), findsOneWidget);
+    expect(find.textContaining('100 → 88 credits available'), findsOneWidget);
+  });
+
   testWidgets('dense previews show test bars for dead renders', (tester) async {
     final now = DateTime.utc(2026, 8, 26, 12);
     final item = Generation(
@@ -3693,6 +3759,73 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('frame and finish share a row and pair with the accordions', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Desktop: the collapsed guidance accordions sit in the left column and
+    // the settings column sits beside them; the two console-key dropdowns
+    // share one row.
+    expect(find.byKey(const ValueKey('guidance-settings-row')), findsOneWidget);
+    expect(find.byKey(const ValueKey('frame-finish-row')), findsOneWidget);
+    final ratio = tester.getCenter(
+      find.byKey(const ValueKey('ratio-dropdown')),
+    );
+    final resolution = tester.getCenter(
+      find.byKey(const ValueKey('resolution-dropdown')),
+    );
+    expect(ratio.dy, closeTo(resolution.dy, 1));
+    expect(ratio.dx, lessThan(resolution.dx));
+    final frames = tester.getCenter(
+      find.byKey(const ValueKey('keyframes-accordion-toggle')),
+    );
+    expect(frames.dx, lessThan(ratio.dx));
+
+    // Mobile: the accordions stack above the settings, and the two dropdowns
+    // still share one row instead of a full row each.
+    await tester.binding.setSurfaceSize(const Size(390, 1400));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('guidance-settings-row')), findsNothing);
+    expect(find.byKey(const ValueKey('frame-finish-row')), findsOneWidget);
+    final narrowRatio = tester.getCenter(
+      find.byKey(const ValueKey('ratio-dropdown')),
+    );
+    final narrowResolution = tester.getCenter(
+      find.byKey(const ValueKey('resolution-dropdown')),
+    );
+    expect(narrowRatio.dy, closeTo(narrowResolution.dy, 1));
+    expect(narrowRatio.dx, lessThan(narrowResolution.dx));
+    controller.dispose();
+  });
+
   testWidgets('seed control appears only for Wan and survives reuse', (
     tester,
   ) async {
@@ -3981,6 +4114,11 @@ void main() {
     expect(find.textContaining('REQUIRED'), findsNothing);
     expect(find.text('Or continue a video'), findsNothing);
     expect(find.text('Or enhance a saved draft'), findsNothing);
+    // The references section is a collapsed accordion until opened; its add
+    // buttons then land below the header row.
+    expect(find.byKey(const ValueKey('add-image-reference')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     expect(
       tester.getTopLeft(find.byKey(const ValueKey('add-image-reference'))).dy,
       greaterThan(tester.getBottomLeft(find.text('REFERENCES')).dy),
@@ -4470,6 +4608,10 @@ void main() {
         ),
       );
 
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
       expect(
         find.textContaining('use First frame for stricter frame-0'),
         findsOneWidget,
@@ -4548,8 +4690,12 @@ void main() {
       ),
     );
 
-    // Empty form: both sections are offered with one compact either-or note.
+    // Empty form: both sections are offered as collapsed accordions; their
+    // captions and add buttons appear once opened.
     await pump();
+    await tester.tap(find.byKey(const ValueKey('keyframes-accordion-toggle')));
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     expect(find.textContaining('2 frames max · first + last'), findsOneWidget);
     expect(
       find.textContaining(
@@ -4633,6 +4779,10 @@ void main() {
         find.byKey(const ValueKey('media-references-section')),
         findsOneWidget,
       );
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-video-reference')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-audio-reference')), findsOneWidget);
@@ -4930,6 +5080,64 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
   });
 
+  testWidgets('clear prompt asks first and wipes only the direction', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = 'A sloth leans in near the drink.';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The clear control hugs the Direction label, left of the header's
+    // trailing cluster.
+    final clear = find.byKey(const ValueKey('prompt-clear-button'));
+    expect(clear, findsOneWidget);
+    expect(
+      tester.getCenter(clear).dx,
+      lessThan(
+        tester.getCenter(find.byKey(const ValueKey('prompt-copy-button'))).dx,
+      ),
+    );
+
+    // Cancel keeps the direction.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    expect(find.text('Clear the prompt?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, 'A sloth leans in near the drink.');
+
+    // Confirm clears the form and the inline editor follows.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('prompt-clear-confirm')));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, isEmpty);
+    expect(find.text('A sloth leans in near the drink.'), findsNothing);
+
+    // Nothing left to clear: the control disables instead of re-asking.
+    expect(tester.widget<IconButton>(clear).onPressed, isNull);
+  });
+
   testWidgets('prompt reference tags autocomplete and highlight', (
     tester,
   ) async {
@@ -5115,6 +5323,10 @@ void main() {
         ),
       ),
     );
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    // Timed pumps: the video tile's thumbnail spinner never settles here.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.tap(
       find.byKey(ValueKey('rename-media-reference-${reference.id}')),
     );
@@ -7109,6 +7321,8 @@ void main() {
     );
     await tester.pump();
 
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     final open = find.byKey(
       const ValueKey('view-media-reference-fullscreen-image'),
     );

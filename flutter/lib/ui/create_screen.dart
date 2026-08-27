@@ -635,6 +635,35 @@ class _ComposerState extends State<_Composer> {
     controller.showNotice('Prompt copied to the clipboard.');
   }
 
+  Future<void> _confirmClearPrompt() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear the prompt?'),
+        content: const Text(
+          'This removes the direction text. Attached frames, references, '
+          'and settings stay.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('prompt-clear-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Clear prompt'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    controller.updateForm((form) => form.prompt = '');
+    // CreateScreen is also used without an AnimatedBuilder in focused widget
+    // tests and development harnesses; refresh the inline editor directly.
+    setState(() {});
+  }
+
   Future<void> _showFullscreenPrompt({required bool upscaling}) async {
     FocusManager.instance.primaryFocus?.unfocus();
     await showGeneralDialog<void>(
@@ -706,6 +735,21 @@ class _ComposerState extends State<_Composer> {
             FieldLabel(
               upscaling ? 'Detail guidance · optional' : 'Direction',
               icon: Icons.edit_note_rounded,
+              inlineAction: IconButton(
+                key: const ValueKey('prompt-clear-button'),
+                tooltip: 'Clear prompt',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                iconSize: 15,
+                onPressed: form.prompt.isEmpty
+                    ? null
+                    : () => unawaited(_confirmClearPrompt()),
+                icon: const Icon(Icons.backspace_outlined),
+              ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -823,20 +867,25 @@ class _ComposerState extends State<_Composer> {
               ),
             ],
           ] else
-            _GuidanceInputsSection(
+            // Guidance accordions and the settings column pair up side by
+            // side at desktop widths; the settings block below is then owned
+            // by this pairing instead of the full-width fallback.
+            _GuidanceAndSettings(
               controller: controller,
               videoAction: videoAction,
               draftAction: draftAction,
             ),
-          SizedBox(height: short ? 8 : 14),
-          Divider(height: 1, color: context.colors.outlineVariant),
-          SizedBox(height: short ? 8 : 14),
-          if (upscaling)
-            _UpscaleSettings(controller: controller)
-          else if (enhancing)
-            _EnhanceSettings(controller: controller)
-          else
-            _SettingsGrid(controller: controller),
+          if (upscaling || enhancing || draftActive || videoActive) ...<Widget>[
+            SizedBox(height: short ? 8 : 14),
+            Divider(height: 1, color: context.colors.outlineVariant),
+            SizedBox(height: short ? 8 : 14),
+            if (upscaling)
+              _UpscaleSettings(controller: controller)
+            else if (enhancing)
+              _EnhanceSettings(controller: controller)
+            else
+              _SettingsGrid(controller: controller),
+          ],
           SizedBox(height: short ? 10 : 16),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -1244,11 +1293,14 @@ List<PromptReferenceOption> _promptReferenceOptions(AppController controller) {
       .toList();
 }
 
-class _GuidanceInputsSection extends StatelessWidget {
-  const _GuidanceInputsSection({
+/// Pairs the guidance accordions with the Frame/Finish/Duration settings
+/// column: side by side at desktop widths, stacked with a divider between
+/// them on narrow layouts.
+class _GuidanceAndSettings extends StatelessWidget {
+  const _GuidanceAndSettings({
     required this.controller,
-    required this.videoAction,
-    required this.draftAction,
+    this.videoAction,
+    this.draftAction,
   });
 
   final AppController controller;
@@ -1257,10 +1309,90 @@ class _GuidanceInputsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final short = _isShort(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final guidance = _GuidanceInputsSection(
+          controller: controller,
+          videoAction: videoAction,
+          draftAction: draftAction,
+        );
+        final settings = _SettingsGrid(controller: controller);
+        if (constraints.maxWidth >= 880) {
+          return Row(
+            key: const ValueKey('guidance-settings-row'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(child: guidance),
+              const SizedBox(width: 26),
+              Expanded(child: settings),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            guidance,
+            SizedBox(height: short ? 8 : 14),
+            Divider(height: 1, color: context.colors.outlineVariant),
+            SizedBox(height: short ? 8 : 14),
+            settings,
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _GuidanceInputsSection extends StatefulWidget {
+  const _GuidanceInputsSection({
+    required this.controller,
+    this.videoAction,
+    this.draftAction,
+  });
+
+  final AppController controller;
+  final Widget? videoAction;
+  final Widget? draftAction;
+
+  @override
+  State<_GuidanceInputsSection> createState() => _GuidanceInputsSectionState();
+}
+
+class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
+  bool _framesOpen = false;
+  bool _referencesOpen = false;
+  late int _lastFrameCount;
+  late int _lastReferenceCount;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    // Attachments already on the form (a restored draft) show as collapsed
+    // header previews; only media arriving after this point auto-opens.
+    _lastFrameCount = controller.form.keyframes.length;
+    _lastReferenceCount = controller.form.references.length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final model = controller.selectedModel;
+    final form = controller.form;
+    // Media arriving through any path (picker, URL add, drop, reuse) reveals
+    // its section so the new tiles are in view.
+    if (form.keyframes.length > _lastFrameCount) _framesOpen = true;
+    if (form.references.length > _lastReferenceCount) _referencesOpen = true;
+    _lastFrameCount = form.keyframes.length;
+    _lastReferenceCount = form.references.length;
     final showFrames =
-        controller.keyframeLimit > 0 || controller.form.keyframes.isNotEmpty;
+        controller.keyframeLimit > 0 || form.keyframes.isNotEmpty;
     final showReferences = model.supportsMediaReferences;
+    final actions = <Widget>[
+      if (widget.videoAction != null) widget.videoAction!,
+      if (widget.draftAction != null) widget.draftAction!,
+    ];
     if (!showFrames && !showReferences) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1281,82 +1413,332 @@ class _GuidanceInputsSection extends StatelessWidget {
               ),
             ),
           ),
-          if (videoAction != null || draftAction != null) ...<Widget>[
+          if (actions.isNotEmpty) ...<Widget>[
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 4,
-              children: <Widget>[
-                if (videoAction != null) videoAction!,
-                if (draftAction != null) draftAction!,
-              ],
-            ),
+            Wrap(spacing: 4, children: actions),
           ],
         ],
       );
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 560;
-        final frames = showFrames
-            ? _FramesSection(
-                controller: controller,
-                compact: compact,
-                startActions: <Widget>[
-                  if (videoAction != null) videoAction!,
-                  if (!showReferences && draftAction != null) draftAction!,
-                ],
-              )
-            : null;
-        final references = showReferences
-            ? _ReferencesSection(
-                controller: controller,
-                compact: compact,
-                startActions: <Widget>[
-                  if (!showFrames && videoAction != null) videoAction!,
-                  if (draftAction != null) draftAction!,
-                ],
-              )
-            : null;
-        final hasVisualReference =
-            controller.form.keyframes.isNotEmpty ||
-            controller.form.referenceCount(MediaReferenceKind.image) > 0 ||
-            controller.form.referenceCount(MediaReferenceKind.video) > 0;
-        late final Widget sections;
-        if (frames != null &&
-            references != null &&
-            constraints.maxWidth >= 880) {
-          sections = Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Expanded(child: frames),
-              const SizedBox(width: 22),
-              Expanded(child: references),
-            ],
+    final conflicted =
+        model.framesExclusiveWithReferences &&
+        form.keyframes.isNotEmpty &&
+        form.references.isNotEmpty;
+    final framesSetAside = controller.framesBlockedByReferences;
+    final referencesSetAside = controller.referencesBlockedByFrames;
+    // A conflicted form (via reuse or a model switch) keeps both sections
+    // open so the madder warning and the tiles to remove stay in view; an
+    // in-flight upload keeps its progress line and loading tiles visible.
+    final framesExpanded =
+        _framesOpen || conflicted || controller.pendingFrameAdds > 0;
+    final referencesExpanded =
+        _referencesOpen ||
+        conflicted ||
+        controller.referenceUploadInProgress ||
+        controller.pendingReferenceAdds > 0;
+    final frames = !showFrames
+        ? null
+        : _GuidanceAccordion(
+            toggleKey: const ValueKey('keyframes-accordion-toggle'),
+            icon: Icons.collections_rounded,
+            label: 'Keyframes',
+            expanded: framesExpanded,
+            onToggle: () => setState(() => _framesOpen = !framesExpanded),
+            previews: _framePreviews(form.keyframes),
+            summary: conflicted
+                ? 'Remove one side'
+                : framesSetAside
+                ? 'Set aside'
+                : form.keyframes.isEmpty
+                ? 'None'
+                : '${form.keyframes.length} attached',
+            error: conflicted,
+            child: _FramesSection(controller: controller),
           );
-        } else {
-          sections = Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (frames != null) frames,
-              if (frames != null && references != null)
-                SizedBox(height: compact ? 12 : 16),
-              if (references != null) references,
-            ],
+    final references = !showReferences
+        ? null
+        // The whole accordion is a drop target, so local files land as
+        // references without touching the pickers — and the section opens
+        // to show what arrived. Files sort into image/video/audio by MIME
+        // type or extension inside the controller.
+        : ReferenceDropZone(
+            enabled: !referencesSetAside,
+            label: 'Drop to add references',
+            // Loading tiles hold the dropped files' spots while their bytes
+            // are read, before the controller can classify and attach them.
+            onDropStarted: (count) {
+              setState(() => _referencesOpen = true);
+              controller.noteIncomingDroppedFiles(count);
+            },
+            onDropFiles: controller.addDroppedReferenceFiles,
+            child: _GuidanceAccordion(
+              key: const ValueKey('media-references-section'),
+              toggleKey: const ValueKey('references-accordion-toggle'),
+              icon: Icons.perm_media_rounded,
+              label: 'References',
+              expanded: referencesExpanded,
+              onToggle: () =>
+                  setState(() => _referencesOpen = !referencesExpanded),
+              previews: _referencePreviews(form.references),
+              summary: conflicted
+                  ? 'Remove one side'
+                  : referencesSetAside
+                  ? 'Set aside'
+                  : form.references.isEmpty
+                  ? 'None'
+                  : '${form.references.length} attached',
+              error: conflicted,
+              child: _ReferencesSection(controller: controller),
+            ),
           );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            sections,
-            if (hasVisualReference) ...<Widget>[
-              const SizedBox(height: 8),
-              _ReferenceNormalizationToggle(controller: controller),
-            ],
-          ],
-        );
-      },
+    final hasVisualReference =
+        form.keyframes.isNotEmpty ||
+        form.referenceCount(MediaReferenceKind.image) > 0 ||
+        form.referenceCount(MediaReferenceKind.video) > 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (frames != null) frames,
+        if (frames != null && references != null) const SizedBox(height: 10),
+        if (references != null) references,
+        // Normalization converts both keyframes and creative references, so
+        // the switch sits below the pair instead of inside either section.
+        if (hasVisualReference) ...<Widget>[
+          const SizedBox(height: 8),
+          _ReferenceNormalizationToggle(controller: controller),
+        ],
+        if (actions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          Wrap(spacing: 4, children: actions),
+        ],
+      ],
     );
   }
+
+  List<Widget> _framePreviews(List<KeyframeDraft> frames) => _cappedPreviews(
+    frames
+        .map(
+          (frame) => _AccordionPreviewThumb(
+            child: frame.asset != null
+                ? Image.memory(frame.asset!.bytes, fit: BoxFit.cover)
+                : Uri.tryParse(frame.source)?.scheme == 'https'
+                ? Image.network(
+                    frame.source,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const _FrameLinkGhost(),
+                  )
+                : const _FrameLinkGhost(),
+          ),
+        )
+        .toList(),
+    frames.length,
+  );
+
+  List<Widget> _referencePreviews(List<MediaReferenceDraft> references) =>
+      _cappedPreviews(
+        references
+            .map(
+              (reference) => _AccordionPreviewThumb(
+                child: reference.kind == MediaReferenceKind.audio
+                    ? Icon(
+                        Icons.graphic_eq_rounded,
+                        size: 13,
+                        color: context.colors.onSurfaceVariant,
+                      )
+                    : MediaThumbnail(
+                        gateway: controller.gateway,
+                        kind: reference.kind,
+                        bytes: reference.asset?.bytes,
+                        mimeType: reference.asset?.mimeType,
+                        localPath: reference.asset?.path,
+                        reference:
+                            reference.asset?.retained ?? reference.retained,
+                        thumbnailReference:
+                            reference.thumbnailAsset ??
+                            reference.asset?.thumbnailAsset,
+                        thumbnailBytes:
+                            reference.thumbnailBytes ??
+                            reference.asset?.thumbnailBytes,
+                        source: reference.source,
+                        semanticsLabel: '${reference.label} preview',
+                      ),
+              ),
+            )
+            .toList(),
+        references.length,
+      );
+
+  /// At most four thumbnails plus a "+n" spillover chip keep the header row
+  /// legible at any width.
+  List<Widget> _cappedPreviews(List<Widget> thumbs, int total) {
+    const cap = 4;
+    if (total <= cap) return thumbs;
+    return <Widget>[
+      ...thumbs.take(cap),
+      _AccordionPreviewThumb(
+        child: Center(
+          child: Text(
+            '+${total - cap}',
+            style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: FontWeight.w700,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+}
+
+/// One collapsible guidance section: the header row carries the section
+/// label, tiny previews of what is attached, and a status word; the full
+/// editing surface (tiles, gauges, add buttons) lives in the body.
+class _GuidanceAccordion extends StatelessWidget {
+  const _GuidanceAccordion({
+    required this.toggleKey,
+    required this.icon,
+    required this.label,
+    required this.expanded,
+    required this.onToggle,
+    required this.child,
+    this.previews = const <Widget>[],
+    this.summary,
+    this.error = false,
+    super.key,
+  });
+
+  final Key toggleKey;
+  final IconData icon;
+  final String label;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final Widget child;
+  final List<Widget> previews;
+  final String? summary;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    final summaryText = summary == null
+        ? null
+        : Text(
+            summary!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: error ? colors.error : colors.onSurfaceVariant,
+            ),
+          );
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: error ? colors.error : colors.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          InkWell(
+            key: toggleKey,
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+              child: Row(
+                children: <Widget>[
+                  Icon(icon, size: 15, color: context.tokens.brass),
+                  const SizedBox(width: 7),
+                  Text(
+                    label.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w700,
+                      color: colors.onSurface.withValues(alpha: .82),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: previews.isEmpty
+                        ? Align(
+                            alignment: Alignment.centerRight,
+                            child: summaryText ?? const SizedBox.shrink(),
+                          )
+                        : SizedBox(
+                            height: 24,
+                            child: Row(
+                              children: <Widget>[
+                                Expanded(
+                                  // A scrollable strip never overflows the
+                                  // header, whatever the column width.
+                                  child: ListView(
+                                    scrollDirection: Axis.horizontal,
+                                    padding: EdgeInsets.zero,
+                                    children: previews,
+                                  ),
+                                ),
+                                if (summaryText != null) ...<Widget>[
+                                  const SizedBox(width: 8),
+                                  summaryText,
+                                ],
+                              ],
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 6),
+                  AnimatedRotation(
+                    turns: expanded ? .5 : 0,
+                    duration: const Duration(milliseconds: 160),
+                    child: Icon(
+                      Icons.expand_more_rounded,
+                      size: 18,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: !expanded
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(11, 2, 11, 11),
+                    child: child,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A tiny rounded thumbnail in an accordion header.
+class _AccordionPreviewThumb extends StatelessWidget {
+  const _AccordionPreviewThumb({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 24,
+    height: 24,
+    margin: const EdgeInsets.only(right: 4),
+    clipBehavior: Clip.antiAlias,
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainer,
+      borderRadius: BorderRadius.circular(6),
+      border: Border.all(color: context.colors.outlineVariant),
+    ),
+    child: child,
+  );
 }
 
 class _QuietAction extends StatelessWidget {
@@ -1384,48 +1766,58 @@ class _QuietAction extends StatelessWidget {
 }
 
 class FieldLabel extends StatelessWidget {
-  const FieldLabel(this.label, {required this.icon, super.key, this.trailing});
+  const FieldLabel(
+    this.label, {
+    required this.icon,
+    super.key,
+    this.inlineAction,
+    this.trailing,
+  });
 
   final String label;
   final IconData icon;
+
+  /// A small control that hugs the label text (e.g. clear-prompt), unlike
+  /// [trailing], which sits at the far end of the row.
+  final Widget? inlineAction;
   final Widget? trailing;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Icon(icon, size: 16, color: context.tokens.brass),
-      const SizedBox(width: 8),
-      Expanded(
-        child: Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.3,
-            fontWeight: FontWeight.w700,
-            color: context.colors.onSurface.withValues(alpha: .82),
-          ),
-        ),
+  Widget build(BuildContext context) {
+    final text = Text(
+      label.toUpperCase(),
+      style: TextStyle(
+        fontSize: 11,
+        letterSpacing: 1.3,
+        fontWeight: FontWeight.w700,
+        color: context.colors.onSurface.withValues(alpha: .82),
       ),
-      if (trailing != null) trailing!,
-    ],
-  );
+    );
+    return Row(
+      children: <Widget>[
+        Icon(icon, size: 16, color: context.tokens.brass),
+        const SizedBox(width: 8),
+        Expanded(
+          child: inlineAction == null
+              ? text
+              : Row(
+                  children: <Widget>[
+                    Flexible(child: text),
+                    const SizedBox(width: 4),
+                    inlineAction!,
+                  ],
+                ),
+        ),
+        if (trailing != null) trailing!,
+      ],
+    );
+  }
 }
 
 class _FramesSection extends StatelessWidget {
-  const _FramesSection({
-    required this.controller,
-    this.compact = false,
-    this.startActions = const <Widget>[],
-  });
+  const _FramesSection({required this.controller});
 
   final AppController controller;
-
-  /// Narrow layouts collapse the section to a single header row with inline
-  /// add buttons and drop the informational caption.
-  final bool compact;
-
-  /// "Or start from" alternates folded into this section's action row.
-  final List<Widget> startActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1475,86 +1867,50 @@ class _FramesSection extends StatelessWidget {
                 (role) => _AddFrameButton(controller: controller, role: role),
               )
               .toList();
-    final tiles = form.keyframes.isEmpty
+    final pendingAdds = controller.pendingFrameAdds;
+    final tiles = form.keyframes.isEmpty && pendingAdds == 0
         ? null
         : Wrap(
             spacing: 10,
             runSpacing: 10,
-            children: form.keyframes
-                .asMap()
-                .entries
-                .map(
-                  (entry) => _FrameTile(
-                    controller: controller,
-                    index: entry.key,
-                    frame: entry.value,
-                  ),
-                )
-                .toList(),
-          );
-    if (compact) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              _SectionLabelChip(
-                icon: Icons.collections_rounded,
-                label: 'Keyframes',
-                hint: caption,
+              ...form.keyframes.asMap().entries.map(
+                (entry) => _FrameTile(
+                  controller: controller,
+                  index: entry.key,
+                  frame: entry.value,
+                ),
               ),
-              if (timingPill != null) timingPill,
-              ...addButtons,
-              ...startActions,
+              for (var index = 0; index < pendingAdds; index += 1)
+                _PendingGuidanceTile(
+                  key: ValueKey('pending-frame-tile-$index'),
+                ),
             ],
-          ),
-          if (conflicted || setAside) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              caption,
-              style: TextStyle(
-                color: conflicted
-                    ? context.colors.error
-                    : context.colors.onSurfaceVariant,
-                fontSize: 10.5,
-                height: 1.35,
-              ),
-            ),
-          ],
-          if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-        ],
-      );
-    }
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        FieldLabel(
-          'Keyframes · optional',
-          icon: Icons.collections_rounded,
-          trailing: timingPill,
-        ),
-        const SizedBox(height: 7),
         Text(
           caption,
           style: TextStyle(
             color: conflicted
                 ? context.colors.error
                 : context.colors.onSurfaceVariant,
-            fontSize: 11.5,
+            fontSize: 11,
             height: 1.4,
           ),
         ),
         if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-        if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
+        if (addButtons.isNotEmpty || timingPill != null) ...<Widget>[
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[...addButtons, ...startActions],
+            children: <Widget>[
+              ...addButtons,
+              if (timingPill != null) timingPill,
+            ],
           ),
         ],
       ],
@@ -1562,52 +1918,10 @@ class _FramesSection extends StatelessWidget {
   }
 }
 
-/// A compact inline section label for narrow layouts, standing in for the
-/// full-width [FieldLabel] row inside a [Wrap].
-class _SectionLabelChip extends StatelessWidget {
-  const _SectionLabelChip({required this.icon, required this.label, this.hint});
-
-  final IconData icon;
-  final String label;
-  final String? hint;
-
-  @override
-  Widget build(BuildContext context) {
-    final row = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(icon, size: 15, color: context.tokens.brass),
-        const SizedBox(width: 6),
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 10.5,
-            letterSpacing: 1.2,
-            fontWeight: FontWeight.w700,
-            color: context.colors.onSurface.withValues(alpha: .82),
-          ),
-        ),
-      ],
-    );
-    return hint == null ? row : Tooltip(message: hint!, child: row);
-  }
-}
-
 class _ReferencesSection extends StatelessWidget {
-  const _ReferencesSection({
-    required this.controller,
-    this.compact = false,
-    this.startActions = const <Widget>[],
-  });
+  const _ReferencesSection({required this.controller});
 
   final AppController controller;
-
-  /// Narrow layouts collapse the section to a single header row with inline
-  /// add buttons and drop the limit summary.
-  final bool compact;
-
-  /// "Or start from" alternates folded into this section's action row.
-  final List<Widget> startActions;
 
   @override
   Widget build(BuildContext context) {
@@ -1679,19 +1993,24 @@ class _ReferencesSection extends StatelessWidget {
       if (!setAside && model.requiresVisualReferenceForAudio)
         'Audio guidance requires at least one image or video reference for this model.',
     ];
-    final tiles = form.references.isEmpty
+    final pendingAdds = controller.pendingReferenceAdds;
+    final tiles = form.references.isEmpty && pendingAdds == 0
         ? null
         : Wrap(
             spacing: 10,
             runSpacing: 10,
-            children: form.references
-                .map(
-                  (reference) => _ReferenceTile(
-                    controller: controller,
-                    reference: reference,
-                  ),
-                )
-                .toList(),
+            children: <Widget>[
+              ...form.references.map(
+                (reference) => _ReferenceTile(
+                  controller: controller,
+                  reference: reference,
+                ),
+              ),
+              for (var index = 0; index < pendingAdds; index += 1)
+                _PendingGuidanceTile(
+                  key: ValueKey('pending-reference-tile-$index'),
+                ),
+            ],
           );
     final addButtons = setAside
         ? const <Widget>[]
@@ -1711,91 +2030,41 @@ class _ReferencesSection extends StatelessWidget {
       fontSize: 10.5,
       height: 1.35,
     );
-    final content = compact
-        ? Column(
-            key: const ValueKey('media-references-section'),
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _SectionLabelChip(
-                icon: Icons.perm_media_rounded,
-                label: 'References',
-                hint: limitSummary,
-              ),
-              if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 7),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[...addButtons, ...startActions],
-                ),
-              ],
-              if (taskChips != null) ...<Widget>[
-                const SizedBox(height: 6),
-                taskChips,
-              ],
-              if (!setAside) ...<Widget>[
-                const SizedBox(height: 8),
-                _ReferenceCapacityGauges(controller: controller),
-              ],
-              for (final note in notes) ...<Widget>[
-                const SizedBox(height: 5),
-                Text(note, style: noteStyle),
-              ],
-              ReferenceUploadIndicator(controller: controller),
-              if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-            ],
-          )
-        : Column(
-            key: const ValueKey('media-references-section'),
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              const FieldLabel(
-                'Creative references · optional',
-                icon: Icons.perm_media_rounded,
-              ),
-              const SizedBox(height: 7),
-              if (taskChips != null) ...<Widget>[
-                taskChips,
-                const SizedBox(height: 7),
-              ],
-              Text(
-                limitSummary,
-                style: TextStyle(
-                  color: context.colors.onSurfaceVariant,
-                  fontSize: 11.5,
-                  height: 1.4,
-                ),
-              ),
-              if (!setAside) ...<Widget>[
-                const SizedBox(height: 10),
-                _ReferenceCapacityGauges(controller: controller),
-              ],
-              for (final note in notes) ...<Widget>[
-                const SizedBox(height: 5),
-                Text(note, style: noteStyle),
-              ],
-              ReferenceUploadIndicator(controller: controller),
-              if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
-              if (addButtons.isNotEmpty || startActions.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: <Widget>[...addButtons, ...startActions],
-                ),
-              ],
-            ],
-          );
-    // The whole section is a drop target, so local files land as references
-    // without touching the pickers. Files sort into image/video/audio by
-    // MIME type or extension inside the controller.
-    return ReferenceDropZone(
-      enabled: !setAside,
-      label: 'Drop to add references',
-      onDropFiles: controller.addDroppedReferenceFiles,
-      child: content,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (taskChips != null) ...<Widget>[
+          taskChips,
+          const SizedBox(height: 7),
+        ],
+        Text(
+          limitSummary,
+          style: TextStyle(
+            color: context.colors.onSurfaceVariant,
+            fontSize: 11,
+            height: 1.4,
+          ),
+        ),
+        if (!setAside) ...<Widget>[
+          const SizedBox(height: 10),
+          _ReferenceCapacityGauges(controller: controller),
+        ],
+        for (final note in notes) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(note, style: noteStyle),
+        ],
+        ReferenceUploadIndicator(controller: controller),
+        if (tiles != null) ...<Widget>[const SizedBox(height: 10), tiles],
+        if (addButtons.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: addButtons,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -1956,6 +2225,58 @@ class _ReferenceNormalizationToggle extends StatelessWidget {
   );
 }
 
+/// Holds the spot where a picked or dropped file's card will land: the same
+/// footprint as a reference/frame tile with a spinner in the thumb zone,
+/// shown while files are chosen, read, or retained.
+class _PendingGuidanceTile extends StatelessWidget {
+  const _PendingGuidanceTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      width: 148,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              height: 76,
+              color: dark
+                  ? ClawnsoleColors.plumInk
+                  : context.colors.surfaceContainer,
+              child: const Center(
+                child: SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Uploading…',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ReferenceTile extends StatelessWidget {
   const _ReferenceTile({required this.controller, required this.reference});
 
@@ -2052,6 +2373,29 @@ class _ReferenceTile extends StatelessWidget {
                 ),
               ),
             ),
+            // A draft picked from References renders immediately but loads
+            // its media bytes in the background; the veil says so until the
+            // real thumbnail is ready.
+            if (controller.isReferenceDraftHydrating(reference.id))
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: .3),
+                      child: const Center(
+                        child: SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               top: 4,
               left: 4,
@@ -2914,6 +3258,9 @@ class _SourceEditor extends StatelessWidget {
   );
 }
 
+/// Frame, Finish, Duration, and the remaining finishing controls in one
+/// column: the two console-key dropdowns share a row (so phones stop
+/// spending a full row on each), and everything else stacks beneath.
 class _SettingsGrid extends StatelessWidget {
   const _SettingsGrid({required this.controller});
 
@@ -2922,79 +3269,86 @@ class _SettingsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final columns = constraints.maxWidth > 640;
-      final first = <Widget>[
+      final pairDropdowns = constraints.maxWidth >= 330;
+      final frame = <Widget>[
         const FieldLabel('Frame', icon: Icons.crop_rounded),
         const SizedBox(height: 6),
         _RatioDropdown(controller: controller),
-        if (controller.selectedModel.outputKind ==
-            GenerationOutputKind.video) ...<Widget>[
-          const SizedBox(height: 10),
-          if (!controller.selectedModel.durationComesFromSource(
-            controller.form.mode,
-          ))
-            _DurationControl(controller: controller),
-          if (controller.selectedModel.supportsFrameRate) ...<Widget>[
-            const SizedBox(height: 10),
-            _FrameRateControl(controller: controller),
-          ],
-        ],
       ];
-      final second = <Widget>[
+      final finish = <Widget>[
         const FieldLabel('Finish', icon: Icons.high_quality_rounded),
         const SizedBox(height: 6),
         _ResolutionDropdown(controller: controller),
-        const SizedBox(height: 4),
-        if (controller.selectedModel.supportsAudio)
-          HardwareSwitchTile(
-            title: 'Synchronized audio',
-            subtitle: 'Dialogue, ambience, and sound',
-            value: controller.form.generateAudio,
-            onChanged: controller.selectedModel.supportsAudio
-                ? controller.setGenerateAudio
-                : null,
-          ),
-        if (controller.selectedModel.supportsDraft)
-          HardwareSwitchTile(
-            title: 'Fast draft',
-            subtitle: 'HD preview now, enhance later',
-            value: controller.form.draft,
-            onChanged: (value) =>
-                controller.updateForm((form) => form.draft = value),
-          ),
-        if (controller.selectedProviderId == 'bfl') ...<Widget>[
-          const SizedBox(height: 6),
-          _SafetyControl(controller: controller),
-        ],
-        if (controller.selectedModel.supportsSeed) ...<Widget>[
-          const SizedBox(height: 8),
-          const FieldLabel('Seed', icon: Icons.tag_rounded),
-          const SizedBox(height: 6),
-          _SeedControl(controller: controller),
-        ],
       ];
-      if (!columns) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[...first, const SizedBox(height: 16), ...second],
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: first,
+          if (pairDropdowns)
+            Row(
+              key: const ValueKey('frame-finish-row'),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: frame,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: finish,
+                  ),
+                ),
+              ],
+            )
+          else ...<Widget>[...frame, const SizedBox(height: 12), ...finish],
+          if (controller.selectedModel.outputKind ==
+                  GenerationOutputKind.video &&
+              !controller.selectedModel.durationComesFromSource(
+                controller.form.mode,
+              )) ...<Widget>[
+            const SizedBox(height: 12),
+            _DurationControl(controller: controller),
+          ],
+          if (controller.selectedModel.outputKind ==
+                  GenerationOutputKind.video &&
+              controller.selectedModel.supportsFrameRate) ...<Widget>[
+            const SizedBox(height: 10),
+            _FrameRateControl(controller: controller),
+          ],
+          if (controller.selectedModel.supportsAudio) ...<Widget>[
+            const SizedBox(height: 8),
+            HardwareSwitchTile(
+              title: 'Synchronized audio',
+              subtitle: 'Dialogue, ambience, and sound',
+              value: controller.form.generateAudio,
+              onChanged: controller.selectedModel.supportsAudio
+                  ? controller.setGenerateAudio
+                  : null,
             ),
-          ),
-          const SizedBox(width: 26),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: second,
+          ],
+          if (controller.selectedModel.supportsDraft) ...<Widget>[
+            const SizedBox(height: 4),
+            HardwareSwitchTile(
+              title: 'Fast draft',
+              subtitle: 'HD preview now, enhance later',
+              value: controller.form.draft,
+              onChanged: (value) =>
+                  controller.updateForm((form) => form.draft = value),
             ),
-          ),
+          ],
+          if (controller.selectedProviderId == 'bfl') ...<Widget>[
+            const SizedBox(height: 10),
+            _SafetyControl(controller: controller),
+          ],
+          if (controller.selectedModel.supportsSeed) ...<Widget>[
+            const SizedBox(height: 12),
+            const FieldLabel('Seed', icon: Icons.tag_rounded),
+            const SizedBox(height: 6),
+            _SeedControl(controller: controller),
+          ],
         ],
       );
     },

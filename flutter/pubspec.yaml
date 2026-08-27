@@ -107,6 +107,15 @@ flutter:
           weight: 500
         - asset: assets/fonts/DMSans-700.ttf
           weight: 700
+    - family: Courier Prime
+      fonts:
+        - asset: assets/fonts/CourierPrime-400.ttf
+          weight: 400
+        - asset: assets/fonts/CourierPrime-700.ttf
+          weight: 700
+        - asset: assets/fonts/CourierPrime-400-Italic.ttf
+          weight: 400
+          style: italic
 
   # To add assets to your application, add an assets section, like this:
   # assets:

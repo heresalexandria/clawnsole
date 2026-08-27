@@ -756,6 +756,98 @@ void main() {
     expect(controller.referenceUploadInProgress, isFalse);
   });
 
+  testWidgets('picking media holds loading tiles until the cards attach', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1400));
+    final pickerResults = <Completer<FilePickerResult?>>[
+      Completer<FilePickerResult?>(),
+      Completer<FilePickerResult?>(),
+    ];
+    var pickerCalls = 0;
+    final gateway = _ReferenceGateway(emptySnapshot);
+    final controller =
+        AppController(
+            gateway: gateway,
+            filePicker:
+                ({
+                  required FileType type,
+                  required bool allowMultiple,
+                  required bool withData,
+                }) => pickerResults[pickerCalls++].future,
+          )
+          ..snapshot = emptySnapshot
+          ..loading = false
+          ..selectedProviderId = 'artcraft'
+          ..selectedModelId = 'seedance_2p5';
+    addTearDown(() async {
+      for (final pending in pickerResults) {
+        if (!pending.isCompleted) pending.complete(null);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+      controller.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+
+    // A reference pick reserves a loading tile from the moment the picker
+    // opens; a canceled pick releases it.
+    final referenceAdd = controller.addMediaReferences(
+      MediaReferenceKind.image,
+    );
+    await tester.pump();
+    expect(controller.pendingReferenceAdds, 1);
+    expect(
+      find.byKey(const ValueKey('pending-reference-tile-0')),
+      findsOneWidget,
+    );
+    pickerResults[0].complete(null);
+    await referenceAdd;
+    await tester.pump();
+    expect(controller.pendingReferenceAdds, 0);
+    expect(
+      find.byKey(const ValueKey('pending-reference-tile-0')),
+      findsNothing,
+    );
+
+    // A keyframe pick runs the whole pick-and-retain pipeline before the
+    // frame attaches, so its tile holds the spot too.
+    final frameAdd = controller.addImageFrame(KeyframeRole.start);
+    await tester.pump();
+    expect(controller.pendingFrameAdds, 1);
+    expect(find.byKey(const ValueKey('pending-frame-tile-0')), findsOneWidget);
+    pickerResults[1].complete(null);
+    await frameAdd;
+    await tester.pump();
+    expect(controller.pendingFrameAdds, 0);
+    expect(find.byKey(const ValueKey('pending-frame-tile-0')), findsNothing);
+
+    // Dropped files reserve one tile each while their bytes are read.
+    controller.noteIncomingDroppedFiles(2);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('pending-reference-tile-1')),
+      findsOneWidget,
+    );
+    await controller.addDroppedReferenceFiles(const <DroppedFile>[]);
+    await tester.pump();
+    expect(controller.pendingReferenceAdds, 0);
+    expect(
+      find.byKey(const ValueKey('pending-reference-tile-0')),
+      findsNothing,
+    );
+  });
+
   testWidgets('trim dialog surfaces duration failures with a retry', (
     tester,
   ) async {

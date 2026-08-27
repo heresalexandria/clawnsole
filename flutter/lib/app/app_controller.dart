@@ -489,6 +489,28 @@ class AppController extends ChangeNotifier {
 
   bool get referenceUploadInProgress => _referenceUploadDepth > 0;
 
+  int _pendingPickerReferenceAdds = 0;
+  int _pendingDropReferenceAdds = 0;
+  int _pendingFrameAdds = 0;
+
+  /// Reference cards expected to appear but not yet appended to the form —
+  /// a picker still choosing or reading files, or dropped files being read.
+  /// The Create screen renders one loading tile per pending add.
+  int get pendingReferenceAdds =>
+      _pendingPickerReferenceAdds + _pendingDropReferenceAdds;
+
+  /// Keyframe cards expected to appear but not yet appended to the form
+  /// (the pick-and-retain pipeline runs before a frame attaches).
+  int get pendingFrameAdds => _pendingFrameAdds;
+
+  /// Reserves loading tiles for files just dropped on the references area,
+  /// covering the read phase before [addDroppedReferenceFiles] can run.
+  void noteIncomingDroppedFiles(int count) {
+    if (count <= 0) return;
+    _pendingDropReferenceAdds += count;
+    notifyListeners();
+  }
+
   List<ReferenceImportProgress> get referenceImports =>
       List<ReferenceImportProgress>.unmodifiable(_referenceImports);
 
@@ -4080,6 +4102,10 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
+    // The whole pick-and-retain pipeline runs before the frame attaches, so
+    // a loading tile holds the card's spot from the first tap.
+    _pendingFrameAdds += 1;
+    notifyListeners();
     try {
       final asset = await _pick(type: FileType.image, source: source);
       if (asset != null) {
@@ -4097,6 +4123,9 @@ class AppController extends ChangeNotifier {
       }
     } on Object catch (error) {
       showNotice(_message(error));
+    } finally {
+      _pendingFrameAdds -= 1;
+      notifyListeners();
     }
   }
 
@@ -4138,6 +4167,7 @@ class AppController extends ChangeNotifier {
   }) async {
     if (!canAddReference(kind)) return;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
+    _pendingPickerReferenceAdds += 1;
     List<PickedAsset> picked;
     try {
       picked = await _pickMany(switch (kind) {
@@ -4149,6 +4179,9 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
       return;
     } finally {
+      // The decrement and the appends below land in one synchronous stretch,
+      // so the loading tile swaps for the real drafts without a gap frame.
+      _pendingPickerReferenceAdds -= 1;
       _finishReferenceUpload();
     }
     await attachPickedReferences(kind, picked);
@@ -4261,7 +4294,13 @@ class AppController extends ChangeNotifier {
   /// Attaches files dropped on the Create screen's references area, sorting
   /// each file into its reference kind by MIME type or extension.
   Future<void> addDroppedReferenceFiles(List<DroppedFile> files) async {
-    if (files.isEmpty) return;
+    // Loading tiles reserved by [noteIncomingDroppedFiles] hand over to the
+    // real drafts appended below (or clear outright for unsupported drops).
+    if (_pendingDropReferenceAdds != 0) _pendingDropReferenceAdds = 0;
+    if (files.isEmpty) {
+      notifyListeners();
+      return;
+    }
     final grouped = _classifyDroppedFiles(files, (unsupported) {
       showNotice(
         unsupported == files.length

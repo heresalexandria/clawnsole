@@ -305,7 +305,11 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           maxLines: widget.expands ? null : 10,
           maxLength: widget.maxLength ?? 50000,
           maxLengthEnforcement: MaxLengthEnforcement.enforced,
-          style: const TextStyle(fontSize: 14.5, height: 1.5),
+          style: const TextStyle(
+            fontFamily: promptFontFamily,
+            fontSize: 14,
+            height: 1.55,
+          ),
           onChanged: widget.onChanged,
           decoration: InputDecoration(
             hintText: widget.references.isEmpty

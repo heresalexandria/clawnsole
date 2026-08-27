@@ -264,7 +264,7 @@ class GenerationVideo extends StatefulWidget {
 
   /// Height of the frame timeline plus the transport bar rendered under the
   /// video surface, so hosts can size themselves around a known video height.
-  static const double chromeHeight = 46.0 + 48.0;
+  static const double chromeHeight = 34.0 + 40.0;
 
   final Uri uri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
@@ -650,12 +650,16 @@ class _VideoControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     color: ClawnsoleColors.plumInk,
+    // The inline bar matches GenerationVideo.chromeHeight's transport share
+    // so playback chrome swaps in at exactly the card's reserved height.
+    height: fullscreen ? 48 : 40,
     padding: const EdgeInsets.symmetric(horizontal: 8),
     child: Row(
       children: <Widget>[
         IconButton(
           tooltip: value.isPlaying ? 'Pause (Space)' : 'Play (Space)',
           color: Colors.white,
+          visualDensity: VisualDensity.compact,
           icon: Icon(
             value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
           ),
@@ -673,6 +677,7 @@ class _VideoControls extends StatelessWidget {
         IconButton(
           tooltip: 'Download video…',
           color: Colors.white,
+          visualDensity: VisualDensity.compact,
           onPressed: saving ? null : onDownload,
           icon: saving
               ? const SizedBox.square(
@@ -688,6 +693,7 @@ class _VideoControls extends StatelessWidget {
           IconButton(
             tooltip: fullscreen ? 'Exit fullscreen (Esc)' : 'Enter fullscreen',
             color: Colors.white,
+            visualDensity: VisualDensity.compact,
             onPressed: onFullscreen,
             icon: Icon(
               fullscreen
@@ -700,6 +706,7 @@ class _VideoControls extends StatelessWidget {
             key: const ValueKey('video-close-button'),
             tooltip: 'Close (Esc)',
             color: Colors.white,
+            visualDensity: VisualDensity.compact,
             onPressed: onClose,
             icon: const Icon(Icons.close_rounded),
           ),

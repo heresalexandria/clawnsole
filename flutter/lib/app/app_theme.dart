@@ -324,6 +324,10 @@ ColorScheme _darkScheme() => const ColorScheme(
 const _display = 'Fraunces';
 const _text = 'DM Sans';
 
+/// The typewriter voice for direction/prompt entry — bundled Courier Prime,
+/// so every platform renders the same script-page feel.
+const String promptFontFamily = 'Courier Prime';
+
 TextTheme _textTheme() => const TextTheme(
   displayLarge: TextStyle(
     fontFamily: _display,
