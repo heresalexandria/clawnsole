@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "kling/kling-o1",
+  "canonical_model_id": "kling-o1",
+  "label": "Kling o1",
+  "description": "Kling o1 reasoning-guided generation with pinned frames.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "Default output"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.1176,
+  "reference_usd_per_second": 0.1176,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_audio": false
+}

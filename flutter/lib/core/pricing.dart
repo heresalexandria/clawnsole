@@ -315,6 +315,8 @@ ProviderModelPrice? _pricedModel(
       '$modelId:${config.generateAudio ? 'audio' : 'silent'}',
     if (modelId == 'gemini_omni_flash')
       '$modelId:${mode == VideoMode.v2v ? 'edit' : 'generation'}',
+    if (mode == VideoMode.v2v) '$modelId:$resolutionLabel:edit',
+    '$modelId:$resolutionLabel:${config.generateAudio ? 'audio' : 'silent'}',
     '$modelId:$resolutionLabel',
     modelId,
   ];

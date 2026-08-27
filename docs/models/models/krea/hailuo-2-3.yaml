@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "minimax/hailuo-2.3",
+  "canonical_model_id": "hailuo-2.3",
+  "label": "Hailuo 2.3",
+  "description": "Hailuo 2.3 with pinned frames at 768p or 1080p.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "768p class"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 4,
+  "max_keyframes": 2,
+  "usd_per_second": 0.049,
+  "reference_usd_per_second": 0.049,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_audio": false
+}

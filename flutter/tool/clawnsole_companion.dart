@@ -96,6 +96,7 @@ Future<void> main(List<String> arguments) async {
           Platform.environment['RUNWAY_KEY']?.trim() ??
           Platform.environment['RUNWAYML_API_SECRET']?.trim() ??
           '',
+      'krea': Platform.environment['KREA_API_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
     requestToken: bootstrap.requestToken,

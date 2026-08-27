@@ -4,6 +4,7 @@ import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/atlas_cloud_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
+import 'package:clawnsole/core/krea_api.dart';
 import 'package:clawnsole/core/ltx_api.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
@@ -247,6 +248,333 @@ void main() {
     expect(avatars.single.pricingUnit, 'realtime-session');
   });
 
+  test('Krea verifies an API key with a one-item job listing', () async {
+    final api = KreaApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/jobs');
+        expect(request.url.queryParameters['limit'], '1');
+        expect(request.headers['authorization'], 'Bearer krea-secret');
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'items': <Object?>[],
+            'next_cursor': null,
+          }),
+          200,
+        );
+      }),
+    );
+
+    final account = await api.verify('krea-secret');
+    expect(account.provider, 'krea');
+    expect(account.balance, isNull);
+    expect(account.balanceLabel, 'Open Krea to view usage ↗');
+  });
+
+  test('Krea maps pinned frames and neutral settings onto Veo 3.1', () async {
+    late Map<String, Object?> requestBody;
+    final api = KreaApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/generate/video/google/veo-3.1');
+        expect(request.headers['authorization'], 'Bearer krea-secret');
+        expect(request.headers['content-type'], startsWith('application/json'));
+        requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'job_id': '11111111-1111-4111-8111-111111111111',
+            'status': 'queued',
+          }),
+          200,
+        );
+      }),
+    );
+
+    final receipt = await api.submit(
+      'krea-secret',
+      'google/veo-3.1',
+      <String, Object?>{
+        'mode': 'i2v',
+        'prompt': '',
+        'duration': 4,
+        'resolution': 'fhd',
+        'aspect_ratio': '9:16',
+        'generate_audio': true,
+        'keyframes': <String>[
+          'https://cdn.test/first.png',
+          'https://cdn.test/last.png',
+        ],
+      },
+    );
+
+    expect(requestBody['start_image'], 'https://cdn.test/first.png');
+    expect(requestBody['end_image'], 'https://cdn.test/last.png');
+    expect(requestBody['resolution'], '1080p');
+    expect(requestBody['aspect_ratio'], '9:16');
+    expect(requestBody['duration'], 4);
+    expect(requestBody['generate_audio'], isTrue);
+    expect(receipt['id'], '11111111-1111-4111-8111-111111111111');
+    expect(
+      receipt['polling_url'],
+      'https://api.krea.ai/jobs/11111111-1111-4111-8111-111111111111',
+    );
+  });
+
+  test('Krea maps quality tiers and pixel dimensions per route', () async {
+    Future<Map<String, Object?>> submitted(
+      String model,
+      Map<String, Object?> input,
+    ) async {
+      late Map<String, Object?> requestBody;
+      final api = KreaApi(
+        client: MockClient((request) async {
+          expect(request.url.path, '/generate/video/$model');
+          requestBody = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+            (key, value) => MapEntry(key.toString(), value),
+          );
+          return http.Response(
+            '{"job_id":"33333333-3333-4333-8333-333333333333",'
+            '"status":"queued"}',
+            200,
+          );
+        }),
+      );
+      await api.submit('secret', model, input);
+      return requestBody;
+    }
+
+    const common = <String, Object?>{
+      'mode': 't2v',
+      'prompt': 'A sloth reviews the quarterly numbers. Slowly.',
+      'duration': 5,
+      'aspect_ratio': '16:9',
+      'generate_audio': false,
+    };
+
+    final klingPro = await submitted('kling/kling-3.0', <String, Object?>{
+      ...common,
+      'resolution': 'fhd',
+    });
+    expect(klingPro['mode'], 'pro');
+    expect(klingPro, isNot(contains('resolution')));
+
+    final kling4k = await submitted('kling/kling-3.0', <String, Object?>{
+      ...common,
+      'resolution': '4k',
+    });
+    expect(kling4k['mode'], '4k');
+
+    final ray = await submitted('luma/ray-2', <String, Object?>{
+      ...common,
+      'resolution': 'hd',
+    });
+    expect(ray['width'], 1280);
+    expect(ray['height'], 720);
+    expect(ray, isNot(contains('duration')));
+
+    final gen45 = await submitted('runway/gen-4.5', <String, Object?>{
+      ...common,
+      'resolution': 'hd',
+      'aspect_ratio': '21:9',
+    });
+    expect(gen45['aspect_ratio'], '1584:672');
+
+    final hailuo = await submitted('minimax/hailuo-2.3', <String, Object?>{
+      ...common,
+      'resolution': 'hd',
+    });
+    expect(hailuo['resolution'], '768p');
+    expect(hailuo, isNot(contains('aspect_ratio')));
+  });
+
+  test('Krea uploads data-URI media through its assets endpoint', () async {
+    late Map<String, Object?> generation;
+    var assetUploadSeen = false;
+    final api = KreaApi(
+      client: MockClient((request) async {
+        if (request.url.path == '/assets') {
+          assetUploadSeen = true;
+          expect(request.method, 'POST');
+          expect(request.headers['authorization'], 'Bearer secret');
+          expect(
+            request.headers['content-type'],
+            startsWith('multipart/form-data'),
+          );
+          return http.Response(
+            jsonEncode(<String, Object?>{
+              'id': '22222222-2222-4222-8222-222222222222',
+              'image_url': 'https://app-uploads.krea.test/asset.png',
+              'uploaded_at': '2026-08-27T00:00:00Z',
+              'width': 1,
+              'height': 1,
+              'size_bytes': 68,
+              'mime_type': 'image/png',
+            }),
+            200,
+          );
+        }
+        expect(request.url.path, '/generate/video/bytedance/seedance-2-mini');
+        generation = (jsonDecode(request.body) as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+        return http.Response(
+          '{"job_id":"44444444-4444-4444-8444-444444444444",'
+          '"status":"queued"}',
+          200,
+        );
+      }),
+    );
+
+    await api.submit('secret', 'bytedance/seedance-2-mini', <String, Object?>{
+      'mode': 't2v',
+      'prompt': 'Animate the crest.',
+      'duration': 4,
+      'resolution': 'hd',
+      'aspect_ratio': '16:9',
+      'generate_audio': false,
+      'keyframes': <String>[
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      ],
+    });
+
+    expect(assetUploadSeen, isTrue);
+    expect(
+      generation['start_image'],
+      'https://app-uploads.krea.test/asset.png',
+    );
+  });
+
+  test('Krea normalizes job states and extracts final result URLs', () async {
+    final responses = <String>[
+      jsonEncode(<String, Object?>{'job_id': 'x', 'status': 'scheduled'}),
+      jsonEncode(<String, Object?>{'job_id': 'x', 'status': 'sampling'}),
+      jsonEncode(<String, Object?>{
+        'job_id': 'x',
+        'status': 'completed',
+        'result': <String, Object?>{
+          'urls': <Object?>[
+            <String, Object?>{
+              'type': 'preview',
+              'url': 'https://cdn.krea.test/p.gif',
+            },
+            <String, Object?>{
+              'type': 'model',
+              'url': 'https://cdn.krea.test/final.mp4',
+            },
+          ],
+        },
+      }),
+      jsonEncode(<String, Object?>{
+        'job_id': 'x',
+        'status': 'completed',
+        'result': <String, Object?>{
+          'urls': <String>['https://cdn.krea.test/plain.mp4'],
+        },
+      }),
+    ];
+    final api = KreaApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/jobs/x');
+        return http.Response(responses.removeAt(0), 200);
+      }),
+    );
+    const pollingUrl = 'https://api.krea.ai/jobs/x';
+
+    final queued = await api.poll('secret', pollingUrl);
+    expect(queued['status'], 'queued');
+    expect(queued, isNot(contains('outputs')));
+
+    final processing = await api.poll('secret', pollingUrl);
+    expect(processing['status'], 'processing');
+
+    final completed = await api.poll('secret', pollingUrl);
+    expect(completed['status'], 'completed');
+    expect(normalizeGenerationStatus(completed['status']), 'Ready');
+    expect(completed['outputs'], <String>['https://cdn.krea.test/final.mp4']);
+
+    final plain = await api.poll('secret', pollingUrl);
+    expect(plain['outputs'], <String>['https://cdn.krea.test/plain.mp4']);
+  });
+
+  test('Krea rejects polling URLs outside its own jobs path', () async {
+    var requests = 0;
+    final api = KreaApi(
+      client: MockClient((_) async {
+        requests += 1;
+        return http.Response('{}', 200);
+      }),
+    );
+
+    await expectLater(
+      api.poll('secret', 'https://evil.example/jobs/x'),
+      throwsA(isA<ProviderException>()),
+    );
+    await expectLater(
+      api.poll('secret', 'https://api.krea.ai/other/x'),
+      throwsA(isA<ProviderException>()),
+    );
+    expect(requests, 0);
+  });
+
+  test('Krea live spec exposes new video routes as audited-pending', () async {
+    final api = KreaApi(
+      client: MockClient((request) async {
+        expect(request.url.path, '/openapi.json');
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            'paths': <String, Object?>{
+              '/generate/video/newvendor/new-model': <String, Object?>{
+                'post': <String, Object?>{'summary': 'New Model'},
+              },
+              '/generate/video/google/veo-3.1': <String, Object?>{
+                'post': <String, Object?>{'summary': 'Veo 3.1'},
+              },
+            },
+          }),
+          200,
+        );
+      }),
+    );
+    final published = publishedProviderPrices('krea');
+
+    final models = await api.listVideoModels();
+    expect(models, hasLength(published.length + 1));
+    final discovered = models.where(
+      (model) => model.model == 'newvendor/new-model',
+    );
+    expect(discovered, hasLength(1));
+    expect(discovered.single.label, 'New Model');
+    expect(discovered.single.createReady, isFalse);
+    expect(discovered.single.pricingUnit, 'catalog-unpriced');
+    expect(
+      models.where((model) => !model.createReady),
+      hasLength(published.where((model) => !model.createReady).length + 1),
+    );
+    expect(
+      models.where(
+        (model) =>
+            model.model.split(':').first == 'google/veo-3.1' &&
+            !model.createReady,
+      ),
+      isEmpty,
+    );
+
+    final unavailable = KreaApi(
+      client: MockClient((_) async => http.Response('unavailable', 500)),
+    );
+    expect(
+      (await unavailable.listVideoModels()).map((model) => model.model),
+      published.map((model) => model.model),
+    );
+    final offline = KreaApi(
+      client: MockClient((_) async => throw http.ClientException('offline')),
+    );
+    expect(
+      (await offline.listVideoModels()).map((model) => model.model),
+      published.map((model) => model.model),
+    );
+  });
+
   test('BFL routes video upscale requests and sends raw base64', () async {
     late http.Request captured;
     final api = BflApi(
@@ -440,9 +768,19 @@ void main() {
         return http.Response('{}', 200);
       }),
     );
+    final krea = KreaApi(
+      client: MockClient((_) async {
+        requests += 1;
+        return http.Response('{}', 200);
+      }),
+    );
 
     await expectLater(
       ltx.poll('secret', 'https://example.com/v2/text-to-video/job'),
+      throwsA(isA<ProviderException>()),
+    );
+    await expectLater(
+      krea.poll('secret', 'https://example.com/jobs/job'),
       throwsA(isA<ProviderException>()),
     );
     await expectLater(
@@ -610,6 +948,36 @@ void main() {
         'happyhorse_1_0': '1/0/0/0/-/mix/audio-ok',
         'gemini_omni_flash': '1/5/0/0/-/exclusive/audio-ok',
         'magnific_video_upscaler_creative': '0/0/0/0/-/mix/audio-ok',
+      },
+    );
+    expect(
+      <String, String>{
+        for (final model in kreaProvider.models) model.id: constraint(model),
+      },
+      <String, String>{
+        'alibaba/wan-2.5': '1/0/0/0/-/mix/audio-ok',
+        'alibaba/wan-3.0': '2/10/5/5/-/mix/audio-ok',
+        'black-forest-labs/flux-3-video': '2/0/0/0/-/mix/audio-ok',
+        'bytedance/seedance-2': '2/9/3/3/-/mix/audio-ok',
+        'bytedance/seedance-2-5': '2/30/10/10/-/mix/audio-ok',
+        'bytedance/seedance-2-fast': '2/9/3/3/-/mix/audio-ok',
+        'bytedance/seedance-2-mini': '2/9/3/3/-/mix/audio-ok',
+        'google/veo-3.1': '2/3/0/0/-/mix/audio-ok',
+        'google/veo-3.1-fast': '2/3/0/0/-/mix/audio-ok',
+        'google/veo-3.1-lite': '2/0/0/0/-/mix/audio-ok',
+        'kling/kling-2.6': '2/0/0/0/-/mix/audio-ok',
+        'kling/kling-3.0': '2/0/0/0/-/mix/audio-ok',
+        'kling/kling-o1': '2/0/0/0/-/mix/audio-ok',
+        'lightricks/ltx-video-2.5-fast': '2/0/0/0/-/mix/audio-ok',
+        'lightricks/ltx-video-2.5-pro': '2/0/0/0/-/mix/audio-ok',
+        'luma/ray-2': '1/0/0/0/-/mix/audio-ok',
+        'minimax/h3-max': '2/0/0/0/-/mix/audio-ok',
+        'minimax/hailuo-2.3': '2/0/0/0/-/mix/audio-ok',
+        'minimax/hailuo-2.3-fast': '2/0/0/0/-/mix/audio-ok',
+        'minimax/hailuo-3': '2/9/3/3/-/mix/audio-ok',
+        'runway/gen-4.5': '1/0/0/0/-/mix/audio-ok',
+        'vidu/q3': '1/0/0/0/-/mix/audio-ok',
+        'xai/grok-video-1.5': '1/0/0/0/-/mix/audio-ok',
       },
     );
     expect(
@@ -1502,6 +1870,65 @@ void main() {
     expect(ltxRows.first.priceFor(10), .3);
     expect(ltxRows.first.supportsDuration(15), isFalse);
     expect(ltxRows.first.supportsDuration(20), isTrue);
+  });
+
+  test('Krea cost estimates use the fixed published route card', () {
+    const config = GenerationConfig(
+      aspectRatio: '16:9',
+      duration: 4,
+      resolution: 'hd',
+      generateAudio: false,
+      safetyTolerance: 2,
+      draft: false,
+    );
+    final prices = publishedProviderPrices('krea');
+
+    final silent = estimateCost(
+      'krea',
+      'google/veo-3.1',
+      VideoMode.t2v,
+      config,
+      const <Generation>[],
+      prices,
+    );
+    expect(silent.minimumUsd, .84);
+    expect(silent.rateUsd, .21);
+
+    final audio = estimateCost(
+      'krea',
+      'google/veo-3.1',
+      VideoMode.t2v,
+      const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 4,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      const <Generation>[],
+      prices,
+    );
+    expect(audio.minimumUsd, 1.68);
+    expect(audio.rateUsd, .42);
+
+    final edit = estimateCost(
+      'krea',
+      'black-forest-labs/flux-3-video',
+      VideoMode.v2v,
+      const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 5,
+        resolution: 'hd',
+        generateAudio: false,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      const <Generation>[],
+      prices,
+    );
+    expect(edit.minimumUsd, 2.05);
+    expect(edit.rateUsd, .41);
   });
 
   test('Runway estimate includes known Seedance input-video credits', () {

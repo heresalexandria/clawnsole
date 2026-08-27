@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "xai/grok-video-1.5",
+  "canonical_model_id": "grok-imagine-video-1.5",
+  "label": "Grok Imagine 1.5",
+  "description": "Fast Grok generation with image or video input up to Full HD.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.084,
+  "reference_usd_per_second": 0.084,
+  "supports_start_frame": true,
+  "supports_audio": false,
+  "max_prompt_characters": 4096
+}

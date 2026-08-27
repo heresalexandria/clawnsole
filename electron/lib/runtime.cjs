@@ -14,6 +14,7 @@ const EXTERNAL_HOSTS = new Set([
   "storyteller-docs.netlify.app",
   "support.apple.com",
   "www.atlascloud.ai",
+  "www.krea.ai",
   "heresalexandria.com",
   "heresalexandria.github.io",
 ]);

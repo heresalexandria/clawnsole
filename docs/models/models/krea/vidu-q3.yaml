@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "vidu/q3",
+  "canonical_model_id": "vidu-q3",
+  "label": "Vidu Q3",
+  "description": "Vidu Q3 generation with audio from one to sixteen seconds.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "960 × 540"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 16,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.0735,
+  "reference_usd_per_second": 0.0735,
+  "supports_start_frame": true,
+  "supports_seed": true,
+  "max_prompt_characters": 2000
+}
