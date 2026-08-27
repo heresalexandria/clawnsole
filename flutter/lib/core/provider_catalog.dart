@@ -2670,6 +2670,21 @@ const appleLocalProvider = VideoProviderDefinition(
   ],
 );
 
+/// Provider ids served by the direct HTTP adapters on every platform.
+///
+/// This is the availability set for gateways without a platform gate of their
+/// own (the desktop companion and the direct gateway's default). Local,
+/// on-device providers are excluded here and stay platform-gated where the
+/// platform is known.
+const Set<String> remoteProviderIds = <String>{
+  'bfl',
+  'ltx',
+  'artcraft',
+  'atlas',
+  'runway',
+  'krea',
+};
+
 const bundledVideoProviders = <VideoProviderDefinition>[
   appleLocalProvider,
   _artCraftProvider,

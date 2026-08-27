@@ -2055,6 +2055,20 @@ void main() {
     );
   });
 
+  test('every bundled remote provider is available on every gateway', () {
+    // The desktop companion and the direct gateway's default availability set
+    // both serve remoteProviderIds; a provider added to the bundled catalog
+    // without joining that set ships on native builds but silently vanishes
+    // from desktop, so the two must move together.
+    expect(
+      remoteProviderIds,
+      bundledVideoProviders
+          .where((provider) => !provider.isLocal)
+          .map((provider) => provider.id)
+          .toSet(),
+    );
+  });
+
   test(
     'Atlas uses each model family schema instead of one generic payload',
     () {

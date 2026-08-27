@@ -61,13 +61,7 @@ class DirectGateway
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
     this.persistenceDescription = 'Durable Clawnsole data store',
-    this.availableProviders = const <String>{
-      'bfl',
-      'ltx',
-      'artcraft',
-      'atlas',
-      'runway',
-    },
+    this.availableProviders = remoteProviderIds,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _client = client ?? http.Client(),

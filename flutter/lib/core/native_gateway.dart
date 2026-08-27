@@ -69,12 +69,7 @@ const _configuredMobileTestArtCraftApiKeyId = String.fromEnvironment(
 );
 
 Set<String> _nativeAvailableProviders(bool isIos) => <String>{
-  'bfl',
-  'ltx',
-  'artcraft',
-  'atlas',
-  'runway',
-  'krea',
+  ...remoteProviderIds,
   if (isIos) 'apple-local',
 };
 

@@ -1884,13 +1884,7 @@ class CompanionApp {
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
-      availableProviders: const <String>{
-        'bfl',
-        'ltx',
-        'artcraft',
-        'atlas',
-        'runway',
-      },
+      availableProviders: remoteProviderIds,
       settingsVault:
           _store.vault?.settingsVaultStatus ??
           const SettingsVaultStatus.unavailable(),
