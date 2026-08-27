@@ -50,6 +50,10 @@ void main() {
       );
       expect(tester.takeException(), isNull);
       await tester.tap(
+        find.byKey(const ValueKey<String>('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
         find.byKey(const ValueKey<String>('add-video-reference')),
       );
       await tester.pumpAndSettle();

@@ -161,7 +161,10 @@ void main() {
     expect(size.width, lessThan(1280));
     expect(size.height, lessThan(800));
     // 1920x1080 media: the video area above the chrome keeps 16:9.
-    expect(size.width / (size.height - 94), closeTo(16 / 9, .05));
+    expect(
+      size.width / (size.height - GenerationVideo.chromeHeight),
+      closeTo(16 / 9, .05),
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();

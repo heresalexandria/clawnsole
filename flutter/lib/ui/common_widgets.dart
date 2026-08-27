@@ -2724,23 +2724,24 @@ class _MediaPlaceholder extends StatelessWidget {
   }
 }
 
-class GenerationCost extends StatefulWidget {
-  const GenerationCost({required this.item, super.key, this.compact = false});
+/// The card cost readout as a compact chip that sits on the card's action
+/// row: just the credit (or dollar) figure at a glance, with the realized/
+/// estimated breakdown in a small anchored popover on tap.
+class GenerationCostChip extends StatefulWidget {
+  const GenerationCostChip({required this.item, super.key});
 
   final Generation item;
-  final bool compact;
 
   @override
-  State<GenerationCost> createState() => _GenerationCostState();
+  State<GenerationCostChip> createState() => _GenerationCostChipState();
 }
 
-class _GenerationCostState extends State<GenerationCost> {
-  bool _expanded = false;
+class _GenerationCostChipState extends State<GenerationCostChip> {
+  final MenuController _menu = MenuController();
 
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final compact = widget.compact;
     if (item.billingUnit == 'local') return const SizedBox.shrink();
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
@@ -2759,9 +2760,20 @@ class _GenerationCostState extends State<GenerationCost> {
         : context.colors.onSecondaryContainer;
     final detailStyle = TextStyle(
       fontSize: 10.5,
-      color: foreground.withValues(alpha: .8),
+      height: 1.4,
+      color: context.colors.onSurfaceVariant,
     );
     final details = <Widget>[
+      Text(
+        '${exact ? 'Realized cost' : 'Estimated'} · '
+        '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}'
+        ' · ${usesUsd ? providerNameForHistory(item.provider) : formatUsdRange(minimum, maximum)}',
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: context.colors.onSurface,
+        ),
+      ),
       if (item.creditsBefore != null && item.creditsAfter != null)
         Text(
           usesUsd
@@ -2785,79 +2797,80 @@ class _GenerationCostState extends State<GenerationCost> {
           style: detailStyle,
         ),
     ];
-    // At a glance a card only needs the realized figure; the balance and
-    // quote trail sit behind the chevron.
-    final expandable = !compact && details.isNotEmpty;
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(11),
-      child: InkWell(
-        key: expandable ? const ValueKey('generation-cost-toggle') : null,
-        borderRadius: BorderRadius.circular(11),
-        onTap: expandable ? () => setState(() => _expanded = !_expanded) : null,
-        child: Padding(
-          padding: EdgeInsets.all(compact ? 9 : 12),
+    return MenuAnchor(
+      controller: _menu,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll<Color>(context.colors.surface),
+        elevation: const WidgetStatePropertyAll<double>(10),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: context.colors.outlineVariant),
+          ),
+        ),
+      ),
+      menuChildren: <Widget>[
+        Container(
+          key: const ValueKey('generation-cost-details'),
+          constraints: const BoxConstraints(maxWidth: 320),
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Row(
+              for (
+                var index = 0;
+                index < details.length;
+                index += 1
+              ) ...<Widget>[
+                if (index > 0) const SizedBox(height: 5),
+                details[index],
+              ],
+            ],
+          ),
+        ),
+      ],
+      builder: (context, menu, _) => Tooltip(
+        message: exact
+            ? 'Realized cost — tap for details'
+            : 'Estimated cost — tap for details',
+        child: Material(
+          color: background,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            key: const ValueKey('generation-cost-toggle'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => menu.isOpen ? menu.close() : menu.open(),
+            child: Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 11),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(
-                    Icons.toll_rounded,
-                    size: compact ? 13 : 15,
-                    color: foreground,
-                  ),
+                  Icon(Icons.toll_rounded, size: 14, color: foreground),
                   const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${exact ? 'Realized cost' : 'Estimated'} · '
-                      '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
-                      style: TextStyle(
-                        fontSize: compact ? 11 : 12,
-                        fontWeight: FontWeight.w700,
-                        color: foreground,
-                      ),
-                    ),
-                  ),
                   Text(
                     usesUsd
-                        ? providerNameForHistory(item.provider)
-                        : formatUsdRange(minimum, maximum),
+                        ? formatUsdAmountRange(minimum, maximum)
+                        : '${formatCreditRange(minimum, maximum)} cr',
                     style: TextStyle(
-                      fontSize: compact ? 11 : 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                       color: foreground,
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures(),
+                      ],
                     ),
                   ),
-                  if (expandable) ...<Widget>[
-                    const SizedBox(width: 4),
-                    Icon(
-                      _expanded
-                          ? Icons.keyboard_arrow_up_rounded
-                          : Icons.keyboard_arrow_down_rounded,
-                      size: 17,
-                      color: foreground.withValues(alpha: .8),
-                    ),
-                  ],
+                  const SizedBox(width: 3),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 15,
+                    color: foreground.withValues(alpha: .8),
+                  ),
                 ],
               ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                alignment: Alignment.topCenter,
-                child: !(_expanded && expandable)
-                    ? const SizedBox(width: double.infinity)
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          for (final line in details) ...<Widget>[
-                            const SizedBox(height: 5),
-                            line,
-                          ],
-                        ],
-                      ),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -2951,8 +2964,6 @@ class ActivityCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   ReferenceInputsStrip(controller: controller, item: item),
                 ],
-                const SizedBox(height: 9),
-                GenerationCost(item: item, compact: true),
                 if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
@@ -2996,8 +3007,8 @@ class ActivityCard extends StatelessWidget {
                               icon: const Icon(Icons.replay_rounded, size: 15),
                               label: Text(
                                 item.isFailed && !item.hasDeliveredMedia
-                                    ? 'Retry generation'
-                                    : 'Reuse inputs',
+                                    ? 'Retry'
+                                    : 'Reuse',
                               ),
                             ),
                           GenerationStatusButton(
@@ -3005,6 +3016,7 @@ class ActivityCard extends StatelessWidget {
                             item: item,
                             compact: true,
                           ),
+                          GenerationCostChip(item: item),
                         ],
                       ),
                     ),
