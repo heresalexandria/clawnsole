@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:characters/characters.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -19,6 +20,7 @@ import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
 import '../core/reference_prompts.dart';
+import '../core/session_naming.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/video_cache_gateway.dart';
 
@@ -349,6 +351,7 @@ class AppController extends ChangeNotifier {
     FilePickerInvocation? filePicker,
     ProviderCatalogClient? providerCatalogClient,
     BackgroundActivityCoordinator? backgroundActivity,
+    SessionNameGenerator? sessionNameGenerator,
     bool mobileTestBuild = clawnsoleMobileTestBuild,
   }) : gateway = gateway ?? createGateway(),
        _filePicker = filePicker ?? _pickFiles,
@@ -356,6 +359,8 @@ class AppController extends ChangeNotifier {
            providerCatalogClient ?? ProviderCatalogClient(),
        _backgroundActivity =
            backgroundActivity ?? MethodChannelBackgroundActivity(),
+       _sessionNameGenerator =
+           sessionNameGenerator ?? const PlatformSessionNameGenerator(),
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
@@ -365,6 +370,7 @@ class AppController extends ChangeNotifier {
   final FilePickerInvocation _filePicker;
   final ProviderCatalogClient _providerCatalogClient;
   final BackgroundActivityCoordinator _backgroundActivity;
+  final SessionNameGenerator _sessionNameGenerator;
   final bool _mobileTestBuild;
   final GenerationFormState form = GenerationFormState();
   bool _generateAudioExplicitlyDisabled = false;
@@ -400,9 +406,12 @@ class AppController extends ChangeNotifier {
   List<String>? costDeskColumns;
   String? lastLocalGenerationFolderId;
   String? lastDriveGenerationFolderId;
+  String? lastLocalGenerationSessionId;
+  String? lastDriveGenerationSessionId;
   String librarySearch = '';
   String libraryFolderView = libraryFolderAll;
   String? libraryTag;
+  String? librarySessionId;
   String referenceSearch = '';
   String referenceFolderView = libraryFolderAll;
   String? referenceTag;
@@ -471,12 +480,15 @@ class AppController extends ChangeNotifier {
   final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
   final Set<String> _referenceDurationWrites = <String>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
+  Future<LibraryFolder?>? _sessionCreationFuture;
+  Future<void> _sessionMutationTail = Future<void>.value();
   int _idCounter = 0;
   int _libraryMutationRevision = 0;
   final Map<String, int> _generationFavoriteRevisions = <String, int>{};
   final Map<String, int> _referenceFavoriteRevisions = <String, int>{};
   final Map<String, int> _generationVisibilityRevisions = <String, int>{};
   final Map<String, int> _referenceVisibilityRevisions = <String, int>{};
+  final Set<String> _sessionNameRefinements = <String>{};
   bool _disposed = false;
 
   static const String libraryFolderAll = 'all';
@@ -555,6 +567,28 @@ class AppController extends ChangeNotifier {
       generationProgressEstimate(generation, generations);
   List<Generation> get visibleGenerations =>
       generations.where((item) => !item.hidden).toList();
+  List<Generation> get recentGenerations {
+    final sessionId = activeGenerationSession?.id;
+    // Existing libraries have no session metadata. Keep their familiar Recent
+    // work view intact until the first automatic session is created instead
+    // of making upgrade-era work appear to have vanished.
+    if (sessionId == null) {
+      final hasSessionsInStorage = generationSessions.any(
+        (session) => session.storage == effectiveStorage,
+      );
+      if (hasSessionsInStorage) return const <Generation>[];
+      return visibleGenerations
+          .where(
+            (item) =>
+                item.storage == effectiveStorage && item.sessionId == null,
+          )
+          .toList();
+    }
+    return generations
+        .where((item) => !item.hidden && item.sessionId == sessionId)
+        .toList();
+  }
+
   List<SavedReference> get savedReferences =>
       snapshot?.savedReferences ?? const <SavedReference>[];
 
@@ -730,6 +764,43 @@ class AppController extends ChangeNotifier {
   List<LibraryFolder> get referenceFolders =>
       foldersFor(LibraryCollection.references);
 
+  List<LibraryFolder> get generationSessions {
+    final values = folders.where((folder) => folder.isSession).toList();
+    values.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return values;
+  }
+
+  LibraryFolder? sessionById(String? sessionId) {
+    if (sessionId == null) return null;
+    return generationSessions
+        .where((session) => session.id == sessionId)
+        .firstOrNull;
+  }
+
+  String? get activeGenerationSessionId =>
+      effectiveStorage == LibraryStorage.drive
+      ? lastDriveGenerationSessionId
+      : lastLocalGenerationSessionId;
+
+  LibraryFolder? get activeGenerationSession {
+    final session = sessionById(activeGenerationSessionId);
+    return session?.storage == effectiveStorage ? session : null;
+  }
+
+  String get activeGenerationSessionLabel =>
+      activeGenerationSession?.name ?? 'New session';
+
+  /// The actual logical folder used by the next generation. A session begins
+  /// inside the user's remembered destination, then remains independently
+  /// filterable even if an individual film is moved elsewhere later.
+  String get generationDestinationPath {
+    final session = activeGenerationSession;
+    if (session != null) return folderPath(session.id);
+    final parentId = selectedGenerationFolderId;
+    final parent = parentId == null ? 'Library' : folderPath(parentId);
+    return '$parent / New session';
+  }
+
   VideoProviderDefinition get selectedProvider =>
       providerById(selectedProviderId);
   VideoModelDefinition get selectedModel =>
@@ -866,6 +937,14 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  /// True when [folderId] names a session or lives beneath one.
+  ///
+  /// Session folders are leaves: they can be renamed or moved between ordinary
+  /// project folders, but cannot become containers for another destination.
+  bool isInGenerationSessionBranch(String? folderId) {
+    return folders.isInSessionBranch(folderId);
+  }
+
   List<LibraryFolder> childFolders(
     String? parentId, {
     LibraryCollection collection = LibraryCollection.generated,
@@ -999,6 +1078,9 @@ class AppController extends ChangeNotifier {
       )
       .length;
 
+  int sessionCount(String sessionId) =>
+      generations.where((item) => item.sessionId == sessionId).length;
+
   List<Generation> get filteredGenerations {
     final query = librarySearch.trim().toLowerCase();
     final selectedBranch =
@@ -1013,9 +1095,11 @@ class AppController extends ChangeNotifier {
       final folderName = item.folderId == null
           ? ''
           : folderPath(item.folderId!).toLowerCase();
+      final sessionName = sessionById(item.sessionId)?.name.toLowerCase() ?? '';
       if (query.isNotEmpty &&
           !item.displayPrompt.toLowerCase().contains(query) &&
           !folderName.contains(query) &&
+          !sessionName.contains(query) &&
           !item.tags.any((tag) => tag.toLowerCase().contains(query))) {
         return false;
       }
@@ -1032,6 +1116,9 @@ class AppController extends ChangeNotifier {
           !item.tags.any(
             (tag) => tag.toLowerCase() == libraryTag!.toLowerCase(),
           )) {
+        return false;
+      }
+      if (librarySessionId != null && item.sessionId != librarySessionId) {
         return false;
       }
       return switch (libraryFilter) {
@@ -1666,12 +1753,18 @@ class AppController extends ChangeNotifier {
           value.preferences.lastLocalGenerationFolderId;
       lastDriveGenerationFolderId =
           value.preferences.lastDriveGenerationFolderId;
-      if (folderById(lastLocalGenerationFolderId)?.storage !=
-          LibraryStorage.local) {
+      lastLocalGenerationSessionId =
+          value.preferences.lastLocalGenerationSessionId;
+      lastDriveGenerationSessionId =
+          value.preferences.lastDriveGenerationSessionId;
+      final localFolder = folderById(lastLocalGenerationFolderId);
+      if (localFolder?.storage != LibraryStorage.local ||
+          isInGenerationSessionBranch(localFolder?.id)) {
         lastLocalGenerationFolderId = null;
       }
-      if (folderById(lastDriveGenerationFolderId)?.storage !=
-          LibraryStorage.drive) {
+      final driveFolder = folderById(lastDriveGenerationFolderId);
+      if (driveFolder?.storage != LibraryStorage.drive ||
+          isInGenerationSessionBranch(driveFolder?.id)) {
         lastDriveGenerationFolderId = null;
       }
       final preferredProvider = providerById(value.preferences.provider);
@@ -1689,6 +1782,17 @@ class AppController extends ChangeNotifier {
       // or a session can reopen with settings the model does not support
       // (for example Auto duration on a fixed-duration model).
       if (selectedModelId != previousModelId) _normalizeFormForModel();
+    }
+    final localSession = sessionById(lastLocalGenerationSessionId);
+    if (localSession?.storage != LibraryStorage.local) {
+      lastLocalGenerationSessionId = null;
+    }
+    final driveSession = sessionById(lastDriveGenerationSessionId);
+    if (driveSession?.storage != LibraryStorage.drive) {
+      lastDriveGenerationSessionId = null;
+    }
+    if (librarySessionId != null && sessionById(librarySessionId) == null) {
+      librarySessionId = null;
     }
     if (libraryFolderView != libraryFolderAll &&
         libraryFolderView != libraryFolderUnfiled &&
@@ -2030,7 +2134,7 @@ class AppController extends ChangeNotifier {
                 .map((item) => item.asset)
           : (section == AppSection.library
                     ? filteredGenerations
-                    : visibleGenerations)
+                    : recentGenerations)
                 .where(
                   (item) =>
                       item.isReady &&
@@ -2111,7 +2215,7 @@ class AppController extends ChangeNotifier {
         listingSection == AppSection.library) {
       final generationPage = listingSection == AppSection.library
           ? filteredGenerations
-          : visibleGenerations;
+          : recentGenerations;
       for (final item in generationPage.take(20)) {
         if (item.isImage) {
           add(item.resultAsset);
@@ -2175,31 +2279,122 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? get selectedGenerationFolderId =>
-      effectiveStorage == LibraryStorage.drive
-      ? lastDriveGenerationFolderId
-      : lastLocalGenerationFolderId;
+  String? get selectedGenerationFolderId {
+    final id = effectiveStorage == LibraryStorage.drive
+        ? lastDriveGenerationFolderId
+        : lastLocalGenerationFolderId;
+    final folder = folderById(id);
+    return folder != null &&
+            !isInGenerationSessionBranch(folder.id) &&
+            folder.storage == effectiveStorage
+        ? folder.id
+        : null;
+  }
 
   Future<void> setGenerationFolder(String? folderId) async {
     final folder = folderById(folderId);
     if (folderId != null &&
-        (folder == null || folder.storage != effectiveStorage)) {
+        (folder == null ||
+            isInGenerationSessionBranch(folder.id) ||
+            folder.storage != effectiveStorage)) {
       showNotice('That destination folder is no longer available.');
       return;
     }
-    if (effectiveStorage == LibraryStorage.drive) {
-      lastDriveGenerationFolderId = folderId;
-    } else {
-      lastLocalGenerationFolderId = folderId;
-    }
-    notifyListeners();
     try {
+      final session = activeGenerationSession;
+      if (session != null && session.parentId != folderId) {
+        if (gateway is! LibraryOrganizationGateway) {
+          showNotice('Session destinations are unavailable on this build.');
+          return;
+        }
+        await _serializeSessionMutation(() async {
+          final current = sessionById(session.id);
+          if (current == null) {
+            throw StateError('That session is no longer available.');
+          }
+          if (current.parentId == folderId) return;
+          _apply(
+            await (gateway as LibraryOrganizationGateway).saveLibraryFolder(
+              current.copyWith(
+                parentId: folderId,
+                clearParent: folderId == null,
+                updatedAt: DateTime.now().toUtc(),
+                automaticName: current.automaticName,
+              ),
+            ),
+          );
+        });
+      }
+      if (effectiveStorage == LibraryStorage.drive) {
+        lastDriveGenerationFolderId = folderId;
+      } else {
+        lastLocalGenerationFolderId = folderId;
+      }
+      notifyListeners();
       await _savePreferences(
         _preferences(
           lastLocalGenerationFolderId: lastLocalGenerationFolderId,
           clearLastLocalGenerationFolder: lastLocalGenerationFolderId == null,
           lastDriveGenerationFolderId: lastDriveGenerationFolderId,
           clearLastDriveGenerationFolder: lastDriveGenerationFolderId == null,
+        ),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> startNewGenerationSession() async {
+    if (submitting) {
+      showNotice('Wait for the current submission before starting a session.');
+      return;
+    }
+    if (effectiveStorage == LibraryStorage.drive) {
+      lastDriveGenerationSessionId = null;
+    } else {
+      lastLocalGenerationSessionId = null;
+    }
+    notifyListeners();
+    try {
+      await _savePreferences(
+        _preferences(
+          lastLocalGenerationSessionId: lastLocalGenerationSessionId,
+          clearLastLocalGenerationSession: lastLocalGenerationSessionId == null,
+          lastDriveGenerationSessionId: lastDriveGenerationSessionId,
+          clearLastDriveGenerationSession: lastDriveGenerationSessionId == null,
+        ),
+      );
+      showNotice('New session ready. Its first prompt will name it.');
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> selectGenerationSession(String sessionId) async {
+    final session = sessionById(sessionId);
+    if (session == null || session.storage != effectiveStorage) {
+      showNotice('That session is no longer available in this storage.');
+      return;
+    }
+    final sessionParent = folderById(session.parentId);
+    final baseFolderId = isInGenerationSessionBranch(sessionParent?.id)
+        ? null
+        : session.parentId;
+    if (effectiveStorage == LibraryStorage.drive) {
+      lastDriveGenerationSessionId = session.id;
+      lastDriveGenerationFolderId = baseFolderId;
+    } else {
+      lastLocalGenerationSessionId = session.id;
+      lastLocalGenerationFolderId = baseFolderId;
+    }
+    notifyListeners();
+    try {
+      await _savePreferences(
+        _preferences(
+          lastLocalGenerationSessionId: lastLocalGenerationSessionId,
+          clearLastLocalGenerationSession: lastLocalGenerationSessionId == null,
+          lastDriveGenerationSessionId: lastDriveGenerationSessionId,
+          clearLastDriveGenerationSession: lastDriveGenerationSessionId == null,
         ),
       );
     } on Object catch (error) {
@@ -2466,6 +2661,23 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setLibrarySession(String? value) {
+    final session = sessionById(value);
+    if (value != null && session == null) return;
+    if (session != null && !libraryStorageFilter.matches(session.storage)) {
+      unawaited(
+        setLibraryStorageFilter(
+          session.storage == LibraryStorage.local
+              ? LibraryStorageFilter.local
+              : LibraryStorageFilter.drive,
+        ),
+      );
+    }
+    librarySessionId = value;
+    _scheduleListingPrefetch();
+    notifyListeners();
+  }
+
   void setReferenceSearch(String value) {
     referenceSearch = value;
     notifyListeners();
@@ -2533,6 +2745,11 @@ class AppController extends ChangeNotifier {
     }
     final organization = gateway as LibraryOrganizationGateway;
     final now = DateTime.now().toUtc();
+    if (collection == LibraryCollection.generated &&
+        isInGenerationSessionBranch(parentId)) {
+      showNotice('Sessions cannot contain subfolders.');
+      return false;
+    }
     final destination =
         existing?.storage ??
         folderById(parentId, collection: collection)?.storage ??
@@ -2552,9 +2769,29 @@ class AppController extends ChangeNotifier {
       parentId: parentId,
       collection: existing?.collection ?? collection,
       storage: destination,
+      role: existing?.role ?? LibraryFolderRole.standard,
+      automaticName: false,
     );
     try {
-      _apply(await organization.saveLibraryFolder(folder));
+      if (existing?.isSession == true) {
+        await _serializeSessionMutation(() async {
+          final current = sessionById(existing!.id);
+          if (current == null) {
+            throw StateError('That session is no longer available.');
+          }
+          _apply(
+            await organization.saveLibraryFolder(
+              folder.copyWith(
+                role: current.role,
+                storage: current.storage,
+                automaticName: false,
+              ),
+            ),
+          );
+        });
+      } else {
+        _apply(await organization.saveLibraryFolder(folder));
+      }
       showNotice(existing == null ? 'Folder created.' : 'Folder updated.');
       return true;
     } on Object catch (error) {
@@ -2563,18 +2800,210 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  String _truncateSessionName(String value, int maximum) {
+    if (value.length <= maximum) return value;
+    final output = StringBuffer();
+    var length = 0;
+    for (final character in value.characters) {
+      if (length + character.length > maximum) break;
+      output.write(character);
+      length += character.length;
+    }
+    return output.toString().trimRight();
+  }
+
+  String _uniqueSessionName(
+    String preferred, {
+    required LibraryStorage storage,
+    required String? parentId,
+    String? excludeId,
+  }) {
+    final base = fallbackSessionName(preferred);
+    final occupied = folders
+        .where(
+          (folder) =>
+              folder.id != excludeId &&
+              folder.storage == storage &&
+              folder.parentId == parentId,
+        )
+        .map((folder) => folder.name.toLowerCase())
+        .toSet();
+    var candidate = base;
+    var number = 2;
+    while (occupied.contains(candidate.toLowerCase())) {
+      final suffix = ' $number';
+      candidate = '${_truncateSessionName(base, 48 - suffix.length)}$suffix';
+      number += 1;
+    }
+    return candidate;
+  }
+
+  Future<LibraryFolder?> _ensureGenerationSession(String namingSource) async {
+    final existing = activeGenerationSession;
+    if (existing != null) return existing;
+    final inFlight = _sessionCreationFuture;
+    if (inFlight != null) return inFlight;
+    late final Future<LibraryFolder?> operation;
+    operation = _createGenerationSession(namingSource).whenComplete(() {
+      if (identical(_sessionCreationFuture, operation)) {
+        _sessionCreationFuture = null;
+      }
+    });
+    _sessionCreationFuture = operation;
+    return operation;
+  }
+
+  Future<T> _serializeSessionMutation<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    _sessionMutationTail = _sessionMutationTail.then((_) async {
+      try {
+        completer.complete(await operation());
+      } on Object catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<LibraryFolder?> _createGenerationSession(String namingSource) async {
+    if (gateway is! LibraryOrganizationGateway) {
+      showNotice('Sessions are unavailable on this build.');
+      return null;
+    }
+    final organization = gateway as LibraryOrganizationGateway;
+    final storage = effectiveStorage;
+    final parentId = selectedGenerationFolderId;
+    final now = DateTime.now().toUtc();
+    final provisional = _uniqueSessionName(
+      fallbackSessionName(namingSource),
+      storage: storage,
+      parentId: parentId,
+    );
+    final session = LibraryFolder(
+      id: 'session-${now.microsecondsSinceEpoch.toRadixString(36)}-${_idCounter++}',
+      name: provisional,
+      createdAt: now,
+      updatedAt: now,
+      parentId: parentId,
+      collection: LibraryCollection.generated,
+      storage: storage,
+      role: LibraryFolderRole.session,
+      automaticName: true,
+    );
+    try {
+      _apply(await organization.saveLibraryFolder(session));
+      if (storage == LibraryStorage.drive) {
+        lastDriveGenerationSessionId = session.id;
+      } else {
+        lastLocalGenerationSessionId = session.id;
+      }
+      try {
+        await _savePreferences(
+          _preferences(
+            lastLocalGenerationSessionId: lastLocalGenerationSessionId,
+            clearLastLocalGenerationSession:
+                lastLocalGenerationSessionId == null,
+            lastDriveGenerationSessionId: lastDriveGenerationSessionId,
+            clearLastDriveGenerationSession:
+                lastDriveGenerationSessionId == null,
+          ),
+        );
+      } on Object {
+        // The session and its first generation remain durable even if merely
+        // remembering the active picker choice needs a later retry.
+      }
+      final created = sessionById(session.id) ?? session;
+      unawaited(_refineGenerationSessionName(created, namingSource));
+      return created;
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return null;
+    }
+  }
+
+  Future<void> _refineGenerationSessionName(
+    LibraryFolder session,
+    String namingSource,
+  ) async {
+    if (!_sessionNameRefinements.add(session.id)) return;
+    try {
+      final suggestion = await _sessionNameGenerator.generate(namingSource);
+      if (_disposed || suggestion == null || suggestion.trim().isEmpty) return;
+      await _serializeSessionMutation(() async {
+        final current = sessionById(session.id);
+        if (current == null ||
+            !current.automaticName ||
+            current.name != session.name ||
+            gateway is! LibraryOrganizationGateway) {
+          return;
+        }
+        final name = _uniqueSessionName(
+          fallbackSessionName(suggestion, fallback: session.name),
+          storage: current.storage,
+          parentId: current.parentId,
+          excludeId: current.id,
+        );
+        if (name == current.name) return;
+        final renamed = current.copyWith(
+          name: name,
+          updatedAt: DateTime.now().toUtc(),
+          automaticName: true,
+        );
+        _apply(
+          await (gateway as LibraryOrganizationGateway).saveLibraryFolder(
+            renamed,
+          ),
+        );
+      });
+    } on Object {
+      // Naming is decorative, local, and best effort. The deterministic title
+      // was already persisted before provider submission.
+    } finally {
+      _sessionNameRefinements.remove(session.id);
+    }
+  }
+
   Future<bool> deleteLibraryFolder(String folderId) async {
     if (gateway is! LibraryOrganizationGateway) return false;
     final organization = gateway as LibraryOrganizationGateway;
+    final removed = folderById(folderId);
     try {
-      _apply(await organization.deleteLibraryFolder(folderId));
+      if (removed?.isSession == true) {
+        await _serializeSessionMutation(() async {
+          _apply(await organization.deleteLibraryFolder(folderId));
+        });
+      } else {
+        _apply(await organization.deleteLibraryFolder(folderId));
+      }
       if (libraryFolderView == folderId) {
         libraryFolderView = libraryFolderAll;
       }
       if (referenceFolderView == folderId) {
         referenceFolderView = libraryFolderAll;
       }
-      showNotice('Folder removed. Its items are unfiled and subfolders kept.');
+      if (removed?.isSession == true) {
+        try {
+          await _savePreferences(
+            _preferences(
+              lastLocalGenerationSessionId: lastLocalGenerationSessionId,
+              clearLastLocalGenerationSession:
+                  lastLocalGenerationSessionId == null,
+              lastDriveGenerationSessionId: lastDriveGenerationSessionId,
+              clearLastDriveGenerationSession:
+                  lastDriveGenerationSessionId == null,
+            ),
+          );
+        } on Object {
+          // The folder deletion already succeeded. The missing session is
+          // validated away on the next load even if this preference write
+          // cannot be completed now.
+        }
+      }
+      showNotice(
+        removed?.isSession == true
+            ? 'Session removed. Its films remain in your library.'
+            : 'Folder removed. Its items are unfiled and subfolders kept.',
+      );
       return true;
     } on Object catch (error) {
       showNotice(_message(error));
@@ -2589,6 +3018,22 @@ class AppController extends ChangeNotifier {
   }) async {
     if (gateway is! LibraryOrganizationGateway) {
       showNotice('Library organization is unavailable on this build.');
+      return false;
+    }
+    final item = generations
+        .where((candidate) => candidate.localId == localId)
+        .firstOrNull;
+    final folder = folderById(folderId);
+    if (item == null) {
+      showNotice('That generation no longer exists.');
+      return false;
+    }
+    if (folderId != null &&
+        (folder == null ||
+            folder.storage != item.storage ||
+            (isInGenerationSessionBranch(folder.id) &&
+                folder.id != item.sessionId))) {
+      showNotice('Choose a project folder, not another session.');
       return false;
     }
     final organization = gateway as LibraryOrganizationGateway;
@@ -2624,6 +3069,7 @@ class AppController extends ChangeNotifier {
     final folder = folderById(folderId);
     if (folderId != null &&
         (folder == null ||
+            isInGenerationSessionBranch(folder.id) ||
             targets.any((item) => item.storage != folder.storage))) {
       showNotice('Choose a folder in the same storage as the selected items.');
       return false;
@@ -3549,6 +3995,10 @@ class AppController extends ChangeNotifier {
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
     bool clearLastDriveGenerationFolder = false,
+    String? lastLocalGenerationSessionId,
+    bool clearLastLocalGenerationSession = false,
+    String? lastDriveGenerationSessionId,
+    bool clearLastDriveGenerationSession = false,
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
@@ -3572,6 +4022,12 @@ class AppController extends ChangeNotifier {
     lastDriveGenerationFolderId: clearLastDriveGenerationFolder
         ? null
         : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
+    lastLocalGenerationSessionId: clearLastLocalGenerationSession
+        ? null
+        : lastLocalGenerationSessionId ?? this.lastLocalGenerationSessionId,
+    lastDriveGenerationSessionId: clearLastDriveGenerationSession
+        ? null
+        : lastDriveGenerationSessionId ?? this.lastDriveGenerationSessionId,
     costDeskColumns: clearCostDeskColumns
         ? null
         : costDeskColumns ?? this.costDeskColumns,
@@ -5082,6 +5538,31 @@ class AppController extends ChangeNotifier {
   String _uid() =>
       '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-${(_idCounter++).toRadixString(16)}';
 
+  String _generationSessionNamingSource() {
+    final prompt = form.prompt.trim();
+    if (prompt.isNotEmpty) return prompt;
+    String sourceLabel(String? assetName, String url, String fallback) {
+      final value = assetName?.trim().isNotEmpty == true
+          ? assetName!.trim()
+          : url.trim();
+      return value.isEmpty ? fallback : value;
+    }
+
+    return switch (form.mode) {
+      VideoMode.upscale =>
+        'Upscale ${sourceLabel(form.videoAsset?.name, form.videoUrl, 'video')}',
+      VideoMode.draftEnhance =>
+        'Enhance ${sourceLabel(form.draftAsset?.name, form.draftUrl, 'saved draft')}',
+      VideoMode.v2v =>
+        'Continue ${sourceLabel(form.videoAsset?.name, form.videoUrl, 'video')}',
+      VideoMode.i2v when form.keyframes.isNotEmpty =>
+        'Animate ${form.keyframes.first.asset?.name ?? form.keyframes.first.label}',
+      VideoMode.i2v when form.references.isNotEmpty =>
+        'Create with ${referencePromptName(form.references.first)}',
+      _ => selectedModel.label,
+    };
+  }
+
   Future<void> submit() async {
     final problem = validate();
     if (problem != null) {
@@ -5100,6 +5581,11 @@ class AppController extends ChangeNotifier {
     }
     if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
     await refreshProviderEstimate();
+    final sessionNamingSource = _generationSessionNamingSource();
+    final generationSession = await _ensureGenerationSession(
+      sessionNamingSource,
+    );
+    if (generationSession == null) return;
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;
     final referenceThumbnailBytes = form.references
@@ -5134,8 +5620,9 @@ class AppController extends ChangeNotifier {
       estimateBasis: estimate.basis,
       quotedCostUsdMin: estimate.minimumUsd,
       quotedCostUsdMax: estimate.maximumUsd,
-      folderId: selectedGenerationFolderId,
-      storage: effectiveStorage,
+      folderId: generationSession.id,
+      sessionId: generationSession.id,
+      storage: generationSession.storage,
     );
     final current = snapshot;
     if (current != null) {
@@ -5242,6 +5729,8 @@ class AppController extends ChangeNotifier {
       items[index] = generation.copyWith(
         folderId: existing.folderId,
         clearFolder: existing.folderId == null,
+        sessionId: existing.sessionId,
+        clearSession: existing.sessionId == null,
         tags: existing.tags,
         favorite: existing.favorite,
         hidden: existing.hidden,

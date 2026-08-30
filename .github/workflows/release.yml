@@ -193,7 +193,7 @@ jobs:
     concurrency:
       group: release-macos
       cancel-in-progress: true
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
         with:

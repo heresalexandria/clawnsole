@@ -41,6 +41,13 @@ accepts credential-free HTTPS destinations, while release links are restricted
 to this repository's GitHub releases. The bridge also verifies that requests
 come from the active local renderer before handing a URL to macOS.
 
+On macOS 26 and later, session titles can be refined by a packaged,
+weak-linked Foundation Models helper. Prompts cross the native boundary only
+through bounded standard input, are never logged or sent over the network, and
+the helper is killed after 20 seconds. Older or unsupported Macs simply keep
+the deterministic title produced by Flutter. Electron Builder explicitly signs
+the helper inside `Contents/Resources` along with the rest of the app.
+
 ## Signing and notarization
 
 Local builds default to ad-hoc/unsigned packaging. Set

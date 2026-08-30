@@ -656,14 +656,23 @@ void main() {
   });
 
   test('at-risk provider submission advises keeping Clawnsole open', () async {
+    final session = LibraryFolder(
+      id: 'session-at-risk-submit',
+      name: 'Moonlit harbor',
+      createdAt: DateTime.utc(2026, 8, 30),
+      role: LibraryFolderRole.session,
+    );
     final gateway = _MemoryGateway(
-      const LocalSnapshot(
-        generations: <Generation>[],
-        preferences: AppPreferences(),
+      LocalSnapshot(
+        generations: const <Generation>[],
+        folders: <LibraryFolder>[session],
+        preferences: const AppPreferences(
+          lastLocalGenerationSessionId: 'session-at-risk-submit',
+        ),
         hasApiKey: true,
-        connectedProviders: <String>{'bfl'},
-        availableProviders: <String>{'bfl'},
-        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        connectedProviders: const <String>{'bfl'},
+        availableProviders: const <String>{'bfl'},
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
       ),
     );
     final controller = AppController(gateway: gateway);
@@ -682,14 +691,24 @@ void main() {
   testWidgets(
     'bad visual reference errors offer normalization and retry submission',
     (tester) async {
+      final session = LibraryFolder(
+        id: 'session-normalize-submit',
+        name: 'Animate portrait',
+        createdAt: DateTime.utc(2026, 8, 30),
+        role: LibraryFolderRole.session,
+      );
       final gateway = _ReferenceFailureGateway(
-        const LocalSnapshot(
-          generations: <Generation>[],
-          preferences: AppPreferences(autoFixReferenceVideos: false),
+        LocalSnapshot(
+          generations: const <Generation>[],
+          folders: <LibraryFolder>[session],
+          preferences: const AppPreferences(
+            autoFixReferenceVideos: false,
+            lastLocalGenerationSessionId: 'session-normalize-submit',
+          ),
           hasApiKey: true,
-          connectedProviders: <String>{'bfl'},
-          availableProviders: <String>{'bfl'},
-          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+          connectedProviders: const <String>{'bfl'},
+          availableProviders: const <String>{'bfl'},
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
         ),
       );
       await tester.pumpWidget(
@@ -1708,13 +1727,22 @@ void main() {
     final frame = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     );
+    final session = LibraryFolder(
+      id: 'session-restored-preview',
+      name: 'Restored preview',
+      createdAt: DateTime.utc(2026, 8, 30),
+      role: LibraryFolderRole.session,
+    );
     final item = _deliveredGeneration(
       'restored-preview',
       thumbnail: 'restored-preview-thumb.png',
-    );
+    ).copyWith(folderId: session.id, sessionId: session.id);
     final snapshot = LocalSnapshot(
       generations: <Generation>[item],
-      preferences: const AppPreferences(),
+      folders: <LibraryFolder>[session],
+      preferences: const AppPreferences(
+        lastLocalGenerationSessionId: 'session-restored-preview',
+      ),
       hasApiKey: false,
       storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
     );
@@ -2066,7 +2094,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 23);
+    expect(decoded.toJson()['schemaVersion'], 24);
   });
 
   test(
@@ -2262,7 +2290,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 23);
+      expect(decoded.toJson()['schemaVersion'], 24);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -3503,6 +3531,12 @@ void main() {
       await tester.binding.setSurfaceSize(null);
     });
     final now = DateTime.utc(2026, 8, 15);
+    final session = LibraryFolder(
+      id: 'session-desktop-reuse',
+      name: 'Desktop reuse',
+      createdAt: now,
+      role: LibraryFolderRole.session,
+    );
     final item = Generation(
       localId: 'desktop-reuse',
       status: 'Ready',
@@ -3518,12 +3552,17 @@ void main() {
       ),
       createdAt: now,
       updatedAt: now,
+      folderId: session.id,
+      sessionId: session.id,
     );
     final controller = AppController(
       gateway: _MemoryGateway(
         LocalSnapshot(
           generations: <Generation>[item],
-          preferences: const AppPreferences(),
+          folders: <LibraryFolder>[session],
+          preferences: const AppPreferences(
+            lastLocalGenerationSessionId: 'session-desktop-reuse',
+          ),
           hasApiKey: false,
           storage: const StorageStats(path: 'memory', bytes: 1, records: 1),
         ),
@@ -4131,6 +4170,123 @@ void main() {
     final creditsRight = tester.getTopRight(credits).dx;
     expect(rateRight, closeTo(creditsRight, .1));
     expect(tester.getTopRight(panel).dx - rateRight, inInclusiveRange(13, 16));
+    controller.dispose();
+  });
+
+  testWidgets('session controls precede the provider and fit narrow Create', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 30, 12);
+    final session = LibraryFolder(
+      id: 'session-desert-launch',
+      name: 'Desert product launch with a deliberately long title',
+      createdAt: now,
+      role: LibraryFolderRole.session,
+      automaticName: true,
+    );
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        LocalSnapshot(
+          generations: const <Generation>[],
+          folders: <LibraryFolder>[session],
+          preferences: const AppPreferences(
+            lastLocalGenerationSessionId: 'session-desert-launch',
+          ),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final start = find.byKey(const ValueKey('session-new-button'));
+    final picker = find.byKey(const ValueKey('session-picker'));
+    final plaque = find.byKey(const ValueKey('provider-plaque'));
+    expect(start, findsOneWidget);
+    expect(picker, findsOneWidget);
+    expect(tester.getCenter(start).dx, lessThan(tester.getCenter(picker).dx));
+    expect(
+      tester.getTopRight(picker).dx,
+      lessThan(tester.getTopLeft(plaque).dx),
+    );
+    expect(tester.getTopRight(plaque).dx, closeTo(374, .1));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(picker);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('session-option-session-desert-launch')),
+      findsOneWidget,
+    );
+    Navigator.of(
+      tester.element(
+        find.byKey(const ValueKey('session-option-session-desert-launch')),
+      ),
+    ).pop();
+    await tester.pumpAndSettle();
+
+    await tester.binding.setSurfaceSize(const Size(320, 844));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(start).dx, greaterThanOrEqualTo(16));
+    expect(tester.getTopRight(plaque).dx, lessThanOrEqualTo(304));
+    expect(tester.takeException(), isNull);
+    controller.dispose();
+  });
+
+  testWidgets('empty session picker points to the new session action', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('session-picker')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('session-empty-state')), findsOneWidget);
+    expect(find.text('No sessions yet'), findsOneWidget);
+    expect(find.text('Use + to start a fresh workspace.'), findsOneWidget);
     controller.dispose();
   });
 
@@ -6698,6 +6854,150 @@ void main() {
     expect(find.text('Nothing in this view.'), findsNothing);
   });
 
+  testWidgets('library session chips filter independently and reset', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 30, 12);
+    final launch = LibraryFolder(
+      id: 'session-launch',
+      name: 'Launch film',
+      createdAt: now,
+      role: LibraryFolderRole.session,
+    );
+    final portrait = LibraryFolder(
+      id: 'session-portrait',
+      name: 'Portrait study',
+      createdAt: now.add(const Duration(minutes: 1)),
+      role: LibraryFolderRole.session,
+    );
+    final moved = LibraryFolder(
+      id: 'folder-delivery',
+      name: 'Delivery',
+      createdAt: now.add(const Duration(minutes: 2)),
+    );
+    final legacySessionChild = LibraryFolder(
+      id: 'folder-legacy-session-child',
+      name: 'Legacy session child',
+      createdAt: now.add(const Duration(minutes: 3)),
+      parentId: launch.id,
+    );
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        LocalSnapshot(
+          generations: <Generation>[
+            _viewModeGeneration(
+              0,
+            ).copyWith(folderId: moved.id, sessionId: launch.id),
+            _viewModeGeneration(
+              1,
+            ).copyWith(folderId: portrait.id, sessionId: portrait.id),
+          ],
+          folders: <LibraryFolder>[launch, portrait, moved, legacySessionChild],
+          preferences: const AppPreferences(activeSection: AppSection.library),
+          hasApiKey: false,
+          storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => LibraryScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('generation-session-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('generation-session-view-generation-1')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('New folder'));
+    await tester.pumpAndSettle();
+    final parentField = find.byWidgetPredicate(
+      (widget) => widget is DropdownButtonFormField<String>,
+    );
+    await tester.tap(parentField);
+    await tester.pumpAndSettle();
+    final parentIds = tester
+        .widgetList<DropdownMenuItem<String>>(
+          find.byType(DropdownMenuItem<String>),
+        )
+        .map((item) => item.value)
+        .whereType<String>()
+        .toSet();
+    expect(parentIds, contains(moved.id));
+    expect(parentIds, isNot(contains(launch.id)));
+    expect(parentIds, isNot(contains(legacySessionChild.id)));
+    await tester.tap(find.text('Delivery').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    final launchRail = find.byKey(
+      const ValueKey('library-session-folder-session-launch'),
+    );
+    expect(
+      find.descendant(of: launchRail, matching: find.text('1')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.descendant(
+        of: launchRail,
+        matching: find.byType(PopupMenuButton<String>),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('New subfolder'), findsNothing);
+    expect(find.text('Rename'), findsOneWidget);
+    Navigator.of(tester.element(find.text('Rename'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(launchRail);
+    await tester.pumpAndSettle();
+    expect(controller.librarySessionId, launch.id);
+    expect(controller.libraryFolderView, AppController.libraryFolderAll);
+    expect(
+      find.byKey(const ValueKey('generation-session-view-generation-1')),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('library-filter-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('SESSIONS'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('library-session-session-launch')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('library-filter-reset')));
+    await tester.pumpAndSettle();
+    expect(controller.librarySessionId, isNull);
+    expect(
+      find.byKey(const ValueKey('generation-session-view-generation-1')),
+      findsOneWidget,
+    );
+    final search = tester.widget<TextField>(
+      find.byKey(const ValueKey('generation-library-search')),
+    );
+    expect(
+      search.decoration?.hintText,
+      'Search prompts, sessions, tags, folders',
+    );
+    controller.dispose();
+  });
+
   test('startup quietly resumes a configured Drive connection', () async {
     final driveFilm = _viewModeGeneration(
       0,
@@ -6920,11 +7220,24 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    final session = LibraryFolder(
+      id: 'session-recent-paging',
+      name: 'Recent paging',
+      createdAt: DateTime.utc(2026, 8, 30),
+      role: LibraryFolderRole.session,
+    );
     final gateway = _MemoryGateway(
       LocalSnapshot(
-        generations: List<Generation>.generate(101, _viewModeGeneration),
+        generations: List<Generation>.generate(
+          101,
+          (index) => _viewModeGeneration(
+            index,
+          ).copyWith(folderId: session.id, sessionId: session.id),
+        ),
+        folders: <LibraryFolder>[session],
         preferences: const AppPreferences(
           recentWorkViewMode: GenerationViewMode.compact,
+          lastLocalGenerationSessionId: 'session-recent-paging',
         ),
         hasApiKey: false,
         storage: const StorageStats(path: 'memory', bytes: 0, records: 101),
@@ -6950,10 +7263,24 @@ void main() {
   testWidgets('recent work dense views hide status badges', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    final session = LibraryFolder(
+      id: 'session-recent-density',
+      name: 'Recent density',
+      createdAt: DateTime.utc(2026, 8, 30),
+      role: LibraryFolderRole.session,
+    );
     final gateway = _MemoryGateway(
       LocalSnapshot(
-        generations: List<Generation>.generate(4, _viewModeGeneration),
-        preferences: const AppPreferences(),
+        generations: List<Generation>.generate(
+          4,
+          (index) => _viewModeGeneration(
+            index,
+          ).copyWith(folderId: session.id, sessionId: session.id),
+        ),
+        folders: <LibraryFolder>[session],
+        preferences: const AppPreferences(
+          lastLocalGenerationSessionId: 'session-recent-density',
+        ),
         hasApiKey: false,
         storage: const StorageStats(path: 'memory', bytes: 0, records: 4),
       ),

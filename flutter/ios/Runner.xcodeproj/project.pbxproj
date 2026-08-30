@@ -19,6 +19,7 @@
 		A11E00000000000000000001 /* AppleLocalGenerationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */; };
 		A11E00000000000000000003 /* BackgroundActivityPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000004 /* BackgroundActivityPlugin.swift */; };
 		A11E00000000000000000005 /* BackgroundDeliveryPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */; };
+		A11E00000000000000000007 /* SessionNamePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000008 /* SessionNamePlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +73,7 @@
 		A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLocalGenerationPlugin.swift; sourceTree = "<group>"; };
 		A11E00000000000000000004 /* BackgroundActivityPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundActivityPlugin.swift; sourceTree = "<group>"; };
 		A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDeliveryPlugin.swift; sourceTree = "<group>"; };
+		A11E00000000000000000008 /* SessionNamePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNamePlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,6 +150,7 @@
 				A11E00000000000000000002 /* AppleLocalGenerationPlugin.swift */,
 				A11E00000000000000000004 /* BackgroundActivityPlugin.swift */,
 				A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */,
+				A11E00000000000000000008 /* SessionNamePlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -415,6 +418,7 @@
 				A11E00000000000000000001 /* AppleLocalGenerationPlugin.swift in Sources */,
 				A11E00000000000000000003 /* BackgroundActivityPlugin.swift in Sources */,
 				A11E00000000000000000005 /* BackgroundDeliveryPlugin.swift in Sources */,
+				A11E00000000000000000007 /* SessionNamePlugin.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

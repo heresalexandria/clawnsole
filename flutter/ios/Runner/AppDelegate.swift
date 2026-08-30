@@ -7,6 +7,7 @@ import UIKit
   private let appleLocalPlugin = AppleLocalGenerationPlugin()
   private let backgroundActivityPlugin = BackgroundActivityPlugin()
   private let backgroundDeliveryPlugin = BackgroundDeliveryPlugin()
+  private let sessionNamePlugin = SessionNamePlugin()
 
   override func application(
     _ application: UIApplication,
@@ -18,6 +19,7 @@ import UIKit
       appleLocalPlugin.register(with: controller)
       backgroundActivityPlugin.register(with: controller)
       backgroundDeliveryPlugin.register(with: controller)
+      sessionNamePlugin.register(with: controller)
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

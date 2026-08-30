@@ -76,6 +76,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       controller.libraryFavoriteFilter,
       controller.libraryVisibilityFilter,
       controller.libraryFolderView,
+      controller.librarySessionId,
       controller.libraryTag,
       controller.librarySearch,
       controller.libraryViewMode,
@@ -387,11 +388,30 @@ class _FolderSidebar extends StatelessWidget {
           ),
         ...controller.folderTree.map(
           (folder) => _FolderRow(
-            icon: Icons.folder_outlined,
+            key: ValueKey(
+              folder.isSession
+                  ? 'library-session-folder-${folder.id}'
+                  : 'library-folder-${folder.id}',
+            ),
+            icon: folder.isSession
+                ? Icons.folder_special_outlined
+                : Icons.folder_outlined,
             label: folder.name,
-            count: controller.folderCount(folder.id),
-            selected: controller.libraryFolderView == folder.id,
-            onTap: () => controller.setLibraryFolderView(folder.id),
+            count: folder.isSession
+                ? controller.sessionCount(folder.id)
+                : controller.folderCount(folder.id),
+            selected: folder.isSession
+                ? controller.librarySessionId == folder.id
+                : controller.libraryFolderView == folder.id,
+            onTap: () {
+              if (folder.isSession) {
+                controller
+                  ..setLibraryFolderView(AppController.libraryFolderAll)
+                  ..setLibrarySession(folder.id);
+              } else {
+                controller.setLibraryFolderView(folder.id);
+              }
+            },
             depth: controller.folderDepth(folder.id),
             folder: folder,
             controller: controller,
@@ -424,6 +444,7 @@ class _FolderRow extends StatelessWidget {
     this.folder,
     this.controller,
     this.depth = 0,
+    super.key,
   });
 
   final IconData icon;
@@ -522,13 +543,20 @@ class _FolderRow extends StatelessWidget {
                         );
                       }
                     },
-                    itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                      PopupMenuItem(
-                        value: 'subfolder',
-                        child: Text('New subfolder'),
+                    itemBuilder: (context) => <PopupMenuEntry<String>>[
+                      if (!controller!.isInGenerationSessionBranch(folder!.id))
+                        const PopupMenuItem(
+                          value: 'subfolder',
+                          child: Text('New subfolder'),
+                        ),
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: Text('Rename'),
                       ),
-                      PopupMenuItem(value: 'rename', child: Text('Rename')),
-                      PopupMenuItem(value: 'delete', child: Text('Remove')),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Remove'),
+                      ),
                     ],
                   ),
                 ),
@@ -550,74 +578,89 @@ class _MobileFolderBar extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Flexible(
-        child: Tooltip(
-          message: 'Choose a storage or folder view',
-          child: InkWell(
-            key: const ValueKey('mobile-folder-dropdown'),
-            onTap: () => unawaited(_showFolderPicker(context, controller)),
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-              decoration: consoleKeyDecoration(
-                context,
-                selected: false,
-                radius: 10,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(
-                    controller.libraryFolderView ==
-                            AppController.libraryFolderAll
-                        ? Icons.video_library_outlined
-                        : Icons.folder_outlined,
-                    color: context.colors.primary,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      controller.activeFolderLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    final session =
+        controller.libraryFolderView == AppController.libraryFolderAll
+        ? controller.sessionById(controller.librarySessionId)
+        : null;
+    final label = session?.name ?? controller.activeFolderLabel;
+    final count = session == null
+        ? controller.folderCount(controller.libraryFolderView)
+        : controller.sessionCount(session.id);
+    return Row(
+      children: <Widget>[
+        Flexible(
+          child: Tooltip(
+            message: 'Choose a storage or folder view',
+            child: InkWell(
+              key: const ValueKey('mobile-folder-dropdown'),
+              onTap: () => unawaited(_showFolderPicker(context, controller)),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 9,
+                ),
+                decoration: consoleKeyDecoration(
+                  context,
+                  selected: false,
+                  radius: 10,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      session != null
+                          ? Icons.folder_special_outlined
+                          : controller.libraryFolderView ==
+                                AppController.libraryFolderAll
+                          ? Icons.video_library_outlined
+                          : Icons.folder_outlined,
+                      color: context.colors.primary,
+                      size: 17,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    '${controller.folderCount(controller.libraryFolderView)}',
-                    style: TextStyle(
-                      fontSize: 11,
+                    const SizedBox(width: 7),
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.expand_more_rounded,
+                      size: 17,
                       color: context.colors.onSurfaceVariant,
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 17,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-      const SizedBox(width: 4),
-      IconButton(
-        tooltip: 'New folder',
-        onPressed: () =>
-            unawaited(_showFolderEditor(context, controller: controller)),
-        icon: const Icon(Icons.create_new_folder_outlined, size: 20),
-      ),
-    ],
-  );
+        const SizedBox(width: 4),
+        IconButton(
+          tooltip: 'New folder',
+          onPressed: () =>
+              unawaited(_showFolderEditor(context, controller: controller)),
+          icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+        ),
+      ],
+    );
+  }
 }
 
 class _LibraryHeading extends StatelessWidget {
@@ -694,7 +737,7 @@ class _LibraryToolbar extends StatelessWidget {
           onChanged: controller.setSearch,
           decoration: const InputDecoration(
             prefixIcon: Icon(Icons.search_rounded, size: 18),
-            hintText: 'Search prompts, tags, folders',
+            hintText: 'Search prompts, sessions, tags, folders',
             isDense: true,
             contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
@@ -783,7 +826,7 @@ class _LibraryEmpty extends StatelessWidget {
           Text(
             controller.generations.isEmpty
                 ? 'Your first generation will arrive here with its settings and live status.'
-                : 'Try another folder, tag, status, or a broader search.',
+                : 'Try another session, folder, tag, status, or a broader search.',
             textAlign: TextAlign.center,
             style: TextStyle(color: context.colors.onSurfaceVariant),
           ),
@@ -1067,7 +1110,9 @@ class _GenerationCardState extends State<GenerationCard> {
         onCopyToDrive: copyToDrive,
       );
     }
+    final session = widget.controller.sessionById(item.sessionId);
     final folder = widget.controller.folderById(item.folderId);
+    final displayFolder = folder?.id == session?.id ? null : folder;
     final hasMedia = item.resultAsset != null || item.resultUrl != null;
     final isGeneratingVideo = !hasMedia && item.isWorking && !item.isImage;
     final progressEstimate = widget.controller.generationProgress(item);
@@ -1208,19 +1253,45 @@ class _GenerationCardState extends State<GenerationCard> {
                   style: Theme.of(context).textTheme.titleLarge,
                   reserveCollapsedHeight: true,
                 ),
-                if (folder != null || item.tags.isNotEmpty) ...<Widget>[
+                if (session != null ||
+                    displayFolder != null ||
+                    item.tags.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 9),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: <Widget>[
-                      if (folder != null)
+                      if (session != null)
                         ActionChip(
-                          avatar: const Icon(Icons.folder_outlined, size: 14),
-                          label: Text(folder.name),
+                          key: ValueKey('generation-session-${item.localId}'),
+                          avatar: const Icon(
+                            Icons.folder_special_outlined,
+                            size: 14,
+                          ),
+                          label: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 180),
+                            child: Text(
+                              session.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                           visualDensity: VisualDensity.compact,
                           onPressed: () =>
-                              widget.controller.setLibraryFolderView(folder.id),
+                              widget.controller.setLibrarySession(session.id),
+                        ),
+                      if (displayFolder != null)
+                        ActionChip(
+                          avatar: Icon(
+                            displayFolder.isSession
+                                ? Icons.folder_special_outlined
+                                : Icons.folder_outlined,
+                            size: 14,
+                          ),
+                          label: Text(displayFolder.name),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => widget.controller
+                              .setLibraryFolderView(displayFolder.id),
                         ),
                       ...item.tags
                           .take(3)
@@ -1444,13 +1515,32 @@ Future<void> _showFolderPicker(
                   const Divider(),
                   ...controller.folderTree.map(
                     (folder) => _FolderPickerTile(
-                      icon: Icons.folder_outlined,
+                      key: ValueKey(
+                        folder.isSession
+                            ? 'mobile-library-session-folder-${folder.id}'
+                            : 'mobile-library-folder-${folder.id}',
+                      ),
+                      icon: folder.isSession
+                          ? Icons.folder_special_outlined
+                          : Icons.folder_outlined,
                       label: folder.name,
-                      count: controller.folderCount(folder.id),
-                      selected: controller.libraryFolderView == folder.id,
+                      count: folder.isSession
+                          ? controller.sessionCount(folder.id)
+                          : controller.folderCount(folder.id),
+                      selected: folder.isSession
+                          ? controller.librarySessionId == folder.id
+                          : controller.libraryFolderView == folder.id,
                       depth: controller.folderDepth(folder.id),
                       onTap: () {
-                        controller.setLibraryFolderView(folder.id);
+                        if (folder.isSession) {
+                          controller
+                            ..setLibraryFolderView(
+                              AppController.libraryFolderAll,
+                            )
+                            ..setLibrarySession(folder.id);
+                        } else {
+                          controller.setLibraryFolderView(folder.id);
+                        }
                         Navigator.pop(sheetContext);
                       },
                       trailing: PopupMenuButton<String>(
@@ -1479,21 +1569,23 @@ Future<void> _showFolderPicker(
                             );
                           }
                         },
-                        itemBuilder: (context) =>
-                            const <PopupMenuEntry<String>>[
-                              PopupMenuItem(
-                                value: 'subfolder',
-                                child: Text('New subfolder'),
-                              ),
-                              PopupMenuItem(
-                                value: 'rename',
-                                child: Text('Rename'),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Remove'),
-                              ),
-                            ],
+                        itemBuilder: (context) => <PopupMenuEntry<String>>[
+                          if (!controller.isInGenerationSessionBranch(
+                            folder.id,
+                          ))
+                            const PopupMenuItem(
+                              value: 'subfolder',
+                              child: Text('New subfolder'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'rename',
+                            child: Text('Rename'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Remove'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -1527,6 +1619,7 @@ class _FolderPickerTile extends StatelessWidget {
     required this.onTap,
     this.trailing,
     this.depth = 0,
+    super.key,
   });
 
   final IconData icon;
@@ -1563,6 +1656,9 @@ Future<bool?> _showFolderEditor(
 }) async {
   final nameController = TextEditingController(text: folder?.name ?? '');
   var selectedParentId = folder?.parentId ?? parentId;
+  if (controller.isInGenerationSessionBranch(selectedParentId)) {
+    selectedParentId = null;
+  }
   var destination =
       folder?.storage ??
       controller.folderById(parentId)?.storage ??
@@ -1651,6 +1747,9 @@ Future<bool?> _showFolderEditor(
                       .where(
                         (candidate) =>
                             candidate.storage == destination &&
+                            !controller.isInGenerationSessionBranch(
+                              candidate.id,
+                            ) &&
                             !blockedParents.contains(candidate.id),
                       )
                       .map(
@@ -1764,6 +1863,9 @@ Future<bool> _showGenerationMoveDialog(
   final storage = storages.single;
   final currentFolders = items.map((item) => item.folderId).toSet();
   String? folderId = currentFolders.length == 1 ? currentFolders.single : null;
+  if (controller.isInGenerationSessionBranch(folderId)) {
+    folderId = null;
+  }
   var moving = false;
   final result = await showDialog<bool>(
     context: context,
@@ -1830,7 +1932,13 @@ Future<bool> _showGenerationMoveDialog(
                               : () => setState(() => folderId = null),
                         ),
                         ...controller.folderTree
-                            .where((folder) => folder.storage == storage)
+                            .where(
+                              (folder) =>
+                                  folder.storage == storage &&
+                                  !controller.isInGenerationSessionBranch(
+                                    folder.id,
+                                  ),
+                            )
                             .map(
                               (folder) => _MoveDestinationTile(
                                 label: folder.name,

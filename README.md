@@ -48,7 +48,8 @@ and optional Google Drive sync keep work organized wherever you create.
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation quoted and realized USD cost history with provenance
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
-- Nested project folders, multi-tag organization, and combined prompt/tag/folder search
+- Automatic prompt-named project sessions, nested project folders, multi-tag
+  organization, and combined prompt/session/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
   duration-aware sorting, non-destructive video trimming, and Saved/Generated
   pickers directly in Create
@@ -124,8 +125,11 @@ Drive is non-destructive, and the separate move action deletes local originals
 only after every copy is verified in Drive.
 
 - History is not capped.
-- Folder names, tag labels, generation assignments, and saved-reference metadata
-  live in the same compact local JSON schema and migrate without changing older records.
+- Session names and membership, folder names, tag labels, generation assignments,
+  and saved-reference metadata live in the same compact local JSON schema and
+  migrate without changing older records. Sessions are generated-work folders
+  inside the selected destination; moving a film later does not change which
+  session it belongs to.
 - Removing a folder never removes its films; directly filed work returns to
   **Unfiled**, tags stay intact, and subfolders move up one level.
 - Reference folders follow the same safe removal behavior within their separate

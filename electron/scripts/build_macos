@@ -50,6 +50,7 @@ ARCHITECTURE="${CLAWNSOLE_ELECTRON_ARCH:-$(uname -m)}"
 node "$ELECTRON_DIRECTORY/scripts/prepare-renderer.mjs"
 CLAWNSOLE_MEDIA_TOOLS_ARCH="$ARCHITECTURE" \
   "$ELECTRON_DIRECTORY/scripts/prepare-media-tools"
+"$ELECTRON_DIRECTORY/scripts/prepare-session-title-helper" "$ARCHITECTURE"
 "$ELECTRON_DIRECTORY/scripts/prepare_icon"
 
 case "$ARCHITECTURE" in

@@ -94,6 +94,7 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.openExternalUrl, "function");
   assert.equal(typeof bridge.revealDataFolder, "function");
   assert.equal(typeof bridge.chooseDataDirectory, "function");
+  assert.equal(typeof bridge.generateSessionName, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
@@ -105,6 +106,7 @@ test("the preload publishes the renderer update bridge", async () => {
   await bridge.openExternalUrl("https://cdn.example/video.mp4", "media");
   await bridge.revealDataFolder();
   await bridge.chooseDataDirectory();
+  await bridge.generateSessionName("A fox in snow");
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
@@ -118,6 +120,7 @@ test("the preload publishes the renderer update bridge", async () => {
       "clawnsole:external:open",
       "clawnsole:data:reveal",
       "clawnsole:data:choose",
+      "clawnsole:session-name:generate",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);
@@ -128,6 +131,7 @@ test("the preload publishes the renderer update bridge", async () => {
     "https://cdn.example/video.mp4",
     "media",
   ]);
+  assert.deepEqual(invoked[10].args, ["A fox in snow"]);
 });
 
 test("update events reach the renderer and unsubscribe cleanly", () => {

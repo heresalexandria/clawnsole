@@ -41,6 +41,11 @@ only macOS desktop lifecycle, packaging, and self-update.
   device download
 - Uncapped compact history plus referenced local inputs/completed videos, storage
   accounting, reload-safe reuse/playback, and granular clear actions
+- Automatic project sessions named from the first generation prompt, with a
+  deterministic cross-platform fallback and on-device Apple Intelligence
+  refinement where Foundation Models is available; sessions nest under the
+  selected project folder and remain independently filterable from folders and
+  tags
 - Per-provider local keys and a responsive Providers comparison desk
 
 ### Input capability contract

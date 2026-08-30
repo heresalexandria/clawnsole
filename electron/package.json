@@ -44,6 +44,10 @@
       {
         "from": "dist/media-tools",
         "to": "media-tools"
+      },
+      {
+        "from": "dist/session-title",
+        "to": "session-title"
       }
     ],
     "directories": {
@@ -54,6 +58,9 @@
       "category": "public.app-category.graphics-design",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
+      "binaries": [
+        "Contents/Resources/session-title/session_title_helper"
+      ],
       "icon": "assets/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [

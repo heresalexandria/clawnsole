@@ -35,6 +35,7 @@ const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
 const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
 const { bundledCompanionArguments } = require("./lib/companion-launch.cjs");
+const { installSessionNameHandler } = require("./lib/session-name.cjs");
 
 const APP_NAME = "Clawnsole";
 const DEVELOPMENT_URL = process.env.CLAWNSOLE_RENDERER_URL || "http://127.0.0.1:7357";
@@ -120,6 +121,11 @@ function stopBundledRenderer() {
   if (!rendererProcess || rendererProcess.exitCode !== null) return;
   rendererProcess.kill("SIGTERM");
   rendererProcess = null;
+}
+
+function sessionNameHelperExecutable() {
+  const root = app.isPackaged ? process.resourcesPath : path.join(__dirname, "dist");
+  return path.join(root, "session-title", "session_title_helper");
 }
 
 function installApplicationMenu() {
@@ -363,6 +369,9 @@ async function chooseDataDirectory() {
 // and the Flutter app binds to it, so the smoke test treats either half being
 // absent as a packaging failure. Flutter boots asynchronously, so poll.
 async function verifyRendererBridge(timeoutMs = 40_000) {
+  if (!fs.existsSync(sessionNameHelperExecutable())) {
+    throw new Error("The packaged Apple session-title helper is missing.");
+  }
   const deadline = Date.now() + timeoutMs;
   let shape = "unavailable";
   while (Date.now() < deadline) {
@@ -376,12 +385,13 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
       + " typeof window.clawnsole?.openExternalUrl,"
       + " typeof window.clawnsole?.revealDataFolder,"
       + " typeof window.clawnsole?.chooseDataDirectory,"
+      + " typeof window.clawnsole?.generateSessionName,"
       + " window.clawnsoleShellReady === true].join(',')",
     );
     if (
       shape
       === "function,function,function,function,function,function,function,"
-        + "function,function,true"
+        + "function,function,function,true"
     ) {
       return;
     }
@@ -432,6 +442,12 @@ function installRendererBridge() {
       return { ok: false, error: "The data-folder request was rejected." };
     }
     return chooseDataDirectory();
+  });
+  installSessionNameHandler({
+    ipcMain,
+    isAllowedAppUrl,
+    rendererUrl: () => rendererUrl,
+    executable: sessionNameHelperExecutable,
   });
 }
 

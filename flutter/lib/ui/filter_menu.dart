@@ -153,12 +153,20 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       ? widget.controller.referenceTags
       : widget.controller.libraryTags;
 
+  String? get _session =>
+      _references ? null : widget.controller.librarySessionId;
+
+  List<LibraryFolder> get _sessions => _references
+      ? const <LibraryFolder>[]
+      : widget.controller.generationSessions;
+
   int get _activeCount =>
       (!_references && widget.controller.libraryFilter != LibraryFilter.all
           ? 1
           : 0) +
       (_favorite != FavoriteFilter.all ? 1 : 0) +
       (_visibility != VisibilityFilter.visible ? 1 : 0) +
+      (_session != null ? 1 : 0) +
       (_tag != null ? 1 : 0);
 
   int _statusCount(LibraryFilter filter) => widget.controller.generations
@@ -185,6 +193,7 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       widget.controller
         ..setLibraryFavoriteFilter(FavoriteFilter.all)
         ..setLibraryVisibilityFilter(VisibilityFilter.visible)
+        ..setLibrarySession(null)
         ..setLibraryTag(null);
       unawaited(widget.controller.setLibraryFilter(LibraryFilter.all));
     }
@@ -211,6 +220,7 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
     listenable: widget.controller,
     builder: (context, _) {
       final tags = _tags;
+      final sessions = _sessions;
       return ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 316, maxHeight: 420),
         child: SingleChildScrollView(
@@ -270,6 +280,52 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                if (sessions.isNotEmpty) ...<Widget>[
+                  _section(
+                    context,
+                    'Sessions',
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: <Widget>[
+                        FilterChip(
+                          key: const ValueKey('library-session-all'),
+                          avatar: const Icon(
+                            Icons.folder_special_outlined,
+                            size: 16,
+                          ),
+                          label: const Text('All sessions'),
+                          selected: _session == null,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) =>
+                              widget.controller.setLibrarySession(null),
+                        ),
+                        ...sessions.map(
+                          (session) => FilterChip(
+                            key: ValueKey('library-session-${session.id}'),
+                            avatar: const Icon(
+                              Icons.folder_special_outlined,
+                              size: 16,
+                            ),
+                            label: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 210),
+                              child: Text(
+                                '${session.name} · ${widget.controller.sessionCount(session.id)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            selected: _session == session.id,
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) =>
+                                widget.controller.setLibrarySession(session.id),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
               ],
               _section(
                 context,
@@ -375,7 +431,9 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       ),
       menuChildren: <Widget>[_panel(context)],
       builder: (context, menu, _) => Tooltip(
-        message: 'Status, visibility, storage, favorites, and tags',
+        message: _references
+            ? 'Visibility, favorites, and tags'
+            : 'Status, sessions, visibility, favorites, and tags',
         child: InkWell(
           key: ValueKey('${_keyPrefix()}-filter-button'),
           borderRadius: BorderRadius.circular(10),
