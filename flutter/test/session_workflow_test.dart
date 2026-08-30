@@ -67,11 +67,9 @@ void main() {
       controller.generations.map((item) => item.sessionId).toSet(),
       <String?>{firstSession.id},
     );
-    expect(
-      naming.sources,
-      <String>['A clockwork garden waking at sunrise'],
-      reason: 'only the first generation may name an existing session',
-    );
+    expect(naming.sources, <String>[
+      'A clockwork garden waking at sunrise',
+    ], reason: 'only the first generation may name an existing session');
 
     await controller.startNewGenerationSession();
     expect(controller.activeGenerationSession, isNull);
