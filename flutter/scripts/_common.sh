@@ -53,6 +53,7 @@ require_command() {
 }
 
 prepare_flutter() {
+  "$REPOSITORY_ROOT/scripts/install_git_hooks" --quiet || true
   require_command flutter
   flutter pub get
 }

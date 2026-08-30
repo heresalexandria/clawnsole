@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+SOURCE_HOOK="$REPOSITORY_ROOT/.githooks/pre-commit"
+MARKER="Clawnsole managed pre-commit dispatcher"
+QUIET=false
+
+if [[ "${1:-}" == "--quiet" ]]; then
+  QUIET=true
+  shift
+fi
+if [[ $# -ne 0 ]]; then
+  echo "Usage: ./scripts/install_git_hooks [--quiet]" >&2
+  exit 2
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  if [[ "$QUIET" == true ]]; then
+    exit 0
+  fi
+  echo "Git is required to install the Clawnsole pre-commit hook." >&2
+  exit 1
+fi
+
+if ! GIT_COMMON_DIRECTORY="$(git -C "$REPOSITORY_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+  if [[ "$QUIET" == true ]]; then
+    exit 0
+  fi
+  echo "Clawnsole is not inside a Git worktree; no hook was installed." >&2
+  exit 1
+fi
+
+CUSTOM_HOOKS_PATH="$(git -C "$REPOSITORY_ROOT" config --get core.hooksPath || true)"
+if [[ -n "$CUSTOM_HOOKS_PATH" ]]; then
+  if [[ "$QUIET" == true ]]; then
+    exit 0
+  fi
+  echo "Git already uses the custom hooks path '$CUSTOM_HOOKS_PATH'." >&2
+  echo "Chain it to $SOURCE_HOOK manually; no existing hook configuration was changed." >&2
+  exit 1
+fi
+
+HOOKS_DIRECTORY="$GIT_COMMON_DIRECTORY/hooks"
+TARGET_HOOK="$HOOKS_DIRECTORY/pre-commit"
+mkdir -p "$HOOKS_DIRECTORY"
+
+if [[ ( -e "$TARGET_HOOK" || -L "$TARGET_HOOK" ) ]] &&
+    ! grep -Fq "$MARKER" "$TARGET_HOOK" 2>/dev/null; then
+  if [[ "$QUIET" == true ]]; then
+    exit 0
+  fi
+  echo "Refusing to replace the existing pre-commit hook at $TARGET_HOOK." >&2
+  echo "Chain it to $SOURCE_HOOK manually, or move it and rerun this installer." >&2
+  exit 1
+fi
+
+if [[ ! -f "$TARGET_HOOK" ]] || ! cmp -s "$SOURCE_HOOK" "$TARGET_HOOK"; then
+  cp "$SOURCE_HOOK" "$TARGET_HOOK"
+  chmod +x "$TARGET_HOOK"
+fi
+
+if [[ "$QUIET" != true ]]; then
+  echo "Installed the Clawnsole Flutter formatter pre-commit hook."
+fi

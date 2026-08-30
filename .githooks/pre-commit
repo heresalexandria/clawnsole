@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Clawnsole managed pre-commit dispatcher.
+
+set -euo pipefail
+
+REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPOSITORY_ROOT"
+
+# Older branches may predate the managed formatter even though this shared Git
+# directory already has the dispatcher installed from another worktree.
+if [[ ! -x "$REPOSITORY_ROOT/scripts/format_flutter" ]]; then
+  exit 0
+fi
+
+STAGED_DART_PATHS=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    flutter/lib/*.dart|flutter/tool/*.dart|flutter/test/*.dart)
+      STAGED_DART_PATHS+=("$path")
+      ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [[ ${#STAGED_DART_PATHS[@]} -eq 0 ]]; then
+  exit 0
+fi
+
+HAS_PARTIAL_CHANGES=false
+for path in "${STAGED_DART_PATHS[@]}"; do
+  if [[ ! -f "$path" ]]; then
+    echo "Cannot auto-format staged Dart file missing from the worktree: $path" >&2
+    HAS_PARTIAL_CHANGES=true
+  elif ! git diff --quiet -- "$path"; then
+    echo "Cannot auto-format partially staged Dart file: $path" >&2
+    HAS_PARTIAL_CHANGES=true
+  fi
+done
+if [[ "$HAS_PARTIAL_CHANGES" == true ]]; then
+  echo "Format and stage those files manually with ./scripts/format_flutter." >&2
+  exit 1
+fi
+
+FORMAT_PATHS=()
+for path in "${STAGED_DART_PATHS[@]}"; do
+  FORMAT_PATHS+=("${path#flutter/}")
+done
+
+"$REPOSITORY_ROOT/scripts/format_flutter" "${FORMAT_PATHS[@]}"
+git add -- "${STAGED_DART_PATHS[@]}"

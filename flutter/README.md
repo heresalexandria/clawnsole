@@ -99,12 +99,19 @@ the original reference is never modified.
 
 ## Install
 
-Use Flutter 3.35.1 or newer and Dart 3.9 or newer.
+Use Flutter 3.47.0 and its bundled Dart SDK. The exact toolchain lives in
+`.fvmrc`, which is also the source of truth for CI and the pre-commit
+formatter. Select that Flutter version on `PATH` or install it with FVM, then
+install the hook once from the repository root:
 
 ```bash
+./scripts/install_git_hooks
 cd flutter
 flutter pub get
 ```
+
+Canonical start/build scripts refresh the managed hook automatically. The hook
+formats staged Dart files and refuses to touch partially staged files.
 
 ## One-command local starts
 
@@ -306,7 +313,7 @@ broker is required if the credential must remain a true secret.
 ## Verification
 
 ```bash
-dart format --output=none --set-exit-if-changed lib tool test
+../scripts/format_flutter --check
 flutter analyze
 flutter test
 flutter build web

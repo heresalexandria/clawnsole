@@ -109,6 +109,18 @@ See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/RE
 Windows scripts run on Windows with Visual Studio and its Desktop development
 with C++ workload installed.
 
+Development and CI use Flutter 3.47.0, pinned in `flutter/.fvmrc`. Select that
+SDK on `PATH` (or install it with FVM), then install the repository formatter
+hook once:
+
+```bash
+./scripts/install_git_hooks
+```
+
+The canonical start/build scripts also refresh the managed hook. It formats
+staged Dart files with the pinned SDK before commit, without changing any
+existing pre-push hook.
+
 ## Persistence
 
 Clawnsole has no database. Native apps store `clawnsole.json` inside their
@@ -195,8 +207,9 @@ Do not post API keys, private prompts, or personal media in a public issue.
 ## Verification
 
 ```bash
+./scripts/format_flutter --check
+
 cd flutter
-dart format --output=none --set-exit-if-changed lib tool test
 flutter analyze
 flutter test
 flutter build web
