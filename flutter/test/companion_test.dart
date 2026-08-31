@@ -555,6 +555,7 @@ void main() {
             'id': 'folder-one',
             'name': 'Favorites',
             'createdAt': now.toIso8601String(),
+            'updatedAt': now.add(const Duration(minutes: 3)).toIso8601String(),
           },
         }),
       );
@@ -594,6 +595,12 @@ void main() {
         ),
       );
       expect(snapshot.folders, hasLength(2));
+      expect(
+        snapshot.folders
+            .singleWhere((folder) => folder.id == 'folder-one')
+            .updatedAt,
+        now.add(const Duration(minutes: 3)),
+      );
       expect(
         snapshot.folders
             .singleWhere((folder) => folder.id == 'folder-child')

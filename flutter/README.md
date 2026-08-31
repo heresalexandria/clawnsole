@@ -41,6 +41,11 @@ only macOS desktop lifecycle, packaging, and self-update.
   device download
 - Uncapped compact history plus referenced local inputs/completed videos, storage
   accounting, reload-safe reuse/playback, and granular clear actions
+- Automatic project sessions named from the first generation prompt, with a
+  deterministic cross-platform fallback and on-device Apple Intelligence
+  refinement where Foundation Models is available; sessions nest under the
+  selected project folder and remain independently filterable from folders and
+  tags
 - Per-provider local keys and a responsive Providers comparison desk
 
 ### Input capability contract
@@ -94,12 +99,19 @@ the original reference is never modified.
 
 ## Install
 
-Use Flutter 3.35.1 or newer and Dart 3.9 or newer.
+Use Flutter 3.47.0 and its bundled Dart SDK. The exact toolchain lives in
+`.fvmrc`, which is also the source of truth for CI and the pre-commit
+formatter. Select that Flutter version on `PATH` or install it with FVM, then
+install the hook once from the repository root:
 
 ```bash
+./scripts/install_git_hooks
 cd flutter
 flutter pub get
 ```
+
+Canonical start/build scripts refresh the managed hook automatically. The hook
+formats staged Dart files and refuses to touch partially staged files.
 
 ## One-command local starts
 
@@ -301,7 +313,7 @@ broker is required if the credential must remain a true secret.
 ## Verification
 
 ```bash
-dart format --output=none --set-exit-if-changed lib tool test
+../scripts/format_flutter --check
 flutter analyze
 flutter test
 flutter build web

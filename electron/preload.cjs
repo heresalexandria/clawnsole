@@ -109,6 +109,8 @@ contextBridge.exposeInMainWorld("clawnsole", {
     ipcRenderer.invoke("clawnsole:external:open", url, purpose),
   revealDataFolder: () => ipcRenderer.invoke("clawnsole:data:reveal"),
   chooseDataDirectory: () => ipcRenderer.invoke("clawnsole:data:choose"),
+  generateSessionName: (source) =>
+    ipcRenderer.invoke("clawnsole:session-name:generate", source),
   onUpdateEvent: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, payload) => callback(payload);

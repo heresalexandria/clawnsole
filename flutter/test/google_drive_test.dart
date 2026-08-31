@@ -277,7 +277,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 23);
+      expect(migrated.toJson()['schemaVersion'], 24);
     },
   );
 
@@ -603,6 +603,8 @@ void main() {
         timelineThumbnailAsset: storage == LibraryStorage.local
             ? timelineAsset
             : null,
+        folderId: storage == LibraryStorage.local ? 'local-session' : null,
+        sessionId: storage == LibraryStorage.local ? 'local-session' : null,
         favorite: storage == LibraryStorage.local,
         storage: storage,
       );
@@ -614,6 +616,27 @@ void main() {
           preferencesUpdatedAt: now,
           generations: <Generation>[
             generation('local-generation', LibraryStorage.local),
+          ],
+          folders: <LibraryFolder>[
+            LibraryFolder(
+              id: 'project-base',
+              name: 'Client work',
+              createdAt: now,
+            ),
+            LibraryFolder(
+              id: 'local-session',
+              name: 'Clockwork Garden',
+              createdAt: now,
+              parentId: 'project-base',
+              role: LibraryFolderRole.session,
+              automaticName: true,
+            ),
+            LibraryFolder(
+              id: 'unrelated-session',
+              name: 'Unrelated session',
+              createdAt: now,
+              role: LibraryFolderRole.session,
+            ),
           ],
           savedReferences: <SavedReference>[
             SavedReference(
@@ -684,6 +707,21 @@ void main() {
             .singleWhere((item) => item.localId == 'drive-local-generation')
             .favorite,
         isTrue,
+      );
+      final copiedGeneration = copied.generations.singleWhere(
+        (item) => item.localId == 'drive-local-generation',
+      );
+      expect(copiedGeneration.folderId, 'drive-local-session');
+      expect(copiedGeneration.sessionId, 'drive-local-session');
+      final copiedSession = copied.folders.singleWhere(
+        (folder) => folder.id == 'drive-local-session',
+      );
+      expect(copiedSession.role, LibraryFolderRole.session);
+      expect(copiedSession.automaticName, isTrue);
+      expect(copiedSession.parentId, 'drive-project-base');
+      expect(
+        copied.folders.map((folder) => folder.id),
+        isNot(contains('drive-unrelated-session')),
       );
       expect(
         copied.savedReferences

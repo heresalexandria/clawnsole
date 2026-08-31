@@ -15,6 +15,7 @@ require_command() {
 }
 
 prepare_dependencies() {
+  "$REPOSITORY_ROOT/scripts/install_git_hooks" --quiet || true
   require_command flutter
   require_command npm
   (cd "$FLUTTER_DIRECTORY" && flutter pub get)

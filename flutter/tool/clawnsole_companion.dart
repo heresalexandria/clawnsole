@@ -1234,6 +1234,18 @@ class CompanionApp {
         final parentId = folder.parentId?.trim().isEmpty == true
             ? null
             : folder.parentId;
+        if (current.folders.isInSessionBranch(
+          parentId,
+          collection: folder.collection,
+        )) {
+          throw StateError('Sessions cannot contain subfolders.');
+        }
+        if (folder.isSession &&
+            current.folders.any((item) => item.parentId == folder.id)) {
+          throw StateError(
+            'Move this folder’s subfolders before making a session.',
+          );
+        }
         if (parentId != null &&
             !current.folders.any(
               (item) =>
@@ -1269,9 +1281,12 @@ class CompanionApp {
           id: folder.id,
           name: name,
           createdAt: folder.createdAt,
+          updatedAt: folder.updatedAt,
           parentId: parentId,
           collection: folder.collection,
           storage: folder.storage,
+          role: folder.role,
+          automaticName: folder.automaticName,
         );
         if (index < 0) {
           folders.add(clean);
@@ -1298,8 +1313,16 @@ class CompanionApp {
               .toList(),
           generations: current.generations
               .map(
-                (item) => item.folderId == folderId
-                    ? item.copyWith(clearFolder: true)
+                (item) =>
+                    item.folderId == folderId ||
+                        (removed?.isSession == true &&
+                            item.sessionId == folderId)
+                    ? item.copyWith(
+                        clearFolder: item.folderId == folderId,
+                        clearSession:
+                            removed?.isSession == true &&
+                            item.sessionId == folderId,
+                      )
                     : item,
               )
               .toList(),
@@ -1322,14 +1345,22 @@ class CompanionApp {
         if (target == null) {
           throw StateError('That generation no longer exists.');
         }
-        if (folderId != null &&
-            !current.folders.any(
-              (folder) =>
-                  folder.id == folderId &&
-                  folder.collection == LibraryCollection.generated &&
-                  folder.storage == target.storage,
-            )) {
-          throw StateError('That folder no longer exists.');
+        if (folderId != null) {
+          final destination = current.folders
+              .where(
+                (folder) =>
+                    folder.id == folderId &&
+                    folder.collection == LibraryCollection.generated &&
+                    folder.storage == target.storage,
+              )
+              .firstOrNull;
+          if (destination == null) {
+            throw StateError('That folder no longer exists.');
+          }
+          if (current.folders.isInSessionBranch(destination.id) &&
+              destination.id != target.sessionId) {
+            throw StateError('Choose a project folder, not another session.');
+          }
         }
         final tags = _cleanLibraryTags(
           map['tags'] is List<Object?>
@@ -1911,6 +1942,8 @@ class CompanionApp {
         persisted = generation.copyWith(
           folderId: existing.folderId,
           clearFolder: existing.folderId == null,
+          sessionId: existing.sessionId,
+          clearSession: existing.sessionId == null,
           tags: existing.tags,
           favorite: existing.favorite,
           hidden: existing.hidden,
@@ -2119,6 +2152,8 @@ class CompanionApp {
       final persisted = next.copyWith(
         folderId: existing.folderId,
         clearFolder: existing.folderId == null,
+        sessionId: existing.sessionId,
+        clearSession: existing.sessionId == null,
         tags: existing.tags,
         favorite: existing.favorite,
         hidden: existing.hidden,

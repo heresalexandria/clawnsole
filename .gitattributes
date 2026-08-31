@@ -1,0 +1,3 @@
+.githooks/pre-commit text eol=lf
+scripts/format_flutter text eol=lf
+scripts/install_git_hooks text eol=lf

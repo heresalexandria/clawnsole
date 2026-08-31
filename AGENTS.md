@@ -127,8 +127,9 @@ desktop entry points live beside the other Flutter scripts:
 Run checks proportionate to the change, including all affected platform families:
 
 ```bash
+./scripts/format_flutter --check
+
 cd flutter
-dart format --output=none --set-exit-if-changed lib tool test
 flutter analyze
 flutter test
 flutter build web

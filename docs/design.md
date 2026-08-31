@@ -269,6 +269,15 @@ included, fit above the fold at 1440×900, with the Recent work header
 visible beneath — enforced by a widget test. Recent work always sits
 below the composer (the old ≥1160 side column is gone).
 
+The Create heading also owns the current **project session** immediately to
+the left of Model & Provider. The `+` key starts an unnamed session; its first
+generation creates a special generated-work folder inside the currently
+selected destination and provides the naming source. A deterministic prompt
+summary is saved before submission, then supported Apple platforms may refine
+that title on-device without delaying or blocking generation. Choosing an
+existing session restores its parent destination. Moving an individual film
+changes only its folder assignment: session membership and tags remain intact.
+
 ## 8. Library & recent work
 
 - The toolbar is **one quiet row**: console-key status segments
@@ -277,9 +286,9 @@ below the composer (the old ≥1160 side column is gone).
   segments = plum fill with cream icon and text; both modes were verified
   against the old unreadable-active-tab bug. Narrow layouts stack the
   search above the segment row.
-- **Filters popover** (`LibraryFilterButton`): favorites and tags live in
+- **Filters popover** (`LibraryFilterButton`): sessions, favorites, and tags live in
   an anchored panel instead of stacked chip rows. The key lights plum with
-  a count while either narrows the view, and the panel offers *Reset
+  a count while any narrows the view, and the panel offers *Reset
   filters*. The References toolbar shares the same pattern (kind segments
   + search + sort key + Filters key).
 - **Storage lives with the folders** (`StorageSidebarSection`): the left

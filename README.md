@@ -48,7 +48,8 @@ and optional Google Drive sync keep work organized wherever you create.
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation quoted and realized USD cost history with provenance
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
-- Nested project folders, multi-tag organization, and combined prompt/tag/folder search
+- Automatic prompt-named project sessions, nested project folders, multi-tag
+  organization, and combined prompt/session/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
   duration-aware sorting, non-destructive video trimming, and Saved/Generated
   pickers directly in Create
@@ -108,6 +109,18 @@ See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/RE
 Windows scripts run on Windows with Visual Studio and its Desktop development
 with C++ workload installed.
 
+Development and CI use Flutter 3.47.0, pinned in `flutter/.fvmrc`. Select that
+SDK on `PATH` (or install it with FVM), then install the repository formatter
+hook once:
+
+```bash
+./scripts/install_git_hooks
+```
+
+The canonical start/build scripts also refresh the managed hook. It formats
+staged Dart files with the pinned SDK before commit, without changing any
+existing pre-push hook.
+
 ## Persistence
 
 Clawnsole has no database. Native apps store `clawnsole.json` inside their
@@ -124,8 +137,11 @@ Drive is non-destructive, and the separate move action deletes local originals
 only after every copy is verified in Drive.
 
 - History is not capped.
-- Folder names, tag labels, generation assignments, and saved-reference metadata
-  live in the same compact local JSON schema and migrate without changing older records.
+- Session names and membership, folder names, tag labels, generation assignments,
+  and saved-reference metadata live in the same compact local JSON schema and
+  migrate without changing older records. Sessions are generated-work folders
+  inside the selected destination; moving a film later does not change which
+  session it belongs to.
 - Removing a folder never removes its films; directly filed work returns to
   **Unfiled**, tags stay intact, and subfolders move up one level.
 - Reference folders follow the same safe removal behavior within their separate
@@ -191,8 +207,9 @@ Do not post API keys, private prompts, or personal media in a public issue.
 ## Verification
 
 ```bash
+./scripts/format_flutter --check
+
 cd flutter
-dart format --output=none --set-exit-if-changed lib tool test
 flutter analyze
 flutter test
 flutter build web

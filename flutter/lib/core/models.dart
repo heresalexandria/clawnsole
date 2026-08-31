@@ -35,6 +35,8 @@ enum MediaReferenceTask { reference, edit, extend }
 
 enum LibraryCollection { generated, references }
 
+enum LibraryFolderRole { standard, session }
+
 enum LibraryStorage { local, drive }
 
 enum LibraryStorageFilter { all, local, drive }
@@ -544,6 +546,8 @@ class LibraryFolder {
     this.parentId,
     this.collection = LibraryCollection.generated,
     this.storage = LibraryStorage.local,
+    this.role = LibraryFolderRole.standard,
+    this.automaticName = false,
   }) : updatedAt = updatedAt ?? createdAt;
 
   final String id;
@@ -553,6 +557,10 @@ class LibraryFolder {
   final String? parentId;
   final LibraryCollection collection;
   final LibraryStorage storage;
+  final LibraryFolderRole role;
+  final bool automaticName;
+
+  bool get isSession => role == LibraryFolderRole.session;
 
   LibraryFolder copyWith({
     String? name,
@@ -560,6 +568,8 @@ class LibraryFolder {
     bool clearParent = false,
     LibraryCollection? collection,
     LibraryStorage? storage,
+    LibraryFolderRole? role,
+    bool? automaticName,
     DateTime? updatedAt,
   }) => LibraryFolder(
     id: id,
@@ -569,6 +579,8 @@ class LibraryFolder {
     parentId: clearParent ? null : parentId ?? this.parentId,
     collection: collection ?? this.collection,
     storage: storage ?? this.storage,
+    role: role ?? this.role,
+    automaticName: automaticName ?? this.automaticName,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -580,6 +592,8 @@ class LibraryFolder {
     if (collection != LibraryCollection.generated)
       'collection': collection.name,
     if (storage != LibraryStorage.local) 'storage': storage.name,
+    if (role != LibraryFolderRole.standard) 'role': role.name,
+    if (automaticName) 'automaticName': true,
   };
 
   factory LibraryFolder.fromJson(Map<String, Object?> json) => LibraryFolder(
@@ -605,7 +619,39 @@ class LibraryFolder {
       (value) => value.name == json['storage'],
       orElse: () => LibraryStorage.local,
     ),
+    role: LibraryFolderRole.values.firstWhere(
+      (value) => value.name == json['role'],
+      orElse: () => LibraryFolderRole.standard,
+    ),
+    automaticName: json['automaticName'] == true,
   );
+}
+
+extension LibraryFolderHierarchy on Iterable<LibraryFolder> {
+  /// Whether [folderId] is a session folder or has a session ancestor.
+  ///
+  /// Sessions deliberately form leaf nodes in the generated-work hierarchy,
+  /// so ordinary destinations can never become nested inside another session.
+  bool isInSessionBranch(
+    String? folderId, {
+    LibraryCollection collection = LibraryCollection.generated,
+  }) {
+    var currentId = folderId;
+    final visited = <String>{};
+    while (currentId != null && visited.add(currentId)) {
+      LibraryFolder? current;
+      for (final folder in this) {
+        if (folder.id == currentId && folder.collection == collection) {
+          current = folder;
+          break;
+        }
+      }
+      if (current == null) return false;
+      if (current.isSession) return true;
+      currentId = current.parentId;
+    }
+    return false;
+  }
 }
 
 class SavedReference {
@@ -794,6 +840,7 @@ class Generation {
     this.lastProviderResponse,
     this.lastProviderResponseAt,
     this.folderId,
+    this.sessionId,
     this.tags = const <String>[],
     this.favorite = false,
     this.hidden = false,
@@ -846,6 +893,7 @@ class Generation {
   final String? lastProviderResponse;
   final DateTime? lastProviderResponseAt;
   final String? folderId;
+  final String? sessionId;
   final List<String> tags;
   final bool favorite;
   final bool hidden;
@@ -968,6 +1016,8 @@ class Generation {
     DateTime? lastProviderResponseAt,
     String? folderId,
     bool clearFolder = false,
+    String? sessionId,
+    bool clearSession = false,
     List<String>? tags,
     bool? favorite,
     bool? hidden,
@@ -1032,6 +1082,7 @@ class Generation {
     lastProviderResponseAt:
         lastProviderResponseAt ?? this.lastProviderResponseAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
+    sessionId: clearSession ? null : sessionId ?? this.sessionId,
     tags: tags ?? this.tags,
     favorite: favorite ?? this.favorite,
     hidden: hidden ?? this.hidden,
@@ -1101,6 +1152,7 @@ class Generation {
           .toUtc()
           .toIso8601String(),
     if (folderId != null) 'folderId': folderId,
+    if (sessionId != null) 'sessionId': sessionId,
     if (tags.isNotEmpty) 'tags': tags,
     if (favorite) 'favorite': true,
     if (hidden) 'hidden': true,
@@ -1195,6 +1247,7 @@ class Generation {
       json['lastProviderResponseAt'] as String? ?? '',
     ),
     folderId: json['folderId'] as String?,
+    sessionId: json['sessionId'] as String?,
     tags: (json['tags'] as List<Object?>? ?? const <Object?>[])
         .whereType<String>()
         .where((tag) => tag.trim().isNotEmpty)
@@ -1223,6 +1276,8 @@ class AppPreferences {
         GenerationPlaceholderStyle.broadcastStatic,
     this.lastLocalGenerationFolderId,
     this.lastDriveGenerationFolderId,
+    this.lastLocalGenerationSessionId,
+    this.lastDriveGenerationSessionId,
     this.costDeskColumns,
     this.localVideoCacheMb = defaultLocalVideoCacheMb,
     this.localThumbnailCacheMb = defaultLocalThumbnailCacheMb,
@@ -1245,6 +1300,8 @@ class AppPreferences {
   final GenerationPlaceholderStyle generationPlaceholderStyle;
   final String? lastLocalGenerationFolderId;
   final String? lastDriveGenerationFolderId;
+  final String? lastLocalGenerationSessionId;
+  final String? lastDriveGenerationSessionId;
 
   /// Visible cost-desk column ids in display order. Null keeps the default
   /// set; ids missing from the list stay hidden and unknown ids are ignored.
@@ -1279,6 +1336,10 @@ class AppPreferences {
     bool clearLastLocalGenerationFolder = false,
     String? lastDriveGenerationFolderId,
     bool clearLastDriveGenerationFolder = false,
+    String? lastLocalGenerationSessionId,
+    bool clearLastLocalGenerationSession = false,
+    String? lastDriveGenerationSessionId,
+    bool clearLastDriveGenerationSession = false,
     List<String>? costDeskColumns,
     bool clearCostDeskColumns = false,
     int? localVideoCacheMb,
@@ -1303,6 +1364,12 @@ class AppPreferences {
     lastDriveGenerationFolderId: clearLastDriveGenerationFolder
         ? null
         : lastDriveGenerationFolderId ?? this.lastDriveGenerationFolderId,
+    lastLocalGenerationSessionId: clearLastLocalGenerationSession
+        ? null
+        : lastLocalGenerationSessionId ?? this.lastLocalGenerationSessionId,
+    lastDriveGenerationSessionId: clearLastDriveGenerationSession
+        ? null
+        : lastDriveGenerationSessionId ?? this.lastDriveGenerationSessionId,
     costDeskColumns: clearCostDeskColumns
         ? null
         : costDeskColumns ?? this.costDeskColumns,
@@ -1327,6 +1394,10 @@ class AppPreferences {
       'lastLocalGenerationFolderId': lastLocalGenerationFolderId,
     if (lastDriveGenerationFolderId != null)
       'lastDriveGenerationFolderId': lastDriveGenerationFolderId,
+    if (lastLocalGenerationSessionId != null)
+      'lastLocalGenerationSessionId': lastLocalGenerationSessionId,
+    if (lastDriveGenerationSessionId != null)
+      'lastDriveGenerationSessionId': lastDriveGenerationSessionId,
     if (costDeskColumns != null) 'costDeskColumns': costDeskColumns,
     'localVideoCacheMb': localVideoCacheMb,
     'localThumbnailCacheMb': localThumbnailCacheMb,
@@ -1376,6 +1447,10 @@ class AppPreferences {
           json['lastLocalGenerationFolderId'] as String?,
       lastDriveGenerationFolderId:
           json['lastDriveGenerationFolderId'] as String?,
+      lastLocalGenerationSessionId:
+          json['lastLocalGenerationSessionId'] as String?,
+      lastDriveGenerationSessionId:
+          json['lastDriveGenerationSessionId'] as String?,
       costDeskColumns: switch (json['costDeskColumns']) {
         final List<Object?> ids => ids.whereType<String>().toList(),
         _ => null,
@@ -1497,7 +1572,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 23,
+    'schemaVersion': 24,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)

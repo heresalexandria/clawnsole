@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOSITORY_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+FLUTTER_DIRECTORY="$REPOSITORY_ROOT/flutter"
+VERSION_FILE="$FLUTTER_DIRECTORY/.fvmrc"
+
+usage() {
+  echo "Usage: ./scripts/format_flutter [--check] [path ...]" >&2
+  echo "Paths are relative to flutter/; the default is: lib tool test" >&2
+}
+
+CHECK_ONLY=false
+if [[ "${1:-}" == "--check" ]]; then
+  CHECK_ONLY=true
+  shift
+elif [[ "${1:-}" == --* ]]; then
+  usage
+  exit 2
+fi
+
+EXPECTED_VERSION="$(sed -nE 's/.*"flutter"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$VERSION_FILE" | head -1)"
+if [[ -z "$EXPECTED_VERSION" ]]; then
+  echo "Could not read the pinned Flutter version from $VERSION_FILE." >&2
+  exit 2
+fi
+
+FLUTTER_BINARY="${CLAWNSOLE_FLUTTER:-}"
+if [[ -n "$FLUTTER_BINARY" && -d "$FLUTTER_BINARY" ]]; then
+  FLUTTER_BINARY="$FLUTTER_BINARY/bin/flutter"
+elif [[ -z "$FLUTTER_BINARY" && -x "$FLUTTER_DIRECTORY/.fvm/flutter_sdk/bin/flutter" ]]; then
+  FLUTTER_BINARY="$FLUTTER_DIRECTORY/.fvm/flutter_sdk/bin/flutter"
+elif [[ -z "$FLUTTER_BINARY" ]]; then
+  FLUTTER_BINARY="$(command -v flutter || true)"
+fi
+
+if [[ -z "$FLUTTER_BINARY" || ! -x "$FLUTTER_BINARY" ]]; then
+  printf '%s\n' \
+    "Clawnsole formatting requires Flutter $EXPECTED_VERSION." \
+    "Install/select that SDK, or set CLAWNSOLE_FLUTTER to its flutter executable." >&2
+  exit 2
+fi
+
+VERSION_OUTPUT="$("$FLUTTER_BINARY" --version 2>/dev/null || true)"
+VERSION_LINE="${VERSION_OUTPUT%%$'\n'*}"
+ACTUAL_VERSION="$(sed -nE 's/^Flutter ([^ ]+).*/\1/p' <<<"$VERSION_LINE")"
+if [[ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]]; then
+  printf '%s\n' \
+    "Clawnsole formatting requires Flutter $EXPECTED_VERSION (the CI toolchain)." \
+    "Found Flutter ${ACTUAL_VERSION:-unknown} at $FLUTTER_BINARY." \
+    "Select the pinned SDK from flutter/.fvmrc or set CLAWNSOLE_FLUTTER explicitly." >&2
+  exit 2
+fi
+
+DART_BINARY="$(cd "$(dirname "$FLUTTER_BINARY")" && pwd)/dart"
+if [[ ! -x "$DART_BINARY" ]]; then
+  echo "The pinned Flutter SDK does not contain an executable Dart formatter." >&2
+  exit 2
+fi
+
+PATHS=("$@")
+if [[ ${#PATHS[@]} -eq 0 ]]; then
+  PATHS=(lib tool test)
+fi
+
+cd "$FLUTTER_DIRECTORY"
+if [[ "$CHECK_ONLY" == true ]]; then
+  exec "$DART_BINARY" format --output=none --set-exit-if-changed "${PATHS[@]}"
+fi
+exec "$DART_BINARY" format "${PATHS[@]}"

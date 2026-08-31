@@ -15,7 +15,7 @@ See docs/releases.md.
 
 ## Checked
 
-- [ ] `cd flutter && dart format --output=none --set-exit-if-changed lib tool test`
+- [ ] `./scripts/format_flutter --check`
 - [ ] `cd flutter && flutter analyze`
 - [ ] `cd flutter && flutter test`
 - [ ] `cd flutter && flutter build web`

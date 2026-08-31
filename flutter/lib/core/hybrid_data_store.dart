@@ -445,16 +445,20 @@ class HybridDataStore implements DurableDataStore {
         .map((item) => item.id)
         .toSet();
     final copyEverything = generationIds.isEmpty && referenceIds.isEmpty;
-    final requestedGenerations = current.generations.where(
-      (item) =>
-          item.storage == LibraryStorage.local &&
-          (copyEverything || generationIds.contains(item.localId)),
-    );
-    final requestedReferences = current.savedReferences.where(
-      (item) =>
-          item.storage == LibraryStorage.local &&
-          (copyEverything || referenceIds.contains(item.id)),
-    );
+    final requestedGenerations = current.generations
+        .where(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              (copyEverything || generationIds.contains(item.localId)),
+        )
+        .toList();
+    final requestedReferences = current.savedReferences
+        .where(
+          (item) =>
+              item.storage == LibraryStorage.local &&
+              (copyEverything || referenceIds.contains(item.id)),
+        )
+        .toList();
     final referenceIdMap = <String, String>{
       for (final reference in current.savedReferences.where(
         (item) => item.storage == LibraryStorage.local,
@@ -464,26 +468,58 @@ class HybridDataStore implements DurableDataStore {
             remoteReferenceIds.contains('drive-${reference.id}'))
           reference.id: 'drive-${reference.id}',
     };
-    final folderMap = <String, String>{};
+    final localFolders = current.folders
+        .where((folder) => folder.storage == LibraryStorage.local)
+        .toList();
+    final copiedFolderIds = <String>{};
+    if (copyEverything) {
+      copiedFolderIds.addAll(localFolders.map((folder) => folder.id));
+    } else {
+      for (final generation in requestedGenerations) {
+        if (generation.folderId != null) {
+          copiedFolderIds.add(generation.folderId!);
+        }
+        if (generation.sessionId != null) {
+          copiedFolderIds.add(generation.sessionId!);
+        }
+      }
+      for (final reference in requestedReferences) {
+        if (reference.folderId != null) {
+          copiedFolderIds.add(reference.folderId!);
+        }
+      }
+      final pending = copiedFolderIds.toList();
+      for (var index = 0; index < pending.length; index += 1) {
+        final folder = localFolders
+            .where((candidate) => candidate.id == pending[index])
+            .firstOrNull;
+        final parentId = folder?.parentId;
+        if (parentId != null && copiedFolderIds.add(parentId)) {
+          pending.add(parentId);
+        }
+      }
+    }
+    final folderMap = <String, String>{
+      for (final folder in localFolders)
+        if (copiedFolderIds.contains(folder.id))
+          folder.id: 'drive-${folder.id}',
+    };
     final driveFolders = <LibraryFolder>[
       ...current.folders.where(
         (folder) => folder.storage == LibraryStorage.drive,
       ),
     ];
-    for (final folder in current.folders.where(
-      (item) => item.storage == LibraryStorage.local,
+    for (final folder in localFolders.where(
+      (item) => copiedFolderIds.contains(item.id),
     )) {
-      final id = 'drive-${folder.id}';
-      folderMap[folder.id] = id;
+      final id = folderMap[folder.id]!;
       if (driveFolders.any((item) => item.id == id)) continue;
       driveFolders.add(
         folder
             .copyWith(
               storage: LibraryStorage.drive,
-              parentId: folder.parentId == null
-                  ? null
-                  : 'drive-${folder.parentId}',
-              clearParent: folder.parentId == null,
+              parentId: folderMap[folder.parentId],
+              clearParent: folderMap[folder.parentId] == null,
             )
             .withId(id),
       );
@@ -502,6 +538,9 @@ class HybridDataStore implements DurableDataStore {
           folderId: generation.folderId == null
               ? null
               : folderMap[generation.folderId],
+          sessionId: generation.sessionId == null
+              ? null
+              : folderMap[generation.sessionId],
         ),
       );
       remoteIds.add(id);
@@ -596,6 +635,7 @@ class HybridDataStore implements DurableDataStore {
     required String id,
     Map<String, String> referenceIdMap = const <String, String>{},
     String? folderId,
+    String? sessionId,
   }) async {
     final keyframes = <KeyframeLabel>[];
     for (final frame in source.config.keyframes ?? const <KeyframeLabel>[]) {
@@ -644,6 +684,7 @@ class HybridDataStore implements DurableDataStore {
       'storage': LibraryStorage.drive.name,
       'config': config.toJson(),
       if (folderId != null) 'folderId': folderId else 'folderId': null,
+      if (sessionId != null) 'sessionId': sessionId else 'sessionId': null,
       if (source.resultAsset != null)
         'resultAsset': (await _copyAsset(source.resultAsset))?.toJson(),
       if (source.thumbnailAsset != null)
@@ -889,5 +930,7 @@ extension on LibraryFolder {
     parentId: parentId,
     collection: collection,
     storage: storage,
+    role: role,
+    automaticName: automaticName,
   );
 }

@@ -617,6 +617,8 @@ class NativeGateway extends DirectGateway
       persisted = generation.copyWith(
         folderId: existing.folderId,
         clearFolder: existing.folderId == null,
+        sessionId: existing.sessionId,
+        clearSession: existing.sessionId == null,
         tags: existing.tags,
         favorite: existing.favorite,
         hidden: existing.hidden,

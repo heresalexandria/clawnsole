@@ -43,6 +43,7 @@ class _CreateScreenState extends State<CreateScreen> {
   int _itemLimit = _pageSize;
   bool _pageAdvancePending = false;
   GenerationViewMode? _viewMode;
+  String? _sessionId;
 
   AppController get controller => widget.controller;
 
@@ -63,7 +64,7 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 
   void _loadMore() {
-    final items = controller.visibleGenerations;
+    final items = controller.recentGenerations;
     if (_pageAdvancePending || _itemLimit >= items.length) return;
     _pageAdvancePending = true;
     final previousLimit = _itemLimit;
@@ -81,8 +82,12 @@ class _CreateScreenState extends State<CreateScreen> {
   }
 
   void _syncListingPage() {
-    if (_viewMode == controller.recentWorkViewMode) return;
+    final sessionId = controller.activeGenerationSession?.id;
+    if (_viewMode == controller.recentWorkViewMode && _sessionId == sessionId) {
+      return;
+    }
     _viewMode = controller.recentWorkViewMode;
+    _sessionId = sessionId;
     _itemLimit = _pageSize;
     _pageAdvancePending = false;
   }
@@ -173,6 +178,7 @@ class _CreateHeading extends StatelessWidget {
           ),
         );
         final plaque = _ProviderPlaque(controller: controller);
+        final session = _SessionControls(controller: controller);
         final plaqueLabel = Text(
           'Model & Provider:',
           style: TextStyle(
@@ -182,12 +188,49 @@ class _CreateHeading extends StatelessWidget {
             letterSpacing: .3,
           ),
         );
-        // Wide layouts keep the quiet label and pin the plaque to the far
-        // right. Phones drop the heading entirely and place the model selector
-        // at the top-right edge to keep the composer compact.
+        // Phones keep both working-context controls on one bounded row. The
+        // provider remains pinned to the right edge, while session and model
+        // names yield space and ellipsize instead of overflowing.
         if (constraints.maxWidth < 720) {
-          return Align(alignment: Alignment.topRight, child: plaque);
+          final sessionWidth = math.min(
+            180.0,
+            constraints.maxWidth * (constraints.maxWidth < 360 ? .44 : .46),
+          );
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              SizedBox(width: sessionWidth, child: session),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Align(alignment: Alignment.centerRight, child: plaque),
+              ),
+            ],
+          );
         }
+
+        // Rail-sized and tablet canvases do not have room for every quiet
+        // label. Keep the title, then bound both selectors and omit only the
+        // provider label until the full desktop composition fits.
+        if (constraints.maxWidth < 1080) {
+          final sessionWidth = math.min(210.0, constraints.maxWidth * .25);
+          final plaqueWidth = math.min(250.0, constraints.maxWidth * .3);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: title),
+              ),
+              const SizedBox(width: 14),
+              SizedBox(width: sessionWidth, child: session),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: plaqueWidth),
+                child: plaque,
+              ),
+            ],
+          );
+        }
+
         return Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
@@ -195,12 +238,153 @@ class _CreateHeading extends StatelessWidget {
               child: Align(alignment: Alignment.centerLeft, child: title),
             ),
             const SizedBox(width: 22),
+            SizedBox(width: 220, child: session),
+            const SizedBox(width: 16),
             plaqueLabel,
             const SizedBox(width: 10),
-            plaque,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 260),
+              child: plaque,
+            ),
           ],
         );
       },
+    );
+  }
+}
+
+class _SessionControls extends StatelessWidget {
+  const _SessionControls({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = controller.activeGenerationSession;
+    final sessions = controller.generationSessions
+        .where((session) => session.storage == controller.effectiveStorage)
+        .toList();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton.filledTonal(
+          key: const ValueKey('session-new-button'),
+          tooltip: 'Start a new session',
+          visualDensity: VisualDensity.compact,
+          onPressed: () => unawaited(controller.startNewGenerationSession()),
+          icon: const Icon(Icons.add_rounded, size: 19),
+        ),
+        const SizedBox(width: 5),
+        Flexible(
+          child: PopupMenuButton<String>(
+            key: const ValueKey('session-picker'),
+            tooltip: sessions.isEmpty
+                ? 'No sessions yet. Start a new session'
+                : 'Choose session',
+            initialValue: active?.id,
+            constraints: const BoxConstraints(minWidth: 240, maxWidth: 360),
+            onSelected: (sessionId) =>
+                unawaited(controller.selectGenerationSession(sessionId)),
+            itemBuilder: (context) {
+              if (sessions.isEmpty) {
+                return const <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    key: ValueKey('session-empty-state'),
+                    enabled: false,
+                    child: SizedBox(
+                      width: 250,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text('No sessions yet'),
+                          SizedBox(height: 3),
+                          Text(
+                            'Use + to start a fresh workspace.',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ];
+              }
+              return sessions
+                  .map(
+                    (session) => CheckedPopupMenuItem<String>(
+                      key: ValueKey('session-option-${session.id}'),
+                      value: session.id,
+                      checked: session.id == active?.id,
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              session.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '${controller.sessionCount(session.id)}',
+                            style: TextStyle(
+                              color: context.colors.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList();
+            },
+            child: Semantics(
+              button: true,
+              label: 'Current session',
+              value: controller.activeGenerationSessionLabel,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 9,
+                ),
+                decoration: consoleKeyDecoration(
+                  context,
+                  selected: false,
+                  radius: 10,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      Icons.folder_special_outlined,
+                      size: 17,
+                      color: context.colors.primary,
+                    ),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        controller.activeGenerationSessionLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Icon(
+                      Icons.expand_more_rounded,
+                      size: 17,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1092,7 +1276,11 @@ class _GenerationDestinationControls extends StatelessWidget {
       itemBuilder: (context) => <PopupMenuEntry<String>>[
         const PopupMenuItem(value: '', child: Text('Library (top level)')),
         ...controller.folderTree
-            .where((folder) => folder.storage == storage)
+            .where(
+              (folder) =>
+                  folder.storage == storage &&
+                  !controller.isInGenerationSessionBranch(folder.id),
+            )
             .map(
               (folder) => PopupMenuItem(
                 value: folder.id,
@@ -1113,9 +1301,7 @@ class _GenerationDestinationControls extends StatelessWidget {
             const SizedBox(width: 7),
             Flexible(
               child: Text(
-                selected == null
-                    ? 'Library (top level)'
-                    : controller.folderPath(selected),
+                controller.generationDestinationPath,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 12),
@@ -4675,6 +4861,31 @@ class _RecentWorkState extends State<_RecentWork> {
                 ],
               );
             }
+            if (constraints.maxWidth < 360) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  title,
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      if (controller.supportsGoogleDrive)
+                        DriveRefreshButton(
+                          controller: controller,
+                          keyPrefix: 'recent-work',
+                          compact: true,
+                        ),
+                      toggle,
+                      library,
+                    ],
+                  ),
+                ],
+              );
+            }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -4704,7 +4915,7 @@ class _RecentWorkState extends State<_RecentWork> {
           },
         ),
         const SizedBox(height: 12),
-        if (controller.visibleGenerations.isEmpty)
+        if (controller.recentGenerations.isEmpty)
           SurfaceCard(
             child: Column(
               children: <Widget>[
@@ -4717,7 +4928,7 @@ class _RecentWorkState extends State<_RecentWork> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Your generations will gather here with live progress and playback.',
+                  'Your first generation in ${controller.activeGenerationSessionLabel} will gather here with live progress and playback.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: context.colors.onSurfaceVariant),
                 ),
@@ -4728,7 +4939,7 @@ class _RecentWorkState extends State<_RecentWork> {
         else if (controller.recentWorkViewMode == GenerationViewMode.compact)
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: controller.visibleGenerations
+            children: controller.recentGenerations
                 .take(widget.itemLimit)
                 .map(
                   (item) => Padding(
@@ -4754,7 +4965,7 @@ class _RecentWorkState extends State<_RecentWork> {
               return Wrap(
                 spacing: GenerationCardGrid.gap,
                 runSpacing: GenerationCardGrid.gap,
-                children: controller.visibleGenerations
+                children: controller.recentGenerations
                     .take(widget.itemLimit)
                     .map(
                       (item) => SizedBox(
@@ -4777,8 +4988,7 @@ class _RecentWorkState extends State<_RecentWork> {
               );
             },
           ),
-        if (widget.itemLimit <
-            controller.visibleGenerations.length) ...<Widget>[
+        if (widget.itemLimit < controller.recentGenerations.length) ...<Widget>[
           const SizedBox(height: 14),
           Center(
             child: TextButton.icon(
@@ -4786,7 +4996,7 @@ class _RecentWorkState extends State<_RecentWork> {
               onPressed: widget.onLoadMore,
               icon: const Icon(Icons.expand_more_rounded),
               label: Text(
-                'Load ${((controller.visibleGenerations.length - widget.itemLimit).clamp(0, 20))} more',
+                'Load ${((controller.recentGenerations.length - widget.itemLimit).clamp(0, 20))} more',
               ),
             ),
           ),

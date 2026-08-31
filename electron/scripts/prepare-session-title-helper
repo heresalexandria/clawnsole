@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The Apple session-title helper is built on macOS." >&2
+  exit 1
+fi
+
+require_command xcrun
+require_command lipo
+
+ARCHITECTURE="${CLAWNSOLE_SESSION_TITLE_ARCH:-${1:-$(uname -m)}}"
+SOURCE="$ELECTRON_DIRECTORY/native/session_title_helper.swift"
+DESTINATION="$ELECTRON_DIRECTORY/dist/session-title"
+OUTPUT="$DESTINATION/session_title_helper"
+BUILD_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/clawnsole-session-title-helper.XXXXXX")"
+
+cleanup() {
+  rm -rf "$BUILD_DIRECTORY"
+}
+trap cleanup EXIT
+
+mkdir -p "$DESTINATION" "$BUILD_DIRECTORY"
+
+compile_architecture() {
+  local architecture="$1"
+  local target_architecture="$architecture"
+  if [[ "$architecture" == "x64" ]]; then
+    target_architecture="x86_64"
+  fi
+  xcrun swiftc \
+    -O \
+    -parse-as-library \
+    -target "$target_architecture-apple-macosx12.0" \
+    "$SOURCE" \
+    -o "$BUILD_DIRECTORY/session_title_helper-$target_architecture"
+}
+
+case "$ARCHITECTURE" in
+  arm64)
+    compile_architecture arm64
+    cp "$BUILD_DIRECTORY/session_title_helper-arm64" "$OUTPUT"
+    ;;
+  x64|x86_64)
+    compile_architecture x64
+    cp "$BUILD_DIRECTORY/session_title_helper-x86_64" "$OUTPUT"
+    ;;
+  universal)
+    compile_architecture arm64
+    compile_architecture x64
+    lipo -create \
+      "$BUILD_DIRECTORY/session_title_helper-arm64" \
+      "$BUILD_DIRECTORY/session_title_helper-x86_64" \
+      -output "$OUTPUT"
+    ;;
+  *)
+    echo "Session-title architecture must be arm64, x64, or universal." >&2
+    exit 1
+    ;;
+esac
+
+chmod 755 "$OUTPUT"
+echo "Prepared the Apple session-title helper at $OUTPUT."

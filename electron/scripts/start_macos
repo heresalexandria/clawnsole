@@ -20,6 +20,7 @@ fi
 print_heading "macOS desktop development"
 prepare_dependencies
 require_command dart
+"$ELECTRON_DIRECTORY/scripts/prepare-session-title-helper" "$(uname -m)"
 
 if [[ -f "$REPOSITORY_ROOT/.env" ]]; then
   set -a
