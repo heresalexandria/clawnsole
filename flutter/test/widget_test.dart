@@ -29,10 +29,13 @@ import 'package:clawnsole/core/update_status.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/generation_error_thumbnail.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
+import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/inline_video.dart';
+import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
@@ -47,6 +50,27 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'web video preview sources use the cache-only companion route',
+    () async {
+      final gateway = WebGateway(baseUrl: Uri.parse('http://127.0.0.1:8787/'));
+
+      final uri = await gateway.cachedVideoAssetUri(
+        const AssetReference(
+          kind: 'drive',
+          value: 'drive-film-0001',
+          label: 'film.mp4',
+          contentType: 'video/mp4',
+        ),
+      );
+
+      expect(
+        uri,
+        Uri.parse('http://127.0.0.1:8787/asset-cache?id=drive-film-0001'),
+      );
+    },
+  );
+
   testWidgets('video media thumbnail extracts and exposes a reusable frame', (
     tester,
   ) async {
@@ -99,6 +123,64 @@ void main() {
     expect(requested, Uri.parse('https://cdn.test/reference.mp4'));
     expect(generated, frame);
     expect(metadata?.signature, '1920×1080@8.000');
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('video media thumbnail retries when its cache source changes', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    var frameLoads = 0;
+
+    Widget thumbnail(int revision) => MaterialApp(
+      home: SizedBox(
+        width: 160,
+        height: 90,
+        child: MediaThumbnail(
+          gateway: gateway,
+          kind: MediaReferenceKind.video,
+          reference: const AssetReference(
+            kind: 'drive',
+            value: 'drive-film-0002',
+            label: 'reference.mp4',
+            contentType: 'video/mp4',
+          ),
+          mediaUriRevision: revision,
+          mediaUriLoader: () async => revision == 0
+              ? null
+              : Uri.parse('http://127.0.0.1:8787/asset-cache?id=cached'),
+          frameLoader: (_, _) async {
+            frameLoads += 1;
+            return frame;
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(thumbnail(0));
+    await tester.pumpAndSettle();
+    expect(frameLoads, 0);
+    expect(
+      find.byKey(const ValueKey('media-thumbnail-video-frame')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(thumbnail(1));
+    await tester.pumpAndSettle();
+    expect(frameLoads, 1);
     expect(
       find.byKey(const ValueKey('media-thumbnail-video-frame')),
       findsOneWidget,
@@ -313,6 +395,66 @@ void main() {
       }, fallback: 'Error'),
       'Generation dependency unavailable',
     );
+    // A payload with no named error field must not surface a job id, hash,
+    // or URL as user-facing failure copy — fall back to the sentence.
+    expect(
+      providerFailureMessage(<String, Object?>{
+        'status': 'Task not found',
+        'job': '93c9a9a9-92c5-40ac-a12a-d6e6312737a4',
+        'result': <String, Object?>{
+          'video_url': 'https://cdn.example.com/film.mp4',
+        },
+      }, fallback: 'Task not found'),
+      'BFL no longer recognizes this task. The generation receipt may have '
+      'expired or become invalid.',
+    );
+  });
+
+  test('a delivered film never renders failure chrome', () {
+    final now = DateTime.utc(2026, 8, 25, 12);
+    final delivered = Generation(
+      localId: 'delivered-failed',
+      status: 'Task not found',
+      error: '93c9a9a9-92c5-40ac-a12a-d6e6312737a4',
+      resultUrl: 'https://example.com/film.mp4',
+      lastCheckedAt: now,
+      statusCheckCount: 23,
+      prompt: 'A sloth in a bedazzled pink cowboy hat.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 20,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now.subtract(const Duration(hours: 2)),
+      updatedAt: now,
+    );
+    // The record still reads as failed for billing/history purposes, but the
+    // delivered media is ground truth for every surface.
+    expect(delivered.isFailed, isTrue);
+    expect(delivered.hasDeliveredMedia, isTrue);
+    expect(GenerationStatusDetails.shouldShow(delivered), isFalse);
+
+    final trulyFailed = Generation(
+      localId: 'truly-failed',
+      status: 'Task not found',
+      error: 'BFL no longer recognizes this task.',
+      lastCheckedAt: now,
+      statusCheckCount: 3,
+      prompt: 'A sloth in a bedazzled pink cowboy hat.',
+      mode: VideoMode.t2v,
+      config: delivered.config,
+      createdAt: delivered.createdAt,
+      updatedAt: now,
+    );
+    expect(trulyFailed.hasDeliveredMedia, isFalse);
+    expect(GenerationStatusDetails.shouldShow(trulyFailed), isTrue);
+    // The test-bars thumbnail follows the same ground truth.
+    expect(GenerationErrorThumbnail.shouldShow(delivered), isFalse);
+    expect(GenerationErrorThumbnail.shouldShow(trulyFailed), isTrue);
   });
 
   test(
@@ -570,7 +712,7 @@ void main() {
   });
 
   testWidgets(
-    'first at-risk provider generation requires checked acceptance once',
+    'at-risk warning repeats unless provider suppression is checked',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1400, 1200));
       addTearDown(() async {
@@ -623,11 +765,21 @@ void main() {
       );
       expect(acceptButton().onPressed, isNull);
 
+      final suppressWarning = find.byKey(
+        const ValueKey('suppress-provider-retention-warning-checkbox'),
+      );
+      expect(tester.widget<CheckboxListTile>(suppressWarning).value, isFalse);
+      await tester.tap(suppressWarning);
+      await tester.pump();
+      expect(acceptButton().onPressed, isNull);
+
       await tester.tap(
         find.byKey(const ValueKey('provider-retention-warning-checkbox')),
       );
       await tester.pump();
       expect(acceptButton().onPressed, isNotNull);
+      await tester.tap(suppressWarning);
+      await tester.pump();
       await tester.tap(
         find.byKey(const ValueKey('accept-provider-retention-warning')),
       );
@@ -643,12 +795,42 @@ void main() {
       expect(gateway.submitCalls, 1);
       expect(
         gateway.snapshot.providerRetentionAcknowledgements,
+        isNot(contains('bfl')),
+      );
+      expect(controller.requiresProviderRetentionAcknowledgement, isTrue);
+
+      await tester.tap(generate);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('provider-retention-warning-checkbox')),
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('suppress-provider-retention-warning-checkbox'),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('accept-provider-retention-warning')),
+      );
+      for (
+        var attempt = 0;
+        attempt < 20 && gateway.submitCalls < 2;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      expect(gateway.submitCalls, 2);
+      expect(
+        gateway.snapshot.providerRetentionAcknowledgements,
         contains('bfl'),
       );
-
       expect(controller.requiresProviderRetentionAcknowledgement, isFalse);
       await controller.submit();
-      expect(gateway.submitCalls, 2);
+      expect(gateway.submitCalls, 3);
       controller.dispose();
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -1001,6 +1183,269 @@ void main() {
     expect(find.textContaining('not safely retained'), findsOneWidget);
   });
 
+  testWidgets('a failed card centers its error on a test-bars thumbnail', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'failed-overlay',
+      status: 'Error',
+      error: 'BFL reported that this generation failed.',
+      lastCheckedAt: now,
+      statusCheckCount: 3,
+      prompt: 'A doomed render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GenerationCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+
+    // The dead media zone shows SMPTE bars with the error on a full-width
+    // black band centered on the thumbnail; the status panel never mounts.
+    expect(find.byType(GenerationStatusDetails), findsNothing);
+    final bars = find.byType(GenerationErrorThumbnail);
+    expect(bars, findsOneWidget);
+    final band = find.byKey(
+      const ValueKey('generation-error-band-failed-overlay'),
+    );
+    expect(
+      find.descendant(
+        of: band,
+        matching: find.text('BFL reported that this generation failed.'),
+      ),
+      findsOneWidget,
+    );
+    final barsRect = tester.getRect(bars);
+    final bandRect = tester.getRect(band);
+    expect(bandRect.left, barsRect.left);
+    expect(bandRect.right, barsRect.right);
+    expect(bandRect.center.dx, closeTo(barsRect.center.dx, .5));
+    expect(bandRect.center.dy, closeTo(barsRect.center.dy, .5));
+
+    // The corner chrome keeps its usual places over the bars.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-failed-overlay')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsOneWidget);
+    expect(find.byIcon(Icons.star_border_rounded), findsOneWidget);
+    expect(find.byType(ProviderBadge), findsOneWidget);
+  });
+
+  testWidgets('card cost chip opens its breakdown in a popover', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'cost-chip',
+      status: 'Ready',
+      prompt: 'A priced render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      cost: 12,
+      creditsBefore: 100,
+      creditsAfter: 88,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: GenerationCard(controller: controller, item: item),
+          ),
+        ),
+      ),
+    );
+
+    // At a glance the card carries only the amount chip on its action row;
+    // the wording and balance trail live behind the tap.
+    final chip = find.byKey(const ValueKey('generation-cost-toggle'));
+    expect(chip, findsOneWidget);
+    expect(
+      find.descendant(of: chip, matching: find.text('12 cr')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Realized cost'), findsNothing);
+    expect(find.textContaining('credits available'), findsNothing);
+
+    await tester.ensureVisible(chip);
+    await tester.pumpAndSettle();
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('generation-cost-details')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Realized cost'), findsOneWidget);
+    expect(find.textContaining('100 → 88 credits available'), findsOneWidget);
+  });
+
+  testWidgets('dense previews show test bars for dead renders', (tester) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'failed-dense',
+      status: 'Error',
+      error: 'BFL reported that this generation failed.',
+      prompt: 'A doomed render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(
+              width: 260,
+              child: MiniGenerationCard(controller: controller, item: item),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(GenerationErrorThumbnail), findsOneWidget);
+    expect(
+      find.text('BFL reported that this generation failed.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('cards anchor the provider chip to the thumbnail, not the body', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 8, 26, 12);
+    final item = Generation(
+      localId: 'provider-chip',
+      provider: atlasProvider.id,
+      model: atlasProvider.defaultModel.id,
+      status: 'Ready',
+      prompt: 'A finished render.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    final controller = AppController();
+    addTearDown(controller.dispose);
+
+    Widget host(Widget child) => MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(body: SingleChildScrollView(child: child)),
+    );
+
+    await tester.pumpWidget(
+      host(GenerationCard(controller: controller, item: item)),
+    );
+
+    // The provider lives on the thumbnail's bottom-right corner and nowhere
+    // else — the spec row below keeps its width for the actual settings.
+    final badgeText = find.descendant(
+      of: find.byType(ProviderBadge),
+      matching: find.text('Atlas Cloud'),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(badgeText, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(GenerationSpecChips),
+        matching: find.text('Atlas Cloud'),
+      ),
+      findsNothing,
+    );
+    final thumb = tester.getRect(
+      find.descendant(
+        of: find.byType(StaticMediaBox),
+        matching: find.byType(AspectRatio),
+      ),
+    );
+    final badge = tester.getRect(find.byType(ProviderBadge));
+    expect(badge.right, closeTo(thumb.right - 10, .5));
+    expect(badge.bottom, closeTo(thumb.bottom - 10, .5));
+
+    await tester.pumpWidget(
+      host(
+        SizedBox(
+          width: 260,
+          child: MiniGenerationCard(controller: controller, item: item),
+        ),
+      ),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ProviderBadge),
+        matching: find.text('Atlas Cloud'),
+      ),
+      findsOneWidget,
+    );
+
+    // Compact rows keep the provider in their metadata line: on the 92-px
+    // thumbnail the pill could only ellipsize the name into noise.
+    await tester.pumpWidget(
+      host(CompactGenerationRow(controller: controller, item: item)),
+    );
+    expect(find.text('Atlas Cloud'), findsOneWidget);
+    expect(find.byType(ProviderBadge), findsNothing);
+  });
+
   testWidgets(
     'shows broadcast static at the generation aspect ratio by default',
     (tester) async {
@@ -1348,6 +1793,184 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.getSize(find.byKey(stripKey)).height, 48);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('full-card idle chrome matches playback and never leaks to work', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'idle-thumb.png': frame,
+        'idle-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    final delivered = _deliveredGeneration(
+      'idle-delivered',
+      thumbnail: 'idle-thumb.png',
+      timeline: 'idle-strip.png',
+    );
+    final now = DateTime.utc(2026, 8, 30, 12);
+    final working = Generation(
+      localId: 'new-working',
+      status: 'Pending',
+      prompt: 'A new film still generating.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    Widget host(Generation item) => MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: GenerationCard(controller: controller, item: item),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(host(delivered));
+    await tester.pumpAndSettle();
+
+    final strip = find.byKey(const ValueKey('generation-idle-filmstrip'));
+    final transport = find.byKey(const ValueKey('generation-idle-transport'));
+    expect(tester.getSize(strip).height, GenerationVideo.timelineHeight);
+    expect(tester.getSize(transport).height, GenerationVideo.transportHeight);
+
+    // Reuse the same card element, as a newly prepended mobile generation
+    // does. Its loading state must not inherit the completed card's strip.
+    await tester.pumpWidget(host(working));
+    await tester.pump();
+
+    expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
+    expect(strip, findsNothing);
+    expect(transport, findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('prepending work keeps every library filmstrip with its ID', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frameA = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final frameB = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final first = _deliveredGeneration(
+      'filmstrip-a',
+      thumbnail: 'filmstrip-a-thumb.png',
+      timeline: 'filmstrip-a-strip.png',
+    );
+    final second = _deliveredGeneration(
+      'filmstrip-b',
+      thumbnail: 'filmstrip-b-thumb.png',
+      timeline: 'filmstrip-b-strip.png',
+    );
+    final initial = LocalSnapshot(
+      generations: <Generation>[first, second],
+      preferences: const AppPreferences(
+        activeSection: AppSection.library,
+        libraryViewMode: GenerationViewMode.full,
+      ),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+    );
+    final gateway = _MemoryGateway(
+      initial,
+      assets: <String, Uint8List>{
+        'filmstrip-a-thumb.png': frameA,
+        'filmstrip-a-strip.png': frameA,
+        'filmstrip-b-thumb.png': frameB,
+        'filmstrip-b-strip.png': frameB,
+      },
+    );
+    final controller = AppController(gateway: gateway)..snapshot = initial;
+    addTearDown(controller.dispose);
+
+    Widget host() => MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(body: LibraryScreen(controller: controller)),
+    );
+
+    MemoryImage filmstripFor(String id) {
+      final card = find.byKey(ValueKey('library-generation-$id'));
+      final strip = find.descendant(
+        of: card,
+        matching: find.byKey(const ValueKey('generation-idle-filmstrip')),
+      );
+      expect(strip, findsOneWidget);
+      return tester.widget<Image>(strip).image as MemoryImage;
+    }
+
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+    expect(identical(filmstripFor(first.localId).bytes, frameA), isTrue);
+    expect(identical(filmstripFor(second.localId).bytes, frameB), isTrue);
+
+    final now = DateTime.utc(2026, 8, 30, 13);
+    final working = Generation(
+      localId: 'newly-prepended-work',
+      status: 'Pending',
+      prompt: 'New work at the front of the list.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    controller.snapshot = initial.copyWith(
+      generations: <Generation>[working, first, second],
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 3),
+    );
+
+    await tester.pumpWidget(host());
+    await tester.pump();
+
+    final workingCard = find.byKey(
+      const ValueKey('library-generation-newly-prepended-work'),
+    );
+    expect(
+      find.descendant(
+        of: workingCard,
+        matching: find.byKey(const ValueKey('generation-idle-filmstrip')),
+      ),
+      findsNothing,
+    );
+    expect(identical(filmstripFor(first.localId).bytes, frameA), isTrue);
+    expect(identical(filmstripFor(second.localId).bytes, frameB), isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
@@ -1779,7 +2402,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 23);
+    expect(decoded.toJson()['schemaVersion'], 24);
   });
 
   test(
@@ -1975,7 +2598,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 23);
+      expect(decoded.toJson()['schemaVersion'], 24);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -3472,6 +4095,73 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('frame and finish share a row and pair with the accordions', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: false,
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Desktop: the collapsed guidance accordions sit in the left column and
+    // the settings column sits beside them; the two console-key dropdowns
+    // share one row.
+    expect(find.byKey(const ValueKey('guidance-settings-row')), findsOneWidget);
+    expect(find.byKey(const ValueKey('frame-finish-row')), findsOneWidget);
+    final ratio = tester.getCenter(
+      find.byKey(const ValueKey('ratio-dropdown')),
+    );
+    final resolution = tester.getCenter(
+      find.byKey(const ValueKey('resolution-dropdown')),
+    );
+    expect(ratio.dy, closeTo(resolution.dy, 1));
+    expect(ratio.dx, lessThan(resolution.dx));
+    final frames = tester.getCenter(
+      find.byKey(const ValueKey('keyframes-accordion-toggle')),
+    );
+    expect(frames.dx, lessThan(ratio.dx));
+
+    // Mobile: the accordions stack above the settings, and the two dropdowns
+    // still share one row instead of a full row each.
+    await tester.binding.setSurfaceSize(const Size(390, 1400));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('guidance-settings-row')), findsNothing);
+    expect(find.byKey(const ValueKey('frame-finish-row')), findsOneWidget);
+    final narrowRatio = tester.getCenter(
+      find.byKey(const ValueKey('ratio-dropdown')),
+    );
+    final narrowResolution = tester.getCenter(
+      find.byKey(const ValueKey('resolution-dropdown')),
+    );
+    expect(narrowRatio.dy, closeTo(narrowResolution.dy, 1));
+    expect(narrowRatio.dx, lessThan(narrowResolution.dx));
+    controller.dispose();
+  });
+
   testWidgets('seed control appears only for Wan and survives reuse', (
     tester,
   ) async {
@@ -3760,6 +4450,11 @@ void main() {
     expect(find.textContaining('REQUIRED'), findsNothing);
     expect(find.text('Or continue a video'), findsNothing);
     expect(find.text('Or enhance a saved draft'), findsNothing);
+    // The references section is a collapsed accordion until opened; its add
+    // buttons then land below the header row.
+    expect(find.byKey(const ValueKey('add-image-reference')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     expect(
       tester.getTopLeft(find.byKey(const ValueKey('add-image-reference'))).dy,
       greaterThan(tester.getBottomLeft(find.text('REFERENCES')).dy),
@@ -4008,6 +4703,81 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets(
+    'models without reference inputs hide and disable attached references',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1000));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = AppController(
+        gateway: _MemoryGateway(
+          const LocalSnapshot(
+            generations: <Generation>[],
+            preferences: AppPreferences(),
+            hasApiKey: false,
+            availableProviders: <String>{'atlas', 'apple-local'},
+            storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+          ),
+        ),
+      );
+      await controller.initialize();
+      await controller.selectProviderModel(
+        'atlas',
+        'bytedance/seedance-2.5/reference-to-video',
+      );
+      controller.addUrlReference(MediaReferenceKind.image);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => CreateScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsOneWidget,
+      );
+
+      await controller.selectProviderModel(
+        'apple-local',
+        'apple-local-animation',
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.mode, VideoMode.t2v);
+      expect(controller.currentConfig.references, isNull);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsNothing,
+      );
+
+      await controller.selectProviderModel(
+        'atlas',
+        'bytedance/seedance-2.5/reference-to-video',
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.mode, VideoMode.i2v);
+      expect(
+        find.byKey(const ValueKey('media-references-section')),
+        findsOneWidget,
+      );
+      controller.dispose();
+    },
+  );
+
   testWidgets('provider picker filters models and provider sections', (
     tester,
   ) async {
@@ -4174,6 +4944,10 @@ void main() {
         ),
       );
 
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
       expect(
         find.textContaining('use First frame for stricter frame-0'),
         findsOneWidget,
@@ -4252,8 +5026,12 @@ void main() {
       ),
     );
 
-    // Empty form: both sections are offered with one compact either-or note.
+    // Empty form: both sections are offered as collapsed accordions; their
+    // captions and add buttons appear once opened.
     await pump();
+    await tester.tap(find.byKey(const ValueKey('keyframes-accordion-toggle')));
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     expect(find.textContaining('2 frames max · first + last'), findsOneWidget);
     expect(
       find.textContaining(
@@ -4263,7 +5041,7 @@ void main() {
     );
     expect(find.textContaining('Guide identity'), findsNothing);
     expect(find.textContaining('Type @'), findsNothing);
-    expect(find.text('First frame'), findsOneWidget);
+    expect(find.text('First'), findsOneWidget);
     expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
 
     // A pinned frame sets the references side aside.
@@ -4287,7 +5065,7 @@ void main() {
       find.textContaining('References attached — remove them to add frames'),
       findsOneWidget,
     );
-    expect(find.text('First frame'), findsNothing);
+    expect(find.text('First'), findsNothing);
 
     // A conflicted form (through reuse or a model switch) warns on both
     // sections.
@@ -4325,7 +5103,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: buildClawnsoleTheme(Brightness.light),
-          home: Scaffold(body: CreateScreen(controller: controller)),
+          home: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) =>
+                Scaffold(body: CreateScreen(controller: controller)),
+          ),
         ),
       );
 
@@ -4333,12 +5115,67 @@ void main() {
         find.byKey(const ValueKey('media-references-section')),
         findsOneWidget,
       );
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('add-image-reference')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-video-reference')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-audio-reference')), findsOneWidget);
       expect(find.textContaining('30 images'), findsOneWidget);
       expect(find.textContaining('10 videos'), findsOneWidget);
       expect(find.textContaining('10 audio clips'), findsOneWidget);
+      // Gauges stay hidden until a reference of that kind is attached; the
+      // summary line above carries the limits in the meantime.
+      expect(
+        find.byKey(const ValueKey('reference-capacity-total')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-image-count')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-video-count')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-video-duration')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-audio-duration')),
+        findsNothing,
+      );
+      controller.addUrlReference(MediaReferenceKind.video);
+      final videoReference = controller.form.references.single;
+      controller.form.references = <MediaReferenceDraft>[
+        videoReference.copyWith(durationSeconds: 12),
+      ];
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('reference-capacity-image-count')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('reference-capacity-audio-duration')),
+        findsNothing,
+      );
+      final videoCountGauge = tester.widget<LinearProgressIndicator>(
+        find.descendant(
+          of: find.byKey(const ValueKey('reference-capacity-video-count')),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+      );
+      final videoDurationGauge = tester.widget<LinearProgressIndicator>(
+        find.descendant(
+          of: find.byKey(const ValueKey('reference-capacity-video-duration')),
+          matching: find.byType(LinearProgressIndicator),
+        ),
+      );
+      expect(videoCountGauge.value, .1);
+      expect(videoDurationGauge.value, .4);
+      expect(find.text('12 s / 30 s'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('reference-task-reference')),
         findsOneWidget,
@@ -4445,6 +5282,7 @@ void main() {
     await tester.binding.setSurfaceSize(viewport);
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
+      tester.view.resetViewInsets();
       await tester.binding.setSurfaceSize(null);
     });
     final controller = AppController()
@@ -4468,9 +5306,11 @@ void main() {
       find.byKey(const ValueKey('prompt-character-limit')),
       findsOneWidget,
     );
+    expect(find.text('18 / 1000'), findsOneWidget);
     await tester.enterText(inlinePrompt, List<String>.filled(1001, 'x').join());
     await tester.pump();
     expect(controller.form.prompt.length, 1000);
+    expect(find.text('1000 / 1000'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-button')));
     await tester.pumpAndSettle();
@@ -4484,6 +5324,25 @@ void main() {
     expect(fullscreen, findsOneWidget);
     expect(tester.getSize(fullscreen), viewport);
     expect(tester.getSize(fullscreenPrompt).height, greaterThan(600));
+    final fullscreenTextField = tester.widget<TextField>(
+      find.descendant(of: fullscreenPrompt, matching: find.byType(TextField)),
+    );
+    expect(fullscreenTextField.textAlign, TextAlign.left);
+    expect(fullscreenTextField.textAlignVertical, TextAlignVertical.top);
+
+    const keyboardHeight = 280.0;
+    tester.view.viewInsets = FakeViewPadding(
+      bottom: keyboardHeight * tester.view.devicePixelRatio,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(
+      tester.getBottomRight(fullscreenPrompt).dy,
+      lessThanOrEqualTo(viewport.height - keyboardHeight),
+    );
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+
     await tester.enterText(
       fullscreenPrompt,
       List<String>.filled(1001, 'y').join(),
@@ -4555,6 +5414,64 @@ void main() {
     expect(copiedText, controller.form.prompt);
     expect(controller.notice, 'Prompt copied to the clipboard.');
     await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('clear prompt asks first and wipes only the direction', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    final controller = AppController()
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'gen4.5';
+    controller.form.prompt = 'A sloth leans in near the drink.';
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => CreateScreen(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The clear control hugs the Direction label, left of the header's
+    // trailing cluster.
+    final clear = find.byKey(const ValueKey('prompt-clear-button'));
+    expect(clear, findsOneWidget);
+    expect(
+      tester.getCenter(clear).dx,
+      lessThan(
+        tester.getCenter(find.byKey(const ValueKey('prompt-copy-button'))).dx,
+      ),
+    );
+
+    // Cancel keeps the direction.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    expect(find.text('Clear the prompt?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, 'A sloth leans in near the drink.');
+
+    // Confirm clears the form and the inline editor follows.
+    await tester.tap(clear);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('prompt-clear-confirm')));
+    await tester.pumpAndSettle();
+    expect(controller.form.prompt, isEmpty);
+    expect(find.text('A sloth leans in near the drink.'), findsNothing);
+
+    // Nothing left to clear: the control disables instead of re-asking.
+    expect(tester.widget<IconButton>(clear).onPressed, isNull);
   });
 
   testWidgets('prompt reference tags autocomplete and highlight', (
@@ -4742,6 +5659,10 @@ void main() {
         ),
       ),
     );
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    // Timed pumps: the video tile's thumbnail spinner never settles here.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.tap(
       find.byKey(ValueKey('rename-media-reference-${reference.id}')),
     );
@@ -4825,6 +5746,7 @@ void main() {
       createdAt: now,
       updatedAt: now,
       tags: const <String>['skate'],
+      durationSeconds: 12,
     );
     final snapshot = LocalSnapshot(
       generations: const <Generation>[],
@@ -4886,6 +5808,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('0/2 selected'), findsOneWidget);
+    expect(find.textContaining('12 s'), findsNWidgets(3));
 
     final first = find.byKey(
       const ValueKey('reference-picker-card-saved-video-1'),
@@ -5776,6 +6699,54 @@ void main() {
     expect(gateway.snapshot.preferences.activeSection, AppSection.references);
   });
 
+  testWidgets('References opens before its retained preview cache responds', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    final now = DateTime.utc(2026, 8, 25, 12);
+    final gateway = _BlockingCacheGateway(
+      LocalSnapshot(
+        generations: const <Generation>[],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'cached-reference',
+            name: 'Cached character',
+            kind: MediaReferenceKind.image,
+            asset: const AssetReference(
+              kind: 'drive',
+              value: 'cached-character-image',
+              label: 'character.png',
+              contentType: 'image/png',
+            ),
+            createdAt: now,
+            updatedAt: now,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+        preferences: const AppPreferences(),
+        hasApiKey: false,
+        storage: const StorageStats(path: 'memory', bytes: 0, records: 1),
+      ),
+    );
+    addTearDown(() async {
+      gateway.completeCache();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.binding.setSurfaceSize(null);
+    });
+    await tester.pumpWidget(
+      ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('References'));
+    await tester.pump();
+
+    expect(gateway.cacheReads, 1);
+    expect(gateway.cacheCompleted, isFalse);
+    expect(find.text('Your creative ingredients.'), findsOneWidget);
+    expect(find.text('Cached character'), findsOneWidget);
+  });
+
   test(
     'keeps the latest tab selected while preference writes finish',
     () async {
@@ -5946,7 +6917,14 @@ void main() {
     expect(find.byTooltip('Compact'), findsOneWidget);
     expect(find.byTooltip('Mini'), findsOneWidget);
     expect(find.byTooltip('Full'), findsOneWidget);
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
 
     await tester.tap(find.byTooltip('Mini'));
     await tester.pumpAndSettle();
@@ -6005,7 +6983,14 @@ void main() {
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
     expect(
       gateway.snapshot.preferences.libraryViewMode,
       GenerationViewMode.full,
@@ -6314,7 +7299,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
 
     // Recent work sits below the full-width composer, so bring its view
     // toggle on screen before tapping.
@@ -6362,7 +7354,14 @@ void main() {
     await tester.tap(find.byTooltip('Full'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(StatusBadge), findsNWidgets(4));
+    // Full cards overlay storage + age on each thumbnail; Ready records
+    // mount no status badge at all since the ready/delivered gate moved to
+    // StatusBadge.shouldShow.
+    expect(
+      find.byKey(const ValueKey('generation-meta-overlay-view-generation-0')),
+      findsOneWidget,
+    );
+    expect(find.byType(StatusBadge), findsNothing);
     expect(
       gateway.snapshot.preferences.recentWorkViewMode,
       GenerationViewMode.full,
@@ -6658,6 +7657,8 @@ void main() {
     );
     await tester.pump();
 
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
     final open = find.byKey(
       const ValueKey('view-media-reference-fullscreen-image'),
     );
@@ -6932,6 +7933,38 @@ void main() {
     });
     controller.dispose();
   });
+
+  test(
+    'FLUX 3 defaults audio on after audio-less models unless user disabled it',
+    () async {
+      final controller = AppController(
+        gateway: _MemoryGateway(
+          const LocalSnapshot(
+            generations: <Generation>[],
+            preferences: AppPreferences(),
+            hasApiKey: false,
+            storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+          ),
+        ),
+      );
+      await controller.initialize();
+
+      expect(controller.selectedModelId, 'flux-3-video');
+      expect(controller.form.generateAudio, isTrue);
+
+      await controller.selectModel('flux-tools-video-upscale-v1');
+      expect(controller.form.generateAudio, isFalse);
+      await controller.selectModel('flux-3-video');
+      expect(controller.form.generateAudio, isTrue);
+
+      controller.setGenerateAudio(false);
+      await controller.selectModel('flux-tools-video-upscale-v1');
+      await controller.selectModel('flux-3-video');
+      expect(controller.form.generateAudio, isFalse);
+
+      controller.dispose();
+    },
+  );
 
   testWidgets('video upscale exposes finishing controls on Create', (
     tester,
@@ -7464,6 +8497,26 @@ class _CacheRestoringGateway extends _MemoryGateway
   Future<Uint8List> readAsset(AssetReference reference) async {
     assetReads += 1;
     return super.readAsset(reference);
+  }
+}
+
+class _BlockingCacheGateway extends _MemoryGateway
+    implements MediaCacheGateway {
+  _BlockingCacheGateway(super.snapshot);
+
+  final Completer<Uint8List?> _cache = Completer<Uint8List?>();
+  int cacheReads = 0;
+
+  bool get cacheCompleted => _cache.isCompleted;
+
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) {
+    cacheReads += 1;
+    return _cache.future;
+  }
+
+  void completeCache() {
+    if (!_cache.isCompleted) _cache.complete(null);
   }
 }
 

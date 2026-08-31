@@ -5,10 +5,12 @@ import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
+import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
+import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/video_cache.dart';
 import 'package:clawnsole/core/video_cache_gateway.dart';
@@ -187,6 +189,166 @@ void main() {
     expect(await restarted.readAsset(image), <int>[1, 2]);
   });
 
+  test('Drive pruning protects an upload until its metadata commits', () async {
+    final now = DateTime.utc(2026, 8, 25, 18);
+    final api = _UploadDriveApi();
+    final store = GoogleDriveStore(
+      apiFactory: (_) => api,
+      presenter: IoGoogleDriveAssetPresenter(
+        cache: VideoCache(directory: () async => temporary),
+      ),
+      clock: () => now,
+      pruneGracePeriod: Duration.zero,
+    );
+    await store.connect('token', 'Shared Studio');
+
+    final film = await store.writeAsset(
+      Uint8List.fromList(<int>[7, 8, 9]),
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    await store.pruneAssets(const <Generation>[]);
+    expect(api.assets, contains(film.value));
+
+    final generation = Generation(
+      localId: 'film',
+      status: 'Ready',
+      prompt: 'Film',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      resultAsset: film,
+      storage: LibraryStorage.drive,
+    );
+    await store.write(StoredData(generations: <Generation>[generation]));
+    await store.write(const StoredData());
+    await store.pruneAssets(const <Generation>[]);
+
+    expect(api.assets, isNot(contains(film.value)));
+  });
+
+  test(
+    'Drive reconnect repairs missing referenced media from local cache',
+    () async {
+      final now = DateTime.utc(2026, 8, 25, 18);
+      const missingFilm = AssetReference(
+        kind: 'drive',
+        value: 'missing-film-0001',
+        label: 'film.mp4',
+        contentType: 'video/mp4',
+        bytes: 3,
+      );
+      const missingThumbnail = AssetReference(
+        kind: 'drive',
+        value: 'missing-thumb-0001',
+        label: 'film-thumbnail.jpg',
+        contentType: 'image/jpeg',
+        bytes: 2,
+      );
+      const missingInput = AssetReference(
+        kind: 'drive',
+        value: 'missing-input-0001',
+        label: 'input.mp4',
+        contentType: 'video/mp4',
+        bytes: 4,
+      );
+      final remote = StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'film',
+            status: 'Ready',
+            prompt: 'Film',
+            mode: VideoMode.v2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+              source: missingInput,
+              references: <MediaReferenceLabel>[
+                MediaReferenceLabel(
+                  label: 'input.mp4',
+                  kind: MediaReferenceKind.video,
+                  source: missingInput,
+                  thumbnailAsset: missingThumbnail,
+                ),
+              ],
+            ),
+            createdAt: now,
+            updatedAt: now,
+            resultAsset: missingFilm,
+            thumbnailAsset: missingThumbnail,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'input',
+            name: 'Input',
+            kind: MediaReferenceKind.video,
+            asset: missingInput,
+            thumbnailAsset: missingThumbnail,
+            createdAt: now,
+            updatedAt: now,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+      );
+      final api = _UploadDriveApi(initialData: remote);
+      final cache = VideoCache(directory: () async => temporary);
+      await cache.put(
+        missingFilm.value,
+        '.mp4',
+        Stream<List<int>>.value(const <int>[1, 2, 3]),
+      );
+      await cache.put(
+        missingThumbnail.value,
+        '.jpg',
+        Stream<List<int>>.value(const <int>[4, 5]),
+      );
+      await cache.put(
+        missingInput.value,
+        '.mp4',
+        Stream<List<int>>.value(const <int>[6, 7, 8, 9]),
+      );
+      final drive = GoogleDriveStore(
+        apiFactory: (_) => api,
+        presenter: IoGoogleDriveAssetPresenter(cache: cache),
+      );
+      final hybrid = HybridDataStore(local: _MemoryStore(), drive: drive);
+
+      final repaired = await hybrid.connect('token', 'Shared Studio');
+
+      final film = repaired.generations.single;
+      final reference = repaired.savedReferences.single;
+      expect(film.resultAsset?.value, isNot(missingFilm.value));
+      expect(film.thumbnailAsset?.value, isNot(missingThumbnail.value));
+      expect(film.config.source?.value, isNot(missingInput.value));
+      expect(
+        film.config.references?.single.source?.value,
+        film.config.source?.value,
+      );
+      expect(reference.asset.value, film.config.source?.value);
+      expect(reference.thumbnailAsset?.value, film.thumbnailAsset?.value);
+      expect(api.assets, hasLength(3));
+      final persisted = StoredData.decode(utf8.decode(api.stateBytes!));
+      expect(
+        persisted.generations.single.resultAsset?.value,
+        film.resultAsset?.value,
+      );
+    },
+  );
+
   test('films and previews use independent durable caches', () async {
     final videoDirectory = Directory('${temporary.path}/videos');
     final thumbnailDirectory = Directory('${temporary.path}/thumbnails');
@@ -281,6 +443,43 @@ void main() {
         ),
       );
       expect(await remote.uri, Uri.parse('https://cdn.test/x.mp4'));
+      controller.dispose();
+    },
+  );
+
+  test(
+    'missing retained results fall back to their provider delivery',
+    () async {
+      final gateway = _CacheGateway(_snapshot())..failAssetUri = true;
+      final controller = AppController(gateway: gateway);
+      final item = _generation(
+        'fallback',
+        status: 'Ready',
+        resultAsset: const AssetReference(
+          kind: 'drive',
+          value: 'missing-film-0001',
+          label: 'clip.mp4',
+          contentType: 'video/mp4',
+        ),
+        resultUrl: 'https://provider.test/clip.mp4',
+      );
+
+      expect(
+        await controller.generationMediaUri(item),
+        Uri.parse('https://provider.test/clip.mp4'),
+      );
+      expect(
+        await controller.generationPreviewSourceUri(item),
+        Uri.parse('https://provider.test/clip.mp4'),
+      );
+      await controller.saveMedia(
+        item,
+        destination: VideoSaveDestination.photos,
+      );
+      expect(gateway.downloadedMedia, <String>[
+        'https://provider.test/clip.mp4',
+      ]);
+      expect(gateway.savedPhotoBytes, <int>[9, 8, 7]);
       controller.dispose();
     },
   );
@@ -408,9 +607,12 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
   LocalSnapshot snapshot;
   final List<AppPreferences> savedPreferences = <AppPreferences>[];
   final List<String> prefetched = <String>[];
+  final List<String> downloadedMedia = <String>[];
   final Map<String, List<VideoDeliveryProgressListener>> _listeners =
       <String, List<VideoDeliveryProgressListener>>{};
   int clears = 0;
+  bool failAssetUri = false;
+  Uint8List? savedPhotoBytes;
   Generation Function(Generation generation)? onPoll;
 
   int listenerCount(String assetId) => _listeners[assetId]?.length ?? 0;
@@ -468,6 +670,7 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
 
   @override
   Future<Uri> assetUri(AssetReference reference) async {
+    if (failAssetUri) throw StateError('The Drive file is missing.');
     if (reference.kind == 'drive') {
       // Emit like a real download: after the caller had a chance to listen.
       await Future<void>.delayed(Duration.zero);
@@ -483,20 +686,26 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
   }
 
   @override
-  Future<Uint8List> readAsset(AssetReference reference) async => Uint8List(0);
+  Future<Uint8List> readAsset(AssetReference reference) async {
+    if (failAssetUri) throw StateError('The Drive file is missing.');
+    return Uint8List(0);
+  }
 
   @override
   Uri mediaUri(String source) => Uri.parse(source);
 
   @override
-  Future<Uint8List> downloadMedia(String source) async => Uint8List(0);
+  Future<Uint8List> downloadMedia(String source) async {
+    downloadedMedia.add(source);
+    return Uint8List.fromList(<int>[9, 8, 7]);
+  }
 
   @override
   Future<void> saveMediaToPhotoLibrary(
     Uint8List bytes,
     String fileName,
     String contentType,
-  ) async {}
+  ) async => savedPhotoBytes = Uint8List.fromList(bytes);
 
   @override
   Future<int> videoCacheUsedBytes() async => 5 * 1024 * 1024;
@@ -543,9 +752,16 @@ class _CacheGateway implements AppGateway, VideoCacheGateway {
 }
 
 class _UploadDriveApi extends GoogleDriveApi {
-  _UploadDriveApi() : super(accessToken: 'token');
+  _UploadDriveApi({StoredData? initialData})
+    : stateBytes = initialData == null
+          ? null
+          : Uint8List.fromList(utf8.encode(initialData.encode())),
+      super(accessToken: 'token');
 
   int _fileCount = 0;
+  Uint8List? stateBytes;
+  final Map<String, Uint8List> assets = <String, Uint8List>{};
+  final Map<String, GoogleDriveFile> assetFiles = <String, GoogleDriveFile>{};
 
   @override
   Future<GoogleDriveFile?> findRootFolder(String name) async =>
@@ -567,6 +783,14 @@ class _UploadDriveApi extends GoogleDriveApi {
           name: clawnsoleDriveAssetsFolder,
           mimeType: 'application/vnd.google-apps.folder',
         )
+      : name == clawnsoleDriveStateFile && stateBytes != null
+      ? GoogleDriveFile(
+          id: 'state-file-0001',
+          name: clawnsoleDriveStateFile,
+          mimeType: 'application/json',
+          size: stateBytes!.length,
+          etag: 'state-etag',
+        )
       : null;
 
   @override
@@ -578,11 +802,111 @@ class _UploadDriveApi extends GoogleDriveApi {
     Map<String, String> appProperties = const <String, String>{},
   }) async {
     _fileCount += 1;
-    return GoogleDriveFile(
+    if (appProperties['clawnsoleState'] == 'true') {
+      stateBytes = Uint8List.fromList(bytes);
+      return GoogleDriveFile(
+        id: 'state-file-0001',
+        name: name,
+        mimeType: contentType,
+        size: bytes.length,
+        etag: 'state-etag',
+      );
+    }
+    final file = GoogleDriveFile(
       id: 'uploaded-file-${_fileCount.toString().padLeft(4, '0')}',
       name: name,
       mimeType: contentType,
       size: bytes.length,
+      modifiedTime: DateTime.utc(2020),
+    );
+    assets[file.id] = Uint8List.fromList(bytes);
+    assetFiles[file.id] = file;
+    return file;
+  }
+
+  @override
+  Future<GoogleDriveContent?> readFile(
+    String fileId, {
+    String? ifNoneMatch,
+  }) async => GoogleDriveContent(stateBytes!, etag: 'state-etag');
+
+  @override
+  Future<GoogleDriveFile> updateFile(
+    String fileId,
+    Uint8List bytes, {
+    required String contentType,
+    String? etag,
+  }) async {
+    stateBytes = Uint8List.fromList(bytes);
+    return GoogleDriveFile(
+      id: fileId,
+      name: clawnsoleDriveStateFile,
+      mimeType: contentType,
+      size: bytes.length,
+      etag: 'state-etag',
     );
   }
+
+  @override
+  Future<List<GoogleDriveFile>> listChildren(
+    String parentId, {
+    String? appPropertyKey,
+    String? appPropertyValue,
+  }) async => assetFiles.values.toList();
+
+  @override
+  Future<void> deleteFile(String fileId) async {
+    assets.remove(fileId);
+    assetFiles.remove(fileId);
+  }
+}
+
+class _MemoryStore implements DurableDataStore {
+  StoredData data = const StoredData();
+
+  @override
+  Future<StoredData> read() async => data;
+
+  @override
+  Future<void> write(StoredData value) async => data = value;
+
+  @override
+  Future<void> delete() async => data = const StoredData();
+
+  @override
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+  }) async => throw UnsupportedError('Not needed by this test store.');
+
+  @override
+  Future<AssetReference?> persistSource(
+    String source, {
+    required String label,
+    AssetReference? retained,
+    LibraryStorage storage = LibraryStorage.local,
+  }) async => retained;
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async =>
+      throw UnsupportedError('Not needed by this test store.');
+
+  @override
+  Future<Uri> assetUri(AssetReference reference) async =>
+      throw UnsupportedError('Not needed by this test store.');
+
+  @override
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) async {}
+
+  @override
+  Future<StorageStats> stats(int records) async => StorageStats(
+    path: 'memory',
+    bytes: data.encode().length,
+    records: records,
+  );
 }

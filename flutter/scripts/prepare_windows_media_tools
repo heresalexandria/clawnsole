@@ -24,9 +24,11 @@ else
   exit 1
 fi
 
-RELEASE_TAG="autobuild-2026-08-11-13-11"
+# BtbN prunes daily autobuild releases; month-end releases retain the same
+# versioned artifacts so this pinned download remains available.
+RELEASE_TAG="autobuild-2026-07-31-14-10"
 ARCHIVE_NAME="ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-shared-8.1.zip"
-ARCHIVE_SHA256="026f3ba22f0acf4fe58bf4da28a7eb64ffb107b270119684b91e4cace3b577aa"
+ARCHIVE_SHA256="c222a490dde4e7059f45495deef6bfb98dbcacc2b43df5b607546252037aa95c"
 CACHE_ROOT="${TMPDIR:-/tmp}/clawnsole-windows-media-$RELEASE_TAG"
 ARCHIVE="$CACHE_ROOT/$ARCHIVE_NAME"
 EXTRACTED="$CACHE_ROOT/extracted"

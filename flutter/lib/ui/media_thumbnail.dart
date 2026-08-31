@@ -36,6 +36,8 @@ class MediaThumbnail extends StatefulWidget {
     this.source,
     this.fit = BoxFit.cover,
     this.frameLoader,
+    this.mediaUriLoader,
+    this.mediaUriRevision,
     this.metadataLoader,
     this.durationLoader,
     this.onThumbnail,
@@ -55,6 +57,8 @@ class MediaThumbnail extends StatefulWidget {
   final String? source;
   final BoxFit fit;
   final VideoFrameLoader? frameLoader;
+  final Future<Uri?> Function()? mediaUriLoader;
+  final Object? mediaUriRevision;
   final VideoMetadataLoader? metadataLoader;
   final MediaDurationLoader? durationLoader;
   final ValueChanged<Uint8List>? onThumbnail;
@@ -82,6 +86,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     widget.source,
     widget.localPath,
     widget.bytes == null ? null : identityHashCode(widget.bytes),
+    widget.mediaUriRevision,
   ].join(':');
 
   @override
@@ -105,6 +110,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       oldWidget.source,
       oldWidget.localPath,
       oldWidget.bytes == null ? null : identityHashCode(oldWidget.bytes),
+      oldWidget.mediaUriRevision,
     ].join(':');
     if (oldFingerprint != _fingerprint) _load();
   }
@@ -191,7 +197,15 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<void> _loadVideoMetadata() async {
-    final uri = await _mediaUri();
+    Uri? uri;
+    try {
+      uri = await _mediaUri();
+    } on Object {
+      // Metadata is a best-effort enhancement launched unawaited; a failing
+      // URI resolution (a disconnected Drive, a missing file) must not become
+      // an unhandled async error.
+      return;
+    }
     if (uri == null) return;
     final key = _fingerprint;
     var job = _videoMetadataJobs[key];
@@ -220,7 +234,14 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<void> _loadMediaDuration() async {
-    final uri = await _mediaUri();
+    Uri? uri;
+    try {
+      uri = await _mediaUri();
+    } on Object {
+      // Same contract as _loadVideoMetadata: never leak an unhandled error
+      // from an unawaited best-effort probe.
+      return;
+    }
     if (uri == null) return;
     final key = _fingerprint;
     var job = _mediaDurationJobs[key];
@@ -249,6 +270,8 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   }
 
   Future<Uri?> _mediaUri() async {
+    final loader = widget.mediaUriLoader;
+    if (loader != null) return loader();
     final path = widget.localPath?.trim() ?? '';
     if (path.isNotEmpty) {
       final parsed = Uri.tryParse(path);

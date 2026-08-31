@@ -36,10 +36,15 @@ class ReferenceVideoTools {
   static Future<ReferenceVideoToolInvocation> convertImageToJpeg({
     required String inputPath,
     required String outputPath,
+    int? maxPixels,
   }) async {
     final response = await _channel.invokeMapMethod<String, Object?>(
       'convertImageToJpeg',
-      <String, Object?>{'inputPath': inputPath, 'outputPath': outputPath},
+      <String, Object?>{
+        'inputPath': inputPath,
+        'outputPath': outputPath,
+        if (maxPixels != null) 'maxPixels': maxPixels,
+      },
     );
     return ReferenceVideoToolInvocation(
       exitCode: (response?['exitCode'] as num?)?.toInt() ?? -1,

@@ -70,7 +70,7 @@ class GoogleDriveSettingsVaultRemote implements SettingsVaultRemote {
     _requireConnected();
     final file = _file;
     if (file == null) return null;
-    final content = await _api!.readFile(file.id);
+    final content = (await _api!.readFile(file.id))!;
     _checkSize(content.bytes);
     _file = GoogleDriveFile(
       id: file.id,

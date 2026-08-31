@@ -67,6 +67,14 @@ abstract interface class ProviderCatalogCacheGateway {
   Future<void> saveProviderCatalogCache(Map<String, Object?> cache);
 }
 
+/// Recovery of result downloads a platform background transfer service
+/// finished while the process was suspended or terminated.
+abstract interface class BackgroundDeliveryGateway {
+  /// Imports every retained platform download whose generation still lacks a
+  /// saved result, returning how many films were recovered.
+  Future<int> recoverBackgroundDeliveries();
+}
+
 abstract interface class LibraryOrganizationGateway {
   Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder);
   Future<LocalSnapshot> deleteLibraryFolder(String folderId);
@@ -83,6 +91,20 @@ abstract interface class ReferenceLibraryGateway {
     String? source,
   });
   Future<LocalSnapshot> deleteReference(String referenceId);
+}
+
+/// Non-destructive edits that create new durable reference media.
+///
+/// The renderer sends only compact edit metadata. Native builds and the
+/// Electron companion perform the media work beside the durable asset store,
+/// keeping large video bytes out of web-renderer messages and history JSON.
+abstract interface class ReferenceVideoEditingGateway {
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  });
 }
 
 abstract interface class FavoriteGateway {

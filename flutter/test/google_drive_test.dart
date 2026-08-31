@@ -149,6 +149,40 @@ void main() {
     expect(observed.url.queryParameters['spaces'], 'drive');
   });
 
+  test('Drive listings follow every provider page', () async {
+    final pageTokens = <String?>[];
+    final api = GoogleDriveApi(
+      accessToken: 'token',
+      apiBase: Uri.parse('https://drive.test/drive/v3/'),
+      client: MockClient((request) async {
+        final token = request.url.queryParameters['pageToken'];
+        pageTokens.add(token);
+        return http.Response(
+          jsonEncode(<String, Object?>{
+            if (token == null) 'nextPageToken': 'second-page',
+            'files': <Object?>[
+              <String, Object?>{
+                'id': token == null ? 'asset-one' : 'asset-two',
+                'name': token == null ? 'one.mp4' : 'two.mp4',
+                'mimeType': 'video/mp4',
+              },
+            ],
+          }),
+          200,
+          headers: const <String, String>{'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    final files = await api.listChildren(
+      'assets-folder',
+      appPropertyKey: 'clawnsoleAsset',
+    );
+
+    expect(pageTokens, <String?>[null, 'second-page']);
+    expect(files.map((file) => file.id), <String>['asset-one', 'asset-two']);
+  });
+
   test(
     'Drive asset upload uses multipart content and its selected parent',
     () async {
@@ -243,7 +277,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 23);
+      expect(migrated.toJson()['schemaVersion'], 24);
     },
   );
 
@@ -769,6 +803,244 @@ void main() {
       expect(local.assets, isNotEmpty);
     },
   );
+
+  test(
+    'Drive state reads revalidate with an ETag instead of re-downloading',
+    () async {
+      var mediaDownloads = 0;
+      final seenValidators = <String?>[];
+      final client = _stateFileClient(
+        onMedia: (request) {
+          seenValidators.add(request.headers['If-None-Match']);
+          if (request.headers['If-None-Match'] == 'state-v1') {
+            return http.Response('', 304);
+          }
+          mediaDownloads += 1;
+          return http.Response(
+            _remoteStateBody(),
+            200,
+            headers: const <String, String>{'etag': 'state-v1'},
+          );
+        },
+      );
+      final store = _mockedDriveStore(client);
+
+      final connected = await store.connect('token', 'Shared Studio');
+      expect(connected.generations.single.localId, 'remote-film');
+      expect(mediaDownloads, 1);
+
+      final revalidated = await store.read();
+      expect(revalidated.generations.single.localId, 'remote-film');
+      expect(mediaDownloads, 1);
+      expect(seenValidators, <String?>[null, 'state-v1']);
+    },
+  );
+
+  test('a Drive quota burst keeps the connection for a later retry', () async {
+    var mode = 'ok';
+    final client = _stateFileClient(
+      onMedia: (request) => switch (mode) {
+        'rate-limited' => http.Response(
+          jsonEncode(<String, Object?>{
+            'error': <String, Object?>{
+              'message': 'User Rate Limit Exceeded',
+              'errors': <Object?>[
+                <String, Object?>{
+                  'domain': 'usageLimits',
+                  'reason': 'userRateLimitExceeded',
+                },
+              ],
+            },
+          }),
+          403,
+        ),
+        'revoked' => http.Response(
+          jsonEncode(<String, Object?>{
+            'error': <String, Object?>{
+              'message': 'The user has not granted the app access.',
+              'errors': <Object?>[
+                <String, Object?>{
+                  'domain': 'global',
+                  'reason': 'insufficientFilePermissions',
+                },
+              ],
+            },
+          }),
+          403,
+        ),
+        _ => http.Response(
+          _remoteStateBody(),
+          200,
+          headers: const <String, String>{'etag': 'state-v1'},
+        ),
+      },
+    );
+    final store = _mockedDriveStore(client);
+    await store.connect('token', 'Shared Studio');
+
+    mode = 'rate-limited';
+    await expectLater(
+      store.read(),
+      throwsA(
+        isA<GoogleDriveException>().having(
+          (error) => error.isRateLimited,
+          'isRateLimited',
+          isTrue,
+        ),
+      ),
+    );
+    expect(
+      store.connection.isConnected,
+      isTrue,
+      reason: 'a quota burst is transient and must not forget the session',
+    );
+
+    mode = 'revoked';
+    await expectLater(
+      store.read(),
+      throwsA(
+        isA<GoogleDriveException>().having(
+          (error) => error.isRateLimited,
+          'isRateLimited',
+          isFalse,
+        ),
+      ),
+    );
+    expect(store.connection.isConnected, isFalse);
+  });
+
+  test(
+    'readCached serves the Drive metadata mirror without Drive traffic',
+    () async {
+      final now = DateTime.utc(2026, 8, 26, 9);
+      final local = _MemoryStore(const StoredData());
+      final drive = _CountingMemoryDriveStore(
+        StoredData(
+          generations: <Generation>[
+            Generation(
+              localId: 'drive-film',
+              status: 'Ready',
+              prompt: 'Drive film',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 8,
+                resolution: 'hd',
+                generateAudio: true,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: now,
+              updatedAt: now,
+              thumbnailAsset: const AssetReference(
+                kind: 'drive',
+                value: 'drive-thumb',
+                label: 'thumb.jpg',
+                contentType: 'image/jpeg',
+              ),
+            ),
+          ],
+        ),
+      );
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Shared Studio');
+      drive.stateReads = 0;
+
+      final cached = await hybrid.readCached();
+
+      expect(cached.generations.single.localId, 'drive-film');
+      expect(cached.generations.single.storage, LibraryStorage.drive);
+      expect(cached.generations.single.thumbnailAsset?.value, 'drive-thumb');
+      expect(
+        drive.stateReads,
+        0,
+        reason: 'serving retained media must never wait on Drive',
+      );
+    },
+  );
+}
+
+/// A Drive backend holding one root folder, one assets folder, and one state
+/// file whose media reads are answered by [onMedia].
+MockClient _stateFileClient({
+  required http.Response Function(http.Request request) onMedia,
+}) => MockClient((request) async {
+  final path = request.url.path;
+  if (path.endsWith('/files') && request.method == 'GET') {
+    final query = request.url.queryParameters['q'] ?? '';
+    Map<String, Object?> entry(String id, String name, String mimeType) =>
+        <String, Object?>{'id': id, 'name': name, 'mimeType': mimeType};
+    final files = query.contains('clawnsoleRoot')
+        ? <Object?>[
+            entry(
+              'root-1',
+              'Shared Studio',
+              'application/vnd.google-apps.folder',
+            ),
+          ]
+        : query.contains('clawnsoleAssets')
+        ? <Object?>[
+            entry('assets-1', 'assets', 'application/vnd.google-apps.folder'),
+          ]
+        : query.contains('clawnsoleState')
+        ? <Object?>[entry('state-1', 'clawnsole.json', 'application/json')]
+        : <Object?>[];
+    return http.Response(
+      jsonEncode(<String, Object?>{'files': files}),
+      200,
+      headers: const <String, String>{'content-type': 'application/json'},
+    );
+  }
+  if (path.endsWith('/files/state-1') && request.method == 'GET') {
+    return onMedia(request);
+  }
+  throw StateError('Unexpected Drive request: ${request.method} $path');
+});
+
+GoogleDriveStore _mockedDriveStore(http.Client client) => GoogleDriveStore(
+  client: client,
+  apiFactory: (token) => GoogleDriveApi(
+    accessToken: token,
+    apiBase: Uri.parse('https://drive.test/drive/v3/'),
+    uploadBase: Uri.parse('https://drive.test/upload/drive/v3/'),
+    client: client,
+  ),
+);
+
+String _remoteStateBody() {
+  final now = DateTime.utc(2026, 8, 26, 9);
+  return StoredData(
+    generations: <Generation>[
+      Generation(
+        localId: 'remote-film',
+        status: 'Ready',
+        prompt: 'Remote film',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    ],
+  ).encode();
+}
+
+class _CountingMemoryDriveStore extends _MemoryDriveStore {
+  _CountingMemoryDriveStore(super.data);
+
+  int stateReads = 0;
+
+  @override
+  Future<StoredData> read() async {
+    stateReads += 1;
+    return super.read();
+  }
 }
 
 _MemoryStore _migrationLocalStore() {

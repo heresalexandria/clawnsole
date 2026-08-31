@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'background_delivery.dart';
 import 'bfl_api.dart';
 import 'durable_data_store.dart';
 import 'generation_status.dart';
@@ -44,8 +45,10 @@ class DirectGateway
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
+        BackgroundDeliveryGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
+        ReferenceVideoEditingGateway,
         FavoriteGateway,
         VisibilityGateway,
         GenerationPreviewGateway,
@@ -55,25 +58,27 @@ class DirectGateway
     BflApi? api,
     http.Client? client,
     ProviderApiRouter? providerRouter,
+    BackgroundResultDelivery? backgroundDelivery,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
     this.persistenceDescription = 'Durable Clawnsole data store',
-    this.availableProviders = const <String>{
-      'bfl',
-      'ltx',
-      'artcraft',
-      'atlas',
-      'runway',
-    },
+    this.availableProviders = remoteProviderIds,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _client = client ?? http.Client(),
-       _referenceVideoNormalizer = referenceVideoNormalizer;
+       _backgroundDelivery = backgroundDelivery,
+       _referenceVideoNormalizer = referenceVideoNormalizer,
+       _referenceVideoEditingService =
+           referenceVideoNormalizer is ReferenceVideoEditingService
+           ? referenceVideoNormalizer as ReferenceVideoEditingService
+           : null;
 
   final DurableDataStore _store;
   final ProviderApiRouter _providers;
   final http.Client _client;
+  final BackgroundResultDelivery? _backgroundDelivery;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
+  final ReferenceVideoEditingService? _referenceVideoEditingService;
   @override
   final String persistenceDescription;
   final Set<String> availableProviders;
@@ -137,9 +142,23 @@ class DirectGateway
           next = next.copyWith(deliveryExpiresAt: expectedExpiry);
         }
       }
+      // An undelivered record keeps its links past the retention estimate
+      // until a result download was actually attempted after the estimate
+      // lapsed. A mere status check is not enough: lastCheckedAt is shared
+      // across devices, so another device's routine poll would otherwise
+      // authorize purging the last delivery link before this device (or any
+      // device) ever tried to download from it.
+      final attemptedAfterExpiry =
+          next.resultAsset != null ||
+          (next.deliveryExpiresAt != null &&
+              next.lastResultRetentionAttemptAt?.isAfter(
+                    next.deliveryExpiresAt!,
+                  ) ==
+                  true);
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
-          (next.resultUrl == null && next.draftCacheUrl == null)) {
+          (next.resultUrl == null && next.draftCacheUrl == null) ||
+          !attemptedAfterExpiry) {
         return next;
       }
       changed = true;
@@ -154,7 +173,16 @@ class DirectGateway
     }).toList();
     if (!changed) return current;
     final next = current.copyWith(generations: generations);
-    await _store.write(next);
+    try {
+      await _store.write(next);
+    } on Object {
+      // Drive-tagged records cannot be rewritten while Drive is disconnected,
+      // and a transient Drive failure must not take down every read (a throw
+      // here would surface as a full-screen startup error and skip Drive
+      // reconciliation for the whole session). Serve the stored state
+      // unchanged; the sweep reruns on a later read.
+      return current;
+    }
     return next;
   }
 
@@ -504,13 +532,14 @@ class DirectGateway
       asset: asset,
       thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
       createdAt: existing?.createdAt ?? reference.createdAt,
-      updatedAt: DateTime.now().toUtc(),
+      updatedAt: reference.updatedAt,
       folderId: reference.folderId,
       tags: _cleanLibraryTags(reference.tags),
       favorite: reference.favorite,
       hidden: reference.hidden,
       storage: reference.storage,
       contentDigest: reference.contentDigest ?? existing?.contentDigest,
+      durationSeconds: reference.durationSeconds ?? existing?.durationSeconds,
     );
     final references = List<SavedReference>.from(current.savedReferences);
     final index = references.indexWhere((item) => item.id == clean.id);
@@ -522,6 +551,102 @@ class DirectGateway
     final next = current.copyWith(savedReferences: references);
     await _store.write(next);
     return _snapshot(next);
+  }
+
+  @override
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    final editor = _referenceVideoEditingService;
+    if (editor == null) {
+      throw StateError('Video trimming is unavailable on this build.');
+    }
+    final current = await _store.read();
+    final source = current.savedReferences
+        .where((item) => item.id == sourceReferenceId)
+        .firstOrNull;
+    if (source == null || source.kind != MediaReferenceKind.video) {
+      throw StateError('That reference video no longer exists.');
+    }
+    final sourceDuration = source.durationSeconds;
+    if (sourceDuration == null ||
+        !startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds > sourceDuration + .001 ||
+        endSeconds - startSeconds < .1) {
+      throw StateError('Choose a valid range within the reference video.');
+    }
+    final name = output.name.trim();
+    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+      throw StateError('Reference names must be between 1 and 80 characters.');
+    }
+    if (current.savedReferences.any((item) => item.id == output.id)) {
+      throw StateError('That reference already exists.');
+    }
+    if (output.storage != source.storage ||
+        (output.folderId != null &&
+            !current.folders.any(
+              (folder) =>
+                  folder.id == output.folderId &&
+                  folder.collection == LibraryCollection.references &&
+                  folder.storage == source.storage,
+            ))) {
+      throw StateError('That reference folder no longer exists.');
+    }
+    final original = await _referenceVideoBytes(source.asset);
+    final trimmed = await editor.trimVideo(
+      original,
+      startSeconds: startSeconds,
+      endSeconds: endSeconds,
+    );
+    final asset = await _store.writeAsset(
+      trimmed,
+      label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
+      contentType: 'video/mp4',
+      storage: source.storage,
+    );
+    final now = DateTime.now().toUtc();
+    final saved = SavedReference(
+      id: output.id,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      createdAt: now,
+      updatedAt: now,
+      folderId: output.folderId,
+      tags: _cleanLibraryTags(output.tags),
+      favorite: output.favorite,
+      hidden: output.hidden,
+      storage: source.storage,
+      durationSeconds: endSeconds - startSeconds,
+    );
+    final next = current.copyWith(
+      savedReferences: <SavedReference>[saved, ...current.savedReferences],
+    );
+    await _store.write(next);
+    return _snapshot(next);
+  }
+
+  Future<Uint8List> _referenceVideoBytes(AssetReference asset) async {
+    if (asset.isLocal) return _store.readAsset(asset);
+    final uri = Uri.tryParse(asset.value);
+    if (uri == null || uri.scheme != 'https') {
+      throw StateError('The reference video is not available for trimming.');
+    }
+    final response = await _client.get(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('The reference video could not be downloaded.');
+    }
+    const maximumBytes = 512 * 1024 * 1024;
+    if (response.bodyBytes.isEmpty ||
+        response.bodyBytes.length > maximumBytes) {
+      throw StateError('Reference videos must be 512 MB or smaller.');
+    }
+    return response.bodyBytes;
   }
 
   @override
@@ -915,10 +1040,9 @@ class DirectGateway
         'Add a ${providerById(provider).name} API key before generating.',
       );
     }
-    final referenceVideoProfile = modelById(
-      provider,
-      record.model,
-    ).referenceVideoCompatibilityProfile;
+    final model = modelById(provider, record.model);
+    final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
+    final referenceImageProfile = model.referenceImageCompatibilityProfile;
     if (submission.autoFixReferenceVideos ??
         data.preferences.autoFixReferenceVideos) {
       final ReferenceImageNormalizationService imageNormalizer =
@@ -931,6 +1055,7 @@ class DirectGateway
         videoNormalizer: _referenceVideoNormalizer,
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
+        imageProfile: referenceImageProfile,
       );
       input = prepared.input;
       record = record.copyWith(config: prepared.config);
@@ -1057,6 +1182,206 @@ class DirectGateway
     }
   }
 
+  Future<AssetReference> _fetchResultAsset(
+    String url,
+    Generation generation,
+  ) async {
+    // A platform background transfer service outlives suspension: once the
+    // download starts, the OS finishes it even if the process is frozen or
+    // terminated, and the recovery pass imports it on the next return. The
+    // in-process HTTP path below remains for platforms without a service.
+    final delivery = _backgroundDelivery;
+    if (delivery != null) {
+      // The bounded wait keeps this poll's classification honest — a slow
+      // transfer becomes a retryable stall, not an abandoned poll — while
+      // the platform keeps transferring; the finished file then lands
+      // through a later retry or the recovery pass. The platform's retained
+      // copy is deliberately NOT released here: the record referencing the
+      // asset persists only at poll end, and the recovery pass releases
+      // copies whose record already holds its result.
+      final delivered = await delivery
+          .download(
+            id: generation.localId,
+            url: validatedProviderUrl(url).toString(),
+          )
+          .timeout(const Duration(minutes: 8));
+      if (delivered != null) {
+        return _store.writeAsset(
+          delivered.bytes,
+          label: 'clawnsole-${generation.localId}.mp4',
+          contentType: delivered.contentType ?? 'video/mp4',
+          storage: generation.storage,
+        );
+      }
+    }
+    final request = http.Request('GET', validatedProviderUrl(url));
+    final response = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ProviderException(
+        'The provider result download returned HTTP ${response.statusCode}.',
+        status: response.statusCode,
+      );
+    }
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.stream.timeout(
+      const Duration(seconds: 30),
+    )) {
+      bytes.add(chunk);
+    }
+    return _store.writeAsset(
+      bytes.takeBytes(),
+      label: 'clawnsole-${generation.localId}.mp4',
+      contentType: response.headers['content-type'] ?? 'video/mp4',
+      storage: generation.storage,
+    );
+  }
+
+  /// Retains a ready result through its previously captured delivery link
+  /// after a status check failed.
+  ///
+  /// A provider that has already expired or forgotten a task often still
+  /// serves the signed result URL captured from an earlier poll, so a failed
+  /// status check must not discard a finished film without trying that link.
+  /// `stalled` distinguishes a timed-out download — which says nothing about
+  /// the link itself and must keep the generation retryable — from a
+  /// definitive link failure.
+  Future<({AssetReference? asset, bool stalled})> _downloadRetainedResult(
+    Generation generation,
+  ) async {
+    final url = generation.resultUrl;
+    if (!generation.isReady || generation.resultAsset != null || url == null) {
+      return (asset: null, stalled: false);
+    }
+    try {
+      return (asset: await _fetchResultAsset(url, generation), stalled: false);
+    } on TimeoutException {
+      return (asset: null, stalled: true);
+    } on Object {
+      return (asset: null, stalled: false);
+    }
+  }
+
+  /// Persists a poll outcome unless the stored record advanced past the
+  /// [expected] baseline while this poll ran, returning null when it did.
+  ///
+  /// A poll abandoned by its caller's timeout keeps running on a dead socket
+  /// and can complete much later; without this guard its stale write would
+  /// overwrite a newer poll's outcome — even discarding a delivered result
+  /// asset — or resurrect a deleted record. Every persisted poll outcome
+  /// advances statusCheckCount, so it serves as the write version.
+  Future<Generation?> _persistPollUpdate(
+    Generation next, {
+    required Generation expected,
+  }) async {
+    final current = await _store.read();
+    final generations = List<Generation>.from(current.generations);
+    final index = generations.indexWhere(
+      (item) => item.localId == next.localId,
+    );
+    if (index < 0) return null;
+    final existing = generations[index];
+    if (existing.statusCheckCount != expected.statusCheckCount) return null;
+    final persisted = next.copyWith(
+      folderId: existing.folderId,
+      clearFolder: existing.folderId == null,
+      tags: existing.tags,
+      favorite: existing.favorite,
+      hidden: existing.hidden,
+      storage: existing.storage,
+    );
+    generations[index] = persisted;
+    await _store.write(current.copyWith(generations: generations));
+    return persisted;
+  }
+
+  /// Whether a failure status reads as provider-side retention expiry — the
+  /// one terminal verdict the arrival of the film itself overrules.
+  static bool _expiryShaped(String status) =>
+      normalizeGenerationStatus(status) == 'Task not found';
+
+  @override
+  Future<int> recoverBackgroundDeliveries() async {
+    final delivery = _backgroundDelivery;
+    if (delivery == null) return 0;
+    final ids = await delivery.pendingResultIds();
+    if (ids.isEmpty) return 0;
+    var recovered = 0;
+    for (final id in ids) {
+      final data = await _store.read();
+      final generation = data.generations
+          .where((item) => item.localId == id)
+          .firstOrNull;
+      if (generation == null || generation.resultAsset != null) {
+        await delivery.completeResult(id);
+        continue;
+      }
+      if (generation.isFailed &&
+          !generation.isReady &&
+          !_expiryShaped(generation.status)) {
+        // A moderation or cancellation verdict stands even though the bytes
+        // arrived; only expiry-shaped failures — the provider forgetting a
+        // task the OS was still downloading — are restored by the film.
+        await delivery.completeResult(id);
+        continue;
+      }
+      final result = await delivery.readPendingResult(id);
+      if (result == null) {
+        await delivery.completeResult(id);
+        continue;
+      }
+      try {
+        final asset = await _store.writeAsset(
+          result.bytes,
+          label: 'clawnsole-$id.mp4',
+          contentType: result.contentType ?? 'video/mp4',
+          storage: generation.storage,
+        );
+        final now = DateTime.now().toUtc();
+        // The film itself arrived, so a record the retention machinery gave
+        // up on — the provider expired the task while the OS was still
+        // downloading — completes as ready rather than staying failed. The
+        // statusCheckCount bump is the write version: without it a poll in
+        // flight against the same baseline would pass the CAS and clobber
+        // the imported film after its platform copy is released.
+        final persisted = await _persistPollUpdate(
+          generation.copyWith(
+            status: 'Ready',
+            resultAsset: asset,
+            clearError: true,
+            clearProgress: true,
+            deliveryExpired: false,
+            resultRetentionFailures: 0,
+            clearResultRetentionError: true,
+            lastResultRetentionAttemptAt: now,
+            statusCheckCount: generation.statusCheckCount + 1,
+            updatedAt: now,
+          ),
+          expected: generation,
+        );
+        if (persisted != null) {
+          recovered += 1;
+          await delivery.completeResult(id);
+        }
+        // A lost write race keeps the platform copy for the next pass.
+      } on Object {
+        // A failed store write keeps the platform copy for a later retry.
+      }
+    }
+    return recovered;
+  }
+
+  /// The stored version of [generation], or the caller's copy when the
+  /// record no longer exists.
+  Future<Generation> _storedOrInput(Generation generation) async {
+    final current = await _store.read();
+    return current.generations
+            .where((item) => item.localId == generation.localId)
+            .firstOrNull ??
+        generation;
+  }
+
   @override
   Future<Generation> poll(Generation generation) async {
     final checkedAt = DateTime.now().toUtc();
@@ -1078,12 +1403,21 @@ class DirectGateway
         key,
         generation.pollingUrl!,
       );
-      var status = normalizeGenerationStatus(payload['status']);
+      final reportedStatus = normalizeGenerationStatus(payload['status']);
+      var status = reportedStatus;
+      if (isGenerationFailureStatus(status) && generation.hasDeliveredMedia) {
+        // A provider expiring or forgetting a task whose film — or still-held
+        // delivery link — already arrived must not fail the generation; a
+        // restored ready status lets retention keep trying the link below.
+        status = normalizeGenerationStatus(generation.status);
+      }
       final result = payload['result'] ?? payload['outputs'] ?? payload;
-      final resultUrl = status == 'Ready'
+      // Fresh links come only from a payload that itself reported ready — a
+      // failure payload must never have an incidental URL mistaken for one.
+      final resultUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: false)
           : null;
-      final draftUrl = status == 'Ready'
+      final draftUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: true)
           : null;
       var failureMessage = isGenerationFailureStatus(status)
@@ -1097,36 +1431,54 @@ class DirectGateway
       var retentionFailures = generation.resultRetentionFailures;
       String? retentionError;
       var attemptedRetention = false;
-      if (status == 'Ready' && resultAsset == null && resultUrl == null) {
+      // A previously captured delivery link often outlives the provider's
+      // status payload, so retention falls back to it whenever this poll's
+      // payload no longer carries a fresh link.
+      final downloadUrl = status == 'Ready'
+          ? (resultUrl ?? generation.resultUrl)
+          : resultUrl;
+      final provider = providerById(generation.provider);
+      final deliveryAvailability = provider.resultDelivery.availability;
+      if (status == 'Ready' && resultAsset == null && resultUrl != null) {
+        // The ready status and its delivery link are an irreplaceable receipt:
+        // they must survive a suspension or crash during the download attempt
+        // below, so they are persisted now rather than only at poll end.
+        final receipt = await _persistPollUpdate(
+          expected: generation,
+          generation.copyWith(
+            status: status,
+            resultUrl: resultUrl,
+            draftCacheUrl: draftUrl,
+            providerCompletedAt: !generation.isReady
+                ? providerGenerationCompletedAt(payload) ?? checkedAt
+                : null,
+            deliveryExpiresAt: deliveryAvailability != null
+                ? generation.deliveryExpiresAt ??
+                      checkedAt.add(deliveryAvailability)
+                : null,
+            clearDeliveryExpiresAt: deliveryAvailability == null,
+            deliveryExpired: false,
+            lastProviderResponse: compactProviderResponse(payload),
+            lastProviderResponseAt: checkedAt,
+            updatedAt: checkedAt,
+          ),
+        );
+        if (receipt == null) {
+          // A newer poll outcome (or a deletion) superseded this one while
+          // it ran; downloading against the stale baseline would only race
+          // that winner's write.
+          return await _storedOrInput(generation);
+        }
+      }
+      if (status == 'Ready' && resultAsset == null && downloadUrl == null) {
         attemptedRetention = true;
         retentionFailures += 1;
         retentionError =
             '${providerById(generation.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
-      } else if (resultUrl != null && resultAsset == null) {
+      } else if (downloadUrl != null && resultAsset == null) {
         attemptedRetention = true;
         try {
-          final request = http.Request('GET', validatedProviderUrl(resultUrl));
-          final response = await _client
-              .send(request)
-              .timeout(const Duration(seconds: 30));
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            throw ProviderException(
-              'The provider result download returned HTTP ${response.statusCode}.',
-              status: response.statusCode,
-            );
-          }
-          final bytes = BytesBuilder(copy: false);
-          await for (final chunk in response.stream.timeout(
-            const Duration(seconds: 30),
-          )) {
-            bytes.add(chunk);
-          }
-          resultAsset = await _store.writeAsset(
-            bytes.takeBytes(),
-            label: 'clawnsole-${generation.localId}.mp4',
-            contentType: response.headers['content-type'] ?? 'video/mp4',
-            storage: generation.storage,
-          );
+          resultAsset = await _fetchResultAsset(downloadUrl, generation);
           retentionFailures = 0;
         } on TimeoutException {
           retentionFailures += 1;
@@ -1149,13 +1501,11 @@ class DirectGateway
         allowDeterministicQuote: status == 'Ready',
         terminal: terminal,
       );
-      final provider = providerById(generation.provider);
       final reportedProgress =
           progressReportingFor(generation.provider, generation.model) ==
               ProviderProgressReporting.reported
           ? findProviderProgress(payload)
           : null;
-      final deliveryAvailability = provider.resultDelivery.availability;
       next = generation.copyWith(
         status: status,
         progress: reportedProgress,
@@ -1199,9 +1549,50 @@ class DirectGateway
               providerHttpStatus(error) == 403)) {
         await invalidateCredential(generation.provider, credential);
       }
+      final rescue = await _downloadRetainedResult(generation);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
-      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+      if (rescue.asset != null) {
+        // The status check failed, but the film itself was still available at
+        // the previously captured delivery link, so the generation completes.
+        next = generation.copyWith(
+          resultAsset: rescue.asset,
+          lastResultRetentionAttemptAt: checkedAt,
+          resultRetentionFailures: 0,
+          clearResultRetentionError: true,
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null &&
+          isGenerationFailureStatus(providerStatus) &&
+          generation.hasDeliveredMedia) {
+        // The film — or its still-held delivery link — already arrived; an
+        // expired or failed provider job cannot retract it, and the rescue
+        // above will keep retrying the link until the delivery window purge
+        // releases it. Record the check without downgrading the delivery.
+        next = generation.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: generation.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastResultRetentionAttemptAt: generation.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: generation.needsResultRetention
+              ? generation.resultRetentionFailures + 1
+              : generation.resultRetentionFailures,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null && isGenerationFailureStatus(providerStatus)) {
         final reportedProgress =
             progressReportingFor(generation.provider, generation.model) ==
                 ProviderProgressReporting.reported
@@ -1231,11 +1622,13 @@ class DirectGateway
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: generation.isReady ? checkedAt : null,
-          resultRetentionFailures: generation.isReady
+          lastResultRetentionAttemptAt: generation.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: generation.needsResultRetention
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
-          resultRetentionError: generation.isReady
+          resultRetentionError: generation.needsResultRetention
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),
@@ -1245,7 +1638,8 @@ class DirectGateway
         );
       }
     }
-    return _replaceGeneration(next);
+    return await _persistPollUpdate(next, expected: generation) ??
+        await _storedOrInput(generation);
   }
 
   @override

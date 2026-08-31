@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "luma/ray-2",
+  "canonical_model_id": "luma-ray-2",
+  "label": "Ray 2",
+  "description": "Luma Ray 2 five-second generation up to Full HD.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "21:9",
+    "9:21"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "960 × 540 base"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720 base"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080 base"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 5,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.084,
+  "reference_usd_per_second": 0.084,
+  "supports_start_frame": true,
+  "supports_audio": false
+}

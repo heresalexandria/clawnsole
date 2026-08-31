@@ -39,6 +39,7 @@
   "duration_step": 1,
   "max_keyframes": 1,
   "usd_per_second": 0.1475,
+  "max_prompt_characters": 4096,
   "reference_usd_per_second": 0.1475,
   "supports_start_frame": true,
   "max_duration_with_image_guidance": 10,

@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "minimax/h3-max",
+  "canonical_model_id": "minimax-h3-max",
+  "label": "MiniMax H3 Max",
+  "description": "MiniMax H3 Max generation at 480p or 768p.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "SD",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "768p class"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.025,
+  "reference_usd_per_second": 0.025,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_audio": false,
+  "supports_seed": true,
+  "max_prompt_characters": 7000
+}

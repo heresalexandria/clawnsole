@@ -1,17 +1,34 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
+import 'video_frame_loader.dart';
+import 'video_metadata_loader.dart';
 import 'visual_reference_viewer.dart';
+
+Future<Uint8List?> _loadReferenceVideoPreview(
+  PickedAsset asset,
+  String source,
+) {
+  final path = asset.path?.trim() ?? '';
+  final parsed = path.isEmpty ? null : Uri.tryParse(path);
+  final uri = path.isEmpty
+      ? Uri.parse(source)
+      : kIsWeb && parsed?.hasScheme == true
+      ? parsed!
+      : Uri.file(path);
+  return loadVideoFrame(uri, const Duration(milliseconds: 250));
+}
 
 class ReferencesScreen extends StatefulWidget {
   const ReferencesScreen({required this.controller, super.key});
@@ -61,7 +78,11 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
       items
           .skip(previousLimit)
           .take(_pageSize)
-          .where((item) => item.kind == MediaReferenceKind.video)
+          .where(
+            (item) =>
+                item.kind == MediaReferenceKind.video &&
+                item.thumbnailAsset == null,
+          )
           .map((item) => item.asset),
     );
   }
@@ -90,47 +111,64 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
       builder: (context, constraints) {
         final desktop = constraints.maxWidth >= 960;
         final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
-        return SingleChildScrollView(
-          controller: _scrollController,
-          padding: EdgeInsets.all(padding),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  _ReferencesHeading(controller: controller),
-                  const SizedBox(height: 22),
-                  if (desktop)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        SizedBox(
-                          width: 228,
-                          child: _ReferenceFolderSidebar(
-                            controller: controller,
+        // The whole library is a drop target: local files dropped anywhere on
+        // this screen save into the current folder, sorted into their kind by
+        // MIME type or extension.
+        return ReferenceDropZone(
+          label: 'Drop to save references',
+          onDropFiles: (files) => controller.importDroppedReferenceFiles(
+            files,
+            folderId:
+                controller.referenceFolderView ==
+                        AppController.libraryFolderAll ||
+                    controller.referenceFolderView ==
+                        AppController.libraryFolderUnfiled
+                ? null
+                : controller.referenceFolderView,
+            videoPreviewLoader: _loadReferenceVideoPreview,
+          ),
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: EdgeInsets.all(padding),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _ReferencesHeading(controller: controller),
+                    const SizedBox(height: 22),
+                    if (desktop)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 228,
+                            child: _ReferenceFolderSidebar(
+                              controller: controller,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: _ReferenceResults(
-                            controller: controller,
-                            itemLimit: _itemLimit,
-                            onLoadMore: _loadMore,
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: _ReferenceResults(
+                              controller: controller,
+                              itemLimit: _itemLimit,
+                              onLoadMore: _loadMore,
+                            ),
                           ),
-                        ),
-                      ],
-                    )
-                  else ...<Widget>[
-                    _ReferenceFolderPicker(controller: controller),
-                    const SizedBox(height: 12),
-                    _ReferenceResults(
-                      controller: controller,
-                      itemLimit: _itemLimit,
-                      onLoadMore: _loadMore,
-                    ),
+                        ],
+                      )
+                    else ...<Widget>[
+                      _ReferenceFolderPicker(controller: controller),
+                      const SizedBox(height: 12),
+                      _ReferenceResults(
+                        controller: controller,
+                        itemLimit: _itemLimit,
+                        onLoadMore: _loadMore,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -146,83 +184,111 @@ class _ReferencesHeading extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 20,
-    runSpacing: 14,
-    alignment: WrapAlignment.spaceBetween,
-    crossAxisAlignment: WrapCrossAlignment.center,
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: <Widget>[
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              'REFERENCE LIBRARY',
-              style: TextStyle(
-                color: context.tokens.brass,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.35,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Your creative ingredients.',
-              style: Theme.of(context).textTheme.displayLarge,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              controller.supportsLocalLibrary
-                  ? 'Keep reusable images, videos, and audio on this device or in Drive, then attach them from Create in a few clicks.'
-                  : 'Keep reusable images, videos, and audio in Drive, then attach them from Create in a few clicks.',
-              style: TextStyle(color: context.colors.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
       Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: 20,
+        runSpacing: 14,
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          if (controller.supportsGoogleDrive)
-            DriveRefreshButton(controller: controller, keyPrefix: 'references'),
-          PopupMenuButton<MediaReferenceKind>(
-            onSelected: (kind) => unawaited(() async {
-              final source = await chooseMediaPickerSource(context, kind);
-              if (source == null) return;
-              await controller.importSavedReferences(
-                kind,
-                source: source,
-                folderId:
-                    controller.referenceFolderView ==
-                            AppController.libraryFolderAll ||
-                        controller.referenceFolderView ==
-                            AppController.libraryFolderUnfiled
-                    ? null
-                    : controller.referenceFolderView,
-              );
-            }()),
-            itemBuilder: (context) => MediaReferenceKind.values
-                .map(
-                  (kind) => PopupMenuItem<MediaReferenceKind>(
-                    value: kind,
-                    child: Row(
-                      children: <Widget>[
-                        Icon(_kindIcon(kind), size: 18),
-                        const SizedBox(width: 10),
-                        Text('Add ${kind.pluralLabel}'),
-                      ],
-                    ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'REFERENCE LIBRARY',
+                  style: TextStyle(
+                    color: context.tokens.brass,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.35,
                   ),
-                )
-                .toList(),
-            child: const FilledButtonIconVisual(
-              icon: Icons.add_rounded,
-              label: 'Add references',
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Your creative ingredients.',
+                  style: Theme.of(context).textTheme.displayLarge,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  controller.supportsLocalLibrary
+                      ? 'Keep reusable images, videos, and audio on this device or in Drive, then attach them from Create in a few clicks.'
+                      : 'Keep reusable images, videos, and audio in Drive, then attach them from Create in a few clicks.',
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+              ],
             ),
           ),
+          ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              // Imports run on the background work queue, so the button stays
+              // available while earlier files are still processing.
+              final uploading = controller.referenceUploadInProgress;
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  if (controller.supportsGoogleDrive)
+                    DriveRefreshButton(
+                      controller: controller,
+                      keyPrefix: 'references',
+                    ),
+                  PopupMenuButton<MediaReferenceKind>(
+                    tooltip: 'Add references',
+                    onSelected: (kind) => unawaited(() async {
+                      final source = await chooseMediaPickerSource(
+                        context,
+                        kind,
+                      );
+                      if (source == null) return;
+                      await controller.importSavedReferences(
+                        kind,
+                        source: source,
+                        previewLoader: kind == MediaReferenceKind.video
+                            ? _loadReferenceVideoPreview
+                            : null,
+                        folderId:
+                            controller.referenceFolderView ==
+                                    AppController.libraryFolderAll ||
+                                controller.referenceFolderView ==
+                                    AppController.libraryFolderUnfiled
+                            ? null
+                            : controller.referenceFolderView,
+                      );
+                    }()),
+                    itemBuilder: (context) => MediaReferenceKind.values
+                        .map(
+                          (kind) => PopupMenuItem<MediaReferenceKind>(
+                            value: kind,
+                            child: Row(
+                              children: <Widget>[
+                                Icon(_kindIcon(kind), size: 18),
+                                const SizedBox(width: 10),
+                                Text('Add ${kind.pluralLabel}'),
+                              ],
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    child: FilledButtonIconVisual(
+                      icon: Icons.add_rounded,
+                      label: 'Add references',
+                      loading: uploading,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ],
+      ),
+      ReferenceUploadIndicator(
+        controller: controller,
+        margin: const EdgeInsets.only(top: 12),
       ),
     ],
   );
@@ -232,17 +298,24 @@ class FilledButtonIconVisual extends StatelessWidget {
   const FilledButtonIconVisual({
     required this.icon,
     required this.label,
+    this.loading = false,
     super.key,
   });
 
   final IconData icon;
   final String label;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
     child: FilledButton.icon(
-      onPressed: () {},
-      icon: Icon(icon),
+      onPressed: loading ? null : () {},
+      icon: loading
+          ? const SizedBox.square(
+              dimension: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(icon),
       label: Text(label),
     ),
   );
@@ -281,6 +354,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
   @override
   Widget build(BuildContext context) {
     final filtered = controller.filteredSavedReferences;
+    final imports = controller.filteredReferenceImports;
     final shown = filtered.take(widget.itemLimit).toList();
     final selected = controller.savedReferences
         .where((item) => selectedIds.contains(item.id))
@@ -339,7 +413,7 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
           ),
         ],
         const SizedBox(height: 18),
-        if (filtered.isEmpty)
+        if (filtered.isEmpty && imports.isEmpty)
           _ReferenceEmpty(controller: controller)
         else
           LayoutBuilder(
@@ -356,49 +430,52 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
               return Wrap(
                 spacing: gap,
                 runSpacing: gap,
-                children: shown
-                    .map(
-                      (item) => SizedBox(
-                        width: width,
-                        child: Stack(
-                          children: <Widget>[
-                            _ReferenceCard(
-                              controller: controller,
-                              reference: item,
-                            ),
-                            if (selecting)
-                              Positioned(
-                                top: 8,
-                                left: 8,
-                                child: Material(
-                                  elevation: 7,
-                                  color: context.colors.surface,
-                                  borderRadius: BorderRadius.circular(9),
-                                  child: IconButton(
-                                    key: ValueKey(
-                                      'select-reference-${item.id}',
-                                    ),
-                                    tooltip: selectedIds.contains(item.id)
-                                        ? 'Deselect ${item.name}'
-                                        : 'Select ${item.name}',
-                                    onPressed: () => _toggle(item.id),
-                                    icon: Icon(
-                                      selectedIds.contains(item.id)
-                                          ? Icons.check_box_rounded
-                                          : Icons
-                                                .check_box_outline_blank_rounded,
-                                      color: selectedIds.contains(item.id)
-                                          ? context.tokens.brass
-                                          : null,
-                                    ),
+                children: <Widget>[
+                  ...imports.map(
+                    (item) => SizedBox(
+                      width: width,
+                      child: _ReferenceImportCard(import: item),
+                    ),
+                  ),
+                  ...shown.map(
+                    (item) => SizedBox(
+                      width: width,
+                      child: Stack(
+                        children: <Widget>[
+                          _ReferenceCard(
+                            controller: controller,
+                            reference: item,
+                          ),
+                          if (selecting)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: Material(
+                                elevation: 7,
+                                color: context.colors.surface,
+                                borderRadius: BorderRadius.circular(9),
+                                child: IconButton(
+                                  key: ValueKey('select-reference-${item.id}'),
+                                  tooltip: selectedIds.contains(item.id)
+                                      ? 'Deselect ${item.name}'
+                                      : 'Select ${item.name}',
+                                  onPressed: () => _toggle(item.id),
+                                  icon: Icon(
+                                    selectedIds.contains(item.id)
+                                        ? Icons.check_box_rounded
+                                        : Icons.check_box_outline_blank_rounded,
+                                    color: selectedIds.contains(item.id)
+                                        ? context.tokens.brass
+                                        : null,
                                   ),
                                 ),
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
-                    )
-                    .toList(),
+                    ),
+                  ),
+                ],
               );
             },
           ),
@@ -418,6 +495,90 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
       ],
     );
   }
+}
+
+class _ReferenceImportCard extends StatelessWidget {
+  const _ReferenceImportCard({required this.import});
+
+  final ReferenceImportProgress import;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    label: '${import.name}: ${import.statusLabel}',
+    child: SurfaceCard(
+      key: ValueKey('reference-import-${import.id}'),
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: context.colors.surfaceContainerLow,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
+                ),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: <Widget>[
+                  Icon(
+                    _kindIcon(import.kind),
+                    size: 46,
+                    color: context.colors.onSurfaceVariant.withValues(
+                      alpha: .34,
+                    ),
+                  ),
+                  const SizedBox.square(
+                    dimension: 34,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(13),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  import.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: <Widget>[
+                    const SizedBox.square(
+                      dimension: 13,
+                      child: CircularProgressIndicator(strokeWidth: 1.8),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        import.statusLabel,
+                        key: ValueKey('reference-import-status-${import.id}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ReferenceToolbar extends StatelessWidget {
@@ -604,38 +765,18 @@ class _ReferenceBulkActions extends StatelessWidget {
   );
 }
 
-class _ReferenceCard extends StatefulWidget {
+class _ReferenceCard extends StatelessWidget {
   const _ReferenceCard({required this.controller, required this.reference});
 
   final AppController controller;
   final SavedReference reference;
 
   @override
-  State<_ReferenceCard> createState() => _ReferenceCardState();
-}
-
-class _ReferenceCardState extends State<_ReferenceCard> {
-  /// The film's measured aspect ratio once its metadata loads. References
-  /// store no dimensions, so video previews open at 16:9 and settle into
-  /// their true shape; images and audio stay 16:9.
-  double? _videoAspect;
-
-  AppController get controller => widget.controller;
-  SavedReference get reference => widget.reference;
-
-  void _onVideoMetadata(VideoSourceMetadata metadata) {
-    if (!metadata.isUsable) return;
-    final aspect = metadata.width / metadata.height;
-    if (_videoAspect != null && (aspect - _videoAspect!).abs() < .001) return;
-    setState(() => _videoAspect = aspect);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isVideo = reference.kind == MediaReferenceKind.video;
-    final restored = controller.cachedAssetBytes(
-      isVideo ? reference.thumbnailAsset : reference.asset,
-    );
+    final restored = isVideo
+        ? controller.cachedReferencePreview(reference)
+        : controller.cachedAssetBytes(reference.asset);
     final thumbnail = MediaThumbnail(
       gateway: controller.gateway,
       kind: reference.kind,
@@ -643,12 +784,31 @@ class _ReferenceCardState extends State<_ReferenceCard> {
       reference: reference.asset,
       thumbnailReference: reference.thumbnailAsset,
       thumbnailBytes: isVideo ? restored : null,
+      mediaUriLoader: isVideo
+          ? () => controller.referencePreviewSourceUri(reference)
+          : null,
+      mediaUriRevision: isVideo ? controller.videoPreviewSourceRevision : null,
       semanticsLabel: '${reference.name} thumbnail',
       onThumbnail: isVideo
           ? (bytes) =>
                 unawaited(controller.cacheReferencePreview(reference, bytes))
           : null,
-      onVideoMetadata: isVideo ? _onVideoMetadata : null,
+      onVideoMetadata: isVideo
+          ? (metadata) {
+              if (!metadata.isUsable) return;
+              unawaited(
+                controller.rememberSavedReferenceDuration(
+                  reference,
+                  metadata.durationSeconds,
+                ),
+              );
+            }
+          : null,
+      onMediaDuration: reference.kind == MediaReferenceKind.audio
+          ? (seconds) => unawaited(
+              controller.rememberSavedReferenceDuration(reference, seconds),
+            )
+          : null,
     );
     return SurfaceCard(
       padding: EdgeInsets.zero,
@@ -658,7 +818,7 @@ class _ReferenceCardState extends State<_ReferenceCard> {
           ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             child: AspectRatio(
-              aspectRatio: isVideo ? _videoAspect ?? 16 / 9 : 16 / 9,
+              aspectRatio: 16 / 9,
               child: Semantics(
                 button: reference.kind != MediaReferenceKind.audio,
                 label: 'View ${reference.name} full screen',
@@ -677,7 +837,7 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                     fit: StackFit.expand,
                     children: <Widget>[
                       thumbnail,
-                      if (isVideo)
+                      if (isVideo && restored != null)
                         const Center(
                           child: Icon(
                             Icons.play_circle_fill_rounded,
@@ -686,6 +846,16 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                             shadows: <Shadow>[
                               Shadow(color: Colors.black54, blurRadius: 12),
                             ],
+                          ),
+                        ),
+                      if (reference.durationSeconds != null)
+                        Positioned(
+                          left: 8,
+                          bottom: 8,
+                          child: MediaDurationBadge(
+                            text: formatMediaDuration(
+                              reference.durationSeconds!,
+                            ),
                           ),
                         ),
                     ],
@@ -725,7 +895,7 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                       ),
                       const SizedBox(height: 5),
                       Text(
-                        '${reference.kind.label} · ${reference.storage.shortLabel}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
+                        '${reference.kind.label}${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'} · ${reference.storage.shortLabel}${savedReferencePendingDriveUpload(reference) ? ' · Syncing…' : ''}${reference.folderId == null ? '' : ' · ${controller.folderPath(reference.folderId!, collection: LibraryCollection.references)}'}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -785,6 +955,10 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                           reference.id,
                         }),
                       );
+                    } else if (value == 'trim') {
+                      unawaited(
+                        showReferenceTrimDialog(context, controller, reference),
+                      );
                     } else if (value == 'tag') {
                       unawaited(
                         _showReferenceTagDialog(context, controller, reference),
@@ -812,6 +986,11 @@ class _ReferenceCardState extends State<_ReferenceCard> {
                       value: 'edit',
                       child: Text('Edit details'),
                     ),
+                    if (reference.kind == MediaReferenceKind.video)
+                      const PopupMenuItem(
+                        value: 'trim',
+                        child: Text('Trim as new reference'),
+                      ),
                     const PopupMenuItem(value: 'move', child: Text('Move')),
                     const PopupMenuItem(value: 'tag', child: Text('Tag')),
                     PopupMenuItem(
@@ -867,7 +1046,7 @@ Future<void> showReferenceDetails(
   ),
 );
 
-class ReferenceDetailsScreen extends StatelessWidget {
+class ReferenceDetailsScreen extends StatefulWidget {
   const ReferenceDetailsScreen({
     required this.controller,
     required this.reference,
@@ -878,7 +1057,37 @@ class ReferenceDetailsScreen extends StatelessWidget {
   final SavedReference reference;
 
   @override
+  State<ReferenceDetailsScreen> createState() => _ReferenceDetailsScreenState();
+}
+
+class _ReferenceDetailsScreenState extends State<ReferenceDetailsScreen> {
+  AppController get controller => widget.controller;
+
+  SavedReference get reference =>
+      controller.savedReferences
+          .where((item) => item.id == widget.reference.id)
+          .firstOrNull ??
+      widget.reference;
+
+  @override
+  void initState() {
+    super.initState();
+    controller.addListener(_refresh);
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final reference = this.reference;
     final usages = controller.generationsUsingReference(reference);
     final folder = reference.folderId == null
         ? null
@@ -906,6 +1115,7 @@ class ReferenceDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   '${reference.kind.label} · ${reference.storage.label}'
+                  '${reference.durationSeconds == null ? '' : ' · ${formatMediaDuration(reference.durationSeconds!)}'}'
                   '${folder == null ? '' : ' · $folder'}',
                   style: TextStyle(color: context.colors.onSurfaceVariant),
                 ),
@@ -950,9 +1160,20 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                   thumbnailReference: reference.thumbnailAsset,
                                   thumbnailBytes:
                                       reference.kind == MediaReferenceKind.video
-                                      ? controller.cachedAssetBytes(
-                                          reference.thumbnailAsset,
+                                      ? controller.cachedReferencePreview(
+                                          reference,
                                         )
+                                      : null,
+                                  mediaUriLoader:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? () => controller
+                                            .referencePreviewSourceUri(
+                                              reference,
+                                            )
+                                      : null,
+                                  mediaUriRevision:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? controller.videoPreviewSourceRevision
                                       : null,
                                   fit: BoxFit.contain,
                                   semanticsLabel:
@@ -966,9 +1187,33 @@ class ReferenceDetailsScreen extends StatelessWidget {
                                           ),
                                         )
                                       : null,
+                                  onVideoMetadata:
+                                      reference.kind == MediaReferenceKind.video
+                                      ? (metadata) => unawaited(
+                                          controller
+                                              .rememberSavedReferenceDuration(
+                                                reference,
+                                                metadata.durationSeconds,
+                                              ),
+                                        )
+                                      : null,
+                                  onMediaDuration:
+                                      reference.kind == MediaReferenceKind.audio
+                                      ? (seconds) => unawaited(
+                                          controller
+                                              .rememberSavedReferenceDuration(
+                                                reference,
+                                                seconds,
+                                              ),
+                                        )
+                                      : null,
                                 ),
                               ),
-                              if (reference.kind == MediaReferenceKind.video)
+                              if (reference.kind == MediaReferenceKind.video &&
+                                  controller.cachedReferencePreview(
+                                        reference,
+                                      ) !=
+                                      null)
                                 const Center(
                                   child: Icon(
                                     Icons.play_circle_fill_rounded,
@@ -989,6 +1234,20 @@ class ReferenceDetailsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (reference.kind == MediaReferenceKind.video) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.tonalIcon(
+                      key: ValueKey('trim-reference-details-${reference.id}'),
+                      onPressed: () => unawaited(
+                        showReferenceTrimDialog(context, controller, reference),
+                      ),
+                      icon: const Icon(Icons.content_cut_rounded, size: 18),
+                      label: const Text('Trim as new reference'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SurfaceCard(
                   child: Wrap(
@@ -1003,6 +1262,13 @@ class ReferenceDetailsScreen extends StatelessWidget {
                         label: 'Updated',
                         value: formatTimestamp(reference.updatedAt),
                       ),
+                      if (reference.durationSeconds != null)
+                        _ReferenceDetailFact(
+                          label: 'Duration',
+                          value: formatMediaDuration(
+                            reference.durationSeconds!,
+                          ),
+                        ),
                       if (reference.tags.isNotEmpty)
                         _ReferenceDetailFact(
                           label: 'Tags',
@@ -1891,6 +2157,18 @@ Future<bool> showReferenceMetadataDialog(
                 ),
                 const SizedBox(height: 10),
               ],
+              if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
+                  null) ...<Widget>[
+                Text(
+                  'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
+                  style: TextStyle(
+                    color: context.colors.onSurfaceVariant,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               TextField(
                 controller: name,
                 autofocus: true,
@@ -1967,6 +2245,322 @@ Future<bool> showReferenceMetadataDialog(
   return saved == true;
 }
 
+Future<bool> showReferenceTrimDialog(
+  BuildContext context,
+  AppController controller,
+  SavedReference reference,
+) async =>
+    (await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          _ReferenceTrimDialog(controller: controller, reference: reference),
+    )) ==
+    true;
+
+class _ReferenceTrimDialog extends StatefulWidget {
+  const _ReferenceTrimDialog({
+    required this.controller,
+    required this.reference,
+  });
+
+  final AppController controller;
+  final SavedReference reference;
+
+  @override
+  State<_ReferenceTrimDialog> createState() => _ReferenceTrimDialogState();
+}
+
+class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
+  late final TextEditingController _name;
+  double? _duration;
+  double _startSeconds = 0;
+  double? _endSeconds;
+  bool _saving = false;
+  bool _loadingDuration = false;
+  bool _durationFailed = false;
+  ValueListenable<double?>? _downloadProgress;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(
+      text: widget.controller.suggestedTrimmedReferenceName(widget.reference),
+    );
+    _duration = widget.reference.durationSeconds;
+    _endSeconds = _duration;
+    if (_duration == null) unawaited(_loadDuration());
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  /// Reads the video duration deliberately instead of waiting on the
+  /// thumbnail's silent best-effort probe: a Drive-backed video shows its
+  /// download progress here, and any failure surfaces as a Retry instead of
+  /// an endless spinner.
+  Future<void> _loadDuration() async {
+    if (_loadingDuration || _duration != null) return;
+    final delivery = widget.controller.referenceMediaDelivery(widget.reference);
+    setState(() {
+      _loadingDuration = true;
+      _durationFailed = false;
+      _downloadProgress = delivery.progress;
+    });
+    try {
+      final uri = await delivery.uri;
+      if (uri == null) {
+        throw StateError('The reference video is unavailable.');
+      }
+      final metadata = await loadVideoMetadata(uri);
+      if (metadata == null || !metadata.isUsable) {
+        throw StateError('The video duration could not be read.');
+      }
+      _rememberMetadata(metadata);
+    } on Object {
+      if (mounted && _duration == null) {
+        setState(() => _durationFailed = true);
+      }
+    } finally {
+      if (mounted) setState(() => _loadingDuration = false);
+    }
+  }
+
+  void _rememberMetadata(VideoSourceMetadata metadata) {
+    if (!metadata.isUsable) return;
+    unawaited(
+      widget.controller.rememberSavedReferenceDuration(
+        widget.reference,
+        metadata.durationSeconds,
+      ),
+    );
+    if (_duration != null || !mounted) return;
+    setState(() {
+      _duration = metadata.durationSeconds;
+      _endSeconds = metadata.durationSeconds;
+      _durationFailed = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final end = _endSeconds;
+    if (_saving || _duration == null || end == null) return;
+    setState(() => _saving = true);
+    final saved = await widget.controller.trimSavedReference(
+      widget.reference,
+      name: _name.text,
+      startSeconds: _startSeconds,
+      endSeconds: end,
+    );
+    if (!mounted) return;
+    if (saved != null) {
+      Navigator.pop(context, true);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final duration = _duration;
+    final end = _endSeconds;
+    final selectedDuration = end == null ? null : end - _startSeconds;
+    final changed =
+        duration != null &&
+        end != null &&
+        (_startSeconds >= .001 || (end - duration).abs() >= .001);
+    return AlertDialog(
+      key: ValueKey('trim-reference-dialog-${widget.reference.id}'),
+      title: const Text('Trim as new reference'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: <Widget>[
+                      InkWell(
+                        onTap: () => unawaited(
+                          showSavedReferenceViewer(
+                            context,
+                            widget.controller,
+                            widget.reference,
+                          ),
+                        ),
+                        child: MediaThumbnail(
+                          gateway: widget.controller.gateway,
+                          kind: MediaReferenceKind.video,
+                          reference: widget.reference.asset,
+                          thumbnailReference: widget.reference.thumbnailAsset,
+                          thumbnailBytes: widget.controller.cachedAssetBytes(
+                            widget.reference.thumbnailAsset,
+                          ),
+                          fit: BoxFit.cover,
+                          semanticsLabel:
+                              '${widget.reference.name} trim preview',
+                          onVideoMetadata: _rememberMetadata,
+                        ),
+                      ),
+                      const Center(
+                        child: IgnorePointer(
+                          child: Icon(
+                            Icons.play_circle_fill_rounded,
+                            size: 52,
+                            color: Colors.white,
+                            shadows: <Shadow>[
+                              Shadow(color: Colors.black54, blurRadius: 12),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                key: const ValueKey('trim-reference-name'),
+                controller: _name,
+                enabled: !_saving,
+                onChanged: (_) => setState(() {}),
+                maxLength: 80,
+                decoration: const InputDecoration(
+                  labelText: 'New reference name',
+                ),
+              ),
+              const SizedBox(height: 6),
+              if (duration == null || end == null)
+                _durationFailed
+                    ? Row(
+                        key: const ValueKey('trim-duration-failed'),
+                        children: <Widget>[
+                          Icon(
+                            Icons.error_outline_rounded,
+                            size: 17,
+                            color: context.colors.error,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'The video duration could not be read.',
+                            ),
+                          ),
+                          TextButton(
+                            key: const ValueKey('trim-duration-retry'),
+                            onPressed: () => unawaited(_loadDuration()),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      )
+                    : Row(
+                        children: <Widget>[
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ValueListenableBuilder<double?>(
+                              valueListenable:
+                                  _downloadProgress ??
+                                  const AlwaysStoppedAnimation<double?>(null),
+                              builder: (context, fraction, _) => Text(
+                                fraction == null
+                                    ? 'Reading video duration…'
+                                    : 'Downloading video · '
+                                          '${(fraction * 100).round()}%',
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+              else ...<Widget>[
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
+                        'Beginning · ${formatMediaDuration(_startSeconds)}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    Text(
+                      'Ending · ${formatMediaDuration(end)}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                RangeSlider(
+                  key: const ValueKey('trim-reference-range'),
+                  min: 0,
+                  max: duration,
+                  values: RangeValues(_startSeconds, end),
+                  labels: RangeLabels(
+                    formatMediaDuration(_startSeconds),
+                    formatMediaDuration(end),
+                  ),
+                  onChanged: _saving
+                      ? null
+                      : (range) {
+                          if (range.end - range.start < .1) return;
+                          setState(() {
+                            _startSeconds = range.start;
+                            _endSeconds = range.end;
+                          });
+                        },
+                ),
+                Text(
+                  'New duration · ${formatMediaDuration(selectedDuration!)} '
+                  'of ${formatMediaDuration(duration)}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colors.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                'The original reference stays unchanged. The selected range is encoded as a separate MP4 in the same folder and storage.',
+                style: TextStyle(
+                  color: context.colors.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          key: const ValueKey('save-trimmed-reference'),
+          onPressed: !_saving && changed && _name.text.trim().isNotEmpty
+              ? _save
+              : null,
+          icon: _saving
+              ? const SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.content_cut_rounded, size: 17),
+          label: Text(_saving ? 'Trimming…' : 'Save new reference'),
+        ),
+      ],
+    );
+  }
+}
+
 Future<List<ReferenceCandidate>?> showReferencePicker(
   BuildContext context,
   AppController controller, {
@@ -2026,6 +2620,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                   folderId: item.folderId,
                   tags: item.tags,
                   storage: item.storage,
+                  durationSeconds: item.durationSeconds,
                 ),
               )
               .toList();
@@ -2088,6 +2683,29 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
       unawaited(widget.controller.cacheReferencePreview(reference, bytes));
       return;
     }
+  }
+
+  void _rememberDuration(ReferenceCandidate item, double seconds) {
+    if (item.generated) return;
+    final reference = widget.controller.savedReferences
+        .where((reference) => reference.id == item.id)
+        .firstOrNull;
+    if (reference == null) return;
+    unawaited(() async {
+      await widget.controller.rememberSavedReferenceDuration(
+        reference,
+        seconds,
+      );
+      if (!mounted) return;
+      setState(() {
+        final refreshed = candidates
+            .where((candidate) => candidate.id == item.id)
+            .firstOrNull;
+        if (refreshed != null && selected.containsKey(item.id)) {
+          selected[item.id] = refreshed;
+        }
+      });
+    }());
   }
 
   @override
@@ -2215,6 +2833,8 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                               onThumbnail: item.kind == MediaReferenceKind.video
                                   ? (bytes) => _cacheThumbnail(item, bytes)
                                   : null,
+                              onDuration: (seconds) =>
+                                  _rememberDuration(item, seconds),
                             );
                           },
                         );
@@ -2252,6 +2872,7 @@ class _ReferenceCandidateCard extends StatelessWidget {
     required this.enabled,
     required this.onTap,
     this.onThumbnail,
+    this.onDuration,
   });
 
   final AppController controller;
@@ -2260,12 +2881,15 @@ class _ReferenceCandidateCard extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
   final ValueChanged<Uint8List>? onThumbnail;
+  final ValueChanged<double>? onDuration;
 
   String get details {
     final collection = item.generated
         ? LibraryCollection.generated
         : LibraryCollection.references;
     final values = <String>[
+      if (item.durationSeconds != null)
+        formatMediaDuration(item.durationSeconds!),
       if (item.folderId != null)
         controller.folderPath(item.folderId!, collection: collection),
       ...item.tags.map((tag) => '#$tag'),
@@ -2323,6 +2947,17 @@ class _ReferenceCandidateCard extends StatelessWidget {
                             : null,
                         semanticsLabel: '${item.name} thumbnail',
                         onThumbnail: onThumbnail,
+                        onVideoMetadata:
+                            item.kind == MediaReferenceKind.video &&
+                                !item.generated
+                            ? (metadata) =>
+                                  onDuration?.call(metadata.durationSeconds)
+                            : null,
+                        onMediaDuration:
+                            item.kind == MediaReferenceKind.audio &&
+                                !item.generated
+                            ? onDuration
+                            : null,
                       ),
                       Positioned(
                         top: 8,
@@ -2457,9 +3092,10 @@ Future<void> _showReferenceFolderEditor(
           folder.id,
           collection: LibraryCollection.references,
         );
+  var saving = false;
   await showDialog<void>(
     context: context,
-    builder: (context) => StatefulBuilder(
+    builder: (dialogContext) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
         title: Text(folder == null ? 'New reference folder' : 'Rename folder'),
         content: SizedBox(
@@ -2483,15 +3119,18 @@ Future<void> _showReferenceFolderEditor(
                         ),
                       )
                       .toList(),
-                  onChanged: (value) => setState(() {
-                    destination = value ?? destination;
-                    selectedParent = null;
-                  }),
+                  onChanged: saving
+                      ? null
+                      : (value) => setState(() {
+                          destination = value ?? destination;
+                          selectedParent = null;
+                        }),
                 ),
                 const SizedBox(height: 8),
               ],
               TextField(
                 controller: name,
+                enabled: !saving,
                 autofocus: true,
                 maxLength: 48,
                 decoration: const InputDecoration(labelText: 'Folder name'),
@@ -2520,28 +3159,43 @@ Future<void> _showReferenceFolderEditor(
                         ),
                       ),
                 ],
-                onChanged: (value) => setState(() => selectedParent = value),
+                onChanged: saving
+                    ? null
+                    : (value) => setState(() => selectedParent = value),
               ),
             ],
           ),
         ),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: saving ? null : () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
-          FilledButton(
-            onPressed: () async {
-              final saved = await controller.saveLibraryFolder(
-                name.text,
-                existing: folder,
-                parentId: selectedParent,
-                collection: LibraryCollection.references,
-                storage: destination,
-              );
-              if (saved && context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Save'),
+          FilledButton.icon(
+            onPressed: saving
+                ? null
+                : () async {
+                    setState(() => saving = true);
+                    final saved = await controller.saveLibraryFolder(
+                      name.text,
+                      existing: folder,
+                      parentId: selectedParent,
+                      collection: LibraryCollection.references,
+                      storage: destination,
+                    );
+                    if (saved && dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                    } else if (dialogContext.mounted) {
+                      setState(() => saving = false);
+                    }
+                  },
+            icon: saving
+                ? const SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.folder_outlined, size: 18),
+            label: Text(saving ? 'Saving…' : 'Save'),
           ),
         ],
       ),

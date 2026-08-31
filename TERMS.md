@@ -1,6 +1,6 @@
 # Clawnsole terms of use
 
-Effective: August 20, 2026
+Effective: August 27, 2026
 
 These terms govern your use of the official Clawnsole website, applications,
 and release builds (collectively, "Clawnsole"). By using Clawnsole, you agree to
@@ -23,7 +23,7 @@ licensed software, the MIT License controls.
 Third-party libraries, services, model names, trademarks, and other materials
 may be subject to their own licenses and terms. Clawnsole is independent and is
 not affiliated with or endorsed by Black Forest Labs, Lightricks/LTX, ArtCraft,
-Atlas Cloud, Google, GitHub, Apple, or Microsoft.
+Atlas Cloud, Runway, Krea, Google, GitHub, Apple, or Microsoft.
 
 ## Your provider accounts and charges
 
@@ -82,10 +82,11 @@ and how this differs from the rest of the website and the apps, which contain
 no Analytics tag or SDK.
 
 Your use of a third-party service is a relationship between you and that
-service. Its terms and privacy policy apply. Atlas Cloud may send request data
-to an underlying model provider, whose terms and policies may also apply.
-Clawnsole is not responsible for third-party services, content, security,
-availability, billing, or data handling.
+service. Its terms and privacy policy apply. Atlas Cloud and Krea may send
+request data to an underlying model provider, and Runway may do the same for
+partner models served through its API; those providers' terms and policies may
+also apply. Clawnsole is not responsible for third-party services, content,
+security, availability, billing, or data handling.
 
 ## Storage, privacy, and security
 

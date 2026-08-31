@@ -1,16 +1,16 @@
 Clawnsole reference-media tools for Windows
 
 This directory contains the pinned x64 LGPL build of FFmpeg 8.1.2 produced by
-BtbN/FFmpeg-Builds at commit 2437e7b868da3c11872367b15f3c613b87c24819.
+BtbN/FFmpeg-Builds at commit a99e8230eae00d1cee38f23076a7a1f55cd984e2.
 GPL-only libraries are excluded. Clawnsole launches ffmpeg.exe and ffprobe.exe
 as separate processes and uses the Windows Media Foundation H.264 encoder,
 with the bundled OpenH264 encoder as a software fallback.
 
 Exact binary release and checksums:
-https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-08-11-13-11
+https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-07-31-14-10
 
 Corresponding build scripts:
-https://github.com/BtbN/FFmpeg-Builds/tree/2437e7b868da3c11872367b15f3c613b87c24819
+https://github.com/BtbN/FFmpeg-Builds/tree/a99e8230eae00d1cee38f23076a7a1f55cd984e2
 
 FFmpeg source revision:
 https://github.com/FFmpeg/FFmpeg/tree/9b6c8969e0

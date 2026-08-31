@@ -9,7 +9,8 @@ only macOS desktop lifecycle, packaging, and self-update.
 ## Capabilities
 
 - BFL FLUX 3 and FLUX Video Upscale, LTX 2.3, ArtCraft’s live video catalog,
-  selected Create-ready Atlas Cloud models, and Runway’s first-party video catalog
+  selected Create-ready Atlas Cloud models, Runway’s first-party video catalog,
+  and Krea’s live multi-vendor video catalog
 - Keyless Apple Intelligence image creation on supported iOS devices, with a
   still-image model and a one-image-per-second silent MP4 sequence model
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
@@ -19,12 +20,17 @@ only macOS desktop lifecycle, packaging, and self-update.
 - Model-aware multi-upload image, video, and audio references, kept distinct
   from first/last or explicitly timed keyframes
 - A searchable saved-reference library with independent nested folders, tags,
-  naming, sorting, and direct Saved/Generated selection from Create
+  naming, duration-aware sorting, non-destructive video trimming, and direct
+  Saved/Generated selection from Create
+- Left-to-right reference count and duration gauges driven by each model's
+  active resolution and input limits
 - Start/last-frame workflows, supported fixed or auto durations, model-specific
   aspect ratios and resolutions, synchronized audio, draft mode, and safety tolerance
 - Provider-aware balance checks and setting-aware USD estimates
 - Live Atlas Cloud video catalog and schema-aware routes for Seedance, Grok, Veo,
   Wan, Kling, Vidu, PixVerse, Hailuo, and FLUX 3
+- Live Krea video catalog and schema-aware routes for Veo, Seedance, Kling,
+  Hailuo, Wan, FLUX 3 Video, LTX, Ray, Gen-4.5, Vidu, and Grok Imagine
 - Runway text/image/video generation, Aleph edits, Act-Two performance,
   Magnific upscaling, live model discovery, credit balance, and terminal charges
 - Canonical model identities for cross-provider route and cost comparison
@@ -67,6 +73,10 @@ treating every image as a keyframe:
   it is an interactive character/session and WebRTC product rather than a
   batch generation task. Newly discovered IDs remain visible but disabled
   until Clawnsole has audited their schema and pricing.
+- Krea routes read each create-ready model’s request contract from Krea’s live
+  OpenAPI spec; other and legacy Krea routes stay visible but comparison-only.
+  Local files and data URIs used as start/end frames or reference images
+  upload through Krea’s `POST /assets` endpoint before submission.
 - Apple Intelligence routes are native-iOS-only and use Image Playground on a
   supported iPhone or iPad running iOS 18.4 or later. The sequence route makes
   one image per selected second and encodes those images locally as a silent
@@ -74,10 +84,13 @@ treating every image as a keyframe:
 
 Image, video, and audio references are ordered independently and retained as
 separate local assets. Provider upload adapters convert local media into the
-token or hosted-asset form required by ArtCraft, Atlas, and Runway before submission.
+token or hosted-asset form required by ArtCraft, Atlas, Krea, and Runway before submission.
 The References tab stores reusable media alongside compact metadata. Its folder
 tree is independent from Generated history, while the Create picker can search
-either hierarchy without copying local assets unnecessarily.
+either hierarchy without copying local assets unnecessarily. Video and audio
+durations are measured once and retained in that compact metadata. Trimming a
+video encodes the selected range as a new MP4 in the same storage and folder;
+the original reference is never modified.
 
 ## Install
 
@@ -294,7 +307,10 @@ flutter test
 flutter build web
 ```
 
-The implementation follows the official BFL, LTX, ArtCraft, Atlas Cloud, and
-Runway API, polling, model capability, and pricing documentation. Atlas models are read
-from its public catalog; supported-duration Create-ready costs use exact route
-payloads with its calculate endpoint and checked-in starting-rate fallbacks.
+The implementation follows the official BFL, LTX, ArtCraft, Atlas Cloud,
+Runway, and Krea API, polling, model capability, and pricing documentation.
+Atlas models are read from its public catalog; supported-duration Create-ready
+costs use exact route payloads with its calculate endpoint and checked-in
+starting-rate fallbacks. Krea models are read from its live OpenAPI spec, and
+Create-ready costs use its published fixed per-request USD prices rather than
+a calculate endpoint.

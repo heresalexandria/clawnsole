@@ -42,6 +42,7 @@
   "frames_exclusive_with_references": true,
   "max_reference_video_seconds": 15,
   "max_reference_audio_seconds": 15,
+  "max_prompt_characters": 7000,
   "requires_visual_reference_for_audio": true,
   "supports_audio": false
 }

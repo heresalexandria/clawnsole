@@ -32,6 +32,7 @@ class WebGateway
         ProviderCatalogCacheGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
+        ReferenceVideoEditingGateway,
         FavoriteGateway,
         VisibilityGateway,
         GenerationPreviewGateway,
@@ -518,6 +519,19 @@ class WebGateway
       _action('deleteReference', referenceId);
 
   @override
+  Future<LocalSnapshot> trimReferenceVideo({
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double startSeconds,
+    required double endSeconds,
+  }) => _action('trimReferenceVideo', <String, Object?>{
+    'sourceReferenceId': sourceReferenceId,
+    'output': output.toJson(),
+    'startSeconds': startSeconds,
+    'endSeconds': endSeconds,
+  });
+
+  @override
   Future<LocalSnapshot> setGenerationFavorite(String localId, bool favorite) =>
       _action('setGenerationFavorite', <String, Object?>{
         'localId': localId,
@@ -667,7 +681,7 @@ class WebGateway
     final response = await _client.get(await assetUri(reference));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ProviderException(
-        'The retained input is unavailable.',
+        'The retained media is unavailable.',
         status: response.statusCode,
       );
     }
@@ -715,9 +729,9 @@ class WebGateway
 
   @override
   Future<Uri?> cachedVideoAssetUri(AssetReference reference) =>
-      // Building a companion URL is always cheap; the companion streams the
-      // asset with Range support and keeps its own disk cache warm.
-      assetUri(reference);
+      Future<Uri?>.value(
+        _url('/asset-cache', <String, String>{'id': reference.value}),
+      );
 
   @override
   Future<void> prefetchVideoAsset(AssetReference reference) async {

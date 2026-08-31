@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "kling/kling-2.6",
+  "canonical_model_id": "kling-2.6",
+  "label": "Kling 2.6",
+  "description": "Kling 2.6 with pinned frames and optional audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "Default output"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 10,
+  "duration_step": 5,
+  "max_keyframes": 2,
+  "usd_per_second": 0.0735,
+  "reference_usd_per_second": 0.0735,
+  "supports_start_frame": true,
+  "supports_end_frame": true
+}

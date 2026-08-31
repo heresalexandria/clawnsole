@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.ColorSpace;
 import android.graphics.ImageDecoder;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -53,12 +55,19 @@ public final class ReferenceVideoToolsPlugin
         if ("convertImageToJpeg".equals(call.method)) {
             final String inputPath = call.argument("inputPath");
             final String outputPath = call.argument("outputPath");
-            if (inputPath == null || outputPath == null) {
-                result.error("invalid_arguments", "Image conversion paths are missing.", null);
+            final Number rawMaxPixels = call.argument("maxPixels");
+            if (inputPath == null
+                    || outputPath == null
+                    || (rawMaxPixels != null && rawMaxPixels.longValue() <= 0)) {
+                result.error(
+                        "invalid_arguments",
+                        "Image conversion paths are missing or the pixel limit is invalid.",
+                        null);
                 return;
             }
+            final long maxPixels = rawMaxPixels == null ? 0 : rawMaxPixels.longValue();
             new Thread(
-                    () -> convertImageToJpeg(inputPath, outputPath, result),
+                    () -> convertImageToJpeg(inputPath, outputPath, maxPixels, result),
                     "clawnsole-image-conversion")
                     .start();
             return;
@@ -99,6 +108,7 @@ public final class ReferenceVideoToolsPlugin
     private void convertImageToJpeg(
             String inputPath,
             String outputPath,
+            long maxPixels,
             MethodChannel.Result result) {
         int exitCode = -1;
         String output = "";
@@ -111,29 +121,58 @@ public final class ReferenceVideoToolsPlugin
                 decoded = ImageDecoder.decodeBitmap(source, (decoder, info, ignored) -> {
                     decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
                     decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB));
+                    final int[] target = constrainedDimensions(
+                            info.getSize().getWidth(),
+                            info.getSize().getHeight(),
+                            maxPixels);
+                    if (target[0] != info.getSize().getWidth()
+                            || target[1] != info.getSize().getHeight()) {
+                        decoder.setTargetSize(target[0], target[1]);
+                    }
                 });
             } else {
-                decoded = BitmapFactory.decodeFile(inputPath);
+                final BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(inputPath, bounds);
+                final int[] desired = constrainedDimensions(
+                        bounds.outWidth, bounds.outHeight, maxPixels);
+                int sampleSize = 1;
+                while (bounds.outWidth / (sampleSize * 2) >= desired[0]
+                        && bounds.outHeight / (sampleSize * 2) >= desired[1]) {
+                    sampleSize *= 2;
+                }
+                final BitmapFactory.Options options = new BitmapFactory.Options();
+                options.inSampleSize = sampleSize;
+                decoded = BitmapFactory.decodeFile(inputPath, options);
             }
             if (decoded == null || decoded.getWidth() <= 0 || decoded.getHeight() <= 0) {
                 throw new IllegalStateException(
                         "The primary reference image could not be decoded.");
             }
 
+            final int[] target = constrainedDimensions(
+                    decoded.getWidth(), decoded.getHeight(), maxPixels);
+
             // Render the complete, orientation-correct primary bitmap into an
-            // sRGB canvas of identical dimensions. This never crops or scales.
+            // sRGB canvas. Any size reduction is proportional and never crops.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 rendered = Bitmap.createBitmap(
-                        decoded.getWidth(),
-                        decoded.getHeight(),
+                        target[0],
+                        target[1],
                         Bitmap.Config.ARGB_8888,
                         true,
                         ColorSpace.get(ColorSpace.Named.SRGB));
             } else {
                 rendered = Bitmap.createBitmap(
-                        decoded.getWidth(), decoded.getHeight(), Bitmap.Config.ARGB_8888);
+                        target[0], target[1], Bitmap.Config.ARGB_8888);
             }
-            new Canvas(rendered).drawBitmap(decoded, 0, 0, null);
+            final Paint paint = new Paint(
+                    Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+            new Canvas(rendered).drawBitmap(
+                    decoded,
+                    null,
+                    new Rect(0, 0, target[0], target[1]),
+                    paint);
             try (FileOutputStream stream = new FileOutputStream(destination)) {
                 if (!rendered.compress(Bitmap.CompressFormat.JPEG, 94, stream)) {
                     throw new IllegalStateException(
@@ -160,6 +199,18 @@ public final class ReferenceVideoToolsPlugin
         response.put("exitCode", exitCode);
         response.put("output", output);
         mainHandler.post(() -> result.success(response));
+    }
+
+    private static int[] constrainedDimensions(int width, int height, long maxPixels) {
+        double scale = 1.0;
+        final double sourcePixels = (double) width * (double) height;
+        if (maxPixels > 0 && sourcePixels > maxPixels) {
+            scale = Math.sqrt(maxPixels / sourcePixels);
+        }
+        return new int[] {
+                Math.max(1, (int) Math.floor(width * scale)),
+                Math.max(1, (int) Math.floor(height * scale)),
+        };
     }
 
     private void reply(Session session, MethodChannel.Result result) {

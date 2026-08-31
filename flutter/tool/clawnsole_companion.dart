@@ -12,6 +12,7 @@ import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
+import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
@@ -95,6 +96,7 @@ Future<void> main(List<String> arguments) async {
           Platform.environment['RUNWAY_KEY']?.trim() ??
           Platform.environment['RUNWAYML_API_SECRET']?.trim() ??
           '',
+      'krea': Platform.environment['KREA_API_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
     requestToken: bootstrap.requestToken,
@@ -576,19 +578,58 @@ class StoreChange<T> {
 }
 
 class CompanionHybridStore {
-  CompanionHybridStore(this.hybrid, {this.vault});
+  CompanionHybridStore(this.hybrid, {this.vault}) {
+    _driveUploadPump = DriveUploadPump(flush: _flushDriveUploads);
+    hybrid.onDeferredDriveUpload = _driveUploadPump.schedule;
+  }
 
   final HybridDataStore hybrid;
   final SettingsVaultDataStore? vault;
+  late final DriveUploadPump _driveUploadPump;
   Future<void> _queue = Future<void>.value();
 
   DurableDataStore get _dataStore => vault ?? hybrid;
+
+  /// One background pass: publishes staged Drive media, then swaps records
+  /// over inside the serialized mutate queue so it cannot race other writes.
+  Future<bool> _flushDriveUploads() async {
+    if (!hybrid.isDriveConnected) return true;
+    final result = await hybrid.uploadQueuedDriveAssets(await read());
+    if (result.replacements.isNotEmpty) {
+      await mutate<void>(
+        (current) => StoreChange<void>(
+          HybridDataStore.applyDriveAssetReplacements(
+            current,
+            result.replacements,
+          ),
+          null,
+        ),
+      );
+    }
+    return result.failures == 0;
+  }
+
+  /// Publishes staged Drive media left over from an interrupted upload pass.
+  void _resumeDeferredDriveUploads(StoredData data) {
+    if (HybridDataStore.pendingDriveUploads(data).isNotEmpty) {
+      _driveUploadPump.schedule();
+    }
+  }
 
   GoogleDriveConnection get connection => hybrid.connection;
 
   Future<StoredData> read() async {
     await _queue;
     return _dataStore.read();
+  }
+
+  /// Reads the persisted library without any Google Drive traffic. Media and
+  /// cache routes resolve their references through this: while connected,
+  /// [read] revalidates the remote state file, and that network round trip
+  /// must never gate serving bytes that are already on this disk.
+  Future<StoredData> readLocal() async {
+    await _queue;
+    return hybrid.readCached();
   }
 
   Future<T> mutate<T>(
@@ -657,7 +698,7 @@ class CompanionHybridStore {
     // Migrate any legacy plaintext credentials before HybridDataStore copies
     // the portable library into Drive.
     await _dataStore.read();
-    await hybrid.connect(accessToken, folderName);
+    _resumeDeferredDriveUploads(await hybrid.connect(accessToken, folderName));
     await vault?.connectRemote(accessToken, connection.folderId);
     return _dataStore.read();
   }
@@ -669,7 +710,9 @@ class CompanionHybridStore {
   }
 
   Future<StoredData> refreshDrive(String accessToken) async {
-    await hybrid.connect(accessToken, hybrid.connection.folderName);
+    _resumeDeferredDriveUploads(
+      await hybrid.connect(accessToken, hybrid.connection.folderName),
+    );
     await vault?.connectRemote(accessToken, connection.folderId);
     return _dataStore.read();
   }
@@ -769,6 +812,10 @@ class CompanionApp {
   final VideoCache? _videoCache;
   final VideoCache? _thumbnailCache;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
+  ReferenceVideoEditingService? get _referenceVideoEditingService =>
+      _referenceVideoNormalizer is ReferenceVideoEditingService
+      ? _referenceVideoNormalizer as ReferenceVideoEditingService
+      : null;
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
 
   Future<void> handle(HttpRequest request) async {
@@ -972,7 +1019,7 @@ class CompanionApp {
         return await _media(request);
       }
       if (request.method == 'GET' && path == '/video-cache') {
-        final cache = await _syncedVideoCache(await _store.read());
+        final cache = await _syncedVideoCache(await _store.readLocal());
         return await _json(request.response, 200, <String, Object?>{
           'usedBytes': cache == null ? 0 : await cache.usedBytes(),
           'capBytes': cache?.maxBytes ?? 0,
@@ -985,7 +1032,7 @@ class CompanionApp {
         });
       }
       if (request.method == 'GET' && path == '/thumbnail-cache') {
-        final cache = await _syncedThumbnailCache(await _store.read());
+        final cache = await _syncedThumbnailCache(await _store.readLocal());
         return await _json(request.response, 200, <String, Object?>{
           'usedBytes': cache == null ? 0 : await cache.usedBytes(),
           'capBytes': cache?.maxBytes ?? 0,
@@ -1150,6 +1197,7 @@ class CompanionApp {
 
   Future<void> _stateAction(String action, Object? value) async {
     if (action == 'clearAll') return _store.delete();
+    if (action == 'trimReferenceVideo') return _trimReferenceVideo(value);
     await _store.mutate<void>((current) async {
       StoredData next;
       if (action == 'setApiKey') {
@@ -1560,13 +1608,15 @@ class CompanionApp {
           asset: asset,
           thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,
           createdAt: existing?.createdAt ?? reference.createdAt,
-          updatedAt: DateTime.now().toUtc(),
+          updatedAt: reference.updatedAt,
           folderId: reference.folderId,
           tags: _cleanLibraryTags(reference.tags),
           favorite: reference.favorite,
           hidden: reference.hidden,
           storage: reference.storage,
           contentDigest: reference.contentDigest ?? existing?.contentDigest,
+          durationSeconds:
+              reference.durationSeconds ?? existing?.durationSeconds,
         );
         final references = List<SavedReference>.from(current.savedReferences);
         final index = references.indexWhere((item) => item.id == clean.id);
@@ -1612,6 +1662,157 @@ class CompanionApp {
     }
   }
 
+  /// Trims outside the serialized mutate queue: the source download and the
+  /// ffmpeg encode can take minutes, and holding the queue for them would
+  /// block every other state read and write across the app. Only the final
+  /// record insert runs inside the queue, re-validated against fresh state.
+  Future<void> _trimReferenceVideo(Object? value) async {
+    final editor = _referenceVideoEditingService;
+    if (editor == null) {
+      throw StateError('Video trimming is unavailable on this build.');
+    }
+    final map = value is Map<Object?, Object?> ? value : const {};
+    final sourceReferenceId = map['sourceReferenceId']?.toString() ?? '';
+    final rawOutput = map['output'];
+    final output = SavedReference.fromJson(
+      rawOutput is Map<Object?, Object?>
+          ? rawOutput.map((key, child) => MapEntry(key.toString(), child))
+          : const <String, Object?>{},
+    );
+    final startSeconds = (map['startSeconds'] as num?)?.toDouble();
+    final endSeconds = (map['endSeconds'] as num?)?.toDouble();
+    final source = _validatedTrimSource(
+      await _store.read(),
+      sourceReferenceId: sourceReferenceId,
+      output: output,
+      startSeconds: startSeconds,
+      endSeconds: endSeconds,
+    );
+    final trimmed = await editor.trimVideo(
+      await _referenceVideoBytes(source.asset),
+      startSeconds: startSeconds!,
+      endSeconds: endSeconds!,
+    );
+    final name = output.name.trim();
+    final asset = await _store.writeAsset(
+      trimmed,
+      label: name.toLowerCase().endsWith('.mp4') ? name : '$name.mp4',
+      contentType: 'video/mp4',
+      storage: source.storage,
+    );
+    final now = DateTime.now().toUtc();
+    final saved = SavedReference(
+      id: output.id,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      createdAt: now,
+      updatedAt: now,
+      folderId: output.folderId,
+      tags: _cleanLibraryTags(output.tags),
+      favorite: output.favorite,
+      hidden: output.hidden,
+      storage: source.storage,
+      durationSeconds: endSeconds - startSeconds,
+    );
+    await _store.mutate<void>((latest) {
+      // The source may have been deleted or the output id taken while the
+      // encode ran; an orphaned trimmed asset is reclaimed by a later prune.
+      _validatedTrimSource(
+        latest,
+        sourceReferenceId: sourceReferenceId,
+        output: output,
+        startSeconds: startSeconds,
+        endSeconds: endSeconds,
+      );
+      return StoreChange<void>(
+        latest.copyWith(
+          savedReferences: <SavedReference>[saved, ...latest.savedReferences],
+        ),
+        null,
+      );
+    });
+  }
+
+  SavedReference _validatedTrimSource(
+    StoredData current, {
+    required String sourceReferenceId,
+    required SavedReference output,
+    required double? startSeconds,
+    required double? endSeconds,
+  }) {
+    final source = current.savedReferences
+        .where((item) => item.id == sourceReferenceId)
+        .firstOrNull;
+    if (source == null || source.kind != MediaReferenceKind.video) {
+      throw StateError('That reference video no longer exists.');
+    }
+    final sourceDuration = source.durationSeconds;
+    if (sourceDuration == null ||
+        startSeconds == null ||
+        endSeconds == null ||
+        !startSeconds.isFinite ||
+        !endSeconds.isFinite ||
+        startSeconds < 0 ||
+        endSeconds > sourceDuration + .001 ||
+        endSeconds - startSeconds < .1) {
+      throw StateError('Choose a valid range within the reference video.');
+    }
+    final name = output.name.trim();
+    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
+      throw StateError('Reference names must be between 1 and 80 characters.');
+    }
+    if (current.savedReferences.any((item) => item.id == output.id)) {
+      throw StateError('That reference already exists.');
+    }
+    if (output.storage != source.storage ||
+        (output.folderId != null &&
+            !current.folders.any(
+              (folder) =>
+                  folder.id == output.folderId &&
+                  folder.collection == LibraryCollection.references &&
+                  folder.storage == source.storage,
+            ))) {
+      throw StateError('That reference folder no longer exists.');
+    }
+    return source;
+  }
+
+  Future<Uint8List> _referenceVideoBytes(AssetReference asset) async {
+    if (asset.isLocal) return _store.readAsset(asset);
+    final uri = Uri.tryParse(asset.value);
+    if (uri == null || uri.scheme != 'https') {
+      throw StateError('The reference video is not available for trimming.');
+    }
+    const maximumBytes = 512 * 1024 * 1024;
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('The reference video could not be downloaded.');
+      }
+      if (response.contentLength > maximumBytes) {
+        throw StateError('Reference videos must be 512 MB or smaller.');
+      }
+      final bytes = BytesBuilder(copy: false);
+      var length = 0;
+      await for (final chunk in response) {
+        length += chunk.length;
+        if (length > maximumBytes) {
+          throw StateError('Reference videos must be 512 MB or smaller.');
+        }
+        bytes.add(chunk);
+      }
+      final value = bytes.takeBytes();
+      if (value.isEmpty) throw StateError('The reference video is empty.');
+      return value;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<LocalSnapshot> _snapshot() async {
     var data = await _store.read();
     // Apply persisted caps immediately, but keep maintenance sweeps off the
@@ -1649,9 +1850,23 @@ class CompanionApp {
           next = next.copyWith(deliveryExpiresAt: expectedExpiry);
         }
       }
+      // An undelivered record keeps its links past the retention estimate
+      // until a result download was actually attempted after the estimate
+      // lapsed. A mere status check is not enough: lastCheckedAt is shared
+      // across devices, so another device's routine poll would otherwise
+      // authorize purging the last delivery link before any device tried to
+      // download from it.
+      final attemptedAfterExpiry =
+          next.resultAsset != null ||
+          (next.deliveryExpiresAt != null &&
+              next.lastResultRetentionAttemptAt?.isAfter(
+                    next.deliveryExpiresAt!,
+                  ) ==
+                  true);
       if (next.deliveryExpiresAt == null ||
           next.deliveryExpiresAt!.isAfter(now) ||
-          (next.resultUrl == null && next.draftCacheUrl == null)) {
+          (next.resultUrl == null && next.draftCacheUrl == null) ||
+          !attemptedAfterExpiry) {
         return next;
       }
       changed = true;
@@ -1664,7 +1879,13 @@ class CompanionApp {
     }).toList();
     if (changed) {
       data = data.copyWith(generations: generations);
-      await _store.replace(data);
+      try {
+        await _store.replace(data);
+      } on Object {
+        // Drive-tagged records cannot be rewritten while Drive is
+        // disconnected, and a transient Drive failure must not fail every
+        // /state response. Serve the swept view; the write reruns later.
+      }
     }
     final connected = videoProviders
         .where((provider) => _activeKey(data, provider.id).isNotEmpty)
@@ -1677,13 +1898,7 @@ class CompanionApp {
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
-      availableProviders: const <String>{
-        'bfl',
-        'ltx',
-        'artcraft',
-        'atlas',
-        'runway',
-      },
+      availableProviders: remoteProviderIds,
       settingsVault:
           _store.vault?.settingsVaultStatus ??
           const SettingsVaultStatus.unavailable(),
@@ -1864,6 +2079,83 @@ class CompanionApp {
     }
   }
 
+  /// Retains a ready result through its previously captured delivery link
+  /// after a status check failed. `stalled` distinguishes a timed-out
+  /// download — which says nothing about the link itself and must keep the
+  /// generation retryable — from a definitive link failure.
+  Future<({AssetReference? asset, bool stalled})> _downloadRetainedResult(
+    Generation current,
+  ) async {
+    final url = current.resultUrl;
+    if (!current.isReady || current.resultAsset != null || url == null) {
+      return (asset: null, stalled: false);
+    }
+    try {
+      return (
+        asset: await _retainResult(
+          url,
+          'clawnsole-${current.localId}.mp4',
+          current.storage,
+        ),
+        stalled: false,
+      );
+    } on ProviderException catch (error) {
+      // _retainResult reports a timed-out download as a status-less
+      // ProviderException.
+      return (asset: null, stalled: error.status == null);
+    } on Object {
+      return (asset: null, stalled: false);
+    }
+  }
+
+  /// Persists a poll outcome unless the stored record advanced past the
+  /// [expected] baseline while this poll ran, returning null when it did.
+  ///
+  /// A poll abandoned by its caller's timeout keeps running on a dead socket
+  /// and can complete much later; without this guard its stale write would
+  /// overwrite a newer poll's outcome — even discarding a delivered result
+  /// asset — or resurrect a deleted record. Every persisted poll outcome
+  /// advances statusCheckCount, so it serves as the write version.
+  Future<Generation?> _persistPollUpdate(
+    Generation next, {
+    required Generation expected,
+  }) {
+    return _store.mutate<Generation?>((current) {
+      final generations = List<Generation>.from(current.generations);
+      final index = generations.indexWhere(
+        (item) => item.localId == next.localId,
+      );
+      if (index < 0) return StoreChange<Generation?>(current, null);
+      final existing = generations[index];
+      if (existing.statusCheckCount != expected.statusCheckCount) {
+        return StoreChange<Generation?>(current, null);
+      }
+      final persisted = next.copyWith(
+        folderId: existing.folderId,
+        clearFolder: existing.folderId == null,
+        tags: existing.tags,
+        favorite: existing.favorite,
+        hidden: existing.hidden,
+        storage: existing.storage,
+      );
+      generations[index] = persisted;
+      return StoreChange<Generation?>(
+        current.copyWith(generations: generations),
+        persisted,
+      );
+    });
+  }
+
+  /// The stored version of [generation], or the caller's copy when the
+  /// record no longer exists.
+  Future<Generation> _storedOrInput(Generation generation) async {
+    final data = await _store.read();
+    return data.generations
+            .where((item) => item.localId == generation.localId)
+            .firstOrNull ??
+        generation;
+  }
+
   Future<Generation> _submit(Map<String, Object?> body) async {
     final input = body['input'];
     final rawRecord = body['record'];
@@ -1895,10 +2187,9 @@ class CompanionApp {
       final bool value => value,
       _ => data.preferences.autoFixReferenceVideos,
     };
-    final referenceVideoProfile = modelById(
-      provider,
-      generation.model,
-    ).referenceVideoCompatibilityProfile;
+    final model = modelById(provider, generation.model);
+    final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
+    final referenceImageProfile = model.referenceImageCompatibilityProfile;
     if (autoFixReferenceVideos) {
       final ReferenceImageNormalizationService imageNormalizer =
           _referenceVideoNormalizer is ReferenceImageNormalizationService
@@ -1910,6 +2201,7 @@ class CompanionApp {
         videoNormalizer: _referenceVideoNormalizer,
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
+        imageProfile: referenceImageProfile,
       );
       cleanInput = prepared.input;
       generation = generation.copyWith(config: prepared.config);
@@ -2061,10 +2353,22 @@ class CompanionApp {
     late Generation next;
     try {
       final payload = await _providers.poll(current.provider, key, pollingUrl);
-      var status = normalizeGenerationStatus(payload['status']);
+      final reportedStatus = normalizeGenerationStatus(payload['status']);
+      var status = reportedStatus;
+      if (isGenerationFailureStatus(status) && current.hasDeliveredMedia) {
+        // A provider expiring or forgetting a task whose film — or still-held
+        // delivery link — already arrived must not fail the generation; a
+        // restored ready status lets retention keep trying the link below.
+        status = normalizeGenerationStatus(current.status);
+      }
       final result = payload['result'] ?? payload['outputs'] ?? payload;
-      final resultUrl = status == 'Ready'
+      // Fresh links come only from a payload that itself reported ready — a
+      // failure payload must never have an incidental URL mistaken for one.
+      final resultUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: false)
+          : null;
+      final draftUrl = reportedStatus == 'Ready'
+          ? findResultUrl(result, draft: true)
           : null;
       var failureMessage = isGenerationFailureStatus(status)
           ? providerNamedFailureMessage(
@@ -2077,16 +2381,53 @@ class CompanionApp {
       var retentionFailures = current.resultRetentionFailures;
       String? retentionError;
       var attemptedRetention = false;
-      if (status == 'Ready' && resultAsset == null && resultUrl == null) {
+      // A previously captured delivery link often outlives the provider's
+      // status payload, so retention falls back to it whenever this poll's
+      // payload no longer carries a fresh link.
+      final downloadUrl = status == 'Ready'
+          ? (resultUrl ?? current.resultUrl)
+          : resultUrl;
+      final deliveryAvailability = providerById(
+        current.provider,
+      ).resultDelivery.availability;
+      if (status == 'Ready' && resultAsset == null && resultUrl != null) {
+        // The ready status and its delivery link are an irreplaceable receipt:
+        // they must survive a crash or shutdown during the download attempt
+        // below, so they are persisted now rather than only at poll end.
+        final receipt = await _persistPollUpdate(
+          expected: current,
+          current.copyWith(
+            status: status,
+            resultUrl: resultUrl,
+            draftCacheUrl: draftUrl,
+            deliveryExpiresAt: deliveryAvailability != null
+                ? current.deliveryExpiresAt ??
+                      checkedAt.add(deliveryAvailability)
+                : null,
+            clearDeliveryExpiresAt: deliveryAvailability == null,
+            deliveryExpired: false,
+            lastProviderResponse: compactProviderResponse(payload),
+            lastProviderResponseAt: checkedAt,
+            updatedAt: checkedAt,
+          ),
+        );
+        if (receipt == null) {
+          // A newer poll outcome (or a deletion) superseded this one while
+          // it ran; downloading against the stale baseline would only race
+          // that winner's write.
+          return await _storedOrInput(current);
+        }
+      }
+      if (status == 'Ready' && resultAsset == null && downloadUrl == null) {
         attemptedRetention = true;
         retentionFailures += 1;
         retentionError =
             '${providerById(current.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
-      } else if (resultUrl != null && resultAsset == null) {
+      } else if (downloadUrl != null && resultAsset == null) {
         attemptedRetention = true;
         try {
           resultAsset = await _retainResult(
-            resultUrl,
+            downloadUrl,
             'clawnsole-${current.localId}.mp4',
             current.storage,
           );
@@ -2108,9 +2449,6 @@ class CompanionApp {
         allowDeterministicQuote: status == 'Ready',
         terminal: terminal,
       );
-      final deliveryAvailability = providerById(
-        current.provider,
-      ).resultDelivery.availability;
       next = current.copyWith(
         status: status,
         progress: status == 'Ready'
@@ -2119,9 +2457,7 @@ class CompanionApp {
         resultUrl: resultUrl,
         resultAsset: resultAsset,
         deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
-        draftCacheUrl: status == 'Ready'
-            ? findResultUrl(result, draft: true)
-            : null,
+        draftCacheUrl: draftUrl,
         deliveryExpiresAt: status == 'Ready' && deliveryAvailability != null
             ? current.deliveryExpiresAt ?? checkedAt.add(deliveryAvailability)
             : null,
@@ -2148,9 +2484,50 @@ class CompanionApp {
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
+      final rescue = await _downloadRetainedResult(current);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
-      if (payload != null && isGenerationFailureStatus(providerStatus)) {
+      if (rescue.asset != null) {
+        // The status check failed, but the film itself was still available at
+        // the previously captured delivery link, so the generation completes.
+        next = current.copyWith(
+          resultAsset: rescue.asset,
+          lastResultRetentionAttemptAt: checkedAt,
+          resultRetentionFailures: 0,
+          clearResultRetentionError: true,
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null &&
+          isGenerationFailureStatus(providerStatus) &&
+          current.hasDeliveredMedia) {
+        // The film — or its still-held delivery link — already arrived; an
+        // expired or failed provider job cannot retract it, and the rescue
+        // above will keep retrying the link until the delivery window purge
+        // releases it. Record the check without downgrading the delivery.
+        next = current.copyWith(
+          lastCheckedAt: checkedAt,
+          statusCheckCount: current.statusCheckCount + 1,
+          consecutiveCheckFailures: 0,
+          clearLastCheckError: true,
+          lastResultRetentionAttemptAt: current.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: current.needsResultRetention
+              ? current.resultRetentionFailures + 1
+              : current.resultRetentionFailures,
+          lastProviderStatusCode: providerHttpStatus(error),
+          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponseAt: checkedAt,
+          updatedAt: checkedAt,
+        );
+      } else if (payload != null && isGenerationFailureStatus(providerStatus)) {
         next = current.copyWith(
           status: providerStatus,
           progress: normalizedProgress(payload['progress']),
@@ -2174,11 +2551,13 @@ class CompanionApp {
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: current.isReady ? checkedAt : null,
-          resultRetentionFailures: current.isReady
+          lastResultRetentionAttemptAt: current.needsResultRetention
+              ? checkedAt
+              : null,
+          resultRetentionFailures: current.needsResultRetention
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
-          resultRetentionError: current.isReady
+          resultRetentionError: current.needsResultRetention
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),
@@ -2188,7 +2567,8 @@ class CompanionApp {
         );
       }
     }
-    return _upsert(next);
+    return await _persistPollUpdate(next, expected: current) ??
+        await _storedOrInput(current);
   }
 
   AssetReference? _findAsset(
@@ -2227,6 +2607,16 @@ class CompanionApp {
     }
     return null;
   }
+
+  String? _resultFallbackUrl(StoredData data, String assetId) => data
+      .generations
+      .where(
+        (item) =>
+            item.resultAsset?.value == assetId &&
+            item.resultUrl?.trim().isNotEmpty == true,
+      )
+      .firstOrNull
+      ?.resultUrl;
 
   /// Applies the persisted cache-cap preference before any cache use, so a
   /// cap changed on another surface (through the synced preferences) takes
@@ -2267,7 +2657,7 @@ class CompanionApp {
         status: 400,
       );
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
@@ -2283,17 +2673,25 @@ class CompanionApp {
       HttpHeaders.cacheControlHeader,
       'private, max-age=86400, immutable',
     );
-    if (reference.kind == 'drive' && _isVideoAsset(reference)) {
-      final cache = await _syncedVideoCache(data);
-      if (cache != null && cache.enabled) {
-        return _driveVideoAsset(request, reference, cache);
+    try {
+      if (reference.kind == 'drive' && _isVideoAsset(reference)) {
+        final cache = await _syncedVideoCache(data);
+        if (cache != null && cache.enabled) {
+          return await _driveVideoAsset(request, reference, cache);
+        }
       }
+      return await _serveAssetBytes(
+        request,
+        reference,
+        await _store.readAsset(reference),
+      );
+    } on GoogleDriveException catch (error) {
+      final fallback = error.status == 404
+          ? _resultFallbackUrl(data, reference.value)
+          : null;
+      if (fallback != null) return _serveRemoteMedia(request, fallback);
+      rethrow;
     }
-    return _serveAssetBytes(
-      request,
-      reference,
-      await _store.readAsset(reference),
-    );
   }
 
   /// Returns retained bytes only when they already exist on this device.
@@ -2304,7 +2702,7 @@ class CompanionApp {
     if (id == null || id.isEmpty) {
       throw const ProviderException('An asset id is required.', status: 400);
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
@@ -2426,7 +2824,7 @@ class CompanionApp {
     if (id.isEmpty) {
       throw const ProviderException('An asset id is required.', status: 400);
     }
-    final data = await _store.read();
+    final data = await _store.readLocal();
     final reference = _findAsset(data.generations, data.savedReferences, id);
     if (reference == null) {
       throw const ProviderException(
@@ -2547,6 +2945,10 @@ class CompanionApp {
     if (source == null) {
       throw const ProviderException('A media URL is required.', status: 400);
     }
+    return _serveRemoteMedia(request, source);
+  }
+
+  Future<void> _serveRemoteMedia(HttpRequest request, String source) async {
     final target = validatedProviderUrl(source);
     final client = HttpClient();
     try {

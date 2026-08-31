@@ -79,9 +79,19 @@ capability contract: modes, geometry, duration, references, pricing, and other
 feature switches. Add its relative path to the owning provider's `models`
 list. Remove that path to stop exposing the model after the Pages deployment.
 
+`max_input_image_pixels` and `max_input_image_bytes` record safe per-image
+provider/model ceilings for pinned frames and creative image references. Leave
+headroom below a provider's raw limit when its downstream image pipeline pads
+or aligns dimensions, and below decoded-byte limits when it expands a base64
+data URI. When reference normalization is enabled, Clawnsole decodes the
+complete oriented image and proportionally downscales only images that exceed
+a ceiling; it never crops them. Omit the fields for recommendations,
+output-resolution limits, or provider-side automatic resizing that does not
+establish a dependable input ceiling.
+
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
-in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `ltx`, or
+in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `krea`, `ltx`, or
 `runway`. `apple-local` is implemented only by the native iOS app. A genuinely
 new API protocol still requires an app release that implements its adapter;
 older builds safely ignore providers whose adapter they do not understand.

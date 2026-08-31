@@ -236,6 +236,95 @@ void main() {
     },
   );
 
+  test('a slow trim never blocks other companion state reads', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-trim-block-test.',
+    );
+    final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final now = DateTime.utc(2026, 8, 26);
+    final asset = await store.writeAsset(
+      Uint8List.fromList(<int>[1, 2, 3, 4]),
+      label: 'clip.mp4',
+      contentType: 'video/mp4',
+    );
+    await store.write(
+      StoredData(
+        savedReferences: <SavedReference>[
+          SavedReference(
+            id: 'clip',
+            name: 'clip',
+            kind: MediaReferenceKind.video,
+            asset: asset,
+            createdAt: now,
+            updatedAt: now,
+            durationSeconds: 10,
+          ),
+        ],
+      ),
+    );
+    final gate = Completer<void>();
+    final editor = _BlockingTrimEditor(gate.future);
+    final application = CompanionApp(
+      store: store,
+      api: BflApi(),
+      referenceVideoNormalizer: editor,
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+    try {
+      final trim = http.patch(
+        base.resolve('/state'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'action': 'trimReferenceVideo',
+          'value': <String, Object?>{
+            'sourceReferenceId': 'clip',
+            'output': SavedReference(
+              id: 'clip-trim',
+              name: 'clip excerpt',
+              kind: MediaReferenceKind.video,
+              asset: const AssetReference(
+                kind: 'remote',
+                value: '',
+                label: 'clip excerpt',
+                contentType: 'video/mp4',
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ).toJson(),
+            'startSeconds': 1.0,
+            'endSeconds': 4.0,
+          },
+        }),
+      );
+      await editor.started.future.timeout(const Duration(seconds: 5));
+
+      // The encode is still running: every other state read must answer
+      // instead of queueing behind it, or the whole app shows loaders for
+      // the duration of the trim.
+      final state = await http
+          .get(base.resolve('/state'))
+          .timeout(const Duration(seconds: 5));
+      expect(state.statusCode, 200);
+
+      gate.complete();
+      final response = await trim;
+      expect(response.statusCode, 200);
+      final data = await store.read();
+      final trimmed = data.savedReferences.singleWhere(
+        (item) => item.id == 'clip-trim',
+      );
+      expect(trimmed.durationSeconds, 3);
+      expect(await store.readAsset(trimmed.asset), <int>[9, 9]);
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
   test(
     'local companion copies a retained Drive input into local storage',
     () async {
@@ -1280,6 +1369,105 @@ void main() {
       }
     },
   );
+
+  test('companion media routes never re-read Drive state', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-local-read-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final drive = _StateCountingDriveStore();
+    final thumbnail = Uint8List.fromList(<int>[5, 6, 7]);
+    drive.assets['drive-thumb-one'] = thumbnail;
+    final now = DateTime.utc(2026, 8, 26);
+    drive.data = StoredData(
+      generations: <Generation>[
+        Generation(
+          localId: 'one',
+          status: 'Ready',
+          prompt: 'a mirrored film',
+          mode: VideoMode.t2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 8,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+          ),
+          createdAt: now,
+          updatedAt: now,
+          resultAsset: const AssetReference(
+            kind: 'drive',
+            value: 'drive-film-one',
+            label: 'clip.mp4',
+            contentType: 'video/mp4',
+            bytes: 8,
+          ),
+          thumbnailAsset: const AssetReference(
+            kind: 'drive',
+            value: 'drive-thumb-one',
+            label: 'thumb.jpg',
+            contentType: 'image/jpeg',
+            bytes: 3,
+          ),
+        ),
+      ],
+    );
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    await store.connectDrive('token', 'Cached Studio');
+    final application = CompanionApp.hybrid(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      // Resolving media references must run against the persisted metadata
+      // mirror. Before this contract, every one of these requests re-fetched
+      // the whole Drive state file, so a reopened library crawled (and burned
+      // Drive quota) even with all of its bytes already on disk.
+      drive.stateReads = 0;
+      final served = await http.get(base.resolve('/assets?id=drive-thumb-one'));
+      expect(served.statusCode, 200);
+      expect(served.bodyBytes, thumbnail);
+
+      final cacheProbe = await http.get(
+        base.resolve('/asset-cache?id=drive-thumb-one'),
+      );
+      expect(cacheProbe.statusCode, 404);
+
+      final videoCacheStats = await http.get(base.resolve('/video-cache'));
+      expect(videoCacheStats.statusCode, 200);
+      final thumbnailCacheStats = await http.get(
+        base.resolve('/thumbnail-cache'),
+      );
+      expect(thumbnailCacheStats.statusCode, 200);
+
+      final prefetch = await http.post(
+        base.resolve('/video-cache/prefetch'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'id': 'drive-film-one'}),
+      );
+      expect(prefetch.statusCode, 200);
+
+      expect(drive.stateReads, 0);
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+}
+
+class _StateCountingDriveStore extends _MemoryDriveStore {
+  int stateReads = 0;
+
+  @override
+  Future<StoredData> read() async {
+    stateReads += 1;
+    return super.read();
+  }
 }
 
 class _StreamingDriveStore extends _MemoryDriveStore {
@@ -1408,6 +1596,34 @@ class _Terminal503Api extends BflApi {
   }
 }
 
+class _BlockingTrimEditor
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceVideoEditingService {
+  _BlockingTrimEditor(this.gate);
+
+  final Future<void> gate;
+  final Completer<void> started = Completer<void>();
+
+  @override
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async =>
+      PreparedReferenceVideos(sources: sources, changedIndexes: const <int>{});
+
+  @override
+  Future<Uint8List> trimVideo(
+    Uint8List source, {
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    if (!started.isCompleted) started.complete();
+    await gate;
+    return Uint8List.fromList(<int>[9, 9]);
+  }
+}
+
 class _ChangedReferenceVideoNormalizer
     implements ReferenceVideoNormalizationService {
   _ChangedReferenceVideoNormalizer(this.derivative);
@@ -1438,10 +1654,16 @@ class _ChangedReferenceMediaNormalizer
 
   final String derivative;
   List<String> sources = const <String>[];
+  ReferenceImageCompatibilityProfile? imageProfile;
 
   @override
-  Future<PreparedReferenceImages> normalizeImages(List<String> sources) async {
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async {
     this.sources = List<String>.of(sources);
+    imageProfile = profile;
     return PreparedReferenceImages(
       sources: <String>[derivative],
       changedIndexes: const <int>{0},

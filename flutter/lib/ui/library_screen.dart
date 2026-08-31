@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
+import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
+import 'hardware.dart';
 import 'inline_video.dart';
 import 'video_save_sheet.dart';
 
@@ -264,6 +267,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
               children: shown
                   .map(
                     (item) => Padding(
+                      key: ValueKey('library-generation-${item.localId}'),
                       padding: const EdgeInsets.only(bottom: 9),
                       child: selectable(item),
                     ),
@@ -283,6 +287,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
                   children: shown
                       .map(
                         (item) => SizedBox(
+                          key: ValueKey('library-generation-${item.localId}'),
                           width: layout.tileWidth,
                           child: selectable(item),
                         ),
@@ -538,23 +543,33 @@ class _FolderRow extends StatelessWidget {
   );
 }
 
+/// Narrow layouts trade the folder sidebar for one console-key dropdown that
+/// hugs its label — a bordered key with a chevron reads as a control, where
+/// the old full-width row read as a heading.
 class _MobileFolderBar extends StatelessWidget {
   const _MobileFolderBar({required this.controller});
 
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-    child: Row(
-      children: <Widget>[
-        Expanded(
+  Widget build(BuildContext context) => Row(
+    children: <Widget>[
+      Flexible(
+        child: Tooltip(
+          message: 'Choose a storage or folder view',
           child: InkWell(
+            key: const ValueKey('mobile-folder-dropdown'),
             onTap: () => unawaited(_showFolderPicker(context, controller)),
             borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+              decoration: consoleKeyDecoration(
+                context,
+                selected: false,
+                radius: 10,
+              ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Icon(
                     controller.libraryFolderView ==
@@ -562,17 +577,21 @@ class _MobileFolderBar extends StatelessWidget {
                         ? Icons.video_library_outlined
                         : Icons.folder_outlined,
                     color: context.colors.primary,
-                    size: 19,
+                    size: 17,
                   ),
-                  const SizedBox(width: 9),
-                  Expanded(
+                  const SizedBox(width: 8),
+                  Flexible(
                     child: Text(
                       controller.activeFolderLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 7),
                   Text(
                     '${controller.folderCount(controller.libraryFolderView)}',
                     style: TextStyle(
@@ -580,22 +599,26 @@ class _MobileFolderBar extends StatelessWidget {
                       color: context.colors.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(width: 5),
-                  const Icon(Icons.expand_more_rounded, size: 19),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 17,
+                    color: context.colors.onSurfaceVariant,
+                  ),
                 ],
               ),
             ),
           ),
         ),
-        const SizedBox(width: 4),
-        IconButton(
-          tooltip: 'New folder',
-          onPressed: () =>
-              unawaited(_showFolderEditor(context, controller: controller)),
-          icon: const Icon(Icons.create_new_folder_outlined, size: 20),
-        ),
-      ],
-    ),
+      ),
+      const SizedBox(width: 4),
+      IconButton(
+        tooltip: 'New folder',
+        onPressed: () =>
+            unawaited(_showFolderEditor(context, controller: controller)),
+        icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+      ),
+    ],
   );
 }
 
@@ -1055,16 +1078,43 @@ class _GenerationCardState extends State<GenerationCard> {
       fit: StackFit.expand,
       children: <Widget>[
         if (hasMedia)
-          GenerationMedia(controller: widget.controller, item: item)
+          GenerationMedia(
+            controller: widget.controller,
+            item: item,
+            showTimelineOverlay: false,
+          )
         else if (isGeneratingVideo)
           GenerationLoadingPlaceholder(
             item: item,
             style: widget.controller.generationPlaceholderStyle,
             progressEstimate: progressEstimate,
           )
+        else if (GenerationErrorThumbnail.shouldShow(item))
+          GenerationErrorThumbnail(item: item)
         else
           GenerationInputPreview(controller: widget.controller, item: item),
-        Positioned(top: 10, left: 10, child: StatusBadge(item: item)),
+        // Status, storage, and age share the top-left corner so the card
+        // body below keeps the full width for the prompt.
+        Positioned(
+          key: ValueKey('generation-meta-overlay-${item.localId}'),
+          top: 10,
+          left: 10,
+          right: 48,
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              if (StatusBadge.shouldShow(item)) StatusBadge(item: item),
+              StorageBadge(
+                storage: item.storage,
+                compact: true,
+                pendingUpload: generationPendingDriveUpload(item),
+              ),
+              MediaDurationBadge(text: relativeTime(item.createdAt)),
+            ],
+          ),
+        ),
+        GenerationThumbnailFooter(item: item),
         Positioned(
           top: 7,
           right: 7,
@@ -1106,38 +1156,59 @@ class _GenerationCardState extends State<GenerationCard> {
                     playbackId: item.localId,
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),
                     preview: preview,
+                    idleChrome: hasMedia && !item.isImage
+                        ? GenerationIdleChrome(
+                            controller: widget.controller,
+                            item: item,
+                          )
+                        : null,
                   )
-                : SizedBox(height: 280, child: preview),
+                : Stack(
+                    children: <Widget>[
+                      StaticMediaBox(
+                        aspectRatio: generationAspectRatio(
+                          item.config.aspectRatio,
+                        ),
+                        reserveChrome: !item.isImage,
+                        child: preview,
+                      ),
+                      // With no film to show, the media zone is dead space —
+                      // the status panel lives there instead of stretching
+                      // the card body past its delivered neighbors. A dead
+                      // render skips the panel: its error already sits on the
+                      // test-bars thumbnail band.
+                      if (!GenerationErrorThumbnail.shouldShow(item) &&
+                          GenerationStatusDetails.shouldShow(item))
+                        Positioned.fill(
+                          key: const ValueKey('generation-status-overlay'),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 52, 16, 16),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 520,
+                                ),
+                                child: GenerationStatusDetails(
+                                  item: item,
+                                  maxProblemLines: 6,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
           ),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      child: GenerationPrompt(
-                        controller: widget.controller,
-                        prompt: item.displayPrompt,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    StorageBadge(storage: item.storage, compact: true),
-                    const SizedBox(width: 7),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        relativeTime(item.createdAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
+                GenerationPrompt(
+                  controller: widget.controller,
+                  prompt: item.displayPrompt,
+                  style: Theme.of(context).textTheme.titleLarge,
+                  reserveCollapsedHeight: true,
                 ),
                 if (folder != null || item.tags.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 9),
@@ -1182,13 +1253,8 @@ class _GenerationCardState extends State<GenerationCard> {
                     item: item,
                   ),
                 ],
-                const SizedBox(height: 11),
-                GenerationCost(item: item),
-                if (item.error != null ||
-                    item.resultRetentionError != null ||
-                    item.lastCheckError != null ||
-                    item.lastCheckedAt != null ||
-                    item.isLongRunning) ...<Widget>[
+                if (GenerationStatusDetails.shouldShow(item) &&
+                    (hasMedia || isGeneratingVideo)) ...<Widget>[
                   const SizedBox(height: 9),
                   GenerationStatusDetails(item: item),
                 ],
@@ -1214,9 +1280,9 @@ class _GenerationCardState extends State<GenerationCard> {
                               item.resultUrl != null)
                             FilledButton.tonalIcon(
                               style: FilledButton.styleFrom(
-                                minimumSize: const Size(128, 40),
+                                minimumSize: const Size(88, 40),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: 15,
                                 ),
                               ),
                               onPressed: saving
@@ -1233,29 +1299,30 @@ class _GenerationCardState extends State<GenerationCard> {
                                       Icons.download_rounded,
                                       size: 16,
                                     ),
-                              label: Text(
-                                item.isImage ? 'Save image' : 'Save video',
-                              ),
+                              label: const Text('Save'),
                             ),
                           if (widget.controller.canReuse(item))
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(128, 40),
+                                minimumSize: const Size(88, 40),
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
+                                  horizontal: 15,
                                 ),
                               ),
                               onPressed: () =>
                                   unawaited(widget.controller.reuse(item)),
                               icon: const Icon(Icons.replay_rounded, size: 16),
                               label: Text(
-                                item.isFailed ? 'Retry generation' : 'Reuse',
+                                item.isFailed && !item.hasDeliveredMedia
+                                    ? 'Retry'
+                                    : 'Reuse',
                               ),
                             ),
                           GenerationStatusButton(
                             controller: widget.controller,
                             item: item,
                           ),
+                          GenerationCostChip(item: item),
                         ],
                       ),
                     ),
@@ -2013,7 +2080,10 @@ class _GenerationTagEditorState extends State<_GenerationTagEditor> {
           const SizedBox(height: 9),
           Align(
             alignment: Alignment.centerLeft,
-            child: StorageBadge(storage: widget.item.storage),
+            child: StorageBadge(
+              storage: widget.item.storage,
+              pendingUpload: generationPendingDriveUpload(widget.item),
+            ),
           ),
           const SizedBox(height: 22),
           Text('Tags', style: Theme.of(context).textTheme.titleMedium),

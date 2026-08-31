@@ -33,6 +33,7 @@
   "max_duration": 20,
   "duration_step": 1,
   "max_keyframes": 1,
+  "max_input_image_pixels": 3800000,
   "usd_per_second": 0.17,
   "reference_usd_per_second": 0.17,
   "supports_start_frame": true

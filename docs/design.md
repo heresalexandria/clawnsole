@@ -114,11 +114,13 @@ both its fill and its `on` color explicitly; never rely on defaults.
 | Face | File | Role |
 | --- | --- | --- |
 | **Fraunces** (500/600 + italic) | `assets/fonts/Fraunces-*` | Display and headlines, stat numerals, wordmark |
+| **Courier Prime** (400/700 + italic) | `assets/fonts/CourierPrime-*` | The Direction/prompt entry — the director's typewriter voice (`promptFontFamily`) |
 | **DM Sans** (400/500/700) | `assets/fonts/DMSans-*` | Everything else |
 
-Both families are vendored so every platform renders identically offline. They
+All families are vendored so every platform renders identically offline. They
 are SIL Open Font License 1.1; the license texts ship beside them as
-`assets/fonts/OFL-Fraunces.txt` and `assets/fonts/OFL-DMSans.txt`.
+`assets/fonts/OFL-Fraunces.txt`, `assets/fonts/OFL-CourierPrime.txt`, and
+`assets/fonts/OFL-DMSans.txt`.
 
 Scale (from `_textTheme`): display 46/38, headline 32/25/20 (Fraunces 600,
 tight leading, slight negative tracking); titles 16.5/14.5/13 at 700; body
@@ -186,12 +188,12 @@ in light mode.
 - **Bottom nav (< 900 px):** the same burl, three labeled buttons with a
   cream-on-wood selected pill and brass count badge for working renders.
 - Breakpoints: 900 (rail vs bottom nav), 1050 (settings split),
-  720/1180 (library 2/3 columns), 620 (gutters), 640 (settings grid
-  columns), 880 (composer guidance columns and the cost + destination
-  row), 560 (guidance sections compact to single rows), 480 (composer
-  footer stacks). A viewport under 950 px tall switches the create
-  screen into a dense mode (no heading description, smaller title,
-  tighter gaps).
+  720/1180 (library 2/3 columns), 620 (gutters), 880 (composer pairs
+  the guidance accordions with the settings column, and the cost +
+  destination row), 330 (Frame/Finish dropdowns stack instead of
+  sharing a row), 480 (composer footer stacks). A viewport under 950 px
+  tall switches the create screen into a dense mode (no heading
+  description, smaller title, tighter gaps).
 
 ## 7. The composer (Create)
 
@@ -206,25 +208,40 @@ reads what you attach; `GenerationFormState.mode` is derived:
 The current inference is always visible as a quiet chip beside the
 Generate button. Layout order:
 
-1. **Direction**: the prompt field (4–10 lines).
-2. **Reference frames · optional**: thumbnail tiles (role tag, remove,
-   URL/timing fields when relevant), three add buttons (First / Middle /
-   Last, each offering *Upload an image* or *Paste an image URL*), and the
-   Custom-timing pill. Provider rules are stated in one sentence under the
-   header. Models that take pinned frames **or** creative references but
-   never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
-   family) say so up front; attaching one side quietly sets the other aside
-   with an explanation, and a conflicted form (via reuse or a model switch)
-   warns in madder and cannot submit.
-3. **"Or start from…"**: two quiet text buttons disclose the
-   video-continuation and draft-enhance panels. An attached source
-   collapses the irrelevant sections and explains what is set aside;
-   removing it restores them. Draft enhance hides prompt/frames entirely
-   (the original generation owns them) and shows only Finish + Safety.
+1. **Direction**: the prompt field (4–10 lines), set in bundled Courier
+   Prime — the typewriter voice for anything the director types. A quiet
+   clear control sits directly after the label (disabled while empty) and
+   asks before wiping the text; the live counter, copy, and fullscreen
+   controls keep the header's far end.
+2. **Keyframes / References accordions**: the two guidance sections are
+   collapsible rows stacked in one column (paired beside the settings
+   column at ≥880 px). A collapsed header carries the section name, tiny
+   thumbnails of what is attached, and a status word (*None* / *n
+   attached* / *Set aside*); the body holds the tiles (role tag, remove,
+   URL/timing fields), capacity gauges, provider rules, add buttons, and
+   the Custom-timing pill. Media arriving through any path (picker, URL,
+   drop, reuse) opens its section; the whole References accordion stays a
+   drop target. From the moment a picker opens or a drop lands, a
+   **loading tile** with a spinner holds the exact spot the new card will
+   occupy (`pendingFrameAdds` / `pendingReferenceAdds` — keyframes keep
+   theirs through the whole pick-and-retain pipeline), and a draft picked
+   from References wears a spinner veil while its media bytes hydrate. Models that take pinned frames **or** creative references
+   but never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
+   family) say so inside the body; attaching one side quietly sets the
+   other aside, and a conflicted form (via reuse or a model switch) pins
+   both accordions open, warns in madder, and cannot submit. The
+   *Normalize visual references* switch applies to both sections, so it
+   sits below the pair.
+3. **"Or start from…"**: two quiet text buttons under the accordions
+   disclose the video-continuation and draft-enhance panels. An attached
+   source collapses the irrelevant sections and explains what is set
+   aside; removing it restores them. Draft enhance hides prompt/frames
+   entirely (the original generation owns them) and shows only Finish +
+   Safety.
 4. **Frame**: a console-key ratio dropdown whose trigger and menu rows
    keep the *drawn glyph of the actual shape* plus label and hint; Auto
-   uses the free-crop glyph. The dropdown replaced the two-row tile
-   strip so the whole form fits above the fold.
+   uses the free-crop glyph. Frame and Finish share one dropdown row at
+   every width above 330 px, so phones stop spending a full row on each.
 5. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
@@ -235,10 +252,11 @@ Generate button. Layout order:
    AUTO is lit drops to Manual, like touching the slider. Layouts that
    require fixed timing lock the switch to Manual and say why.
 6. **Finish**: a console-key resolution dropdown (label + pixel detail
-   per row; draft mode dims tiers above HD), audio and fast-draft
-   hardware switches (lit hunter green when on), safety-tolerance knob
-   with an `n / 4` readout, and — for models whose API takes one — a
-   **Seed** field with a dice button (empty = random).
+   per row; draft mode dims tiers above HD) on the Frame row, then audio
+   and fast-draft hardware switches (lit hunter green when on),
+   safety-tolerance knob with an `n / 4` readout, and — for models whose
+   API takes one — a **Seed** field with a dice button (empty = random),
+   all stacked in the single settings column.
 7. **Estimated charge + Save generation to**: side by side in one row at
    desktop widths. The stitched hunter-green panel keeps the brass coin,
    credits range in Fraunces, USD in brass, balances, and rate-card link
@@ -269,6 +287,9 @@ below the composer (the old ≥1160 side column is gone).
   per-storage counts, above the folder tree; narrow layouts get the same
   rows in the folder picker. The Drive row carries the connection state
   and a brass *Reconnect* action when a configured session is signed out.
+  Narrow layouts open that picker from a **console-key folder dropdown**
+  that hugs its label (bordered key, count, chevron) — a control, not a
+  full-width heading.
 - **Drive reconnects itself at startup** (`resumeGoogleDrive`): the
   companion and shell hold Drive sessions per process, so the controller
   quietly reattaches a previously configured connection on launch using a
@@ -279,10 +300,14 @@ below the composer (the old ≥1160 side column is gone).
 - **No Ready chips on cards**: a delivered thumbnail already says ready,
   so `StatusBadge` renders nothing for ready work and only appears for
   in-progress, failed, or status-unavailable items.
-- Card actions stay light: the primary verbs (**Save video**,
-  **Reuse/Retry**, **Check status**) are buttons; everything else
-  (Organize, Enhance, Copy to Drive, View details, Delete) folds into the
-  shared `GenerationActionsMenu` (⋯).
+- Card actions stay light: the primary verbs (**Save**, **Reuse/Retry**,
+  **Check status**) are buttons; everything else (Organize, Enhance,
+  Copy to Drive, View details, Delete) folds into the shared
+  `GenerationActionsMenu` (⋯). The cost readout is a compact amount chip
+  (`GenerationCostChip`) on the same row — just the credit or dollar
+  figure at a glance, with the realized/estimated wording, USD
+  conversion, balance trail, and quote-vs-realized lines in a small
+  anchored popover on tap.
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
   keyframes.
@@ -292,7 +317,11 @@ below the composer (the old ≥1160 side column is gone).
   fullscreen player with a close overlay. The fullscreen button inside the
   modal opens the true fullscreen route. Space toggles playback, ←/→ seek
   (5% of the film, clamped 1–5 s), Escape closes the surface it is pressed
-  on. Saved video references play through the same modal.
+  on. Saved video references play through the same modal. The inline
+  timeline band is 34 px and the transport bar 40 px
+  (`GenerationVideo.chromeHeight` = 74), so the idle filmstrip a card
+  reserves under its thumbnail stays a low-profile strip rather than a
+  second media zone.
 - `ReferenceInputsStrip` shows 44 px thumbnails of each keyframe (and a
   chip for a video/draft source). Tapping opens the full-resolution viewer
   (zoomable) with **Download** and, for remote frames, **Open link**.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,6 +14,7 @@ import '../core/provider_catalog.dart';
 import '../core/shell_bridge.dart';
 import 'estimated_progress_bar.dart';
 import 'formatters.dart';
+import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'generation_view_widgets.dart';
@@ -23,11 +25,190 @@ import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
 import 'visual_reference_viewer.dart';
 
+/// Accepts local files dragged from the OS anywhere over [child] and hands
+/// their bytes to [onDropFiles]. A themed overlay confirms the target while a
+/// drag hovers. Inert on platforms without OS file drops (iPhone): the drag
+/// events simply never fire and [child] renders untouched.
+class ReferenceDropZone extends StatefulWidget {
+  const ReferenceDropZone({
+    required this.onDropFiles,
+    required this.label,
+    required this.child,
+    this.enabled = true,
+    this.onDropStarted,
+    super.key,
+  });
+
+  final Future<void> Function(List<DroppedFile> files) onDropFiles;
+  final String label;
+  final bool enabled;
+
+  /// Called with the dropped item count the moment the drop lands, before
+  /// their bytes are read — so the host can reserve loading tiles for the
+  /// read phase. [onDropFiles] always follows, even for unreadable drops.
+  final ValueChanged<int>? onDropStarted;
+  final Widget child;
+
+  @override
+  State<ReferenceDropZone> createState() => _ReferenceDropZoneState();
+}
+
+class _ReferenceDropZoneState extends State<ReferenceDropZone> {
+  bool _hovering = false;
+
+  Future<void> _handleDrop(DropDoneDetails details) async {
+    widget.onDropStarted?.call(details.files.length);
+    final files = <DroppedFile>[];
+    for (final item in details.files) {
+      try {
+        files.add(
+          DroppedFile(
+            name: item.name,
+            bytes: await item.readAsBytes(),
+            path: item.path.isEmpty ? null : item.path,
+          ),
+        );
+      } on Object {
+        // An unreadable item (a folder, a permission failure) is skipped;
+        // every readable file in the same drop still lands.
+      }
+    }
+    await widget.onDropFiles(files);
+  }
+
+  @override
+  Widget build(BuildContext context) => DropTarget(
+    key: const ValueKey('reference-drop-zone'),
+    enable: widget.enabled,
+    onDragEntered: (_) => setState(() => _hovering = true),
+    onDragExited: (_) => setState(() => _hovering = false),
+    onDragDone: (details) {
+      setState(() => _hovering = false);
+      unawaited(_handleDrop(details));
+    },
+    child: Stack(
+      children: <Widget>[
+        widget.child,
+        if (_hovering)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: context.colors.primaryContainer.withValues(alpha: .3),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: context.colors.primary, width: 2),
+                ),
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.colors.surface.withValues(alpha: .92),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: context.colors.outlineVariant),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          Icons.file_download_outlined,
+                          size: 17,
+                          color: context.colors.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.label,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class ReferenceUploadIndicator extends StatelessWidget {
+  const ReferenceUploadIndicator({
+    required this.controller,
+    this.margin = const EdgeInsets.only(top: 8),
+    super.key,
+  });
+
+  final AppController controller;
+  final EdgeInsetsGeometry margin;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final status = controller.referenceUploadStatus;
+      if (!controller.referenceUploadInProgress || status == null) {
+        return const SizedBox.shrink();
+      }
+      return Padding(
+        padding: margin,
+        child: Semantics(
+          liveRegion: true,
+          label: status,
+          child: Container(
+            key: const ValueKey('reference-upload-progress'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: context.colors.primaryContainer.withValues(alpha: .42),
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: context.colors.outlineVariant),
+            ),
+            child: Row(
+              children: <Widget>[
+                const SizedBox.square(
+                  dimension: 17,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    status,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class StorageBadge extends StatelessWidget {
-  const StorageBadge({required this.storage, super.key, this.compact = false});
+  const StorageBadge({
+    required this.storage,
+    super.key,
+    this.compact = false,
+    this.pendingUpload = false,
+  });
 
   final LibraryStorage storage;
   final bool compact;
+
+  /// The record is Drive-tagged but its media is still staged on this device
+  /// waiting for the background upload pass to publish it.
+  final bool pendingUpload;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -46,14 +227,16 @@ class StorageBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Icon(
-          storage == LibraryStorage.drive
+          pendingUpload
+              ? Icons.cloud_upload_outlined
+              : storage == LibraryStorage.drive
               ? Icons.cloud_outlined
               : Icons.devices_outlined,
           size: compact ? 12 : 14,
         ),
         const SizedBox(width: 5),
         Text(
-          storage.shortLabel,
+          pendingUpload ? 'Syncing…' : storage.shortLabel,
           style: TextStyle(
             fontSize: compact ? 9.5 : 10.5,
             fontWeight: FontWeight.w700,
@@ -392,12 +575,17 @@ class GenerationPrompt extends StatefulWidget {
     super.key,
     this.collapsedLines = 3,
     this.style,
+    this.reserveCollapsedHeight = false,
   });
 
   final AppController controller;
   final String prompt;
   final int collapsedLines;
   final TextStyle? style;
+
+  /// Occupy the full collapsed block (all [collapsedLines] plus the toggle
+  /// row) even for short prompts, so sibling cards in a grid stay level.
+  final bool reserveCollapsedHeight;
 
   @override
   State<GenerationPrompt> createState() => _GenerationPromptState();
@@ -433,6 +621,27 @@ class _GenerationPromptState extends State<GenerationPrompt> {
           textScaler: MediaQuery.textScalerOf(context),
         )..layout(maxWidth: available);
         final truncated = painter.didExceedMaxLines;
+        final promptText = Text(
+          widget.prompt,
+          maxLines: _expanded ? null : widget.collapsedLines,
+          overflow: _expanded ? null : TextOverflow.ellipsis,
+          style: style,
+        );
+        final toggleRow = InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              _expanded ? 'Show less' : 'Show full prompt',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: linkColor,
+              ),
+            ),
+          ),
+        );
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -440,28 +649,22 @@ class _GenerationPromptState extends State<GenerationPrompt> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(
-                    widget.prompt,
-                    maxLines: _expanded ? null : widget.collapsedLines,
-                    overflow: _expanded ? null : TextOverflow.ellipsis,
-                    style: style,
-                  ),
-                  if (truncated || _expanded)
-                    InkWell(
-                      borderRadius: BorderRadius.circular(6),
-                      onTap: () => setState(() => _expanded = !_expanded),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          _expanded ? 'Show less' : 'Show full prompt',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: linkColor,
+                  widget.reserveCollapsedHeight && !_expanded
+                      ? ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight:
+                                painter.preferredLineHeight *
+                                widget.collapsedLines,
                           ),
-                        ),
-                      ),
-                    ),
+                          child: promptText,
+                        )
+                      : promptText,
+                  if (truncated || _expanded)
+                    toggleRow
+                  else if (widget.reserveCollapsedHeight)
+                    // An invisible twin of the toggle row keeps short-prompt
+                    // cards level with their truncated neighbors.
+                    IgnorePointer(child: Opacity(opacity: 0, child: toggleRow)),
                 ],
               ),
             ),
@@ -489,10 +692,17 @@ class StatusBadge extends StatelessWidget {
 
   final Generation item;
 
+  /// A delivered thumbnail already says "ready" — no chip needed. The same
+  /// goes for a delivered film whose record picked up a late failure status
+  /// (an expired provider job, or a cross-device merge): the film is proof.
+  static bool shouldShow(Generation item) =>
+      !item.isReady && !(item.hasDeliveredMedia && !item.isWorking);
+
   @override
   Widget build(BuildContext context) {
-    // A delivered thumbnail already says "ready" — no chip needed.
-    if (item.isReady) return const SizedBox.shrink();
+    if (!shouldShow(item)) {
+      return const SizedBox.shrink();
+    }
     final (background, foreground) = item.isStatusUnavailable
         ? (context.colors.errorContainer, context.colors.onErrorContainer)
         : item.isWorking
@@ -545,6 +755,114 @@ class StatusBadge extends StatelessWidget {
   }
 }
 
+/// Duration pill overlaid on a media thumbnail, shared by reference and
+/// generation cards.
+class MediaDurationBadge extends StatelessWidget {
+  const MediaDurationBadge({required this.text, super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: .78),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
+/// The duration to overlay on a generation thumbnail, or null when duration
+/// does not apply (images, upscales that keep their source's length).
+String? generationDurationLabel(Generation item) {
+  if (item.isImage || item.mode == VideoMode.upscale) return null;
+  final duration = item.config.duration;
+  return duration == 'auto' ? 'Auto' : '$duration s';
+}
+
+/// Provider pill overlaid on a generation thumbnail's bottom-right corner,
+/// matching the duration pill's chrome so the card body below keeps its
+/// width for the prompt and specs.
+class ProviderBadge extends StatelessWidget {
+  const ProviderBadge({required this.item, super.key});
+
+  final Generation item;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: .78),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      child: Text(
+        providerNameForHistory(item.provider),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
+}
+
+/// Bottom overlay row shared by every generation thumbnail: clip duration in
+/// the left corner, provider in the right, laid out as one row so the pills
+/// never collide on narrow tiles.
+class GenerationThumbnailFooter extends StatelessWidget {
+  const GenerationThumbnailFooter({
+    required this.item,
+    super.key,
+    this.inset = 10,
+    this.showProvider = true,
+  });
+
+  final Generation item;
+
+  /// Distance from the thumbnail edges, matching the surface's other overlays.
+  final double inset;
+
+  /// Compact rows opt out: on their 92-px thumbnails the provider pill can
+  /// only ellipsize, so the name stays in the row's metadata line instead.
+  final bool showProvider;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    left: inset,
+    right: inset,
+    bottom: inset,
+    child: Row(
+      children: <Widget>[
+        if (generationDurationLabel(item) != null) ...<Widget>[
+          MediaDurationBadge(text: generationDurationLabel(item)!),
+          const SizedBox(width: 6),
+        ],
+        if (showProvider)
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: ProviderBadge(item: item),
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 /// Every setting used for a generation, shown as compact chips.
 class GenerationSpecChips extends StatelessWidget {
   const GenerationSpecChips({required this.item, super.key});
@@ -559,7 +877,8 @@ class GenerationSpecChips extends StatelessWidget {
       spacing: 6,
       runSpacing: 6,
       children: <Widget>[
-        _SpecChip(label: providerNameForHistory(item.provider)),
+        // The provider rides the thumbnail's bottom-right corner
+        // (GenerationThumbnailFooter), not the spec row.
         _SpecChip(
           label: item.isImage
               ? (item.mode == VideoMode.i2v
@@ -580,11 +899,6 @@ class GenerationSpecChips extends StatelessWidget {
           _SpecChip(
             label: config.aspectRatio == 'auto' ? 'Auto' : config.aspectRatio,
             leading: _MiniRatioGlyph(ratio: config.aspectRatio),
-          ),
-        if (!item.isImage && !upscaling)
-          _SpecChip(
-            icon: Icons.timelapse_rounded,
-            label: config.duration == 'auto' ? 'Auto' : '${config.duration} s',
           ),
         if (item.provider == 'apple-local' && !item.isImage)
           _SpecChip(icon: Icons.animation_rounded, label: '1 frame / s'),
@@ -752,7 +1066,10 @@ class _MediaReferenceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: '${media.kind.label} reference · ${media.label} — tap to view',
+    message:
+        '${media.kind.label} reference · ${media.label}'
+        '${media.durationSeconds == null ? '' : ' · ${formatMediaDuration(media.durationSeconds!)}'}'
+        ' — tap to view',
     child: InkWell(
       key: ValueKey('view-generation-reference-${item.localId}-${media.label}'),
       borderRadius: BorderRadius.circular(8),
@@ -804,7 +1121,9 @@ class _MediaReferenceChip extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 110),
               child: Text(
-                media.label,
+                media.durationSeconds == null
+                    ? media.label
+                    : '${media.label} · ${formatMediaDuration(media.durationSeconds!)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -1220,9 +1539,32 @@ Future<void> showSourceReferenceSheet(
 );
 
 class GenerationStatusDetails extends StatelessWidget {
-  const GenerationStatusDetails({required this.item, super.key});
+  const GenerationStatusDetails({
+    required this.item,
+    super.key,
+    this.maxProblemLines,
+  });
 
   final Generation item;
+
+  /// Clamp for the problem message when the panel overlays a bounded media
+  /// zone; the full text stays available in the details dialog. Null keeps
+  /// the message unclamped for in-body placements.
+  final int? maxProblemLines;
+
+  /// Whether the status panel has anything worth saying for [item]. A
+  /// delivered film is its own proof of success: stale poll metadata or a
+  /// late failure status must not dress a playable card in error colors.
+  static bool shouldShow(Generation item) {
+    if (item.hasDeliveredMedia && !item.needsResultRetention) return false;
+    final problem =
+        item.error ?? item.resultRetentionError ?? item.lastCheckError;
+    if (problem != null || item.isLongRunning || item.needsResultRetention) {
+      return true;
+    }
+    // Otherwise only in-flight records surface their polling cadence.
+    return item.isWorking && item.lastCheckedAt != null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1230,7 +1572,7 @@ class GenerationStatusDetails extends StatelessWidget {
         item.error ?? item.resultRetentionError ?? item.lastCheckError;
     final isTerminal = item.error != null || item.isFailed;
     final checked = item.lastCheckedAt;
-    if (problem == null && checked == null && !item.isLongRunning) {
+    if (!shouldShow(item)) {
       return const SizedBox.shrink();
     }
     return Container(
@@ -1266,6 +1608,10 @@ class GenerationStatusDetails extends StatelessWidget {
                 Expanded(
                   child: Text(
                     problem,
+                    maxLines: maxProblemLines,
+                    overflow: maxProblemLines == null
+                        ? null
+                        : TextOverflow.ellipsis,
                     style: TextStyle(
                       color: isTerminal
                           ? context.colors.onErrorContainer
@@ -1344,7 +1690,11 @@ class GenerationStatusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!item.canCheckStatus || (item.isReady && !item.needsResultRetention)) {
+    if (!item.canCheckStatus ||
+        (item.hasDeliveredMedia &&
+            !item.needsResultRetention &&
+            !item.isWorking) ||
+        (item.isReady && !item.needsResultRetention)) {
       return const SizedBox.shrink();
     }
     final checking = controller.isCheckingStatus(item.localId);
@@ -1567,10 +1917,16 @@ class GenerationMedia extends StatefulWidget {
     required this.controller,
     required this.item,
     super.key,
+    this.showTimelineOverlay = true,
   });
 
   final AppController controller;
   final Generation item;
+
+  /// Whether the cached filmstrip may overlay the bottom of the thumbnail.
+  /// Cards that render [GenerationIdleChrome] show the strip below the frame
+  /// instead, so they pass false to avoid doubling it.
+  final bool showTimelineOverlay;
 
   @override
   State<GenerationMedia> createState() => _GenerationMediaState();
@@ -1649,6 +2005,7 @@ class _GenerationMediaState extends State<GenerationMedia> {
       controller: widget.controller,
       item: widget.item,
       uri: _uri,
+      showTimelineOverlay: widget.showTimelineOverlay,
     );
   }
 }
@@ -1656,6 +2013,167 @@ class _GenerationMediaState extends State<GenerationMedia> {
 final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
     <String, _GeneratedVideoPreviewJob>{};
 final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
+
+String _generationPreviewJobKey(Generation item) =>
+    '${item.storage.name}:${item.localId}:${item.resultAsset?.value ?? item.resultUrl}';
+
+/// The idle chrome bar a full video card renders under its film: the cached
+/// filmstrip occupies the exact band the player's live timeline will use, and
+/// a static transport row sits where the controls will appear — so starting
+/// playback replaces content without resizing the card.
+class GenerationIdleChrome extends StatefulWidget {
+  const GenerationIdleChrome({
+    required this.controller,
+    required this.item,
+    super.key,
+  });
+
+  final AppController controller;
+  final Generation item;
+
+  @override
+  State<GenerationIdleChrome> createState() => _GenerationIdleChromeState();
+}
+
+class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
+  Future<Uint8List?>? _timeline;
+  Uint8List? _restoredTimeline;
+  late int _sourceRevision;
+
+  bool get _playable =>
+      widget.item.resultAsset != null || widget.item.resultUrl != null;
+
+  void _load() {
+    _sourceRevision = widget.controller.videoPreviewSourceRevision;
+    final asset = widget.item.timelineThumbnailAsset;
+    _restoredTimeline = widget.controller.cachedAssetBytes(asset);
+    if (_restoredTimeline != null) {
+      _timeline = null;
+      return;
+    }
+    if (asset != null) {
+      _timeline = widget.controller
+          .readPreviewAsset(asset)
+          .then<Uint8List?>((bytes) => bytes)
+          .catchError((Object _) => null);
+      return;
+    }
+    // The thumbnail preview above shares its extraction job; piggyback on it
+    // instead of running a second frame pass for the same film.
+    _timeline = _previewJobs[_generationPreviewJobKey(widget.item)]?.future
+        .then((preview) => preview?.timeline);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant GenerationIdleChrome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.localId != widget.item.localId ||
+        _sourceRevision != widget.controller.videoPreviewSourceRevision ||
+        oldWidget.item.timelineThumbnailAsset?.value !=
+            widget.item.timelineThumbnailAsset?.value ||
+        oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value ||
+        oldWidget.item.resultUrl != widget.item.resultUrl) {
+      _load();
+    }
+  }
+
+  Future<void> _download(VideoSaveDestination destination) async {
+    try {
+      await widget.controller.saveMedia(widget.item, destination: destination);
+    } on Object catch (error) {
+      widget.controller.showErrorNotice(error);
+    }
+  }
+
+  Future<void> _play() async {
+    final delivery = widget.controller.generationMediaDelivery(widget.item);
+    final inline = InlineVideoPlayback.of(context);
+    if (inline != null) {
+      inline(
+        InlineVideoRequest(
+          deferredUri: delivery.uri,
+          progress: delivery.progress,
+          onDownload: _download,
+          supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+        ),
+      );
+      return;
+    }
+    await showVideoPlayerModal(
+      context,
+      deferredUri: delivery.uri,
+      progress: delivery.progress,
+      supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+      initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
+      onDownload: _download,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_playable) return const SizedBox.shrink();
+    return InkWell(
+      // The thumbnail's play button is the primary affordance, while the
+      // reserved timeline and transport chrome accept the same tap.
+      onTap: () => unawaited(_play()),
+      child: SizedBox.expand(
+        child: Column(
+          children: <Widget>[
+            SizedBox(
+              height: GenerationVideo.timelineHeight,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Colors.white30)),
+                ),
+                child: FutureBuilder<Uint8List?>(
+                  key: ValueKey(
+                    'generation-idle-filmstrip-${widget.item.localId}',
+                  ),
+                  future: _timeline,
+                  initialData: _restoredTimeline,
+                  builder: (context, snapshot) {
+                    final bytes = snapshot.data;
+                    if (bytes == null) return const SizedBox.expand();
+                    return Image.memory(
+                      bytes,
+                      key: const ValueKey('generation-idle-filmstrip'),
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    );
+                  },
+                ),
+              ),
+            ),
+            Container(
+              key: const ValueKey('generation-idle-transport'),
+              height: GenerationVideo.transportHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              color: ClawnsoleColors.plumInk,
+              child: const Row(
+                children: <Widget>[
+                  Icon(Icons.play_arrow_rounded, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tap to play',
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _GeneratedVideoPreview {
   const _GeneratedVideoPreview({required this.thumbnail, this.timeline});
@@ -1681,11 +2199,13 @@ class _CachedVideoPreview extends StatefulWidget {
     required this.controller,
     required this.item,
     required this.uri,
+    this.showTimelineOverlay = true,
   });
 
   final AppController controller;
   final Generation item;
   final Future<Uri?> uri;
+  final bool showTimelineOverlay;
 
   @override
   State<_CachedVideoPreview> createState() => _CachedVideoPreviewState();
@@ -1698,8 +2218,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   late DateTime _previewStartedAt;
   late Duration _previewExpectedDuration;
 
-  String get _jobKey =>
-      '${widget.item.storage.name}:${widget.item.localId}:${widget.item.resultAsset?.value ?? widget.item.resultUrl}';
+  String get _jobKey => _generationPreviewJobKey(widget.item);
 
   Future<Uint8List> _read(AssetReference reference) =>
       widget.controller.readPreviewAsset(reference);
@@ -1923,6 +2442,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
               // cover frame, so the band disappears there.
               final boxHeight = constraints.maxHeight;
               final showTimeline =
+                  widget.showTimelineOverlay &&
                   preview.timeline != null &&
                   boxHeight.isFinite &&
                   boxHeight >= 110;
@@ -2242,14 +2762,24 @@ class _MediaPlaceholder extends StatelessWidget {
   }
 }
 
-class GenerationCost extends StatelessWidget {
-  const GenerationCost({required this.item, super.key, this.compact = false});
+/// The card cost readout as a compact chip that sits on the card's action
+/// row: just the credit (or dollar) figure at a glance, with the realized/
+/// estimated breakdown in a small anchored popover on tap.
+class GenerationCostChip extends StatefulWidget {
+  const GenerationCostChip({required this.item, super.key});
 
   final Generation item;
-  final bool compact;
+
+  @override
+  State<GenerationCostChip> createState() => _GenerationCostChipState();
+}
+
+class _GenerationCostChipState extends State<GenerationCostChip> {
+  final MenuController _menu = MenuController();
 
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
     if (item.billingUnit == 'local') return const SizedBox.shrink();
     final minimum = item.cost ?? item.estimatedCreditsMin;
     final maximum = item.cost ?? item.estimatedCreditsMax;
@@ -2266,89 +2796,121 @@ class GenerationCost extends StatelessWidget {
     final foreground = exact
         ? context.colors.onPrimaryContainer
         : context.colors.onSecondaryContainer;
-    return Container(
-      padding: EdgeInsets.all(compact ? 9 : 12),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(11),
+    final detailStyle = TextStyle(
+      fontSize: 10.5,
+      height: 1.4,
+      color: context.colors.onSurfaceVariant,
+    );
+    final details = <Widget>[
+      Text(
+        '${exact ? 'Realized cost' : 'Estimated'} · '
+        '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}'
+        ' · ${usesUsd ? providerNameForHistory(item.provider) : formatUsdRange(minimum, maximum)}',
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: context.colors.onSurface,
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
+      if (item.creditsBefore != null && item.creditsAfter != null)
+        Text(
+          usesUsd
+              ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
+              : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
+          style: detailStyle,
+        ),
+      if (exact &&
+          item.quotedCostUsdMin != null &&
+          item.quotedCostUsdMax != null)
+        Text(
+          'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
+          'realized ${formatUsdAmount(realizedUsd)}'
+          '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
+          style: detailStyle,
+        ),
+      if (unconfirmedFailure && realizedUsd != null)
+        Text(
+          'No confirmed charge · submit-time estimate '
+          '${formatUsdAmount(realizedUsd)}',
+          style: detailStyle,
+        ),
+    ];
+    return MenuAnchor(
+      controller: _menu,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll<Color>(context.colors.surface),
+        elevation: const WidgetStatePropertyAll<double>(10),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: context.colors.outlineVariant),
+          ),
+        ),
+      ),
+      menuChildren: <Widget>[
+        Container(
+          key: const ValueKey('generation-cost-details'),
+          constraints: const BoxConstraints(maxWidth: 320),
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Icon(
-                Icons.toll_rounded,
-                size: compact ? 13 : 15,
-                color: foreground,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '${exact ? 'Realized cost' : 'Estimated'} · '
-                  '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}',
-                  style: TextStyle(
-                    fontSize: compact ? 11 : 12,
-                    fontWeight: FontWeight.w700,
-                    color: foreground,
-                  ),
-                ),
-              ),
-              Text(
-                usesUsd
-                    ? providerNameForHistory(item.provider)
-                    : formatUsdRange(minimum, maximum),
-                style: TextStyle(
-                  fontSize: compact ? 11 : 12,
-                  fontWeight: FontWeight.w700,
-                  color: foreground,
-                ),
-              ),
+              for (
+                var index = 0;
+                index < details.length;
+                index += 1
+              ) ...<Widget>[
+                if (index > 0) const SizedBox(height: 5),
+                details[index],
+              ],
             ],
           ),
-          if (!compact &&
-              item.creditsBefore != null &&
-              item.creditsAfter != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              usesUsd
-                  ? '${formatUsdAmount(item.creditsBefore!)} → ${formatUsdAmount(item.creditsAfter!)} available'
-                  : '${formatCredits(item.creditsBefore!)} → ${formatCredits(item.creditsAfter!)} credits available',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
+        ),
+      ],
+      builder: (context, menu, _) => Tooltip(
+        message: exact
+            ? 'Realized cost — tap for details'
+            : 'Estimated cost — tap for details',
+        child: Material(
+          color: background,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            key: const ValueKey('generation-cost-toggle'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => menu.isOpen ? menu.close() : menu.open(),
+            child: Container(
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 11),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Icon(Icons.toll_rounded, size: 14, color: foreground),
+                  const SizedBox(width: 6),
+                  Text(
+                    usesUsd
+                        ? formatUsdAmountRange(minimum, maximum)
+                        : '${formatCreditRange(minimum, maximum)} cr',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: foreground,
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures(),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 15,
+                    color: foreground.withValues(alpha: .8),
+                  ),
+                ],
               ),
             ),
-          ],
-          if (!compact &&
-              exact &&
-              item.quotedCostUsdMin != null &&
-              item.quotedCostUsdMax != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              'Quoted ${formatUsdAmountRange(item.quotedCostUsdMin!, item.quotedCostUsdMax!)} · '
-              'realized ${formatUsdAmount(realizedUsd)}'
-              '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
-              ),
-            ),
-          ],
-          if (!compact &&
-              unconfirmedFailure &&
-              realizedUsd != null) ...<Widget>[
-            const SizedBox(height: 5),
-            Text(
-              'No confirmed charge · submit-time estimate '
-              '${formatUsdAmount(realizedUsd)}',
-              style: TextStyle(
-                fontSize: 10.5,
-                color: foreground.withValues(alpha: .8),
-              ),
-            ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -2377,9 +2939,12 @@ class ActivityCard extends StatelessWidget {
             style: controller.generationPlaceholderStyle,
             progressEstimate: progressEstimate,
           )
+        else if (GenerationErrorThumbnail.shouldShow(item))
+          GenerationErrorThumbnail(item: item, dense: true)
         else
           GenerationInputPreview(controller: controller, item: item),
         Positioned(left: 8, top: 8, child: StatusBadge(item: item)),
+        GenerationThumbnailFooter(item: item, inset: 8),
       ],
     );
     return SurfaceCard(
@@ -2411,6 +2976,7 @@ class ActivityCard extends StatelessWidget {
                         prompt: item.displayPrompt,
                         collapsedLines: 2,
                         style: Theme.of(context).textTheme.titleMedium,
+                        reserveCollapsedHeight: true,
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -2436,8 +3002,6 @@ class ActivityCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   ReferenceInputsStrip(controller: controller, item: item),
                 ],
-                const SizedBox(height: 9),
-                GenerationCost(item: item, compact: true),
                 if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
@@ -2448,11 +3012,10 @@ class ActivityCard extends StatelessWidget {
                     color: context.colors.primary,
                   ),
                 ],
-                if (item.error != null ||
-                    item.resultRetentionError != null ||
-                    item.lastCheckError != null ||
-                    item.lastCheckedAt != null ||
-                    item.isLongRunning) ...<Widget>[
+                // A dead render already carries its error on the thumbnail
+                // band; repeating it below would just double the obituary.
+                if (GenerationStatusDetails.shouldShow(item) &&
+                    !GenerationErrorThumbnail.shouldShow(item)) ...<Widget>[
                   const SizedBox(height: 8),
                   GenerationStatusDetails(item: item),
                 ],
@@ -2481,9 +3044,9 @@ class ActivityCard extends StatelessWidget {
                                   unawaited(controller.reuse(item)),
                               icon: const Icon(Icons.replay_rounded, size: 15),
                               label: Text(
-                                item.isFailed
-                                    ? 'Retry generation'
-                                    : 'Reuse inputs',
+                                item.isFailed && !item.hasDeliveredMedia
+                                    ? 'Retry'
+                                    : 'Reuse',
                               ),
                             ),
                           GenerationStatusButton(
@@ -2491,6 +3054,7 @@ class ActivityCard extends StatelessWidget {
                             item: item,
                             compact: true,
                           ),
+                          GenerationCostChip(item: item),
                         ],
                       ),
                     ),

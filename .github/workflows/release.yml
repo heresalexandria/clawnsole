@@ -4,6 +4,13 @@ name: Release
 # that exact main-branch commit to a trusted build run. The second run builds
 # the desktop packages and iOS concurrently, uploads iOS directly to App Store
 # Connect, then publishes only the desktop packages on GitHub.
+#
+# Merges may race. The push of the release version to main is the lock: a
+# prepare run that loses it re-reads main and either releases the newer tip or
+# stands down when a later release already contains its merge. Trusted build
+# runs verify they still hold main's newest prepared version before building,
+# and a newer release cancels a superseded release's in-flight builds, so the
+# newest release always wins and bundle versions only move forward.
 on:
   pull_request:
     types: [closed]
@@ -28,9 +35,9 @@ permissions:
 env:
   CLAWNSOLE_SITE_URL: https://clawnsole.app/
 
-concurrency:
-  group: release
-  cancel-in-progress: false
+# Coordination is per build job rather than workflow-wide: prepare runs are
+# short and made race-safe by the push lock, while each build job group lets
+# a newer release cancel the superseded release's still-running builds.
 
 jobs:
   prepare:
@@ -47,7 +54,10 @@ jobs:
       build: ${{ steps.bump.outputs.build || steps.current.outputs.build }}
       tag: ${{ steps.bump.outputs.tag || steps.current.outputs.tag }}
       sha: ${{ steps.release.outputs.sha }}
-      skip: ${{ steps.kind.outputs.skip }}
+      skip: >-
+        ${{ steps.kind.outputs.skip == 'true' ||
+            steps.bump.outputs.superseded == 'true' ||
+            steps.verify.outputs.stale == 'true' }}
       mobile_test: ${{ steps.mobile_test.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7
@@ -56,6 +66,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify prepared release commit is on main
+        id: verify
         if: github.event_name == 'repository_dispatch'
         env:
           PREPARED_SHA: ${{ github.event.client_payload.sha }}
@@ -74,6 +85,9 @@ jobs:
             echo "::error::The prepared release commit is not on main"
             exit 1
           fi
+          # A superseded release stands down green: the newer prepared release
+          # covers this commit and ships with a higher bundle version.
+          python3 scripts/release/verify_prepared.py FETCH_HEAD
 
       - name: Select release kind
         id: kind
@@ -121,51 +135,31 @@ jobs:
         id: bump
         if: steps.kind.outputs.skip != 'true' && steps.kind.outputs.kind != 'current'
         env:
-          MERGE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MOBILE_TEST: ${{ steps.mobile_test.outputs.enabled }}
         # A local iOS distribution build may prepare the exact next version in
-        # the merged PR. Preserve that synchronized version instead of bumping
-        # it a second time when the release workflow runs.
+        # the merged PR; prepare_release.py preserves it instead of bumping a
+        # second time, advances the model catalog, and pushes the release
+        # commit -- retrying against a moving main and standing down when a
+        # newer release already contains this merge.
         run: |
           args=()
-          if [ -n "$MERGE_BASE_SHA" ]; then
-            args+=(--base-ref "$MERGE_BASE_SHA")
+          if [ -n "$MERGE_SHA" ]; then
+            args+=(--merge-ref "$MERGE_SHA")
           fi
-          python3 scripts/release/bump_version.py "${{ steps.kind.outputs.kind }}" "${args[@]}"
+          if [ "$MOBILE_TEST" = true ]; then
+            args+=(--mobile-test)
+          fi
+          python3 scripts/release/prepare_release.py "${{ steps.kind.outputs.kind }}" "${args[@]}"
 
       - name: Use current synchronized version
         id: current
         if: steps.kind.outputs.kind == 'current'
         run: python3 scripts/release/bump_version.py --current
 
-      - name: Advance the release model catalog
-        if: steps.kind.outputs.skip != 'true'
-        env:
-          RELEASE_VERSION: ${{ steps.bump.outputs.version || steps.current.outputs.version }}
-          MOBILE_TEST: ${{ steps.mobile_test.outputs.enabled }}
-        run: |
-          args=()
-          if [ "$MOBILE_TEST" = true ]; then
-            args+=(--add-test)
-          fi
-          python3 scripts/release/set_mobile_test_version.py "$RELEASE_VERSION" "${args[@]}"
-
-      - name: Commit and push version
-        id: push
-        if: steps.kind.outputs.skip != 'true' && github.event_name != 'repository_dispatch'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add electron/package.json electron/package-lock.json \
-            flutter/pubspec.yaml flutter/lib/core/app_version.dart \
-            docs/models/index.html
-          if ! git diff --cached --quiet; then
-            git commit -m "Release ${{ steps.bump.outputs.tag || steps.current.outputs.tag }}"
-            git push origin HEAD:main
-          fi
-
       - name: Select release commit
         id: release
-        if: steps.kind.outputs.skip != 'true'
+        if: steps.kind.outputs.skip != 'true' && steps.bump.outputs.superseded != 'true'
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   dispatch:
@@ -196,6 +190,9 @@ jobs:
     name: build macOS desktop
     needs: prepare
     if: github.event_name != 'pull_request' && needs.prepare.outputs.skip != 'true'
+    concurrency:
+      group: release-macos
+      cancel-in-progress: true
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -276,6 +273,9 @@ jobs:
     name: build Windows desktop
     needs: prepare
     if: github.event_name != 'pull_request' && needs.prepare.outputs.skip != 'true'
+    concurrency:
+      group: release-windows
+      cancel-in-progress: true
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -333,6 +333,9 @@ jobs:
       needs.prepare.outputs.skip != 'true' &&
       (github.event_name != 'workflow_dispatch' || inputs.include_ios == true) &&
       (github.event_name != 'repository_dispatch' || github.event.client_payload.include_ios == true)
+    concurrency:
+      group: release-ios
+      cancel-in-progress: true
     runs-on: macos-26
     timeout-minutes: 45
     environment: app-store-connect
@@ -521,6 +524,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          RELEASE_BUILD: ${{ needs.prepare.outputs.build }}
         run: |
           for value in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY_P8; do
             if [ -z "${!value}" ]; then echo "::error::$value is required for App Store Connect uploads"; exit 1; fi
@@ -532,12 +536,30 @@ jobs:
 
           # altool returns after Apple accepts the upload. App Store processing,
           # TestFlight availability, and review status are deliberately not polled.
-          xcrun altool --upload-app \
+          #
+          # Apple rejects a bundle version at or below its newest accepted
+          # upload. Equal means this exact release build already reached App
+          # Store Connect -- a re-run after a later failure, or a local
+          # distribution build of the version this PR prepared -- so the
+          # release continues without a second upload. Lower means this run
+          # is stale and must not ship.
+          if output="$(xcrun altool --upload-app \
             --type ios \
             -f "$CLAWNSOLE_IOS_IPA" \
             --apiKey "$APP_STORE_CONNECT_KEY_ID" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID" \
-            --p8-file-path "$key_file"
+            --p8-file-path "$key_file" 2>&1)"; then
+            printf '%s\n' "$output"
+          else
+            status=$?
+            printf '%s\n' "$output"
+            if grep -q 'ENTITY_ERROR\.ATTRIBUTE\.INVALID\.DUPLICATE' <<< "$output" && \
+               grep -Eq "previousBundleVersion[[:space:]]*:[[:space:]]*${RELEASE_BUILD}([^0-9]|$)" <<< "$output"; then
+              echo "::warning::Build $RELEASE_BUILD was already accepted by App Store Connect; continuing without a second upload"
+            else
+              exit "$status"
+            fi
+          fi
 
       - name: Remove temporary Apple credentials and IPA
         if: always()
@@ -572,6 +594,11 @@ jobs:
       needs.windows.result == 'success' &&
       (needs.ios.result == 'success' || needs.ios.result == 'skipped') &&
       needs.prepare.outputs.skip != 'true'
+    # Publishes are quick and serialized rather than cancelled, so a nearly
+    # finished release is never torn down half-published.
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -97,7 +97,9 @@ class _VideoFrameTimelineState extends State<VideoFrameTimeline> {
     final fraction = durationMicros <= 0
         ? 0.0
         : (widget.position.inMicroseconds / durationMicros).clamp(0.0, 1.0);
-    final height = widget.fullscreen ? 68.0 : 46.0;
+    // The inline band matches GenerationVideo.chromeHeight's timeline share;
+    // fullscreen keeps a taller scrub surface.
+    final height = widget.fullscreen ? 68.0 : 34.0;
 
     return LayoutBuilder(
       builder: (context, constraints) {
