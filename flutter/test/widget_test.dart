@@ -711,6 +711,45 @@ void main() {
     expect(controller.notice, contains('retry retrieval'));
   });
 
+  test(
+    'a stale Drive refresh cannot hide a newly accepted ArtCraft generation',
+    () async {
+      const initial = LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(defaultStorage: LibraryStorage.drive),
+        hasApiKey: false,
+        connectedProviders: <String>{'artcraft'},
+        availableProviders: <String>{'artcraft'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      );
+      final gateway = _RacingDriveProviderGateway(initial);
+      final controller = AppController(gateway: gateway)
+        ..snapshot = initial
+        ..selectedProviderId = 'artcraft'
+        ..selectedModelId = 'seedance_2p5'
+        ..defaultStorage = LibraryStorage.drive;
+      controller.form.prompt = 'A dancer crosses a sunlit studio.';
+      addTearDown(controller.dispose);
+
+      final refresh = controller.refreshGoogleDrive();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.refreshCalls, 1);
+
+      await controller.submit(providerRetentionRiskAcknowledged: true);
+      final accepted = controller.generations.single;
+      expect(accepted.provider, 'artcraft');
+      expect(accepted.isWorking, isTrue);
+
+      gateway.completeStaleRefresh();
+      await refresh;
+
+      expect(controller.generations, hasLength(1));
+      expect(controller.generations.single.localId, accepted.localId);
+      expect(controller.generations.single.canCheckStatus, isTrue);
+      expect(controller.hasPendingProviderWork, isTrue);
+    },
+  );
+
   testWidgets(
     'at-risk warning repeats unless provider suppression is checked',
     (tester) async {
@@ -5538,6 +5577,16 @@ void main() {
       ),
       findsOneWidget,
     );
+    final promptBounds = tester.getRect(prompt);
+    final suggestionBounds = tester.getRect(suggestions);
+    expect(
+      suggestionBounds.top,
+      lessThan(promptBounds.bottom),
+      reason: 'the menu should open at the caret, not below the prompt box',
+    );
+    expect(suggestionBounds.left, greaterThanOrEqualTo(8));
+    expect(suggestionBounds.right, lessThanOrEqualTo(1392));
+    expect(suggestionBounds.bottom, lessThanOrEqualTo(1392));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -8659,6 +8708,71 @@ class _ProviderMemoryGateway extends _MemoryGateway implements ProviderGateway {
   @override
   Future<List<ProviderModelPrice>> listProviderModels(String provider) async =>
       publishedProviderPrices(provider);
+}
+
+class _RacingDriveProviderGateway extends _ProviderMemoryGateway
+    implements GoogleDriveGateway {
+  _RacingDriveProviderGateway(super.snapshot);
+
+  final Completer<LocalSnapshot> _staleRefresh = Completer<LocalSnapshot>();
+  late final LocalSnapshot _refreshSnapshot = snapshot;
+  int refreshCalls = 0;
+
+  @override
+  bool get supportsLocalLibrary => true;
+
+  @override
+  GoogleDriveConnection get googleDriveConnection =>
+      const GoogleDriveConnection(
+        state: GoogleDriveConnectionState.connected,
+        folderName: 'Clawnsole',
+        folderId: 'folder-1',
+      );
+
+  @override
+  Future<Generation> submit(GenerationSubmission submission) async {
+    final now = DateTime.now().toUtc();
+    final accepted = submission.record.copyWith(
+      status: 'Pending',
+      requestId: 'artcraft-request',
+      pollingUrl: 'https://api.artcraft.ai/jobs/artcraft-request',
+      providerAcceptedAt: now,
+      updatedAt: now,
+    );
+    snapshot = snapshot.copyWith(
+      generations: <Generation>[accepted, ...snapshot.generations],
+    );
+    return accepted;
+  }
+
+  void completeStaleRefresh() => _staleRefresh.complete(_refreshSnapshot);
+
+  @override
+  Future<LocalSnapshot> refreshGoogleDrive() {
+    refreshCalls += 1;
+    return _staleRefresh.future;
+  }
+
+  @override
+  Future<LocalSnapshot?> resumeGoogleDrive({bool force = false}) async =>
+      snapshot;
+
+  @override
+  Future<LocalSnapshot> connectGoogleDrive(String folderName) async => snapshot;
+
+  @override
+  Future<LocalSnapshot> disconnectGoogleDrive() async => snapshot;
+
+  @override
+  Future<GoogleDriveCopyResult> copyLocalLibraryToGoogleDrive({
+    Set<String> generationIds = const <String>{},
+    Set<String> referenceIds = const <String>{},
+  }) async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
+
+  @override
+  Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async =>
+      GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 }
 
 class _AppleLocalRuntime implements AppleLocalRuntime {
