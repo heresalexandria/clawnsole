@@ -267,6 +267,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
               children: shown
                   .map(
                     (item) => Padding(
+                      key: ValueKey('library-generation-${item.localId}'),
                       padding: const EdgeInsets.only(bottom: 9),
                       child: selectable(item),
                     ),
@@ -286,6 +287,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
                   children: shown
                       .map(
                         (item) => SizedBox(
+                          key: ValueKey('library-generation-${item.localId}'),
                           width: layout.tileWidth,
                           child: selectable(item),
                         ),
@@ -1154,12 +1156,12 @@ class _GenerationCardState extends State<GenerationCard> {
                     playbackId: item.localId,
                     aspectRatio: generationAspectRatio(item.config.aspectRatio),
                     preview: preview,
-                    idleChrome: item.isImage
-                        ? null
-                        : GenerationIdleChrome(
+                    idleChrome: hasMedia && !item.isImage
+                        ? GenerationIdleChrome(
                             controller: widget.controller,
                             item: item,
-                          ),
+                          )
+                        : null,
                   )
                 : Stack(
                     children: <Widget>[

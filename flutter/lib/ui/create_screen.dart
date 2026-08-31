@@ -4732,6 +4732,7 @@ class _RecentWorkState extends State<_RecentWork> {
                 .take(widget.itemLimit)
                 .map(
                   (item) => Padding(
+                    key: ValueKey('recent-generation-${item.localId}'),
                     padding: const EdgeInsets.only(bottom: 9),
                     child: CompactGenerationRow(
                       controller: controller,
@@ -4757,6 +4758,7 @@ class _RecentWorkState extends State<_RecentWork> {
                     .take(widget.itemLimit)
                     .map(
                       (item) => SizedBox(
+                        key: ValueKey('recent-generation-${item.localId}'),
                         width: layout.tileWidth,
                         child:
                             controller.recentWorkViewMode ==

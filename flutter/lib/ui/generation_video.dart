@@ -262,9 +262,15 @@ class GenerationVideo extends StatefulWidget {
     this.progress,
   });
 
+  /// Height of the inline frame timeline rendered under the video surface.
+  static const double timelineHeight = 34.0;
+
+  /// Height of the inline transport bar rendered under the frame timeline.
+  static const double transportHeight = 40.0;
+
   /// Height of the frame timeline plus the transport bar rendered under the
   /// video surface, so hosts can size themselves around a known video height.
-  static const double chromeHeight = 34.0 + 40.0;
+  static const double chromeHeight = timelineHeight + transportHeight;
 
   final Uri uri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;

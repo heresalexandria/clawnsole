@@ -2073,7 +2073,8 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
   @override
   void didUpdateWidget(covariant GenerationIdleChrome oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_sourceRevision != widget.controller.videoPreviewSourceRevision ||
+    if (oldWidget.item.localId != widget.item.localId ||
+        _sourceRevision != widget.controller.videoPreviewSourceRevision ||
         oldWidget.item.timelineThumbnailAsset?.value !=
             widget.item.timelineThumbnailAsset?.value ||
         oldWidget.item.resultAsset?.value != widget.item.resultAsset?.value ||
@@ -2115,33 +2116,63 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
   }
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    // The thumbnail's play button is the affordance; the strip just accepts
-    // the same tap. The filmstrip fills the whole reserved chrome zone, so
-    // playback (timeline + transport) still swaps in at an equal height.
-    onTap: _playable ? () => unawaited(_play()) : null,
-    child: SizedBox.expand(
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Colors.white30)),
-        ),
-        child: FutureBuilder<Uint8List?>(
-          future: _timeline,
-          initialData: _restoredTimeline,
-          builder: (context, snapshot) {
-            final bytes = snapshot.data;
-            if (bytes == null) return const SizedBox.expand();
-            return Image.memory(
-              bytes,
-              key: const ValueKey('generation-idle-filmstrip'),
-              fit: BoxFit.cover,
-              gaplessPlayback: true,
-            );
-          },
+  Widget build(BuildContext context) {
+    if (!_playable) return const SizedBox.shrink();
+    return InkWell(
+      // The thumbnail's play button is the primary affordance, while the
+      // reserved timeline and transport chrome accept the same tap.
+      onTap: () => unawaited(_play()),
+      child: SizedBox.expand(
+        child: Column(
+          children: <Widget>[
+            SizedBox(
+              height: GenerationVideo.timelineHeight,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Colors.white30)),
+                ),
+                child: FutureBuilder<Uint8List?>(
+                  key: ValueKey(
+                    'generation-idle-filmstrip-${widget.item.localId}',
+                  ),
+                  future: _timeline,
+                  initialData: _restoredTimeline,
+                  builder: (context, snapshot) {
+                    final bytes = snapshot.data;
+                    if (bytes == null) return const SizedBox.expand();
+                    return Image.memory(
+                      bytes,
+                      key: const ValueKey('generation-idle-filmstrip'),
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    );
+                  },
+                ),
+              ),
+            ),
+            Container(
+              key: const ValueKey('generation-idle-transport'),
+              height: GenerationVideo.transportHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              color: ClawnsoleColors.plumInk,
+              child: const Row(
+                children: <Widget>[
+                  Icon(Icons.play_arrow_rounded, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Tap to play',
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _GeneratedVideoPreview {

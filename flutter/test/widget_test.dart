@@ -31,6 +31,7 @@ import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_error_thumbnail.dart';
 import 'package:clawnsole/ui/generation_loading_placeholder.dart';
+import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/inline_video.dart';
@@ -1635,6 +1636,184 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(tester.getSize(find.byKey(stripKey)).height, 48);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('full-card idle chrome matches playback and never leaks to work', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frame = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: <Generation>[],
+        preferences: AppPreferences(),
+        hasApiKey: false,
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+      assets: <String, Uint8List>{
+        'idle-thumb.png': frame,
+        'idle-strip.png': frame,
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    final delivered = _deliveredGeneration(
+      'idle-delivered',
+      thumbnail: 'idle-thumb.png',
+      timeline: 'idle-strip.png',
+    );
+    final now = DateTime.utc(2026, 8, 30, 12);
+    final working = Generation(
+      localId: 'new-working',
+      status: 'Pending',
+      prompt: 'A new film still generating.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    Widget host(Generation item) => MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: GenerationCard(controller: controller, item: item),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(host(delivered));
+    await tester.pumpAndSettle();
+
+    final strip = find.byKey(const ValueKey('generation-idle-filmstrip'));
+    final transport = find.byKey(const ValueKey('generation-idle-transport'));
+    expect(tester.getSize(strip).height, GenerationVideo.timelineHeight);
+    expect(tester.getSize(transport).height, GenerationVideo.transportHeight);
+
+    // Reuse the same card element, as a newly prepended mobile generation
+    // does. Its loading state must not inherit the completed card's strip.
+    await tester.pumpWidget(host(working));
+    await tester.pump();
+
+    expect(find.byType(GenerationLoadingPlaceholder), findsOneWidget);
+    expect(strip, findsNothing);
+    expect(transport, findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('prepending work keeps every library filmstrip with its ID', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frameA = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final frameB = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final first = _deliveredGeneration(
+      'filmstrip-a',
+      thumbnail: 'filmstrip-a-thumb.png',
+      timeline: 'filmstrip-a-strip.png',
+    );
+    final second = _deliveredGeneration(
+      'filmstrip-b',
+      thumbnail: 'filmstrip-b-thumb.png',
+      timeline: 'filmstrip-b-strip.png',
+    );
+    final initial = LocalSnapshot(
+      generations: <Generation>[first, second],
+      preferences: const AppPreferences(
+        activeSection: AppSection.library,
+        libraryViewMode: GenerationViewMode.full,
+      ),
+      hasApiKey: false,
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 2),
+    );
+    final gateway = _MemoryGateway(
+      initial,
+      assets: <String, Uint8List>{
+        'filmstrip-a-thumb.png': frameA,
+        'filmstrip-a-strip.png': frameA,
+        'filmstrip-b-thumb.png': frameB,
+        'filmstrip-b-strip.png': frameB,
+      },
+    );
+    final controller = AppController(gateway: gateway)..snapshot = initial;
+    addTearDown(controller.dispose);
+
+    Widget host() => MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(body: LibraryScreen(controller: controller)),
+    );
+
+    MemoryImage filmstripFor(String id) {
+      final card = find.byKey(ValueKey('library-generation-$id'));
+      final strip = find.descendant(
+        of: card,
+        matching: find.byKey(const ValueKey('generation-idle-filmstrip')),
+      );
+      expect(strip, findsOneWidget);
+      return tester.widget<Image>(strip).image as MemoryImage;
+    }
+
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+    expect(identical(filmstripFor(first.localId).bytes, frameA), isTrue);
+    expect(identical(filmstripFor(second.localId).bytes, frameB), isTrue);
+
+    final now = DateTime.utc(2026, 8, 30, 13);
+    final working = Generation(
+      localId: 'newly-prepended-work',
+      status: 'Pending',
+      prompt: 'New work at the front of the list.',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 8,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+    );
+    controller.snapshot = initial.copyWith(
+      generations: <Generation>[working, first, second],
+      storage: const StorageStats(path: 'memory', bytes: 0, records: 3),
+    );
+
+    await tester.pumpWidget(host());
+    await tester.pump();
+
+    final workingCard = find.byKey(
+      const ValueKey('library-generation-newly-prepended-work'),
+    );
+    expect(
+      find.descendant(
+        of: workingCard,
+        matching: find.byKey(const ValueKey('generation-idle-filmstrip')),
+      ),
+      findsNothing,
+    );
+    expect(identical(filmstripFor(first.localId).bytes, frameA), isTrue);
+    expect(identical(filmstripFor(second.localId).bytes, frameB), isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
