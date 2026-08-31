@@ -633,9 +633,39 @@ void main() {
     expect(bflProvider.resultDelivery.keepOpenRecommended, isTrue);
     expect(ltxProvider.resultDelivery.availability, const Duration(hours: 24));
     expect(ltxProvider.resultDelivery.keepOpenRecommended, isFalse);
+    expect(
+      runwayProvider.resultDelivery.availability,
+      const Duration(hours: 24),
+    );
+    expect(runwayProvider.resultDelivery.keepOpenRecommended, isTrue);
     expect(artCraftProvider.resultDelivery.availability, isNull);
+    expect(artCraftProvider.resultDelivery.keepOpenRecommended, isTrue);
     expect(atlasProvider.resultDelivery.availability, isNull);
+    expect(atlasProvider.resultDelivery.keepOpenRecommended, isTrue);
   });
+
+  test(
+    'provider retention acceptance is bound to the active credential',
+    () async {
+      final store = _MemoryLocalDataStore(
+        const StoredData().withApiKey('bfl', 'first-key'),
+      );
+      final gateway = NativeGateway(store: store, isIos: false);
+
+      final accepted = await gateway.acknowledgeProviderRetentionRisk('bfl');
+      expect(accepted.providerRetentionAcknowledgements, contains('bfl'));
+
+      // Simulate a credential replaced by settings-vault reconciliation rather
+      // than the normal withApiKey path. The stale acknowledgement must still
+      // fail its credential-id check.
+      store.data = store.data.copyWith(
+        apiKey: 'second-key',
+        apiKeys: const <String, String>{'bfl': 'second-key'},
+      );
+      final replaced = await gateway.load();
+      expect(replaced.providerRetentionAcknowledgements, isEmpty);
+    },
+  );
 
   test('only provider routes with trustworthy API progress opt in', () {
     expect(
@@ -664,6 +694,7 @@ void main() {
         hasApiKey: true,
         connectedProviders: <String>{'bfl'},
         availableProviders: <String>{'bfl'},
+        providerRetentionAcknowledgements: <String>{'bfl'},
         storage: StorageStats(path: 'memory', bytes: 0, records: 0),
       ),
     );
@@ -681,6 +712,131 @@ void main() {
   });
 
   testWidgets(
+    'at-risk warning repeats unless provider suppression is checked',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 1200));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final gateway = _MemoryGateway(
+        const LocalSnapshot(
+          generations: <Generation>[],
+          preferences: AppPreferences(),
+          hasApiKey: true,
+          connectedProviders: <String>{'bfl'},
+          availableProviders: <String>{'bfl'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      controller.updateForm(
+        (form) => form.prompt = 'A lighthouse beam through sea mist.',
+      );
+
+      await controller.submit();
+      expect(gateway.submitCalls, 0);
+      expect(controller.notice, contains('Review and accept'));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => CreateScreen(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final generate = find.text('Generate video');
+      await tester.ensureVisible(generate);
+      await tester.tap(generate);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.textContaining('10 minutes'), findsOneWidget);
+      expect(find.textContaining('open and active'), findsOneWidget);
+      FilledButton acceptButton() => tester.widget<FilledButton>(
+        find.byKey(const ValueKey('accept-provider-retention-warning')),
+      );
+      expect(acceptButton().onPressed, isNull);
+
+      final suppressWarning = find.byKey(
+        const ValueKey('suppress-provider-retention-warning-checkbox'),
+      );
+      expect(tester.widget<CheckboxListTile>(suppressWarning).value, isFalse);
+      await tester.tap(suppressWarning);
+      await tester.pump();
+      expect(acceptButton().onPressed, isNull);
+
+      await tester.tap(
+        find.byKey(const ValueKey('provider-retention-warning-checkbox')),
+      );
+      await tester.pump();
+      expect(acceptButton().onPressed, isNotNull);
+      await tester.tap(suppressWarning);
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('accept-provider-retention-warning')),
+      );
+      for (
+        var attempt = 0;
+        attempt < 20 && gateway.submitCalls < 1;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(gateway.submitCalls, 1);
+      expect(
+        gateway.snapshot.providerRetentionAcknowledgements,
+        isNot(contains('bfl')),
+      );
+      expect(controller.requiresProviderRetentionAcknowledgement, isTrue);
+
+      await tester.tap(generate);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('provider-retention-warning-checkbox')),
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey('suppress-provider-retention-warning-checkbox'),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('accept-provider-retention-warning')),
+      );
+      for (
+        var attempt = 0;
+        attempt < 20 && gateway.submitCalls < 2;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      expect(gateway.submitCalls, 2);
+      expect(
+        gateway.snapshot.providerRetentionAcknowledgements,
+        contains('bfl'),
+      );
+      expect(controller.requiresProviderRetentionAcknowledgement, isFalse);
+      await controller.submit();
+      expect(gateway.submitCalls, 3);
+      controller.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
     'bad visual reference errors offer normalization and retry submission',
     (tester) async {
       final gateway = _ReferenceFailureGateway(
@@ -690,6 +846,7 @@ void main() {
           hasApiKey: true,
           connectedProviders: <String>{'bfl'},
           availableProviders: <String>{'bfl'},
+          providerRetentionAcknowledgements: <String>{'bfl'},
           storage: StorageStats(path: 'memory', bytes: 0, records: 0),
         ),
       );
@@ -2245,7 +2402,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 23);
+    expect(decoded.toJson()['schemaVersion'], 24);
   });
 
   test(
@@ -2441,7 +2598,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 23);
+      expect(decoded.toJson()['schemaVersion'], 24);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -8177,7 +8334,8 @@ class _ExpiringPreferenceDriveGateway extends _MemoryGateway
       GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 }
 
-class _MemoryGateway implements AppGateway {
+class _MemoryGateway
+    implements AppGateway, ProviderRetentionAcknowledgementGateway {
   _MemoryGateway(
     this.snapshot, {
     this.supportsPhotoLibrarySave = false,
@@ -8191,6 +8349,7 @@ class _MemoryGateway implements AppGateway {
   final Object? creditError;
   final Map<String, Uint8List> assets;
   int invalidationCount = 0;
+  int submitCalls = 0;
   Uint8List? photoLibraryBytes;
   String? photoLibraryFileName;
 
@@ -8213,6 +8372,8 @@ class _MemoryGateway implements AppGateway {
       hasApiKey: snapshot.hasApiKey,
       connectedProviders: snapshot.connectedProviders,
       availableProviders: snapshot.availableProviders,
+      providerRetentionAcknowledgements:
+          snapshot.providerRetentionAcknowledgements,
       storage: snapshot.storage,
     );
     return snapshot;
@@ -8236,6 +8397,8 @@ class _MemoryGateway implements AppGateway {
         hasApiKey: false,
         connectedProviders: snapshot.connectedProviders,
         availableProviders: snapshot.availableProviders,
+        providerRetentionAcknowledgements:
+            snapshot.providerRetentionAcknowledgements,
         storage: snapshot.storage,
       );
       throw creditError!;
@@ -8244,8 +8407,23 @@ class _MemoryGateway implements AppGateway {
   }
 
   @override
-  Future<Generation> submit(GenerationSubmission submission) async =>
-      submission.record;
+  Future<Generation> submit(GenerationSubmission submission) async {
+    submitCalls += 1;
+    return submission.record;
+  }
+
+  @override
+  Future<LocalSnapshot> acknowledgeProviderRetentionRisk(
+    String provider,
+  ) async {
+    snapshot = snapshot.copyWith(
+      providerRetentionAcknowledgements: <String>{
+        ...snapshot.providerRetentionAcknowledgements,
+        provider,
+      },
+    );
+    return snapshot;
+  }
 
   @override
   Future<Generation> poll(Generation generation) async => generation;

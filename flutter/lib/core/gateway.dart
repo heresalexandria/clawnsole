@@ -52,6 +52,12 @@ abstract interface class ProviderGateway {
   );
 }
 
+/// Persists the device-local acknowledgement required before using providers
+/// whose completed media may disappear before Clawnsole can retain it.
+abstract interface class ProviderRetentionAcknowledgementGateway {
+  Future<LocalSnapshot> acknowledgeProviderRetentionRisk(String provider);
+}
+
 /// Device-local persistence for the last complete remote provider catalog.
 ///
 /// This stays separate from [AppGateway] so lightweight embedders and tests can

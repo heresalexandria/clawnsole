@@ -255,7 +255,7 @@ void main() {
       StoredData(providerCatalogCache: cache).encode(),
     );
 
-    expect(decoded.toJson()['schemaVersion'], 23);
+    expect(decoded.toJson()['schemaVersion'], 24);
     expect(decoded.providerCatalogCache, cache);
   });
 

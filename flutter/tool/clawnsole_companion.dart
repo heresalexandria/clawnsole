@@ -1214,6 +1214,20 @@ class CompanionApp {
           throw StateError('The provider API key is invalid.');
         }
         next = current.withApiKey(provider, key);
+      } else if (action == 'acknowledgeProviderRetentionRisk') {
+        final provider = value?.toString().trim() ?? '';
+        if (provider.isEmpty ||
+            !providerById(provider).resultDelivery.keepOpenRecommended) {
+          throw StateError('The provider does not require this warning.');
+        }
+        final credential = current.apiKeyFor(provider).trim();
+        if (credential.isEmpty) {
+          throw StateError('An API key is required.');
+        }
+        next = current.withProviderRetentionAcknowledged(
+          provider,
+          providerCredentialAcknowledgementId(provider, credential),
+        );
       } else if (action == 'setPreferences') {
         final map = value is Map<Object?, Object?>
             ? value.map((key, child) => MapEntry(key.toString(), child))

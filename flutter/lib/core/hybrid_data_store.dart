@@ -680,6 +680,8 @@ class HybridDataStore implements DurableDataStore {
     return StoredData(
       apiKey: local.apiKey,
       apiKeys: local.apiKeys,
+      providerRetentionAcknowledgements:
+          local.providerRetentionAcknowledgements,
       rejectedIosReviewApiKeyId: local.rejectedIosReviewApiKeyId,
       rejectedIosReviewApiKeyIds: local.rejectedIosReviewApiKeyIds,
       providerCatalogCache: local.providerCatalogCache,
@@ -753,6 +755,7 @@ class HybridDataStore implements DurableDataStore {
   StoredData _localPartition(StoredData data) => StoredData(
     apiKey: data.apiKey,
     apiKeys: data.apiKeys,
+    providerRetentionAcknowledgements: data.providerRetentionAcknowledgements,
     rejectedIosReviewApiKeyId: data.rejectedIosReviewApiKeyId,
     rejectedIosReviewApiKeyIds: data.rejectedIosReviewApiKeyIds,
     providerCatalogCache: data.providerCatalogCache,
@@ -789,6 +792,7 @@ class HybridDataStore implements DurableDataStore {
   StoredData _localMirror(StoredData data) => StoredData(
     apiKey: data.apiKey,
     apiKeys: data.apiKeys,
+    providerRetentionAcknowledgements: data.providerRetentionAcknowledgements,
     rejectedIosReviewApiKeyId: data.rejectedIosReviewApiKeyId,
     rejectedIosReviewApiKeyIds: data.rejectedIosReviewApiKeyIds,
     preferences: data.preferences,
