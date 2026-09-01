@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app_theme.dart';
@@ -116,6 +117,9 @@ class ReferencePromptField extends StatefulWidget {
 class _ReferencePromptFieldState extends State<ReferencePromptField> {
   late final _ReferencePromptEditingController _controller;
   late final FocusNode _focusNode;
+  final OverlayPortalController _suggestionsOverlay = OverlayPortalController();
+  final GlobalKey _fieldKey = GlobalKey();
+  RenderEditable? _editable;
   _PromptMentionQuery? _query;
   List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
   int? _highlightedSuggestion;
@@ -127,7 +131,10 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       text: widget.prompt,
       mentions: _mentions(widget.references),
     )..addListener(_refreshSuggestions);
-    _focusNode = FocusNode();
+    // Handle menu navigation at the primary focus. A surrounding Focus can
+    // lose Enter to EditableText's multiline action before bubbling reaches
+    // it, which inserts a newline instead of accepting the highlighted tag.
+    _focusNode = FocusNode(onKeyEvent: _handleKeyEvent);
   }
 
   @override
@@ -170,6 +177,26 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       _suggestions = suggestions;
       _highlightedSuggestion = null;
     });
+    if (suggestions.isEmpty) {
+      _suggestionsOverlay.hide();
+    } else {
+      // Normal text-input notifications happen between frames, so the real
+      // caret render object is available immediately. didUpdateWidget can
+      // also reach this path during build; defer discovery in that case.
+      try {
+        _editable ??= _findRenderEditable();
+      } on FlutterError {
+        // The post-frame fallback below will discover it safely.
+      }
+      _suggestionsOverlay.show();
+      if (_editable == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _suggestions.isEmpty) return;
+          _editable = _findRenderEditable();
+          if (_editable != null) setState(() {});
+        });
+      }
+    }
   }
 
   void _preserveAncestorScrollForSelectAll() {
@@ -270,6 +297,162 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     return KeyEventResult.ignored;
   }
 
+  RenderEditable? _findRenderEditable() {
+    final field = _fieldKey.currentContext;
+    if (field == null) return null;
+    RenderEditable? editable;
+    void visit(Element element) {
+      if (editable != null) return;
+      final renderObject = element.findRenderObject();
+      if (renderObject is RenderEditable) {
+        editable = renderObject;
+        return;
+      }
+      element.visitChildElements(visit);
+    }
+
+    field.visitChildElements(visit);
+    return editable;
+  }
+
+  Widget _buildSuggestionsOverlay(BuildContext context) {
+    if (_suggestions.isEmpty) return const SizedBox.shrink();
+    final overlay = Overlay.of(context).context.findRenderObject();
+    final editable = _editable;
+    final field = _fieldKey.currentContext?.findRenderObject();
+    if (overlay is! RenderBox || editable == null || field is! RenderBox) {
+      return const SizedBox.shrink();
+    }
+
+    final selection = _controller.selection;
+    final caretOffset = selection.isValid
+        ? selection.extentOffset.clamp(0, _controller.text.length)
+        : _controller.text.length;
+    final caret = editable.getLocalRectForCaret(
+      TextPosition(offset: caretOffset),
+    );
+    final caretTop = overlay.globalToLocal(
+      editable.localToGlobal(caret.topLeft),
+    );
+    final caretBottom = overlay.globalToLocal(
+      editable.localToGlobal(caret.bottomLeft),
+    );
+    final mediaQuery = MediaQuery.of(context);
+    const margin = 8.0;
+    const gap = 6.0;
+    final minimumTop = mediaQuery.padding.top + margin;
+    final maximumBottom =
+        overlay.size.height - mediaQuery.padding.bottom - margin;
+    final availableWidth = overlay.size.width - margin * 2;
+    final menuWidth = field.size.width
+        .clamp(240.0, 360.0)
+        .clamp(0.0, availableWidth);
+    final menuHeight = (_suggestions.length * 44.0).clamp(44.0, 260.0);
+    final left = caretTop.dx.clamp(
+      margin,
+      (overlay.size.width - menuWidth - margin).clamp(margin, double.infinity),
+    );
+    final below = caretBottom.dy + gap;
+    final above = caretTop.dy - menuHeight - gap;
+    final top = below + menuHeight <= maximumBottom
+        ? below
+        : above >= minimumTop
+        ? above
+        : below.clamp(
+            minimumTop,
+            (maximumBottom - menuHeight).clamp(minimumTop, double.infinity),
+          );
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: menuWidth,
+      child: _suggestionsMenu(),
+    );
+  }
+
+  Widget _suggestionsMenu() => Container(
+    key: const ValueKey('prompt-reference-suggestions'),
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: context.colors.outlineVariant),
+      boxShadow: <BoxShadow>[
+        BoxShadow(
+          color: Colors.black.withValues(alpha: .08),
+          blurRadius: 16,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 260),
+      child: ListView(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        children: _suggestions
+            .asMap()
+            .entries
+            .map(
+              (entry) => ColoredBox(
+                color: _highlightedSuggestion == entry.key
+                    ? context.colors.primaryContainer
+                    : Colors.transparent,
+                child: InkWell(
+                  key: ValueKey(
+                    'prompt-reference-${entry.value.mention.normalized}',
+                  ),
+                  onTap: () => _select(entry.value),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(
+                          switch (entry.value.mention.kind) {
+                            MediaReferenceKind.image => Icons.image_rounded,
+                            MediaReferenceKind.video =>
+                              Icons.video_library_rounded,
+                            MediaReferenceKind.audio =>
+                              Icons.graphic_eq_rounded,
+                          },
+                          size: 18,
+                          color: context.colors.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          entry.value.mention.canonical,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            entry.value.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: context.colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    ),
+  );
+
   @override
   void dispose() {
     _controller
@@ -281,8 +464,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
 
   @override
   Widget build(BuildContext context) {
-    final promptField = Focus(
-      onKeyEvent: _handleKeyEvent,
+    final promptField = OverlayPortal(
+      controller: _suggestionsOverlay,
+      overlayChildBuilder: _buildSuggestionsOverlay,
       child: Actions(
         actions: <Type, Action<Intent>>{
           // EditableText normally asks every ancestor Scrollable to reveal the
@@ -295,6 +479,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           ),
         },
         child: TextFormField(
+          key: _fieldKey,
           controller: _controller,
           focusNode: _focusNode,
           autofocus: widget.autofocus,
@@ -325,91 +510,6 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         if (widget.expands) Expanded(child: promptField) else promptField,
-        if (_suggestions.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 6),
-          Container(
-            key: const ValueKey('prompt-reference-suggestions'),
-            decoration: BoxDecoration(
-              color: context.colors.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: context.colors.outlineVariant),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: .08),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260),
-              child: ListView(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                children: _suggestions
-                    .asMap()
-                    .entries
-                    .map(
-                      (entry) => ColoredBox(
-                        color: _highlightedSuggestion == entry.key
-                            ? context.colors.primaryContainer
-                            : Colors.transparent,
-                        child: InkWell(
-                          key: ValueKey(
-                            'prompt-reference-${entry.value.mention.normalized}',
-                          ),
-                          onTap: () => _select(entry.value),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 9,
-                            ),
-                            child: Row(
-                              children: <Widget>[
-                                Icon(
-                                  switch (entry.value.mention.kind) {
-                                    MediaReferenceKind.image =>
-                                      Icons.image_rounded,
-                                    MediaReferenceKind.video =>
-                                      Icons.video_library_rounded,
-                                    MediaReferenceKind.audio =>
-                                      Icons.graphic_eq_rounded,
-                                  },
-                                  size: 18,
-                                  color: context.colors.primary,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  entry.value.mention.canonical,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    entry.value.label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: context.colors.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }

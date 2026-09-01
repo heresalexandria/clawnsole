@@ -370,7 +370,14 @@ class AppController extends ChangeNotifier {
   bool _generateAudioExplicitlyDisabled = false;
   final List<MediaReferenceDraft> _disabledReferences = <MediaReferenceDraft>[];
 
-  LocalSnapshot? snapshot;
+  LocalSnapshot? _snapshot;
+  int _snapshotRevision = 0;
+  LocalSnapshot? get snapshot => _snapshot;
+  set snapshot(LocalSnapshot? value) {
+    _snapshot = value;
+    _snapshotRevision += 1;
+  }
+
   AppSection section = AppSection.create;
   LibraryFilter libraryFilter = LibraryFilter.all;
   GenerationViewMode recentWorkViewMode = GenerationViewMode.full;
@@ -1718,6 +1725,29 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _setSnapshot(LocalSnapshot value) => snapshot = value;
+
+  /// Applies an asynchronous library read only if no newer in-memory state
+  /// appeared while it was in flight. When requested, a superseded response
+  /// is re-read after the competing write finishes so an explicit refresh can
+  /// still complete without erasing a newly submitted generation card.
+  Future<bool> _applySnapshotRead(
+    LocalSnapshot value, {
+    required int startedAtRevision,
+    bool restorePreferences = false,
+    bool reloadIfSuperseded = false,
+  }) async {
+    if (_snapshotRevision != startedAtRevision) {
+      if (!reloadIfSuperseded) return false;
+      final reloadRevision = _snapshotRevision;
+      value = await gateway.load();
+      if (_disposed || _snapshotRevision != reloadRevision) return false;
+    }
+    if (_disposed) return false;
+    _apply(value, restorePreferences: restorePreferences);
+    return true;
+  }
+
   void showNotice(String message, {AppNoticeAction? action}) {
     notice = message;
     noticeAction = action;
@@ -2247,14 +2277,16 @@ class AppController extends ChangeNotifier {
     final favorite = !current.favorite;
     final revision = ++_libraryMutationRevision;
     _generationFavoriteRevisions[item.localId] = revision;
-    snapshot = snapshot!.copyWith(
-      generations: generations
-          .map(
-            (candidate) => candidate.localId == item.localId
-                ? candidate.copyWith(favorite: favorite)
-                : candidate,
-          )
-          .toList(),
+    _setSnapshot(
+      snapshot!.copyWith(
+        generations: generations
+            .map(
+              (candidate) => candidate.localId == item.localId
+                  ? candidate.copyWith(favorite: favorite)
+                  : candidate,
+            )
+            .toList(),
+      ),
     );
     notifyListeners();
     try {
@@ -2265,14 +2297,16 @@ class AppController extends ChangeNotifier {
     } on Object catch (error) {
       if (_generationFavoriteRevisions[item.localId] == revision &&
           snapshot != null) {
-        snapshot = snapshot!.copyWith(
-          generations: generations
-              .map(
-                (candidate) => candidate.localId == item.localId
-                    ? candidate.copyWith(favorite: current.favorite)
-                    : candidate,
-              )
-              .toList(),
+        _setSnapshot(
+          snapshot!.copyWith(
+            generations: generations
+                .map(
+                  (candidate) => candidate.localId == item.localId
+                      ? candidate.copyWith(favorite: current.favorite)
+                      : candidate,
+                )
+                .toList(),
+          ),
         );
         notifyListeners();
       }
@@ -2293,14 +2327,16 @@ class AppController extends ChangeNotifier {
     final favorite = !current.favorite;
     final revision = ++_libraryMutationRevision;
     _referenceFavoriteRevisions[item.id] = revision;
-    snapshot = snapshot!.copyWith(
-      savedReferences: savedReferences
-          .map(
-            (candidate) => candidate.id == item.id
-                ? candidate.copyWith(favorite: favorite)
-                : candidate,
-          )
-          .toList(),
+    _setSnapshot(
+      snapshot!.copyWith(
+        savedReferences: savedReferences
+            .map(
+              (candidate) => candidate.id == item.id
+                  ? candidate.copyWith(favorite: favorite)
+                  : candidate,
+            )
+            .toList(),
+      ),
     );
     notifyListeners();
     try {
@@ -2311,14 +2347,16 @@ class AppController extends ChangeNotifier {
     } on Object catch (error) {
       if (_referenceFavoriteRevisions[item.id] == revision &&
           snapshot != null) {
-        snapshot = snapshot!.copyWith(
-          savedReferences: savedReferences
-              .map(
-                (candidate) => candidate.id == item.id
-                    ? candidate.copyWith(favorite: current.favorite)
-                    : candidate,
-              )
-              .toList(),
+        _setSnapshot(
+          snapshot!.copyWith(
+            savedReferences: savedReferences
+                .map(
+                  (candidate) => candidate.id == item.id
+                      ? candidate.copyWith(favorite: current.favorite)
+                      : candidate,
+                )
+                .toList(),
+          ),
         );
         notifyListeners();
       }
@@ -2351,14 +2389,16 @@ class AppController extends ChangeNotifier {
     for (final id in ids) {
       _generationVisibilityRevisions[id] = revision;
     }
-    snapshot = snapshot!.copyWith(
-      generations: generations
-          .map(
-            (item) => ids.contains(item.localId)
-                ? item.copyWith(hidden: hidden)
-                : item,
-          )
-          .toList(),
+    _setSnapshot(
+      snapshot!.copyWith(
+        generations: generations
+            .map(
+              (item) => ids.contains(item.localId)
+                  ? item.copyWith(hidden: hidden)
+                  : item,
+            )
+            .toList(),
+      ),
     );
     notifyListeners();
     try {
@@ -2370,13 +2410,15 @@ class AppController extends ChangeNotifier {
       return true;
     } on Object catch (error) {
       if (snapshot != null) {
-        snapshot = snapshot!.copyWith(
-          generations: generations.map((item) {
-            if (_generationVisibilityRevisions[item.localId] != revision) {
-              return item;
-            }
-            return item.copyWith(hidden: previous[item.localId]);
-          }).toList(),
+        _setSnapshot(
+          snapshot!.copyWith(
+            generations: generations.map((item) {
+              if (_generationVisibilityRevisions[item.localId] != revision) {
+                return item;
+              }
+              return item.copyWith(hidden: previous[item.localId]);
+            }).toList(),
+          ),
         );
         notifyListeners();
       }
@@ -2410,13 +2452,15 @@ class AppController extends ChangeNotifier {
     for (final id in ids) {
       _referenceVisibilityRevisions[id] = revision;
     }
-    snapshot = snapshot!.copyWith(
-      savedReferences: savedReferences
-          .map(
-            (item) =>
-                ids.contains(item.id) ? item.copyWith(hidden: hidden) : item,
-          )
-          .toList(),
+    _setSnapshot(
+      snapshot!.copyWith(
+        savedReferences: savedReferences
+            .map(
+              (item) =>
+                  ids.contains(item.id) ? item.copyWith(hidden: hidden) : item,
+            )
+            .toList(),
+      ),
     );
     notifyListeners();
     try {
@@ -2428,11 +2472,15 @@ class AppController extends ChangeNotifier {
       return true;
     } on Object catch (error) {
       if (snapshot != null) {
-        snapshot = snapshot!.copyWith(
-          savedReferences: savedReferences.map((item) {
-            if (_referenceVisibilityRevisions[item.id] != revision) return item;
-            return item.copyWith(hidden: previous[item.id]);
-          }).toList(),
+        _setSnapshot(
+          snapshot!.copyWith(
+            savedReferences: savedReferences.map((item) {
+              if (_referenceVisibilityRevisions[item.id] != revision) {
+                return item;
+              }
+              return item.copyWith(hidden: previous[item.id]);
+            }).toList(),
+          ),
         );
         notifyListeners();
       }
@@ -5290,14 +5338,16 @@ class AppController extends ChangeNotifier {
   /// generations this device can then pick up and poll. Runs faster while
   /// staged uploads are draining so the sync indicators stay current.
   Future<void> _refreshDriveLibraryIfDue() async {
-    if (_disposed || _refreshingDriveLibrary || loading) return;
+    if (_disposed || _refreshingDriveLibrary || loading || submitting) return;
     if (!googleDriveConnected) return;
     _driveRefreshTick += 1;
     final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
     if (_driveRefreshTick % everyTicks != 0) return;
     _refreshingDriveLibrary = true;
+    final snapshotRevision = _snapshotRevision;
     try {
-      _apply(await gateway.load());
+      final value = await gateway.load();
+      await _applySnapshotRead(value, startedAtRevision: snapshotRevision);
     } on Object {
       // Periodic reconciliation is best-effort; the next tick retries.
     } finally {
@@ -5919,6 +5969,7 @@ class AppController extends ChangeNotifier {
       return false;
     }
     googleDriveBusy = true;
+    final snapshotRevision = _snapshotRevision;
     notifyListeners();
     try {
       final value = await (gateway as GoogleDriveGateway).resumeGoogleDrive(
@@ -5926,14 +5977,15 @@ class AppController extends ChangeNotifier {
       );
       if (value == null) return false;
       if (_disposed) return false;
-      _apply(
+      return await _applySnapshotRead(
         value,
+        startedAtRevision: snapshotRevision,
+        reloadIfSuperseded: true,
         restorePreferences:
             restorePreferences &&
             (expectedPreferenceRevision == null ||
                 _preferenceRevision == expectedPreferenceRevision),
       );
-      return true;
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
       // an unexpected error without surfacing a notice.
@@ -5947,10 +5999,14 @@ class AppController extends ChangeNotifier {
   Future<void> refreshGoogleDrive() async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
+    final snapshotRevision = _snapshotRevision;
     notifyListeners();
     try {
-      _apply(
-        await (gateway as GoogleDriveGateway).refreshGoogleDrive(),
+      final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
+      await _applySnapshotRead(
+        value,
+        startedAtRevision: snapshotRevision,
+        reloadIfSuperseded: true,
         restorePreferences: true,
       );
       showNotice('Google Drive data refreshed.');
