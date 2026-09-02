@@ -11,6 +11,7 @@ import '../app/app_theme.dart';
 import '../core/app_links.dart';
 import '../core/google_drive.dart';
 import '../core/models.dart';
+import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
@@ -56,6 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _GenerationAppearanceCard(controller: widget.controller),
           const SizedBox(height: 18),
           _ProviderAccessCard(controller: widget.controller),
+          const SizedBox(height: 18),
+          _AiRewriteCard(controller: widget.controller),
           if (widget.controller.supportsGoogleDrive) ...<Widget>[
             const SizedBox(height: 18),
             _GoogleDriveSection(controller: widget.controller),
@@ -232,6 +235,243 @@ class _ProviderAccessCard extends StatelessWidget {
       },
     ),
   );
+}
+
+/// Keys for the LLMs that revise prompts. They sit here rather than on the
+/// Providers desk because they render nothing: they only read a finished film
+/// and hand back better words for it.
+class _AiRewriteCard extends StatefulWidget {
+  const _AiRewriteCard({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_AiRewriteCard> createState() => _AiRewriteCardState();
+}
+
+class _AiRewriteCardState extends State<_AiRewriteCard> {
+  final Map<String, TextEditingController> _keys =
+      <String, TextEditingController>{
+        for (final provider in RewriteProvider.values)
+          provider.id: TextEditingController(),
+      };
+  final Set<String> _visibleKeys = <String>{};
+  final Set<String> _busyProviders = <String>{};
+  final Map<String, _RewriteKeyResult> _results = <String, _RewriteKeyResult>{};
+
+  @override
+  void dispose() {
+    for (final controller in _keys.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save(RewriteProvider provider) async {
+    final candidate = _keys[provider.id]!.text;
+    setState(() {
+      _busyProviders.add(provider.id);
+      _results.remove(provider.id);
+    });
+    try {
+      await widget.controller.saveRewriteKey(provider, candidate);
+      if (!mounted) return;
+      _keys[provider.id]!.clear();
+      _results[provider.id] = const _RewriteKeyResult('Connected');
+    } on PromptRewriteException catch (error) {
+      _results[provider.id] = _RewriteKeyResult(error.message, failed: true);
+    } on Object catch (error) {
+      _results[provider.id] = _RewriteKeyResult(error.toString(), failed: true);
+    } finally {
+      if (mounted) setState(() => _busyProviders.remove(provider.id));
+    }
+  }
+
+  Future<void> _remove(RewriteProvider provider) async {
+    try {
+      await widget.controller.removeRewriteKey(provider);
+      if (!mounted) return;
+      setState(() => _results.remove(provider.id));
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _results[provider.id] = _RewriteKeyResult(
+          error.toString(),
+          failed: true,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = widget.controller.connectedRewriteProviders;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              CircleAvatar(
+                backgroundColor: context.colors.primaryContainer,
+                child: Icon(
+                  Icons.auto_awesome_outlined,
+                  color: context.colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'AI Rewrite',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Adds an AI Rewrite action to finished films: frames of '
+                      'the film and its prompt go to the model you pick, and a '
+                      'revised prompt opens in a new composer tab.',
+                      style: TextStyle(color: context.colors.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          for (final provider in RewriteProvider.values) ...<Widget>[
+            const SizedBox(height: 18),
+            _RewriteProviderKey(
+              provider: provider,
+              connected: connected.contains(provider.id),
+              keyController: _keys[provider.id]!,
+              keyVisible: _visibleKeys.contains(provider.id),
+              busy: _busyProviders.contains(provider.id),
+              result: _results[provider.id],
+              onToggleKey: () => setState(() {
+                if (!_visibleKeys.remove(provider.id)) {
+                  _visibleKeys.add(provider.id);
+                }
+              }),
+              onSave: () => _save(provider),
+              onRemove: () => unawaited(_remove(provider)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RewriteKeyResult {
+  const _RewriteKeyResult(this.message, {this.failed = false});
+
+  final String message;
+  final bool failed;
+}
+
+class _RewriteProviderKey extends StatelessWidget {
+  const _RewriteProviderKey({
+    required this.provider,
+    required this.connected,
+    required this.keyController,
+    required this.keyVisible,
+    required this.busy,
+    required this.onToggleKey,
+    required this.onSave,
+    required this.onRemove,
+    this.result,
+  });
+
+  final RewriteProvider provider;
+  final bool connected;
+  final TextEditingController keyController;
+  final bool keyVisible;
+  final bool busy;
+  final _RewriteKeyResult? result;
+  final VoidCallback onToggleKey;
+  final Future<void> Function() onSave;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = result;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        TextField(
+          key: ValueKey('rewrite-key-${provider.id}'),
+          controller: keyController,
+          obscureText: !keyVisible,
+          autocorrect: false,
+          enableSuggestions: false,
+          enabled: !busy,
+          decoration: InputDecoration(
+            labelText: '${provider.name} API key',
+            hintText: connected
+                ? 'Connected — paste a replacement'
+                : provider.keyHint,
+            suffixIcon: IconButton(
+              tooltip: keyVisible ? 'Hide key' : 'Show key',
+              onPressed: onToggleKey,
+              icon: Icon(
+                keyVisible
+                    ? Icons.visibility_off_rounded
+                    : Icons.visibility_rounded,
+              ),
+            ),
+          ),
+        ),
+        if (status != null || connected) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            status?.message ?? 'Connected',
+            key: ValueKey('rewrite-key-status-${provider.id}'),
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: status?.failed == true
+                  ? context.colors.error
+                  : context.colors.primary,
+            ),
+          ),
+        ],
+        const SizedBox(height: 11),
+        Wrap(
+          spacing: 7,
+          runSpacing: 7,
+          children: <Widget>[
+            FilledButton(
+              key: ValueKey('rewrite-key-save-${provider.id}'),
+              onPressed: busy ? null : () => unawaited(onSave()),
+              child: busy
+                  ? const SizedBox.square(
+                      dimension: 15,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(connected ? 'Replace key' : 'Verify & save'),
+            ),
+            if (connected)
+              TextButton(
+                key: ValueKey('rewrite-key-remove-${provider.id}'),
+                onPressed: busy ? null : onRemove,
+                child: Text(
+                  'Remove',
+                  style: TextStyle(color: context.colors.error),
+                ),
+              ),
+            TextButton(
+              onPressed: () =>
+                  unawaited(launchUrl(Uri.parse(provider.consoleUrl))),
+              child: const Text('Get a key ↗'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 class _StorageSection extends StatefulWidget {

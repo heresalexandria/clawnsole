@@ -6,7 +6,11 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
-Future<Uint8List?> loadVideoFrame(Uri uri, Duration position) async {
+Future<Uint8List?> loadVideoFrame(
+  Uri uri,
+  Duration position, {
+  int maxWidth = 180,
+}) async {
   final video = web.HTMLVideoElement()
     ..crossOrigin = 'anonymous'
     ..muted = true
@@ -33,7 +37,7 @@ Future<Uint8List?> loadVideoFrame(Uri uri, Duration position) async {
     }
 
     if (video.videoWidth == 0 || video.videoHeight == 0) return null;
-    final width = math.min(180, video.videoWidth);
+    final width = math.min(math.max(1, maxWidth), video.videoWidth);
     final height = math.max(
       1,
       (width * video.videoHeight / video.videoWidth).round(),

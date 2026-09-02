@@ -1778,6 +1778,7 @@ class AppController extends ChangeNotifier {
             preferences: _preferences(),
             hasApiKey: value.hasApiKey,
             connectedProviders: value.connectedProviders,
+            connectedRewriteProviders: value.connectedRewriteProviders,
             availableProviders: value.availableProviders,
             providerRetentionAcknowledgements:
                 value.providerRetentionAcknowledgements,
@@ -5335,6 +5336,7 @@ class AppController extends ChangeNotifier {
         preferences: current.preferences,
         hasApiKey: current.hasApiKey,
         connectedProviders: current.connectedProviders,
+        connectedRewriteProviders: current.connectedRewriteProviders,
         availableProviders: current.availableProviders,
         providerRetentionAcknowledgements:
             current.providerRetentionAcknowledgements,
@@ -5448,6 +5450,7 @@ class AppController extends ChangeNotifier {
       preferences: current.preferences,
       hasApiKey: current.hasApiKey,
       connectedProviders: current.connectedProviders,
+      connectedRewriteProviders: current.connectedRewriteProviders,
       availableProviders: current.availableProviders,
       providerRetentionAcknowledgements:
           current.providerRetentionAcknowledgements,

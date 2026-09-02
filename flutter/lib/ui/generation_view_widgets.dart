@@ -12,6 +12,7 @@ import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'hardware.dart';
+import 'prompt_rewrite_dialog.dart';
 import 'video_save_sheet.dart';
 
 class GenerationViewToggle extends StatelessWidget {
@@ -402,6 +403,7 @@ enum _DenseGenerationAction {
   save,
   enhance,
   reuse,
+  rewrite,
   copyToDrive,
   checkStatus,
   details,
@@ -420,6 +422,7 @@ class GenerationActionsMenu extends StatelessWidget {
     this.onCopyToDrive,
     this.includeSave = true,
     this.includeReuse = true,
+    this.includeRewrite = true,
     this.includeCheckStatus = true,
   });
 
@@ -432,6 +435,7 @@ class GenerationActionsMenu extends StatelessWidget {
   final VoidCallback? onCopyToDrive;
   final bool includeSave;
   final bool includeReuse;
+  final bool includeRewrite;
   final bool includeCheckStatus;
 
   List<_DenseGenerationAction> get _actions => <_DenseGenerationAction>[
@@ -442,6 +446,8 @@ class GenerationActionsMenu extends StatelessWidget {
       _DenseGenerationAction.save,
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
     if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
+    if (includeRewrite && controller.canRewrite(item))
+      _DenseGenerationAction.rewrite,
     if (onCopyToDrive != null) _DenseGenerationAction.copyToDrive,
     if (includeCheckStatus &&
         item.canCheckStatus &&
@@ -476,6 +482,14 @@ class GenerationActionsMenu extends StatelessWidget {
               controller.enhance(item);
             case _DenseGenerationAction.reuse:
               unawaited(controller.reuse(item));
+            case _DenseGenerationAction.rewrite:
+              unawaited(
+                showPromptRewriteDialog(
+                  context,
+                  controller: controller,
+                  item: item,
+                ),
+              );
             case _DenseGenerationAction.copyToDrive:
               onCopyToDrive?.call();
             case _DenseGenerationAction.checkStatus:
@@ -509,10 +523,15 @@ class GenerationActionsMenu extends StatelessWidget {
                 else
                   Icon(_denseGenerationActionIcon(action), size: 18),
                 const SizedBox(width: 10),
-                Text(
-                  copying
-                      ? 'Copying to Drive…'
-                      : _denseGenerationActionLabel(action, item),
+                // The popup caps itself at 256 px; a long verb has to give
+                // way there rather than overflow its own row.
+                Flexible(
+                  child: Text(
+                    copying
+                        ? 'Copying to Drive…'
+                        : _denseGenerationActionLabel(action, item),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -531,6 +550,7 @@ IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
       _DenseGenerationAction.save => Icons.download_rounded,
       _DenseGenerationAction.enhance => Icons.auto_fix_high_rounded,
       _DenseGenerationAction.reuse => Icons.replay_rounded,
+      _DenseGenerationAction.rewrite => Icons.auto_awesome_outlined,
       _DenseGenerationAction.copyToDrive => Icons.cloud_upload_outlined,
       _DenseGenerationAction.checkStatus => Icons.sync_rounded,
       _DenseGenerationAction.details => Icons.receipt_long_rounded,
@@ -547,6 +567,7 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.save => item.isImage ? 'Save image' : 'Save video',
   _DenseGenerationAction.enhance => 'Enhance',
   _DenseGenerationAction.reuse => item.isFailed ? 'Retry generation' : 'Reuse',
+  _DenseGenerationAction.rewrite => 'AI Rewrite',
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
   _DenseGenerationAction.checkStatus => 'Check status',
   _DenseGenerationAction.details => 'View details',

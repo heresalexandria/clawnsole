@@ -21,6 +21,7 @@ import 'generation_video.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'media_thumbnail.dart';
+import 'prompt_rewrite_dialog.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
@@ -3060,6 +3061,22 @@ class ActivityCard extends StatelessWidget {
                                     : 'Reuse',
                               ),
                             ),
+                          if (controller.canRewrite(item))
+                            OutlinedButton.icon(
+                              key: const ValueKey('activity-rewrite'),
+                              onPressed: () => unawaited(
+                                showPromptRewriteDialog(
+                                  context,
+                                  controller: controller,
+                                  item: item,
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.auto_awesome_outlined,
+                                size: 15,
+                              ),
+                              label: const Text('AI Rewrite'),
+                            ),
                           GenerationStatusButton(
                             controller: controller,
                             item: item,
@@ -3074,6 +3091,7 @@ class ActivityCard extends StatelessWidget {
                       item: item,
                       includeSave: false,
                       includeReuse: false,
+                      includeRewrite: false,
                       includeCheckStatus: false,
                     ),
                   ],
