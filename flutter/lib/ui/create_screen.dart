@@ -234,20 +234,20 @@ class _CreateHeading extends StatelessWidget {
         final heading = Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            Expanded(
-              child: Align(alignment: Alignment.centerLeft, child: title),
-            ),
-            // Desktop widths hang the strip off the heading's slack, where it
-            // costs the composer no vertical space at all. The bounded box
-            // lets the strip shrink to its keys instead of taking the room
-            // the display line needs.
             if (constraints.maxWidth >= 880) ...<Widget>[
-              const SizedBox(width: 16),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 300),
-                child: tabs,
+              title,
+              const SizedBox(width: 24),
+              // Desktop widths hang the strip off the heading's slack, where
+              // it costs the composer no vertical space at all. It takes all
+              // the room between the display line and the plaque, so several
+              // drafts sit side by side before the strip has to scroll.
+              Expanded(
+                child: Align(alignment: Alignment.centerRight, child: tabs),
               ),
-            ],
+            ] else
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: title),
+              ),
             const SizedBox(width: 22),
             plaqueLabel,
             const SizedBox(width: 10),
