@@ -11,6 +11,7 @@ import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
+import 'hardware.dart';
 import 'video_save_sheet.dart';
 
 class GenerationViewToggle extends StatelessWidget {
@@ -39,37 +40,49 @@ class GenerationViewToggle extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: GenerationViewMode.values.map((mode) {
           final selected = value == mode;
+          void select() {
+            hardwareSelectionFeedback();
+            onChanged(mode);
+          }
+
           return Tooltip(
             message: _generationViewModeLabel(mode),
-            child: Semantics(
-              button: true,
-              selected: selected,
-              label: _generationViewModeLabel(mode),
-              child: InkWell(
-                key: ValueKey('$keyPrefix-${mode.name}'),
-                onTap: selected ? null : () => onChanged(mode),
-                borderRadius: BorderRadius.circular(8),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  width: 34,
-                  height: 30,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? context.colors.primaryContainer
-                        : Colors.transparent,
+            child: MergeSemantics(
+              child: Semantics(
+                container: true,
+                button: true,
+                inMutuallyExclusiveGroup: true,
+                selected: selected,
+                label: _generationViewModeLabel(mode),
+                child: HardwareTouchTarget(
+                  onTap: selected ? null : select,
+                  child: InkWell(
+                    key: ValueKey('$keyPrefix-${mode.name}'),
+                    onTap: selected ? null : select,
                     borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    switch (mode) {
-                      GenerationViewMode.compact => Icons.view_list_rounded,
-                      GenerationViewMode.mini => Icons.grid_view_rounded,
-                      GenerationViewMode.full => Icons.view_agenda_rounded,
-                    },
-                    size: 18,
-                    color: selected
-                        ? context.colors.onPrimaryContainer
-                        : context.colors.onSurfaceVariant,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 140),
+                      width: 34,
+                      height: 30,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? context.colors.primaryContainer
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        switch (mode) {
+                          GenerationViewMode.compact => Icons.view_list_rounded,
+                          GenerationViewMode.mini => Icons.grid_view_rounded,
+                          GenerationViewMode.full => Icons.view_agenda_rounded,
+                        },
+                        size: 18,
+                        color: selected
+                            ? context.colors.onPrimaryContainer
+                            : context.colors.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ),
               ),

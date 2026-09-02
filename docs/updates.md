@@ -6,17 +6,21 @@ versions that users can actually install are reported. The other surfaces check
 GitHub Releases. A manual macOS check is also available from **Clawnsole → Check
 for Updates…** or from the version beside the wordmark in the app's top bar.
 Native Windows builds send available updates to the GitHub release for a manual
-download. Development builds explain that they update through git instead of
-replacing themselves.
+download, and the dialog spells out the steps: download the new ZIP, extract
+it, and replace the `Clawnsole` folder — the library lives outside that folder
+and is not touched. Development builds explain that they update through git
+instead of replacing themselves.
 
 When the platform's release source successfully reports a newer **major**
 version, Clawnsole blocks continued use until the update begins. macOS uses the
-verified in-place updater; iOS opens App Store product `6801916362`, and Android
-opens Google Play package `app.clawnsole.clawnsole`. The gate is never shown
+verified in-place updater and iOS opens App Store product `6801916362`. Android
+is compiled but not yet listed on Google Play, so it is treated like a
+non-store build (`clawnsoleAndroidStoreListed` in `store_update.dart` flips it
+to store-managed once the listing exists); until then it links to the GitHub
+release instead of a Play page that does not exist. The gate is never shown
 when the request fails, the version cannot be parsed, or the newest release
 remains in the current major version. App Store review and processing are
-therefore decoupled from GitHub release timing. Android still reads GitHub, so
-publish the GitHub release only after its Play Store build is available.
+therefore decoupled from GitHub release timing.
 
 ## In-app version chip and update dialog
 
@@ -25,8 +29,10 @@ pixels wide, a newer release adds an animated blue-purple **Update Available**
 chip beside the version. Packaged macOS can install from that chip; Windows and
 development builds open the update dialog and release link. Compact
 viewports and native mobile apps keep the header uncluttered and flash an update
-notification instead. iOS and Android leave installation to their stores.
-Opening the version dialog re-checks immediately outside store-managed builds.
+notification instead. iOS leaves installation to the App Store.
+Opening the version dialog re-checks immediately outside store-managed builds;
+a store-managed build also re-queries when its launch-time check failed, so a
+flaky first request does not stick until the next launch.
 `ClawnsoleApp(checkForUpdates: false)` disables network checks in tests.
 
 The launch check is always fresh. Later automatic checks retain the macOS

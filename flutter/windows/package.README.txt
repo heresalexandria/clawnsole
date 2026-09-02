@@ -1,0 +1,37 @@
+Clawnsole for Windows (x64)
+
+Requires 64-bit Windows 10 or 11.
+
+INSTALL
+
+  1. Extract this whole Clawnsole folder somewhere you keep programs, for
+     example a folder in your user profile or under C:\Program Files.
+     Keep every file together: Clawnsole.exe needs the DLLs and the data
+     and media-tools folders that sit beside it.
+  2. Open the folder and run Clawnsole.exe. Pin it to the taskbar or the
+     Start menu if you like.
+
+WINDOWS SMARTSCREEN
+
+  This build is not yet code signed, so the first launch may show
+  "Windows protected your PC". Click "More info", then "Run anyway".
+  Every release is published with a SHA256SUMS.txt you can check the ZIP
+  against at https://github.com/heresalexandria/clawnsole/releases
+
+UPDATE
+
+  1. Download the newest Clawnsole-windows-x64.zip from the releases page.
+     Clawnsole also tells you when a newer version is available.
+  2. Close Clawnsole, then replace this whole folder with the newly
+     extracted one.
+
+  Your library, settings, and caches are not stored in this folder. The
+  library lives in %LOCALAPPDATA%\Clawnsole (in Documents\Clawnsole if an
+  earlier version created it there, or in the folder you chose in
+  Settings) and settings and caches live under your user profile's
+  AppData folder, so replacing this folder never touches them.
+
+UNINSTALL
+
+  Close Clawnsole and delete this folder. Your library stays in its own
+  folder (see above) until you remove it yourself.

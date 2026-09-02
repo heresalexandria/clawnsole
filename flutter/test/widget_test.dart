@@ -1126,7 +1126,7 @@ void main() {
 
     expect(find.text('Status unavailable'), findsOneWidget);
     expect(find.text('In progress'), findsNothing);
-    expect(find.text('Retry status'), findsOneWidget);
+    expect(find.text('Check again'), findsOneWidget);
     expect(find.text('View details'), findsOneWidget);
 
     await tester.tap(find.text('View details'));
@@ -6035,21 +6035,33 @@ void main() {
       expect(ios.appUri.toString(), contains('id6801916362'));
       expect(ios.webUri.host, 'apps.apple.com');
 
-      final android = clawnsoleStoreDestination(TargetPlatform.android)!;
-      expect(android.name, 'Google Play');
-      expect(android.appUri.queryParameters['id'], 'app.clawnsole.clawnsole');
-      expect(android.webUri.host, 'play.google.com');
+      // Android is compiled but not listed on Google Play yet, so it must not
+      // be sent to a store page that does not exist.
+      expect(clawnsoleAndroidStoreListed, isFalse);
+      expect(clawnsoleStoreDestination(TargetPlatform.android), isNull);
+      final androidAttempts = <Uri>[];
+      expect(
+        await openClawnsoleStore(
+          TargetPlatform.android,
+          launch: (uri) async {
+            androidAttempts.add(uri);
+            return true;
+          },
+        ),
+        isFalse,
+      );
+      expect(androidAttempts, isEmpty);
 
       final attempts = <Uri>[];
       final opened = await openClawnsoleStore(
-        TargetPlatform.android,
+        TargetPlatform.iOS,
         launch: (uri) async {
           attempts.add(uri);
           return attempts.length == 2;
         },
       );
       expect(opened, isTrue);
-      expect(attempts, <Uri>[android.appUri, android.webUri]);
+      expect(attempts, <Uri>[ios.appUri, ios.webUri]);
     },
   );
 

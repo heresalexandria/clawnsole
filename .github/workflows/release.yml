@@ -314,8 +314,35 @@ jobs:
           New-Item -ItemType Directory -Path outgoing | Out-Null
           $source = "flutter/build/windows/x64/runner/Release"
           $archive = "outgoing/Clawnsole-${{ needs.prepare.outputs.version }}-windows-x64.zip"
-          Compress-Archive -Path "$source/*" -DestinationPath $archive -CompressionLevel Optimal
+          # Extracting the ZIP yields one Clawnsole folder holding the app, the
+          # bundled MSVC runtime, data, media tools, and install notes.
+          $stage = Join-Path $env:RUNNER_TEMP "windows-package"
+          $folder = Join-Path $stage "Clawnsole"
+          if (Test-Path $stage) { Remove-Item -Path $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $folder | Out-Null
+          Copy-Item -Path "$source/*" -Destination $folder -Recurse
+          $readme = Get-Content -Raw "flutter/windows/package.README.txt"
+          Set-Content -Path (Join-Path $folder "README.txt") -Value ($readme -replace "`r?`n", "`r`n") -NoNewline
+          $required = @(
+            "Clawnsole.exe", "flutter_windows.dll", "README.txt",
+            "msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll",
+            "data/flutter_assets", "media-tools/ffmpeg.exe"
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path (Join-Path $folder $item))) { throw "Windows package is missing $item." }
+          }
+          Compress-Archive -Path $folder -DestinationPath $archive -CompressionLevel Optimal
           if (-not (Test-Path $archive)) { throw "Windows archive was not created." }
+          # Verify the layout users will see after extracting.
+          $check = Join-Path $stage "check"
+          Expand-Archive -Path $archive -DestinationPath $check
+          $roots = @(Get-ChildItem -Path $check -Force | Select-Object -ExpandProperty Name)
+          if ($roots.Count -ne 1 -or $roots[0] -ne "Clawnsole") { throw "Windows archive must contain only the Clawnsole folder." }
+          $extracted = Join-Path $check "Clawnsole"
+          foreach ($item in $required) {
+            if (-not (Test-Path (Join-Path $extracted $item))) { throw "Windows archive is missing Clawnsole/$item." }
+          }
+          Remove-Item -Path $check -Recurse -Force
           Get-Item $archive | Format-List Name, Length
 
       - uses: actions/upload-artifact@v7

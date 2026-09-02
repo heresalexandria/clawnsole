@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_version.dart';
@@ -10,6 +11,7 @@ import '../core/gateway.dart';
 import '../core/shell_bridge.dart';
 import '../core/store_update.dart';
 import '../core/update_status.dart';
+import '../ui/app_intents.dart';
 import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
 import '../ui/formatters.dart';
@@ -61,7 +63,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   bool _requiredUpdateDialogOpen = false;
   String? _lastNotifiedUpdateVersion;
   int _lastNoticeSequence = 0;
-  ThemeMode _themeMode = ThemeMode.system;
+  StreamSubscription<String>? _shellNavigation;
 
   @override
   void initState() {
@@ -72,6 +74,14 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     _updateStatus.addListener(_handleUpdateStatus);
     _handleUpdateStatus();
     unawaited(controller.initialize());
+    // The desktop shell's menu ("Settings… ⌘,") asks the renderer to open a
+    // section; honour it exactly like the rail.
+    _shellNavigation = shellNavigationRequests.listen((name) {
+      final section = AppSection.values
+          .where((value) => value.name == name)
+          .firstOrNull;
+      if (section != null) unawaited(controller.navigate(section));
+    });
     // A shell-menu "Check for Updates…" downloads through the same pipe, so
     // surface its progress modal no matter where the update started.
     _shellUpdates = updateEvents.listen((event) {
@@ -100,6 +110,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     WidgetsBinding.instance.removeObserver(this);
     _periodicUpdateCheck?.cancel();
     unawaited(_shellUpdates?.cancel());
+    unawaited(_shellNavigation?.cancel());
     _updateStatus.removeListener(_handleUpdateStatus);
     controller.dispose();
     super.dispose();
@@ -107,6 +118,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    controller.appInForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.reconcileGenerationWork());
     }
@@ -204,20 +216,39 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     scaffoldMessengerKey: _scaffoldMessengerKey,
     theme: buildClawnsoleTheme(Brightness.light),
     darkTheme: buildClawnsoleTheme(Brightness.dark),
-    themeMode: _themeMode,
+    themeMode: _materialThemeMode(controller.themeMode),
     // Native mobile Flutter keeps focus on touch taps outside text fields.
     // Override that once so multiline fields never trap the software keyboard.
-    builder: (context, child) => Actions(
-      actions: <Type, Action<Intent>>{
-        EditableTextTapOutsideIntent:
-            CallbackAction<EditableTextTapOutsideIntent>(
-              onInvoke: (intent) {
-                intent.focusNode.unfocus();
-                return null;
-              },
-            ),
+    // The desktop shortcuts live here too so they work from any route,
+    // including the fullscreen prompt editor.
+    builder: (context, child) => Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.enter, meta: true): GenerateIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, control: true):
+            GenerateIntent(),
+        SingleActivator(LogicalKeyboardKey.comma, meta: true):
+            OpenSettingsIntent(),
+        SingleActivator(LogicalKeyboardKey.comma, control: true):
+            OpenSettingsIntent(),
       },
-      child: child ?? const SizedBox.shrink(),
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          EditableTextTapOutsideIntent:
+              CallbackAction<EditableTextTapOutsideIntent>(
+                onInvoke: (intent) {
+                  intent.focusNode.unfocus();
+                  return null;
+                },
+              ),
+          OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
+            onInvoke: (_) {
+              unawaited(controller.navigate(AppSection.settings));
+              return null;
+            },
+          ),
+        },
+        child: child ?? const SizedBox.shrink(),
+      ),
     ),
     home: AnimatedBuilder(
       animation: controller,
@@ -259,13 +290,26 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
         return _AppShell(
           controller: controller,
           updateStatus: _updateStatus,
-          themeMode: _themeMode,
-          onThemeModeChanged: (mode) => setState(() => _themeMode = mode),
+          themeMode: _materialThemeMode(controller.themeMode),
+          onThemeModeChanged: (mode) =>
+              unawaited(controller.setThemeMode(_appThemeMode(mode))),
         );
       },
     ),
   );
 }
+
+ThemeMode _materialThemeMode(AppThemeMode mode) => switch (mode) {
+  AppThemeMode.system => ThemeMode.system,
+  AppThemeMode.light => ThemeMode.light,
+  AppThemeMode.dark => ThemeMode.dark,
+};
+
+AppThemeMode _appThemeMode(ThemeMode mode) => switch (mode) {
+  ThemeMode.system => AppThemeMode.system,
+  ThemeMode.light => AppThemeMode.light,
+  ThemeMode.dark => AppThemeMode.dark,
+};
 
 class _AppShell extends StatelessWidget {
   const _AppShell({
@@ -474,54 +518,70 @@ class _RailButton extends StatelessWidget {
     final color = selected ? tokens.onPanel : tokens.onPanelMuted;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(13),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 3),
-          decoration: BoxDecoration(
-            color: selected
-                ? Colors.white.withValues(alpha: .13)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: navigationSemanticsLabel(label, badge),
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(13),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 3),
+            decoration: BoxDecoration(
               color: selected
-                  ? tokens.panelBrass.withValues(alpha: .4)
+                  ? Colors.white.withValues(alpha: .13)
                   : Colors.transparent,
-            ),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: <Widget>[
-              SizedBox(
-                width: double.infinity,
-                child: Column(
-                  children: <Widget>[
-                    Icon(icon, size: 21, color: color),
-                    const SizedBox(height: 5),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 10,
-                        letterSpacing: .3,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: selected
+                    ? tokens.panelBrass.withValues(alpha: .4)
+                    : Colors.transparent,
               ),
-              if (badge > 0)
-                Positioned(right: 2, top: -6, child: _CountBadge(count: badge)),
-            ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    children: <Widget>[
+                      Icon(icon, size: 21, color: color),
+                      const SizedBox(height: 5),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 10,
+                          letterSpacing: .3,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (badge > 0)
+                  Positioned(
+                    right: 2,
+                    top: -6,
+                    child: _CountBadge(count: badge),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+/// What assistive tech reads for a section button: the section, its selected
+/// state (exposed as a flag), and the in-progress count the badge only paints.
+String navigationSemanticsLabel(String label, int badge) => badge > 0
+    ? '$label, $badge ${badge == 1 ? 'generation' : 'generations'} in progress'
+    : label;
 
 class _CountBadge extends StatelessWidget {
   const _CountBadge({required this.count});
@@ -626,7 +686,15 @@ class _TopBar extends StatelessWidget {
           ),
           _CreditsPill(controller: controller, compact: compact),
           const SizedBox(width: 8),
-          if (!compact) ...<Widget>[
+          // The balance pill already carries the call to action when no key
+          // is set and the connection state when no balance is published;
+          // a second pill only earns its place beside a numeric balance.
+          if (!compact &&
+              controller.hasApiKey &&
+              controller
+                      .providerAccounts[controller.selectedProviderId]
+                      ?.balance !=
+                  null) ...<Widget>[
             _KeyPill(controller: controller),
             const SizedBox(width: 8),
           ],
@@ -716,7 +784,7 @@ class _CreditsPill extends StatelessWidget {
         account?.balanceLabel != null &&
         controller.selectedProvider.consoleUrl.isNotEmpty;
     final tooltip = !controller.hasApiKey
-        ? 'Add a ${controller.selectedProvider.name} API key'
+        ? 'Connect ${controller.selectedProvider.name}'
         : externalBalance
         ? 'Open ${controller.selectedProvider.name} to view the balance'
         : 'Refresh the ${controller.selectedProvider.name} balance';
@@ -784,7 +852,11 @@ class _CreditsPill extends StatelessWidget {
     ProviderAccountStatus? account, {
     required bool compact,
   }) {
-    if (!controller.hasApiKey) return 'Add key';
+    if (!controller.hasApiKey) {
+      return compact
+          ? 'Add key'
+          : 'Connect ${controller.selectedProvider.name}';
+    }
     if (account?.balance == null) {
       if (account?.balanceLabel != null &&
           controller.selectedProvider.consoleUrl.isNotEmpty) {
@@ -979,50 +1051,56 @@ class _BottomNavButton extends StatelessWidget {
     final tokens = context.tokens;
     final color = selected ? tokens.onPanel : tokens.onPanelMuted;
     return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(13),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 3),
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? Colors.white.withValues(alpha: .13)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: navigationSemanticsLabel(label, badge),
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(13),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
               color: selected
-                  ? tokens.panelBrass.withValues(alpha: .4)
+                  ? Colors.white.withValues(alpha: .13)
                   : Colors.transparent,
-            ),
-          ),
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: <Widget>[
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(icon, size: 22, color: color),
-                  const SizedBox(height: 3),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 10.5,
-                      letterSpacing: .3,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: selected
+                    ? tokens.panelBrass.withValues(alpha: .4)
+                    : Colors.transparent,
               ),
-              if (badge > 0)
-                Positioned(
-                  right: 16,
-                  top: -3,
-                  child: _CountBadge(count: badge),
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: <Widget>[
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(icon, size: 22, color: color),
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 10.5,
+                        letterSpacing: .3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
-            ],
+                if (badge > 0)
+                  Positioned(
+                    right: 16,
+                    top: -3,
+                    child: _CountBadge(count: badge),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1069,6 +1147,17 @@ class _ConnectionError extends StatelessWidget {
                   color: context.colors.onSurfaceVariant,
                 ),
               ),
+            const SizedBox(height: 18),
+            // A momentarily locked file or an unmounted volume is the usual
+            // cause; relaunching the whole app should not be the only way out.
+            FilledButton.icon(
+              key: const ValueKey<String>('startup-retry-button'),
+              onPressed: controller.loading
+                  ? null
+                  : () => unawaited(controller.retryInitialize()),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Try again'),
+            ),
           ],
         ),
       ),

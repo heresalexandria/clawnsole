@@ -3,13 +3,17 @@ import 'package:flutter/foundation.dart';
 import 'app_store_update_check.dart';
 import 'app_version.dart';
 import 'shell_bridge.dart';
+import 'store_update.dart';
 import 'update_check.dart';
 
 /// Whether the operating system's store owns installation for this build.
+/// Android only counts once a Play listing exists; until then a sideloaded
+/// build must not be sent to a store page that is not there.
 bool get storeManagedPlatform =>
     !kIsWeb &&
     (defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.android);
+        (defaultTargetPlatform == TargetPlatform.android &&
+            clawnsoleAndroidStoreListed));
 
 /// The app-wide answer to "is there a newer Clawnsole?".
 ///

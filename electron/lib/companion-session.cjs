@@ -57,6 +57,9 @@ function sameOrigin(value, expected) {
   }
 }
 
+// Returns a handle whose rebind() moves the header to a new renderer origin.
+// A restarted companion keeps its session token but may come back on a
+// different port, and only the current origin may ever receive the token.
 function installCompanionSessionHeader(webRequest, rendererUrl, requestToken) {
   if (!webRequest || typeof webRequest.onBeforeSendHeaders !== "function") {
     throw new TypeError("An Electron webRequest session is required.");
@@ -64,16 +67,25 @@ function installCompanionSessionHeader(webRequest, rendererUrl, requestToken) {
   if (!sameOrigin(rendererUrl, rendererUrl) || !is32ByteBase64Url(requestToken)) {
     throw new TypeError("The companion session configuration is invalid.");
   }
+  let currentRendererUrl = rendererUrl;
   webRequest.onBeforeSendHeaders(
     { urls: ["<all_urls>"] },
     (details, callback) => {
       const requestHeaders = { ...details.requestHeaders };
-      if (sameOrigin(details.url, rendererUrl)) {
+      if (sameOrigin(details.url, currentRendererUrl)) {
         requestHeaders[SESSION_HEADER] = requestToken;
       }
       callback({ requestHeaders });
     },
   );
+  return {
+    rebind(nextRendererUrl) {
+      if (!sameOrigin(nextRendererUrl, nextRendererUrl)) {
+        throw new TypeError("The companion session configuration is invalid.");
+      }
+      currentRendererUrl = nextRendererUrl;
+    },
+  };
 }
 
 function sanitizedString(value, maximum) {

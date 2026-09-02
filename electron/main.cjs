@@ -1,4 +1,3 @@
-const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -10,12 +9,12 @@ const {
   ipcMain,
   Menu,
   nativeTheme,
+  Notification,
   safeStorage,
   session,
   shell,
 } = require("electron");
 const {
-  findOpenPort,
   isAllowedAppUrl,
   isAllowedExplicitExternalUrl,
   isAllowedExternalUrl,
@@ -35,13 +34,47 @@ const packageMetadata = require("./package.json");
 const { GoogleDriveAuth, configuredOAuth } = require("./lib/google-drive-auth.cjs");
 const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
 const { bundledCompanionArguments } = require("./lib/companion-launch.cjs");
+const { CompanionLog } = require("./lib/companion-log.cjs");
+const { CompanionSupervisor } = require("./lib/companion-supervisor.cjs");
+const {
+  NAVIGATE_CHANNEL,
+  buildApplicationMenuTemplate,
+} = require("./lib/application-menu.cjs");
+const { installRendererRecovery } = require("./lib/renderer-recovery.cjs");
+const {
+  NOTIFY_CHANNEL,
+  sanitizeNotification,
+  shouldShowNotification,
+} = require("./lib/notifications.cjs");
+const {
+  INSTALL_LOCATION_HELP,
+  applicationsMoveDeclined,
+  rememberApplicationsMoveDeclined,
+} = require("./lib/install-location.cjs");
 
 const APP_NAME = "Clawnsole";
 const DEVELOPMENT_URL = process.env.CLAWNSOLE_RENDERER_URL || "http://127.0.0.1:7357";
 const IS_SMOKE_TEST = process.argv.includes("--smoke");
+// Every member the Flutter app binds to, plus the flag it raises once it has.
+const BRIDGE_MEMBERS = [
+  "checkForUpdate",
+  "startUpdate",
+  "onUpdateEvent",
+  "onNavigate",
+  "notify",
+  "authorizeGoogleDrive",
+  "disconnectGoogleDrive",
+  "settingsVault",
+  "openExternalUrl",
+  "revealDataFolder",
+  "chooseDataDirectory",
+];
 
 let mainWindow = null;
-let rendererProcess = null;
+let companion = null;
+let companionLog = null;
+let companionSession = null;
+let companionFailurePending = false;
 let rendererUrl = null;
 let isQuitting = false;
 let updateBusy = false;
@@ -50,107 +83,126 @@ let companionToken = "";
 
 app.setName(APP_NAME);
 
-function logServerOutput(stream, label) {
-  stream?.setEncoding("utf8");
-  stream?.on("data", (chunk) => {
-    for (const line of chunk.trimEnd().split("\n")) {
-      if (line) process.stderr.write(`[renderer:${label}] ${line}\n`);
-    }
-  });
+function companionLogger() {
+  if (!companionLog) {
+    companionLog = new CompanionLog({
+      directory: app.getPath("logs"),
+      // Development keeps the familiar terminal stream; a packaged app has
+      // nowhere to echo to and relies on the file alone.
+      echo: app.isPackaged ? null : (entry) => process.stderr.write(entry),
+    });
+  }
+  return companionLog;
 }
 
+// The supervisor owns the bundled companion for the life of the shell: it
+// restarts one unexpected exit or health-check failure by itself, and asks
+// here only when a second failure makes it a crash loop.
 async function startBundledRenderer({ deviceKey, requestToken }) {
   const rendererDirectory = path.join(process.resourcesPath, "renderer");
-  const companionExecutable = path.join(
-    process.resourcesPath,
-    "companion",
-    "clawnsole_companion",
-  );
-  const port = await findOpenPort();
-  const localUrl = `http://127.0.0.1:${port}`;
-
-  const companionArguments = bundledCompanionArguments({
-    port,
-    dataFile: dataLocation.dataFile(app.getPath("userData")),
-    rendererDirectory,
-    resourcesPath: process.resourcesPath,
-  });
   const companionEnvironment = { ...process.env };
   delete companionEnvironment.CLAWNSOLE_COMPANION_TOKEN;
-  const child = spawn(companionExecutable, companionArguments, {
+  companion = new CompanionSupervisor({
+    executable: path.join(process.resourcesPath, "companion", "clawnsole_companion"),
+    argumentsFor: (port) => bundledCompanionArguments({
+      port,
+      dataFile: dataLocation.dataFile(app.getPath("userData")),
+      rendererDirectory,
+      resourcesPath: process.resourcesPath,
+    }),
     cwd: rendererDirectory,
     env: companionEnvironment,
-    stdio: ["pipe", "pipe", "pipe"],
+    bootstrapLine: companionBootstrapLine(deviceKey, requestToken),
+    log: companionLogger(),
+    onRestarted: (restart) => adoptCompanionUrl(restart),
+    onFailed: (reason) => void reportCompanionFailure(reason),
   });
-  rendererProcess = child;
-
-  logServerOutput(child.stdout, "out");
-  logServerOutput(child.stderr, "error");
-
-  child.once("exit", (code, signal) => {
-    const stoppedUnexpectedly = !isQuitting;
-    if (rendererProcess === child) rendererProcess = null;
-    if (stoppedUnexpectedly) {
-      console.error(`Clawnsole's renderer stopped unexpectedly (${signal || code}).`);
-      app.quit();
-    }
-  });
-
-  await new Promise((resolve, reject) => {
-    const failed = () => reject(
-      new Error("Clawnsole could not initialize its local secure storage."),
-    );
-    child.stdin.once("error", failed);
-    child.stdin.end(
-      companionBootstrapLine(deviceKey, requestToken),
-      () => {
-        child.stdin.removeListener("error", failed);
-        resolve();
-      },
-    );
-  });
-
-  await waitForServer(`${localUrl}/health`, {
-    isProcessAlive: () => Boolean(rendererProcess && rendererProcess.exitCode === null),
-  });
-  return localUrl;
+  return companion.start();
 }
 
 function stopBundledRenderer() {
-  if (!rendererProcess || rendererProcess.exitCode !== null) return;
-  rendererProcess.kill("SIGTERM");
-  rendererProcess = null;
+  companion?.stop();
+  companion = null;
+  companionLog?.close();
+}
+
+// A restart usually reclaims the same port. When it cannot, the renderer
+// origin moves, so the session header follows it and the window reloads from
+// the new origin rather than the dead one.
+function adoptCompanionUrl({ url, changedUrl }) {
+  rendererUrl = url;
+  companionSession?.rebind(url);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (changedUrl) void mainWindow.loadURL(url);
+  else mainWindow.webContents.reload();
+}
+
+async function reportCompanionFailure(reason) {
+  if (isQuitting || companionFailurePending) return;
+  companionFailurePending = true;
+  try {
+    for (;;) {
+      const choice = await showMessage({
+        type: "error",
+        title: "Clawnsole Stopped Working",
+        message: "Clawnsole's local companion stopped and could not be restarted.",
+        detail: `${reason}\n\nReopening Clawnsole starts a fresh companion. Your `
+          + "library and settings stay where they are.",
+        buttons: ["Reopen", "Show Logs", "Quit"],
+        defaultId: 0,
+        cancelId: 2,
+      });
+      if (choice.response === 1) {
+        shell.showItemInFolder(companionLogger().file);
+        continue;
+      }
+      if (choice.response === 0) {
+        isQuitting = true;
+        app.relaunch();
+      }
+      app.quit();
+      return;
+    }
+  } finally {
+    companionFailurePending = false;
+  }
+}
+
+// Settings… and any later section shortcut reach Flutter through the
+// preload's onNavigate bridge. On macOS the window may already be closed, so
+// reopen it first and navigate once it has loaded.
+function openSection(section) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.webContents.send(NAVIGATE_CHANNEL, { section });
+    return;
+  }
+  if (!rendererUrl) return;
+  void createMainWindow().then(() => {
+    mainWindow?.webContents.send(NAVIGATE_CHANNEL, { section });
+  });
+}
+
+// Help-menu destinations go through the same allowlist as every other link
+// the shell hands to macOS.
+function openMenuUrl(url) {
+  if (!isAllowedExternalUrl(url)) return false;
+  void shell.openExternal(url);
+  return true;
 }
 
 function installApplicationMenu() {
-  const template = [
-    {
-      label: APP_NAME,
-      submenu: [
-        { role: "about" },
-        {
-          label: "Check for Updates…",
-          click: () => void checkForUpdates({ manual: true }),
-        },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
+    appName: APP_NAME,
+    isPackaged: app.isPackaged,
+    checkForUpdates: () => void checkForUpdates({ manual: true }),
+    openSettings: () => openSection("settings"),
+    openExternalUrl: (url) => openMenuUrl(url),
+  })));
 }
 
 function showMessage(options) {
-  return mainWindow
+  return mainWindow && !mainWindow.isDestroyed()
     ? dialog.showMessageBox(mainWindow, options)
     : dialog.showMessageBox(options);
 }
@@ -290,6 +342,66 @@ async function startUpdateFromRenderer() {
   }
 }
 
+// A bundle outside /Applications can never replace itself: Gatekeeper runs a
+// freshly downloaded copy from a read-only randomized path, and everywhere
+// else the swap trips over permissions. Offer the move once and remember a
+// decline so the prompt never becomes nagging.
+async function offerApplicationsMove() {
+  if (!app.isPackaged || IS_SMOKE_TEST) return;
+  if (typeof app.isInApplicationsFolder !== "function") return;
+  if (app.isInApplicationsFolder()) return;
+  const userData = app.getPath("userData");
+  if (applicationsMoveDeclined(userData)) return;
+  const choice = await showMessage({
+    type: "question",
+    title: "Move Clawnsole to Applications?",
+    message: "Clawnsole is not in your Applications folder.",
+    detail: "Clawnsole can only install its own updates from the Applications "
+      + "folder. Moving it now takes a moment and reopens Clawnsole.",
+    buttons: ["Move to Applications", "Not Now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (choice.response !== 0) {
+    try {
+      rememberApplicationsMoveDeclined(userData);
+    } catch {
+      // A prompt shown twice is better than a failed launch.
+    }
+    return;
+  }
+  try {
+    // A successful move relaunches Clawnsole from its new home.
+    app.moveToApplicationsFolder();
+  } catch (error) {
+    await showMessage({
+      type: "warning",
+      title: "Clawnsole Was Not Moved",
+      message: "Clawnsole could not move itself to the Applications folder.",
+      detail: `${error instanceof Error ? error.message : String(error)}\n\n`
+        + INSTALL_LOCATION_HELP,
+    });
+  }
+}
+
+// The post-quit swap helper leaves its report beside the staged update. This
+// is the launch that consumes it, so a failed in-place update is never silent.
+async function reportPreviousUpdate() {
+  if (!app.isPackaged) return;
+  let result = null;
+  try {
+    result = updater.consumeSwapResult();
+  } catch {
+    result = null;
+  }
+  if (!result) return;
+  await showMessage({
+    type: result.ok ? "info" : "warning",
+    title: "Clawnsole Updates",
+    message: result.message,
+  });
+}
+
 // Moving the companion's data directory must happen here: the companion
 // reads --data-file once at startup, so after the files are migrated the app
 // records the choice and relaunches against the new location. Confirmation
@@ -363,28 +475,15 @@ async function chooseDataDirectory() {
 // and the Flutter app binds to it, so the smoke test treats either half being
 // absent as a packaging failure. Flutter boots asynchronously, so poll.
 async function verifyRendererBridge(timeoutMs = 40_000) {
+  const probe = `[${
+    BRIDGE_MEMBERS.map((name) => `typeof window.clawnsole?.${name}`).join(",")
+  }, window.clawnsoleShellReady === true].join(',')`;
+  const expected = `${BRIDGE_MEMBERS.map(() => "function").join(",")},true`;
   const deadline = Date.now() + timeoutMs;
   let shape = "unavailable";
   while (Date.now() < deadline) {
-    shape = await mainWindow?.webContents.executeJavaScript(
-      "[typeof window.clawnsole?.checkForUpdate,"
-      + " typeof window.clawnsole?.startUpdate,"
-      + " typeof window.clawnsole?.onUpdateEvent,"
-      + " typeof window.clawnsole?.authorizeGoogleDrive,"
-      + " typeof window.clawnsole?.disconnectGoogleDrive,"
-      + " typeof window.clawnsole?.settingsVault,"
-      + " typeof window.clawnsole?.openExternalUrl,"
-      + " typeof window.clawnsole?.revealDataFolder,"
-      + " typeof window.clawnsole?.chooseDataDirectory,"
-      + " window.clawnsoleShellReady === true].join(',')",
-    );
-    if (
-      shape
-      === "function,function,function,function,function,function,function,"
-        + "function,function,true"
-    ) {
-      return;
-    }
+    shape = await mainWindow?.webContents.executeJavaScript(probe);
+    if (shape === expected) return;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`The renderer update bridge is missing (saw ${shape}).`);
@@ -433,16 +532,40 @@ function installRendererBridge() {
     }
     return chooseDataDirectory();
   });
+  // Resolves to true only when a banner was actually posted, which is what
+  // the Flutter side awaits before deciding whether to show its own toast.
+  ipcMain.handle(NOTIFY_CHANNEL, (event, payload) => {
+    if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
+    const notification = sanitizeNotification(payload);
+    if (!notification) return false;
+    if (!shouldShowNotification({
+      supported: Notification.isSupported(),
+      windowFocused: mainWindow?.isDestroyed() === false && mainWindow.isFocused(),
+    })) {
+      return false;
+    }
+    const banner = new Notification(notification);
+    banner.on("click", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    banner.show();
+    return true;
+  });
 }
 
-function protectNavigation(window, localRendererUrl) {
+// The renderer origin can move when the companion restarts on a new port, so
+// every guard reads the live value rather than the one captured at startup.
+function protectNavigation(window) {
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 
   window.webContents.on("will-navigate", (event, url) => {
-    if (isAllowedAppUrl(url, localRendererUrl)) return;
+    if (isAllowedAppUrl(url, rendererUrl)) return;
     event.preventDefault();
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
   });
@@ -450,7 +573,7 @@ function protectNavigation(window, localRendererUrl) {
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
 }
 
-async function createMainWindow(localRendererUrl) {
+async function createMainWindow() {
   const window = new BrowserWindow({
     title: APP_NAME,
     width: 1480,
@@ -468,13 +591,23 @@ async function createMainWindow(localRendererUrl) {
     },
   });
 
-  protectNavigation(window, localRendererUrl);
+  protectNavigation(window);
+  installRendererRecovery({
+    window,
+    showMessage,
+    relaunch: () => {
+      isQuitting = true;
+      app.relaunch();
+      app.quit();
+    },
+    quit: () => app.quit(),
+  });
   window.once("ready-to-show", () => window.show());
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
-  await window.loadURL(localRendererUrl);
   mainWindow = window;
+  await window.loadURL(rendererUrl);
 }
 
 async function startApplication() {
@@ -547,18 +680,26 @@ async function startApplication() {
     }
     rendererUrl = DEVELOPMENT_URL;
   }
-  installCompanionSessionHeader(
+  companionSession = installCompanionSessionHeader(
     session.defaultSession.webRequest,
     rendererUrl,
     companionToken,
   );
-  if (!app.isPackaged) await waitForServer(rendererUrl, { timeoutMs: 60_000 });
-  await createMainWindow(rendererUrl);
+  // /health is the companion's only unauthenticated route: every other path,
+  // the app shell included, answers 403 without the session header this
+  // process only ever adds inside Electron's own session.
+  if (!app.isPackaged) {
+    await waitForServer(`${rendererUrl}/health`, { timeoutMs: 60_000 });
+  }
+  await createMainWindow();
   if (IS_SMOKE_TEST) {
     await verifyRendererBridge();
     console.log("Clawnsole packaged smoke test passed.");
     setTimeout(() => app.quit(), 250).unref();
+    return;
   }
+  await reportPreviousUpdate();
+  await offerApplicationsMove();
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -566,15 +707,20 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
+  // Reopening a windowless Clawnsole from the Dock or Finder arrives here as
+  // well as through activate, so both rebuild the window.
   app.on("second-instance", () => {
-    if (!mainWindow) return;
+    if (!mainWindow) {
+      if (rendererUrl) void createMainWindow();
+      return;
+    }
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
   });
 
   app.on("activate", () => {
-    if (!mainWindow && rendererUrl) void createMainWindow(rendererUrl);
+    if (!mainWindow && rendererUrl) void createMainWindow();
   });
 
   app.on("before-quit", () => {
@@ -582,7 +728,12 @@ if (!hasSingleInstanceLock) {
     stopBundledRenderer();
   });
 
-  app.on("window-all-closed", () => app.quit());
+  // macOS keeps an app running without windows: ⌘W closes the window, the
+  // companion keeps serving, and Dock activation reopens it. Only ⌘Q, or a
+  // non-darwin host closing its last window, ends the session.
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
 
   app.whenReady().then(startApplication).catch((error) => {
     console.error(error);

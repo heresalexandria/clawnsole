@@ -17,6 +17,7 @@ class InlineVideoRequest {
     this.deferredUri,
     required this.onDownload,
     this.supportsPhotos = false,
+    this.onShare,
     this.controllerFactory,
     this.frameLoader,
     this.progress,
@@ -32,6 +33,9 @@ class InlineVideoRequest {
   final Future<Uri?>? deferredUri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool supportsPhotos;
+
+  /// Opens the platform share sheet for the film; null hides "Share…".
+  final Future<void> Function()? onShare;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final ValueListenable<double?>? progress;
@@ -196,6 +200,7 @@ class _InlineVideoMediaBoxState extends State<InlineVideoMediaBox> {
                     uri: request.uri!,
                     onDownload: request.onDownload,
                     supportsPhotos: request.supportsPhotos,
+                    onShare: request.onShare,
                     controllerFactory: request.controllerFactory,
                     frameLoader: request.frameLoader,
                     autoplay: true,
@@ -207,6 +212,7 @@ class _InlineVideoMediaBoxState extends State<InlineVideoMediaBox> {
                     uri: request.deferredUri!,
                     onDownload: request.onDownload,
                     supportsPhotos: request.supportsPhotos,
+                    onShare: request.onShare,
                     controllerFactory: request.controllerFactory,
                     frameLoader: request.frameLoader,
                     autoplay: true,

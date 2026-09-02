@@ -73,3 +73,12 @@ ShellUpdater? get shellUpdater {
   }
   return _cached;
 }
+
+/// Section names (`settings`, …) the desktop shell's menu asks the renderer
+/// to open. Empty everywhere but inside the Electron shell.
+Stream<String> get shellNavigationRequests => createShellNavigationStream();
+
+/// Posts a system notification through the desktop shell. False when no
+/// shell is present, so callers can fall back to in-app notices.
+Future<bool> notifyViaShell(String title, String body) =>
+    shellNotify(title, body);

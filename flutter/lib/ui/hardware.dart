@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -41,6 +43,77 @@ const _brushedDark = <Color>[
   Color(0xFFC9CBC9),
 ];
 
+/// The comfortable minimum tap target on touch hardware, in logical pixels.
+///
+/// The console is drawn for a mouse: a switch paints 50×28 and a console key
+/// about 32 tall. Fingers need more, so touch builds grow the *hit* area to
+/// this size around the same artwork.
+const double kHardwareTouchTarget = 44;
+
+/// Whether this build runs on a finger-first platform.
+///
+/// Only phones and tablets grow their hit areas and click their detents;
+/// desktop keeps the drawn console to the pixel. Tests flip this through
+/// `debugDefaultTargetPlatformOverride`.
+bool get isHardwareTouchPlatform =>
+    defaultTargetPlatform == TargetPlatform.iOS ||
+    defaultTargetPlatform == TargetPlatform.android;
+
+/// The small click a detent, toggle, or console key makes under a finger.
+/// Silent everywhere the platform has no taptic hardware.
+void hardwareSelectionFeedback() {
+  if (isHardwareTouchPlatform) {
+    unawaited(HapticFeedback.selectionClick());
+  }
+}
+
+/// Grows a control's hit area to [kHardwareTouchTarget] on touch platforms
+/// without touching what it paints or inks.
+///
+/// The child keeps its drawn size and stays on top, so it still handles the
+/// taps that land on it; a transparent pad behind it catches the near misses.
+/// Desktop gets [child] straight back, so console layouts stay
+/// pixel-identical there.
+class HardwareTouchTarget extends StatelessWidget {
+  const HardwareTouchTarget({
+    required this.onTap,
+    required this.child,
+    super.key,
+    this.minWidth = kHardwareTouchTarget,
+    this.minHeight = kHardwareTouchTarget,
+  });
+
+  /// Repeats what the child's own gesture handler does. A null callback
+  /// (a disabled control) leaves the pad inert.
+  final VoidCallback? onTap;
+  final Widget child;
+  final double minWidth;
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isHardwareTouchPlatform) return child;
+    return ConstrainedBox(
+      constraints: BoxConstraints(minWidth: minWidth, minHeight: minHeight),
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          if (onTap != null)
+            Positioned.fill(
+              child: ExcludeSemantics(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                ),
+              ),
+            ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 const _wellLight = Color(0xFFE2D6BE);
 const _wellDark = Color(0xFF140F0C);
 
@@ -64,8 +137,29 @@ void paintMachinedKnob(
   required Brightness brightness,
   Color? indicator,
   double indicatorAngle = -math.pi / 2,
+  Color? focusGlow,
 }) {
   final dark = brightness == Brightness.dark;
+
+  // Keyboard focus: a brass halo around the rim, the way a lamp catches the
+  // edge of a knob. Painted first so the knob itself stays untouched.
+  if (focusGlow != null) {
+    canvas.drawCircle(
+      center,
+      radius * 1.16,
+      Paint()
+        ..color = focusGlow.withValues(alpha: .5)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * .34),
+    );
+    canvas.drawCircle(
+      center,
+      radius + 1.7,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = focusGlow.withValues(alpha: .85),
+    );
+  }
 
   // Soft drop shadow so the knob sits above the panel.
   canvas.drawCircle(
@@ -175,9 +269,22 @@ void paintMachinedKnob(
   }
 }
 
+/// Jumps a slider to one end of its travel.
+class _SliderEdgeIntent extends Intent {
+  const _SliderEdgeIntent.minimum() : toMaximum = false;
+  const _SliderEdgeIntent.maximum() : toMaximum = true;
+
+  final bool toMaximum;
+}
+
 /// A [Slider] dressed as console hardware: a machined knob traveling a
 /// recessed groove whose filled side lights up plum.
-class HardwareSlider extends StatelessWidget {
+///
+/// The knob is a real slider for assistive tech and the keyboard: it reports
+/// a labelled slider node whose value is spoken in the caller's own units
+/// (see [semanticFormatterCallback]), arrow keys walk one division, Home and
+/// End jump to the ends, and keyboard focus lights a brass halo on the knob.
+class HardwareSlider extends StatefulWidget {
   const HardwareSlider({
     required this.value,
     required this.onChanged,
@@ -186,6 +293,8 @@ class HardwareSlider extends StatelessWidget {
     this.max = 1,
     this.divisions,
     this.label,
+    this.semanticLabel,
+    this.semanticFormatterCallback,
   });
 
   final double value;
@@ -193,44 +302,186 @@ class HardwareSlider extends StatelessWidget {
   final double min;
   final double max;
   final int? divisions;
+
+  /// The value bubble shown while dragging.
   final String? label;
+
+  /// What this knob sets, e.g. 'Duration'. Without it a screen reader
+  /// announces a bare number.
+  final String? semanticLabel;
+
+  /// Speaks a raw value in the caller's units — pass a callback returning
+  /// '10 seconds' rather than letting Material announce its stock "40%".
+  /// Defaults to the plain number at the precision the divisions imply.
+  final SemanticFormatterCallback? semanticFormatterCallback;
+
+  @override
+  State<HardwareSlider> createState() => _HardwareSliderState();
+}
+
+class _HardwareSliderState extends State<HardwareSlider> {
+  late final FocusNode _focus = FocusNode(debugLabel: 'HardwareSlider')
+    ..addListener(_handleFocusChange);
+  bool _focused = false;
+
+  static const Map<ShortcutActivator, Intent> _edgeShortcuts =
+      <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.home): _SliderEdgeIntent.minimum(),
+        SingleActivator(LogicalKeyboardKey.end): _SliderEdgeIntent.maximum(),
+      };
+
+  @override
+  void dispose() {
+    _focus
+      ..removeListener(_handleFocusChange)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (_focus.hasFocus != _focused) {
+      setState(() => _focused = _focus.hasFocus);
+    }
+  }
+
+  bool get _enabled => widget.onChanged != null;
+
+  /// One detent, or a tenth of the travel on a continuous groove.
+  double get _step {
+    final divisions = widget.divisions;
+    final span = widget.max - widget.min;
+    if (divisions != null && divisions > 0) return span / divisions;
+    return span / 10;
+  }
+
+  double _clamp(double value) =>
+      math.min(math.max(value, widget.min), widget.max);
+
+  /// Lands [value] on the nearest detent so keyboard and screen-reader steps
+  /// agree with what dragging produces.
+  double _snap(double value) {
+    final divisions = widget.divisions;
+    if (divisions == null || divisions <= 0) return _clamp(value);
+    final step = (widget.max - widget.min) / divisions;
+    final index = (((value - widget.min) / step).round()).clamp(0, divisions);
+    return widget.min + index * step;
+  }
+
+  int? _detent(double value) {
+    final divisions = widget.divisions;
+    if (divisions == null || divisions <= 0) return null;
+    final step = (widget.max - widget.min) / divisions;
+    return ((value - widget.min) / step).round();
+  }
+
+  String _speak(double value) =>
+      widget.semanticFormatterCallback?.call(value) ?? _plainNumber(value);
+
+  /// Whole seconds read as "6"; a 0.1 upscale factor reads as "2.4".
+  String _plainNumber(double value) {
+    final divisions = widget.divisions;
+    final step = divisions == null || divisions <= 0
+        ? null
+        : (widget.max - widget.min) / divisions;
+    final wholeSteps =
+        step != null &&
+        step == step.roundToDouble() &&
+        widget.min == widget.min.roundToDouble();
+    return wholeSteps ? '${value.round()}' : value.toStringAsFixed(1);
+  }
+
+  void _emit(double value) {
+    final onChanged = widget.onChanged;
+    if (onChanged == null || value == widget.value) return;
+    if (_detent(value) != _detent(widget.value)) hardwareSelectionFeedback();
+    onChanged(value);
+  }
+
+  /// Pointer path: [Slider] has already snapped the value for us.
+  void _handleChanged(double value) {
+    if (_detent(value) != _detent(widget.value)) hardwareSelectionFeedback();
+    widget.onChanged!(value);
+  }
+
+  void _nudge(double delta) => _emit(_snap(_clamp(widget.value + delta)));
 
   @override
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
     final lit = _litPlum(brightness);
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        trackHeight: 9,
-        trackShape: const _RecessedGrooveTrack(),
-        thumbShape: _MachinedKnobThumb(radius: 14, indicator: lit),
-        tickMarkShape: const _GrooveTickMark(),
-        activeTickMarkColor: ClawnsoleColors.cream.withValues(alpha: .55),
-        inactiveTickMarkColor: brightness == Brightness.dark
-            ? ClawnsoleColors.creamMuted.withValues(alpha: .3)
-            : const Color(0xFF6B5E4C).withValues(alpha: .4),
-        overlayShape: const RoundSliderOverlayShape(overlayRadius: 23),
-        activeTrackColor: lit,
-        inactiveTrackColor: _well(brightness),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-      ),
-      child: Slider(
-        value: value,
-        min: min,
-        max: max,
-        divisions: divisions,
-        label: label,
-        onChanged: onChanged,
+    final increased = _snap(_clamp(widget.value + _step));
+    final decreased = _snap(_clamp(widget.value - _step));
+    return Semantics(
+      container: true,
+      slider: true,
+      enabled: _enabled,
+      focusable: _enabled,
+      focused: _focused,
+      label: widget.semanticLabel,
+      value: _speak(widget.value),
+      increasedValue: _speak(increased),
+      decreasedValue: _speak(decreased),
+      onIncrease: _enabled ? () => _nudge(_step) : null,
+      onDecrease: _enabled ? () => _nudge(-_step) : null,
+      // The groove owns the announcement; Material's own slider node would
+      // otherwise repeat it as a bare percentage.
+      excludeSemantics: true,
+      child: Shortcuts(
+        shortcuts: _edgeShortcuts,
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            _SliderEdgeIntent: CallbackAction<_SliderEdgeIntent>(
+              onInvoke: (intent) {
+                _emit(intent.toMaximum ? widget.max : widget.min);
+                return null;
+              },
+            ),
+          },
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 9,
+              trackShape: const _RecessedGrooveTrack(),
+              thumbShape: _MachinedKnobThumb(
+                radius: 14,
+                indicator: lit,
+                focusGlow: _focused && _enabled ? context.tokens.brass : null,
+              ),
+              tickMarkShape: const _GrooveTickMark(),
+              activeTickMarkColor: ClawnsoleColors.cream.withValues(alpha: .55),
+              inactiveTickMarkColor: brightness == Brightness.dark
+                  ? ClawnsoleColors.creamMuted.withValues(alpha: .3)
+                  : const Color(0xFF6B5E4C).withValues(alpha: .4),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 23),
+              activeTrackColor: lit,
+              inactiveTrackColor: _well(brightness),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            ),
+            child: Slider(
+              value: widget.value,
+              min: widget.min,
+              max: widget.max,
+              divisions: widget.divisions,
+              label: widget.label,
+              focusNode: _focus,
+              onChanged: _enabled ? _handleChanged : null,
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
 class _MachinedKnobThumb extends SliderComponentShape {
-  const _MachinedKnobThumb({required this.radius, required this.indicator});
+  const _MachinedKnobThumb({
+    required this.radius,
+    required this.indicator,
+    this.focusGlow,
+  });
 
   final double radius;
   final Color indicator;
+  final Color? focusGlow;
 
   @override
   Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
@@ -259,8 +510,21 @@ class _MachinedKnobThumb extends SliderComponentShape {
           ? Brightness.dark
           : Brightness.light,
       indicator: indicator.withValues(alpha: enableAnimation.value),
+      focusGlow: focusGlow,
     );
   }
+
+  // Value equality keeps an unchanged groove out of a needless repaint, and
+  // lets a test see the focus halo arrive.
+  @override
+  bool operator ==(Object other) =>
+      other is _MachinedKnobThumb &&
+      other.radius == radius &&
+      other.indicator == indicator &&
+      other.focusGlow == focusGlow;
+
+  @override
+  int get hashCode => Object.hash(radius, indicator, focusGlow);
 }
 
 class _RecessedGrooveTrack extends SliderTrackShape with BaseSliderTrackShape {
@@ -382,15 +646,28 @@ class _GrooveTickMark extends SliderTickMarkShape {
 
 /// A metallic toggle: a machined handle sliding in a recessed well whose
 /// active side lights up hunter green.
+///
+/// Reads to assistive tech as one labelled switch, takes Space or Enter from
+/// the keyboard, and on touch platforms answers to a finger-sized area
+/// around the drawn 50×28 well.
 class HardwareSwitch extends StatefulWidget {
   const HardwareSwitch({
     required this.value,
     required this.onChanged,
     super.key,
+    this.semanticLabel,
+    this.canRequestFocus = true,
   });
 
   final bool value;
   final ValueChanged<bool>? onChanged;
+
+  /// What this switch turns on, e.g. 'Synchronized audio'.
+  final String? semanticLabel;
+
+  /// Set false when an enclosing row already owns the focus stop — see
+  /// [HardwareSwitchTile], where the whole row toggles.
+  final bool canRequestFocus;
 
   @override
   State<HardwareSwitch> createState() => _HardwareSwitchState();
@@ -422,31 +699,43 @@ class _HardwareSwitchState extends State<HardwareSwitch>
     super.dispose();
   }
 
+  void _toggle() {
+    hardwareSelectionFeedback();
+    widget.onChanged!(!widget.value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onChanged != null;
     final brightness = Theme.of(context).brightness;
-    return Semantics(
-      container: true,
-      enabled: enabled,
-      toggled: widget.value,
-      child: Opacity(
-        opacity: enabled ? 1 : .45,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(999),
-          onTap: enabled ? () => widget.onChanged!(!widget.value) : null,
-          child: Padding(
-            padding: const EdgeInsets.all(3),
-            child: AnimatedBuilder(
-              animation: _position,
-              builder: (context, _) => CustomPaint(
-                size: const Size(50, 28),
-                painter: _SwitchPainter(
-                  t: Curves.easeOut.transform(_position.value),
-                  brightness: brightness,
-                  // The money green, tuned per mode: a signal lamp on paper,
-                  // the cost panel's felt at night.
-                  lit: context.tokens.switchOn,
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        enabled: enabled,
+        toggled: widget.value,
+        label: widget.semanticLabel,
+        child: Opacity(
+          opacity: enabled ? 1 : .45,
+          child: HardwareTouchTarget(
+            onTap: enabled ? _toggle : null,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              canRequestFocus: widget.canRequestFocus,
+              onTap: enabled ? _toggle : null,
+              child: Padding(
+                padding: const EdgeInsets.all(3),
+                child: AnimatedBuilder(
+                  animation: _position,
+                  builder: (context, _) => CustomPaint(
+                    size: const Size(50, 28),
+                    painter: _SwitchPainter(
+                      t: Curves.easeOut.transform(_position.value),
+                      brightness: brightness,
+                      // The money green, tuned per mode: a signal lamp on
+                      // paper, the cost panel's felt at night.
+                      lit: context.tokens.switchOn,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -460,6 +749,11 @@ class _HardwareSwitchState extends State<HardwareSwitch>
 /// A two-position labeled switch set into a recessed console well. The
 /// selected option rides on a brushed-metal carriage instead of using a flat
 /// segmented-control fill.
+///
+/// Each half is one node in a mutually exclusive group, so a screen reader
+/// says "AUTO, selected" rather than reading the label twice. On touch
+/// platforms the well keeps its drawn 36 px height inside a finger-sized
+/// 44 px band.
 class HardwareChoiceSwitch extends StatelessWidget {
   const HardwareChoiceSwitch({
     required this.firstLabel,
@@ -469,6 +763,7 @@ class HardwareChoiceSwitch extends StatelessWidget {
     super.key,
     this.firstKey,
     this.secondKey,
+    this.semanticLabel,
   });
 
   final String firstLabel;
@@ -478,6 +773,15 @@ class HardwareChoiceSwitch extends StatelessWidget {
   final Key? firstKey;
   final Key? secondKey;
 
+  /// What the pair chooses between, e.g. 'Duration mode'. Spoken as a hint
+  /// on each half so the group has a name.
+  final String? semanticLabel;
+
+  void _select(bool first) {
+    if (first != firstSelected) hardwareSelectionFeedback();
+    onChanged!(first);
+  }
+
   @override
   Widget build(BuildContext context) {
     final enabled = onChanged != null;
@@ -486,106 +790,142 @@ class HardwareChoiceSwitch extends StatelessWidget {
     final selectedText = dark
         ? const Color(0xFF242025)
         : ClawnsoleColors.plumInk;
+    final well = Container(
+      width: 164,
+      height: 36,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _well(brightness),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: Colors.black.withValues(alpha: dark ? .5 : .18),
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: _wellShadowAlpha(brightness)),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: dark ? .06 : .75),
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: <Widget>[
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            alignment: firstSelected
+                ? Alignment.centerLeft
+                : Alignment.centerRight,
+            child: FractionallySizedBox(
+              widthFactor: .5,
+              heightFactor: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: .38),
+                  ),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: dark
+                        ? const <Color>[
+                            Color(0xFFD0D1CF),
+                            Color(0xFF92959A),
+                            Color(0xFFBFC1BF),
+                          ]
+                        : const <Color>[
+                            Color(0xFFF3F4F2),
+                            Color(0xFFB6B9BD),
+                            Color(0xFFE1E2E0),
+                          ],
+                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: dark ? .5 : .3),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1.5),
+                    ),
+                    BoxShadow(
+                      color: context.tokens.switchOn.withValues(alpha: .35),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _HardwareChoice(
+                  key: firstKey,
+                  label: firstLabel,
+                  selected: firstSelected,
+                  enabled: enabled,
+                  selectedText: selectedText,
+                  groupLabel: semanticLabel,
+                  onTap: () => _select(true),
+                ),
+              ),
+              Expanded(
+                child: _HardwareChoice(
+                  key: secondKey,
+                  label: secondLabel,
+                  selected: !firstSelected,
+                  enabled: enabled,
+                  selectedText: selectedText,
+                  groupLabel: semanticLabel,
+                  onTap: () => _select(false),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
     return Opacity(
       opacity: enabled ? 1 : .55,
-      child: Container(
-        width: 164,
-        height: 36,
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: _well(brightness),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: Colors.black.withValues(alpha: dark ? .5 : .18),
-          ),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withValues(
-                alpha: _wellShadowAlpha(brightness),
-              ),
-              blurRadius: 3,
-              offset: const Offset(0, 1),
-            ),
-            BoxShadow(
-              color: Colors.white.withValues(alpha: dark ? .06 : .75),
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: <Widget>[
-            AnimatedAlign(
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
-              alignment: firstSelected
-                  ? Alignment.centerLeft
-                  : Alignment.centerRight,
-              child: FractionallySizedBox(
-                widthFactor: .5,
-                heightFactor: 1,
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(7),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: .38),
-                    ),
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: dark
-                          ? const <Color>[
-                              Color(0xFFD0D1CF),
-                              Color(0xFF92959A),
-                              Color(0xFFBFC1BF),
-                            ]
-                          : const <Color>[
-                              Color(0xFFF3F4F2),
-                              Color(0xFFB6B9BD),
-                              Color(0xFFE1E2E0),
-                            ],
-                    ),
-                    boxShadow: <BoxShadow>[
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: dark ? .5 : .3),
-                        blurRadius: 3,
-                        offset: const Offset(0, 1.5),
+      child: isHardwareTouchPlatform
+          // Touch keeps the drawn 36 px well and hangs a finger-sized band
+          // behind it, split down the middle so a near miss still picks the
+          // right half. A locked switch gets the same band, unpressable, so
+          // nothing shifts when the layout locks it to Manual.
+          ? SizedBox(
+              width: 164,
+              height: kHardwareTouchTarget,
+              child: Stack(
+                children: <Widget>[
+                  if (enabled)
+                    Positioned.fill(
+                      child: ExcludeSemantics(
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _select(true),
+                              ),
+                            ),
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () => _select(false),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      BoxShadow(
-                        color: context.tokens.switchOn.withValues(alpha: .35),
-                        blurRadius: 4,
-                      ),
-                    ],
-                  ),
-                ),
+                    ),
+                  Center(child: well),
+                ],
               ),
-            ),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: _HardwareChoice(
-                    key: firstKey,
-                    label: firstLabel,
-                    selected: firstSelected,
-                    enabled: enabled,
-                    selectedText: selectedText,
-                    onTap: () => onChanged!(true),
-                  ),
-                ),
-                Expanded(
-                  child: _HardwareChoice(
-                    key: secondKey,
-                    label: secondLabel,
-                    selected: !firstSelected,
-                    enabled: enabled,
-                    selectedText: selectedText,
-                    onTap: () => onChanged!(false),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+            )
+          : well,
     );
   }
 }
@@ -598,6 +938,7 @@ class _HardwareChoice extends StatelessWidget {
     required this.selectedText,
     required this.onTap,
     super.key,
+    this.groupLabel,
   });
 
   final String label;
@@ -605,24 +946,36 @@ class _HardwareChoice extends StatelessWidget {
   final bool enabled;
   final Color selectedText;
   final VoidCallback onTap;
+  final String? groupLabel;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    button: true,
-    selected: selected,
-    enabled: enabled,
-    label: label,
-    child: InkWell(
-      borderRadius: BorderRadius.circular(7),
-      onTap: enabled ? onTap : null,
-      child: Center(
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: .7,
-            color: selected ? selectedText : context.colors.onSurfaceVariant,
+  Widget build(BuildContext context) => MergeSemantics(
+    child: Semantics(
+      container: true,
+      button: true,
+      inMutuallyExclusiveGroup: true,
+      selected: selected,
+      enabled: enabled,
+      label: label,
+      hint: groupLabel,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(7),
+        onTap: enabled ? onTap : null,
+        // The label is already spoken above; without this the carriage
+        // announces itself twice ("AUTO AUTO").
+        child: ExcludeSemantics(
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .7,
+                color: selected
+                    ? selectedText
+                    : context.colors.onSurfaceVariant,
+              ),
+            ),
           ),
         ),
       ),
@@ -710,6 +1063,9 @@ class _SwitchPainter extends CustomPainter {
 
 /// A labeled switch row: title and subtitle on the left, the metallic switch
 /// on the right. The whole row toggles.
+///
+/// The row is one merged switch node — title as the label, subtitle as the
+/// hint — with a single focus stop that Space or Enter throws.
 class HardwareSwitchTile extends StatelessWidget {
   const HardwareSwitchTile({
     required this.title,
@@ -717,6 +1073,7 @@ class HardwareSwitchTile extends StatelessWidget {
     required this.onChanged,
     super.key,
     this.subtitle,
+    this.semanticLabel,
   });
 
   final String title;
@@ -724,43 +1081,78 @@ class HardwareSwitchTile extends StatelessWidget {
   final bool value;
   final ValueChanged<bool>? onChanged;
 
+  /// Overrides [title] as the spoken name, for titles that only read well
+  /// with their surrounding section.
+  final String? semanticLabel;
+
+  /// The switch grows to [kHardwareTouchTarget] under a finger, so the row
+  /// gives back the same padding and keeps its drawn height.
+  static const double _switchBoxHeight = 34;
+
   @override
   Widget build(BuildContext context) {
     final enabled = onChanged != null;
-    return InkWell(
-      borderRadius: BorderRadius.circular(11),
-      onTap: enabled ? () => onChanged!(!value) : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+    final inset = isHardwareTouchPlatform
+        ? math.max(0.0, 8 - (kHardwareTouchTarget - _switchBoxHeight) / 2)
+        : 8.0;
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        toggled: value,
+        enabled: enabled,
+        label: semanticLabel ?? title,
+        hint: subtitle,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(11),
+          onTap: enabled
+              ? () {
+                  hardwareSelectionFeedback();
+                  onChanged!(!value);
+                }
+              : null,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: inset),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  // The row already speaks these; repeating them would read
+                  // the title twice.
+                  child: ExcludeSemantics(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (subtitle != null) ...<Widget>[
+                          const SizedBox(height: 1),
+                          Text(
+                            subtitle!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: context.colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (subtitle != null) ...<Widget>[
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                ExcludeSemantics(
+                  child: HardwareSwitch(
+                    value: value,
+                    onChanged: onChanged,
+                    canRequestFocus: false,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            HardwareSwitch(value: value, onChanged: onChanged),
-          ],
+          ),
         ),
       ),
     );
@@ -772,26 +1164,54 @@ class HardwareSwitchTile extends StatelessWidget {
 /// with ink numerals in light mode and a dark pane with cream numerals in
 /// dark mode, so neither mode gets a foreign-looking island.
 class CounterReadout extends StatelessWidget {
-  const CounterReadout(this.text, {super.key, this.unit});
+  const CounterReadout(
+    this.text, {
+    super.key,
+    this.unit,
+    this.semanticLabel,
+    this.unitLabel,
+  });
 
   final String text;
   final String? unit;
 
+  /// What the window counts, e.g. 'Frame rate'. Without it the numerals are
+  /// announced bare.
+  final String? semanticLabel;
+
+  /// The spoken form of [unit], e.g. 'frames per second' for `fps`.
+  final String? unitLabel;
+
+  /// The window's one-node announcement: numerals plus a pronounceable unit.
+  String get _spoken {
+    final spokenUnit = unitLabel ?? unit;
+    return spokenUnit == null ? text : '$text $spokenUnit';
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: _readoutWindowDecoration(dark),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(text, style: _readoutNumeralStyle(context, dark)),
-          if (unit != null) ...<Widget>[
-            const SizedBox(width: 4),
-            Text(unit!, style: _readoutUnitStyle(context, dark)),
+    return Semantics(
+      container: true,
+      readOnly: true,
+      label: semanticLabel,
+      value: _spoken,
+      // One node for the whole window; the numerals and the unit would
+      // otherwise be read as two unrelated scraps.
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: _readoutWindowDecoration(dark),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(text, style: _readoutNumeralStyle(context, dark)),
+            if (unit != null) ...<Widget>[
+              const SizedBox(width: 4),
+              Text(unit!, style: _readoutUnitStyle(context, dark)),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -849,6 +1269,8 @@ class CounterReadoutField extends StatefulWidget {
     this.fieldKey,
     this.enabled = true,
     this.onEditingStarted,
+    this.semanticLabel,
+    this.unitLabel,
   });
 
   /// The committed value to display while not editing (may be non-numeric,
@@ -866,6 +1288,13 @@ class CounterReadoutField extends StatefulWidget {
   /// Called when the field gains focus, before any digits arrive — the hook
   /// that lets an AUTO readout drop to manual the moment it is touched.
   final VoidCallback? onEditingStarted;
+
+  /// What the window counts, e.g. 'Duration'. Without it the field is
+  /// announced as an unnamed edit box.
+  final String? semanticLabel;
+
+  /// The spoken form of [unit], e.g. 'seconds' for `s`.
+  final String? unitLabel;
 
   @override
   State<CounterReadoutField> createState() => _CounterReadoutFieldState();
@@ -926,42 +1355,66 @@ class _CounterReadoutFieldState extends State<CounterReadoutField> {
     }
   }
 
+  /// 'Duration, seconds' — the field itself supplies the number and the
+  /// "editable" role.
+  String? get _label {
+    final spokenUnit = widget.unitLabel ?? widget.unit;
+    final parts = <String>[
+      if (widget.semanticLabel != null) widget.semanticLabel!,
+      if (spokenUnit != null) spokenUnit,
+    ];
+    return parts.isEmpty ? null : parts.join(', ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return Opacity(
-      opacity: widget.enabled ? 1 : .55,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: _readoutWindowDecoration(dark),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            SizedBox(
-              width: 46,
-              child: TextField(
-                key: widget.fieldKey,
-                controller: _text,
-                focusNode: _focus,
-                enabled: widget.enabled,
-                keyboardType: TextInputType.number,
-                inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.digitsOnly,
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        enabled: widget.enabled,
+        label: _label,
+        child: Opacity(
+          opacity: widget.enabled ? 1 : .55,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: _readoutWindowDecoration(dark),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                SizedBox(
+                  width: 46,
+                  child: TextField(
+                    key: widget.fieldKey,
+                    controller: _text,
+                    focusNode: _focus,
+                    enabled: widget.enabled,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: <TextInputFormatter>[
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    textAlign: TextAlign.right,
+                    style: _readoutNumeralStyle(context, dark),
+                    cursorColor: dark
+                        ? ClawnsoleColors.cream
+                        : context.colors.onSurface,
+                    decoration: null,
+                    onSubmitted: (_) => _commit(),
+                  ),
+                ),
+                if (widget.unit != null) ...<Widget>[
+                  const SizedBox(width: 4),
+                  // Spoken by the label above, in words rather than 's'.
+                  ExcludeSemantics(
+                    child: Text(
+                      widget.unit!,
+                      style: _readoutUnitStyle(context, dark),
+                    ),
+                  ),
                 ],
-                textAlign: TextAlign.right,
-                style: _readoutNumeralStyle(context, dark),
-                cursorColor: dark
-                    ? ClawnsoleColors.cream
-                    : context.colors.onSurface,
-                decoration: null,
-                onSubmitted: (_) => _commit(),
-              ),
+              ],
             ),
-            if (widget.unit != null) ...<Widget>[
-              const SizedBox(width: 4),
-              Text(widget.unit!, style: _readoutUnitStyle(context, dark)),
-            ],
-          ],
+          ),
         ),
       ),
     );

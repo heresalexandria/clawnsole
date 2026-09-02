@@ -201,13 +201,82 @@ Uri validatedProviderUrl(String value) {
   if (url == null ||
       url.scheme != 'https' ||
       host.isEmpty ||
-      host == 'localhost' ||
-      host == '127.0.0.1' ||
-      host == '::1' ||
-      host.endsWith('.local')) {
+      !isPublicProviderHost(host)) {
     throw const ProviderException('The provider URL is invalid.', status: 400);
   }
   return url;
+}
+
+/// Whether [host] can only name a public endpoint. Provider payloads decide
+/// where media is fetched from, and the companion streams the response back,
+/// so anything that could reach loopback, a private network, link-local or
+/// cloud-metadata addresses — including the alternate spellings of loopback
+/// (`127.1`, `2130706433`, `0x7f000001`, `[::ffff:127.0.0.1]`) — is refused.
+bool isPublicProviderHost(String host) {
+  final name = host.toLowerCase().trim();
+  if (name.isEmpty) return false;
+  if (name == 'localhost' ||
+      name.endsWith('.localhost') ||
+      name.endsWith('.local') ||
+      name.endsWith('.internal') ||
+      name.endsWith('.home.arpa') ||
+      name == 'metadata' ||
+      name == 'instance-data') {
+    return false;
+  }
+  if (name.contains(':')) return _isPublicIpv6(name);
+  // A host made only of digits, dots, or hex prefixes is an IPv4 literal in
+  // one of its many encodings; anything but a public dotted quad is refused.
+  if (RegExp(r'^[0-9a-fx.]+$').hasMatch(name) &&
+      RegExp(r'^[0-9]').hasMatch(name)) {
+    final octets = name.split('.');
+    if (octets.length != 4) return false;
+    final values = <int>[];
+    for (final octet in octets) {
+      if (!RegExp(r'^[0-9]{1,3}$').hasMatch(octet)) return false;
+      final parsed = int.parse(octet);
+      if (parsed > 255) return false;
+      values.add(parsed);
+    }
+    return _isPublicIpv4(values);
+  }
+  return true;
+}
+
+bool _isPublicIpv4(List<int> o) {
+  if (o[0] == 0 || o[0] == 10 || o[0] == 127) return false;
+  if (o[0] == 100 && o[1] >= 64 && o[1] <= 127) return false;
+  if (o[0] == 169 && o[1] == 254) return false;
+  if (o[0] == 172 && o[1] >= 16 && o[1] <= 31) return false;
+  if (o[0] == 192 && o[1] == 168) return false;
+  if (o[0] == 192 && o[1] == 0 && (o[2] == 0 || o[2] == 2)) return false;
+  if (o[0] == 198 && (o[1] == 18 || o[1] == 19)) return false;
+  if (o[0] == 198 && o[1] == 51 && o[2] == 100) return false;
+  if (o[0] == 203 && o[1] == 0 && o[2] == 113) return false;
+  if (o[0] >= 224) return false;
+  return true;
+}
+
+bool _isPublicIpv6(String address) {
+  final normalized = address.replaceAll('[', '').replaceAll(']', '');
+  if (normalized == '::' || normalized == '::1') return false;
+  final mapped = RegExp(
+    r'^::ffff:(\d+\.\d+\.\d+\.\d+)$',
+  ).firstMatch(normalized);
+  if (mapped != null) return isPublicProviderHost(mapped.group(1)!);
+  if (normalized.startsWith('::ffff:')) return false;
+  final head = normalized.split(':').first;
+  if (head.isEmpty) return false;
+  if (head.startsWith('fc') || head.startsWith('fd')) return false;
+  if (head.startsWith('fe8') ||
+      head.startsWith('fe9') ||
+      head.startsWith('fea') ||
+      head.startsWith('feb') ||
+      head.startsWith('fec')) {
+    return false;
+  }
+  if (head.startsWith('ff')) return false;
+  return true;
 }
 
 double? normalizedProgress(Object? value) {

@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 
 import 'asset_extensions.dart';
+import 'atomic_file.dart';
 import 'durable_data_store.dart';
 import 'models.dart';
 
@@ -23,9 +24,25 @@ class LocalDataStore implements DurableDataStore {
   File? _cachedFile;
 
   Future<Directory> _defaultRoot() async {
-    final documents =
-        _documentsOverride ?? await getApplicationDocumentsDirectory();
-    return Directory('${documents.path}${Platform.pathSeparator}Clawnsole');
+    final separator = Platform.pathSeparator;
+    if (_documentsOverride != null) {
+      return Directory('${_documentsOverride.path}${separator}Clawnsole');
+    }
+    final documents = await getApplicationDocumentsDirectory();
+    final legacy = Directory('${documents.path}${separator}Clawnsole');
+    if (!Platform.isWindows) return legacy;
+    // On Windows, Documents is routinely redirected into OneDrive, which
+    // uploads every retained film, dehydrates assets on demand, and holds
+    // sync locks that race whole-file rewrites. New installs therefore live
+    // in %LOCALAPPDATA%; an existing Documents library (or its relocation
+    // pointer) keeps being honoured so nothing moves underneath a user.
+    final localAppData = Platform.environment['LOCALAPPDATA']?.trim() ?? '';
+    if (localAppData.isEmpty) return legacy;
+    if (await File('${legacy.path}$separator$dataFileName').exists() ||
+        await File('${legacy.path}$separator$locationFileName').exists()) {
+      return legacy;
+    }
+    return Directory('$localAppData${separator}Clawnsole');
   }
 
   /// Resolves the active data directory: the pointer file's target when it
@@ -134,15 +151,11 @@ class LocalDataStore implements DurableDataStore {
     final root = await _defaultRoot();
     await root.create(recursive: true);
     final pointer = File('${root.path}$separator$locationFileName');
-    final temporary = File(
-      '${pointer.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
-    );
-    await temporary.writeAsString(
+    await writeTextAtomically(
+      pointer,
       jsonEncode(<String, String>{'dataDirectory': targetPath}),
-      flush: true,
+      keepBackup: false,
     );
-    if (await pointer.exists()) await pointer.delete();
-    await temporary.rename(pointer.path);
     _cachedFile = targetFile;
   }
 
@@ -344,9 +357,9 @@ class LocalDataStore implements DurableDataStore {
   @override
   Future<StoredData> read() async {
     final file = await _file();
-    if (!await file.exists()) return const StoredData();
     try {
-      return StoredData.decode(await file.readAsString());
+      return await readTextWithFallback(file, StoredData.decode) ??
+          const StoredData();
     } on FormatException {
       throw StateError(
         'Clawnsole could not read ${file.path}. The JSON file is malformed.',
@@ -354,16 +367,12 @@ class LocalDataStore implements DurableDataStore {
     }
   }
 
+  /// The data file is the only durable copy of every generation receipt, so
+  /// it is replaced atomically with the previous contents kept beside it;
+  /// a crash mid-write can no longer leave the library looking empty.
   @override
   Future<void> write(StoredData data) async {
-    final file = await _file();
-    await file.parent.create(recursive: true);
-    final temporary = File(
-      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp',
-    );
-    await temporary.writeAsString(data.encode(), flush: true);
-    if (await file.exists()) await file.delete();
-    await temporary.rename(file.path);
+    await writeTextAtomically(await _file(), data.encode());
   }
 
   @override

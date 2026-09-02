@@ -147,6 +147,8 @@ class _GenerationAppearanceCard extends StatelessWidget {
                   labelText: 'Generation Placeholder',
                   helperText:
                       'Static recreates analog broadcast snow; Cyclone keeps the luminous ribbon field.',
+                  // Phones would otherwise ellipsize this after "sno…".
+                  helperMaxLines: 3,
                 ),
                 items: GenerationPlaceholderStyle.values
                     .map(
@@ -194,7 +196,7 @@ class _ProviderAccessCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   const Text(
-                    'Provider access moved to its own desk',
+                    'Provider keys and costs',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                   ),
                   SizedBox(height: 4),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,6 +10,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
+import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'formatters.dart';
@@ -94,25 +96,41 @@ class _CreateScreenState extends State<CreateScreen> {
       builder: (context, constraints) {
         final short = _isShort(context);
         final pad = constraints.maxWidth < 620 ? 16.0 : (short ? 20.0 : 28.0);
-        return SingleChildScrollView(
-          controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(pad, short ? 10 : pad, pad, pad),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  _CreateHeading(controller: controller),
-                  SizedBox(height: short ? 8 : 18),
-                  _Composer(controller: controller),
-                  SizedBox(height: short ? 12 : 24),
-                  _RecentWork(
-                    controller: controller,
-                    itemLimit: _itemLimit,
-                    onLoadMore: _loadMore,
-                  ),
-                ],
+        // ⌘/Ctrl+Enter (mapped app-wide) runs the form from anywhere on this
+        // screen, including inside the prompt field.
+        return Actions(
+          actions: <Type, Action<Intent>>{
+            GenerateIntent: CallbackAction<GenerateIntent>(
+              onInvoke: (_) {
+                if (!controller.submitting) {
+                  unawaited(
+                    _submitWithProviderRetentionWarning(context, controller),
+                  );
+                }
+                return null;
+              },
+            ),
+          },
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            padding: EdgeInsets.fromLTRB(pad, short ? 10 : pad, pad, pad),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _CreateHeading(controller: controller),
+                    SizedBox(height: short ? 8 : 18),
+                    _Composer(controller: controller),
+                    SizedBox(height: short ? 12 : 24),
+                    _RecentWork(
+                      controller: controller,
+                      itemLimit: _itemLimit,
+                      onLoadMore: _loadMore,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -156,9 +174,18 @@ class _CreateHeading extends StatelessWidget {
                     ? Theme.of(context).textTheme.headlineLarge
                     : Theme.of(context).textTheme.displayLarge,
               ),
+              // A studio with nothing to render with yet explains the
+              // bring-your-own-key model here, in the description's slot, so
+              // the composer keeps its place above the fold.
+              if (!short &&
+                  controller.needsProviderSetup &&
+                  !controller.selectedProvider.isLocal) ...<Widget>[
+                const SizedBox(height: 10),
+                _FirstRunGuidance(controller: controller),
+              ]
               // Short viewports drop the description so the composer itself
               // stays above the fold.
-              if (!short) ...<Widget>[
+              else if (!short) ...<Widget>[
                 const SizedBox(height: 10),
                 Text(
                   controller.selectedProvider.isLocal
@@ -718,8 +745,11 @@ class _ComposerState extends State<_Composer> {
             onTap: () => setState(() => _showVideoPanel = true),
           )
         : null;
+    // Enhancing needs a saved draft to pick from; on a fresh studio the link
+    // would only open an empty picker.
     final draftAction =
-        controller.selectedModel.modes.contains(VideoMode.draftEnhance)
+        controller.selectedModel.modes.contains(VideoMode.draftEnhance) &&
+            (controller.hasDraftEnhanceCandidates || draftActive)
         ? _QuietAction(
             icon: Icons.auto_fix_high_rounded,
             label: 'Or enhance a saved draft',
@@ -948,62 +978,75 @@ class _FullscreenPromptEditor extends StatelessWidget {
     final horizontalPadding = MediaQuery.sizeOf(context).width < 620
         ? 14.0
         : 24.0;
-    return Material(
-      key: const ValueKey('prompt-fullscreen-editor'),
-      type: MaterialType.transparency,
-      child: AppBackdrop(
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: SafeArea(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                12,
-                horizontalPadding,
-                16,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  FieldLabel(
-                    upscaling ? 'Detail guidance · optional' : 'Direction',
-                    icon: Icons.edit_note_rounded,
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        _PromptCharacterCounter(controller: controller),
-                        IconButton(
-                          key: const ValueKey('prompt-fullscreen-minimize'),
-                          tooltip: 'Minimize prompt',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => Navigator.of(context).pop(),
-                          icon: const Icon(Icons.fullscreen_exit_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ReferencePromptField(
-                      key: ValueKey(
-                        'generation-prompt-fullscreen-'
-                        '${controller.formRevision}',
+    // The barrier is deliberately not dismissible (a stray click must not
+    // lose the editor mid-thought), but Escape is an explicit request.
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        DismissIntent: CallbackAction<DismissIntent>(
+          onInvoke: (_) {
+            Navigator.of(context).pop();
+            return null;
+          },
+        ),
+      },
+      child: Material(
+        key: const ValueKey('prompt-fullscreen-editor'),
+        type: MaterialType.transparency,
+        child: AppBackdrop(
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  12,
+                  horizontalPadding,
+                  16,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    FieldLabel(
+                      upscaling ? 'Detail guidance · optional' : 'Direction',
+                      icon: Icons.edit_note_rounded,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          _PromptCharacterCounter(controller: controller),
+                          IconButton(
+                            key: const ValueKey('prompt-fullscreen-minimize'),
+                            tooltip: 'Minimize prompt',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.fullscreen_exit_rounded),
+                          ),
+                        ],
                       ),
-                      prompt: controller.form.prompt,
-                      formRevision: controller.formRevision,
-                      references: _promptReferenceOptions(controller),
-                      expands: true,
-                      autofocus: true,
-                      maxLength: controller.selectedModel.maxPromptCharacters,
-                      onChanged: (value) =>
-                          controller.updateForm((form) => form.prompt = value),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ReferencePromptField(
+                        key: ValueKey(
+                          'generation-prompt-fullscreen-'
+                          '${controller.formRevision}',
+                        ),
+                        prompt: controller.form.prompt,
+                        formRevision: controller.formRevision,
+                        references: _promptReferenceOptions(controller),
+                        expands: true,
+                        autofocus: true,
+                        maxLength: controller.selectedModel.maxPromptCharacters,
+                        onChanged: (value) => controller.updateForm(
+                          (form) => form.prompt = value,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1739,6 +1782,64 @@ class _AccordionPreviewThumb extends StatelessWidget {
       border: Border.all(color: context.colors.outlineVariant),
     ),
     child: child,
+  );
+}
+
+/// The one explanation a new studio needs: renders run on the person's own
+/// provider accounts. Shown in place of the screen description until a key
+/// (or a working on-device provider) exists, then it simply disappears. It
+/// is a single sentence with an inline link — never a button row — so it
+/// occupies exactly the description's height and the composer keeps its
+/// place above the fold.
+class _FirstRunGuidance extends StatefulWidget {
+  const _FirstRunGuidance({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_FirstRunGuidance> createState() => _FirstRunGuidanceState();
+}
+
+class _FirstRunGuidanceState extends State<_FirstRunGuidance> {
+  late final TapGestureRecognizer _openProviders = TapGestureRecognizer()
+    ..onTap = () => unawaited(widget.controller.navigate(AppSection.providers));
+
+  @override
+  void dispose() {
+    _openProviders.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+    TextSpan(
+      style: TextStyle(color: context.colors.onSurfaceVariant),
+      children: <InlineSpan>[
+        const TextSpan(
+          text:
+              'Renders run on your own provider accounts — add an API key in ',
+        ),
+        TextSpan(
+          text: 'Providers',
+          recognizer: _openProviders,
+          semanticsLabel: 'Open Providers',
+          style: TextStyle(
+            color: context.colors.primary,
+            fontWeight: FontWeight.w700,
+            decoration: TextDecoration.underline,
+            decorationColor: context.colors.primary,
+          ),
+        ),
+        const TextSpan(
+          text:
+              ' to begin. Apple Intelligence runs with no key on a supported '
+              'iPhone or iPad.',
+        ),
+      ],
+    ),
+    key: const ValueKey<String>('first-run-guidance'),
+    maxLines: 2,
+    overflow: TextOverflow.ellipsis,
   );
 }
 
@@ -3459,7 +3560,12 @@ class _UpscaleSettings extends StatelessWidget {
             FieldLabel(
               'Creative detail',
               icon: Icons.auto_awesome_rounded,
-              trailing: CounterReadout('$strength', unit: '%'),
+              trailing: CounterReadout(
+                '$strength',
+                unit: '%',
+                semanticLabel: 'Creative detail',
+                unitLabel: 'percent',
+              ),
             ),
             const SizedBox(height: 8),
             HardwareSlider(
@@ -3468,6 +3574,8 @@ class _UpscaleSettings extends StatelessWidget {
               max: 100,
               divisions: 20,
               label: '$strength%',
+              semanticLabel: 'Creative detail',
+              semanticFormatterCallback: (value) => '${value.round()} percent',
               value: strength.toDouble(),
               onChanged: (value) => controller.updateForm(
                 (form) => form.upscaleCreativity = value.round(),
@@ -3526,7 +3634,12 @@ class _UpscaleSettings extends StatelessWidget {
           FieldLabel(
             'Upscale factor',
             icon: Icons.zoom_out_map_rounded,
-            trailing: CounterReadout(factorText, unit: '×'),
+            trailing: CounterReadout(
+              factorText,
+              unit: '×',
+              semanticLabel: 'Upscale factor',
+              unitLabel: 'times',
+            ),
           ),
           const SizedBox(height: 8),
           HardwareSlider(
@@ -3535,6 +3648,9 @@ class _UpscaleSettings extends StatelessWidget {
             max: 3,
             divisions: 15,
             label: '$factorText×',
+            semanticLabel: 'Upscale factor',
+            semanticFormatterCallback: (value) =>
+                '${value.toStringAsFixed(1)} times',
             value: factor,
             onChanged: (value) => controller.updateForm(
               (form) => form.upscaleFactor = (value * 10).roundToDouble() / 10,
@@ -3555,6 +3671,7 @@ class _UpscaleSettings extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: HardwareChoiceSwitch(
               key: const ValueKey('upscale-creativity-switch'),
+              semanticLabel: 'Detail mode',
               firstLabel: 'PRECISE',
               secondLabel: 'CREATIVE',
               firstSelected: !creative,
@@ -3808,6 +3925,8 @@ class _DurationControl extends StatelessWidget {
       fieldKey: const ValueKey('duration-input'),
       value: form.autoDuration ? 'AUTO' : '${form.durationSeconds}',
       unit: form.autoDuration ? null : 's',
+      semanticLabel: 'Duration',
+      unitLabel: form.autoDuration ? null : 'seconds',
       enabled: !(form.autoDuration && autoLocked),
       // Starting to type is the keyboard's version of touching the slider:
       // it drops Auto and takes manual control.
@@ -3819,6 +3938,7 @@ class _DurationControl extends StatelessWidget {
     final modeSwitch = model.supportsAutoDuration
         ? HardwareChoiceSwitch(
             key: const ValueKey('duration-mode-switch'),
+            semanticLabel: 'Duration mode',
             firstKey: const ValueKey('duration-mode-auto'),
             secondKey: const ValueKey('duration-mode-manual'),
             firstLabel: 'AUTO',
@@ -3896,6 +4016,9 @@ class _DurationControl extends StatelessWidget {
                 max: range.maximumSeconds.toDouble(),
                 divisions: range.divisions,
                 label: '${form.durationSeconds} s',
+                semanticLabel: 'Duration',
+                semanticFormatterCallback: (value) =>
+                    '${value.round()} seconds',
                 value: form.durationSeconds.toDouble(),
                 onChanged: (value) =>
                     controller.setDurationSeconds(value.round()),
@@ -3952,13 +4075,21 @@ class _FrameRateControl extends StatelessWidget {
         FieldLabel(
           'Frame rate',
           icon: Icons.animation_rounded,
-          trailing: CounterReadout('${controller.form.frameRate}', unit: 'fps'),
+          trailing: CounterReadout(
+            '${controller.form.frameRate}',
+            unit: 'fps',
+            semanticLabel: 'Frame rate',
+            unitLabel: 'frames per second',
+          ),
         ),
         HardwareSlider(
           min: 1,
           max: 6,
           divisions: 5,
           label: '${controller.form.frameRate} fps',
+          semanticLabel: 'Frame rate',
+          semanticFormatterCallback: (value) =>
+              '${value.round()} frames per second',
           value: controller.form.frameRate.toDouble(),
           onChanged: (value) => controller.setFrameRate(value.round()),
         ),
@@ -4082,6 +4213,8 @@ class _SafetyControl extends StatelessWidget {
         trailing: CounterReadout(
           '${controller.form.safetyTolerance}',
           unit: '/ 4',
+          semanticLabel: 'Safety tolerance',
+          unitLabel: 'out of 4',
         ),
       ),
       HardwareSlider(
@@ -4089,6 +4222,8 @@ class _SafetyControl extends StatelessWidget {
         max: 4,
         divisions: 4,
         label: '${controller.form.safetyTolerance} / 4',
+        semanticLabel: 'Safety tolerance',
+        semanticFormatterCallback: (value) => '${value.round()} of 4',
         value: controller.form.safetyTolerance.toDouble(),
         onChanged: (value) => controller.updateForm(
           (form) => form.safetyTolerance = value.round(),
@@ -4633,6 +4768,9 @@ class _ComposerFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final form = controller.form;
+    final localUnavailable =
+        controller.selectedProvider.isLocal &&
+        !controller.localGenerationAvailable;
     final status = Wrap(
       spacing: 12,
       runSpacing: 8,
@@ -4641,7 +4779,13 @@ class _ComposerFooter extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (!controller.selectedProvider.requiresApiKey ||
+            if (localUnavailable)
+              Icon(
+                Icons.phonelink_off_rounded,
+                color: context.colors.error,
+                size: 18,
+              )
+            else if (!controller.selectedProvider.requiresApiKey ||
                 controller.hasApiKey)
               ClawMark(size: 19, color: context.tokens.brass)
             else
@@ -4651,13 +4795,48 @@ class _ComposerFooter extends StatelessWidget {
                 size: 18,
               ),
             const SizedBox(width: 9),
-            Text(
-              !controller.selectedProvider.requiresApiKey ||
-                      controller.hasApiKey
-                  ? 'Ready when you are'
-                  : 'API key needed',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-            ),
+            if (localUnavailable)
+              // The on-device provider is selected but this device cannot run
+              // it; say so here rather than after a failed Generate.
+              Flexible(
+                child: Text(
+                  'Needs iOS 18.4 and Apple Intelligence',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    color: context.colors.error,
+                  ),
+                ),
+              )
+            else if (!controller.selectedProvider.requiresApiKey ||
+                controller.hasApiKey)
+              const Text(
+                'Ready when you are',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              )
+            else
+              // The status line is where a new studio looks first when
+              // Generate does nothing; make it the way in, not just a verdict.
+              Flexible(
+                child: InkWell(
+                  key: const ValueKey<String>('composer-open-providers'),
+                  onTap: () =>
+                      unawaited(controller.navigate(AppSection.providers)),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Text(
+                    'API key needed · Open Providers',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: context.colors.primary,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
         Container(
@@ -4848,6 +5027,18 @@ class _RecentWorkState extends State<_RecentWork> {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: context.colors.onSurfaceVariant),
                 ),
+                // On phones the heading has no room for the first-run line,
+                // so the empty branch carries the way in.
+                if (controller.needsProviderSetup) ...<Widget>[
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    key: const ValueKey<String>('quiet-branch-open-providers'),
+                    onPressed: () =>
+                        unawaited(controller.navigate(AppSection.providers)),
+                    icon: const Icon(Icons.hub_rounded, size: 16),
+                    label: const Text('Add a provider key to begin'),
+                  ),
+                ],
                 const SizedBox(height: 10),
               ],
             ),

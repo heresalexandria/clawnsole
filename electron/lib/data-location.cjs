@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -38,12 +39,22 @@ function dataFile(userData) {
   return path.join(dataDirectory(userData), DATA_FILE);
 }
 
+// Written through a temporary sibling and a rename, like the Flutter side,
+// so a crash mid-write can never leave a truncated pointer behind.
 function rememberDataDirectory(userData, directory) {
   fs.mkdirSync(userData, { recursive: true });
-  fs.writeFileSync(
-    path.join(userData, DATA_LOCATION_FILE),
-    `${JSON.stringify({ dataDirectory: directory })}\n`,
-  );
+  const file = path.join(userData, DATA_LOCATION_FILE);
+  const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(
+      temporary,
+      `${JSON.stringify({ dataDirectory: directory })}\n`,
+      { encoding: "utf8", flag: "wx", flush: true },
+    );
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
 }
 
 // Validates a picked target before anything is copied. Returns

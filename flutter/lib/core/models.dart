@@ -759,6 +759,12 @@ class SavedReference {
   }
 }
 
+/// Older builds stored the provider's task id as the failure text; such a
+/// value is never worth showing, so the record loads without it and the UI
+/// falls back to status-based copy.
+String? _presentableFailureText(String? value) =>
+    isIdentifierLikeFailureText(value) ? null : value;
+
 class Generation {
   const Generation({
     required this.localId,
@@ -908,7 +914,12 @@ class Generation {
   bool isStatusCheckDue(DateTime now) =>
       lastCheckedAt == null ||
       !now.isBefore(
-        lastCheckedAt!.add(automaticPollDelay(consecutiveCheckFailures)),
+        lastCheckedAt!.add(
+          spreadPollDelay(
+            consecutiveCheckFailures,
+            seed: '$localId:$statusCheckCount',
+          ),
+        ),
       );
 
   bool isResultRetentionDue(DateTime now) =>
@@ -916,7 +927,10 @@ class Generation {
       (lastResultRetentionAttemptAt == null ||
           !now.isBefore(
             lastResultRetentionAttemptAt!.add(
-              automaticPollDelay(resultRetentionFailures),
+              spreadPollDelay(
+                resultRetentionFailures,
+                seed: '$localId:retention:$resultRetentionFailures',
+              ),
             ),
           ));
 
@@ -1196,7 +1210,7 @@ class Generation {
     quotedCostUsdMax: (json['quotedCostUsdMax'] as num?)?.toDouble(),
     realizedCostUsd: (json['realizedCostUsd'] as num?)?.toDouble(),
     realizedCostSource: json['realizedCostSource'] as String?,
-    error: json['error'] as String?,
+    error: _presentableFailureText(json['error'] as String?),
     lastCheckedAt: DateTime.tryParse(json['lastCheckedAt'] as String? ?? ''),
     statusCheckCount: (json['statusCheckCount'] as num?)?.toInt() ?? 0,
     consecutiveCheckFailures:
@@ -1221,6 +1235,20 @@ class Generation {
   );
 }
 
+/// The appearance a person chose from the top bar. Kept in preferences so an
+/// explicit Light or Dark pick survives relaunch instead of snapping back to
+/// the system setting.
+enum AppThemeMode {
+  system,
+  light,
+  dark;
+
+  static AppThemeMode parse(Object? value) => AppThemeMode.values.firstWhere(
+    (mode) => mode.name == value,
+    orElse: () => AppThemeMode.system,
+  );
+}
+
 class AppPreferences {
   const AppPreferences({
     this.activeSection = AppSection.create,
@@ -1240,6 +1268,7 @@ class AppPreferences {
     this.localVideoCacheMb = defaultLocalVideoCacheMb,
     this.localThumbnailCacheMb = defaultLocalThumbnailCacheMb,
     this.autoFixReferenceVideos = defaultAutoFixReferenceVideos,
+    this.themeMode = AppThemeMode.system,
   });
 
   static const int defaultLocalVideoCacheMb = 100;
@@ -1277,6 +1306,8 @@ class AppPreferences {
   /// settings compatibility.
   final bool autoFixReferenceVideos;
 
+  final AppThemeMode themeMode;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1297,6 +1328,7 @@ class AppPreferences {
     int? localVideoCacheMb,
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
+    AppThemeMode? themeMode,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1323,6 +1355,7 @@ class AppPreferences {
     localThumbnailCacheMb: localThumbnailCacheMb ?? this.localThumbnailCacheMb,
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
+    themeMode: themeMode ?? this.themeMode,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1344,6 +1377,7 @@ class AppPreferences {
     'localVideoCacheMb': localVideoCacheMb,
     'localThumbnailCacheMb': localThumbnailCacheMb,
     'autoFixReferenceVideos': autoFixReferenceVideos,
+    'themeMode': themeMode.name,
   };
 
   factory AppPreferences.fromJson(Map<String, Object?> json) {
@@ -1405,6 +1439,7 @@ class AppPreferences {
         final bool value => value,
         _ => defaultAutoFixReferenceVideos,
       },
+      themeMode: AppThemeMode.parse(json['themeMode']),
     );
   }
 }

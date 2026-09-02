@@ -5,15 +5,18 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/asset_extensions.dart';
+import 'package:clawnsole/core/atomic_file.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
+import 'package:clawnsole/core/generation_timing.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
+import 'package:clawnsole/core/library_rules.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/provider_api.dart';
@@ -462,9 +465,9 @@ class CompanionStore implements DurableDataStore {
   }
 
   Future<StoredData> _readRaw() async {
-    if (!await file.exists()) return const StoredData();
     try {
-      return StoredData.decode(await file.readAsString());
+      return await readTextWithFallback(file, StoredData.decode) ??
+          const StoredData();
     } on FormatException {
       throw StateError(
         'Clawnsole could not read ${file.path}. The JSON file is malformed.',
@@ -472,15 +475,11 @@ class CompanionStore implements DurableDataStore {
     }
   }
 
-  Future<void> _writeRaw(StoredData data) async {
-    await file.parent.create(recursive: true);
-    final temporary = File(
-      '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp',
-    );
-    await temporary.writeAsString(data.encode(), flush: true);
-    if (await file.exists()) await file.delete();
-    await temporary.rename(file.path);
-  }
+  /// Atomic replace with the previous contents kept as `.bak`, matching the
+  /// native store: the file holds every provider receipt, so no write may
+  /// ever leave a window in which it does not exist.
+  Future<void> _writeRaw(StoredData data) =>
+      writeTextAtomically(file, data.encode());
 
   @override
   Future<StoredData> read() async {
@@ -737,23 +736,8 @@ class _RawByteRange {
   final int? rawEnd;
 }
 
-List<String> _cleanLibraryTags(Iterable<Object?> input) {
-  final tags = <String>[];
-  final seen = <String>{};
-  for (final value in input) {
-    final clean = value
-        .toString()
-        .trim()
-        .replaceFirst(RegExp(r'^#+'), '')
-        .trim();
-    final key = clean.toLowerCase();
-    if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
-    seen.add(key);
-    tags.add(clean);
-    if (tags.length == 12) break;
-  }
-  return tags;
-}
+List<String> _cleanLibraryTags(Iterable<Object?> input) =>
+    cleanLibraryTags(input.map((value) => value.toString()));
 
 class CompanionApp {
   factory CompanionApp({
@@ -1242,8 +1226,8 @@ class CompanionApp {
             : <String, Object?>{};
         final folder = LibraryFolder.fromJson(map);
         final name = folder.name.trim();
-        if (folder.id.trim().isEmpty || name.isEmpty || name.length > 48) {
-          throw StateError('Folder names must be between 1 and 48 characters.');
+        if (folder.id.trim().isEmpty || !isValidLibraryFolderName(name)) {
+          throw StateError(libraryFolderNameRule);
         }
         final parentId = folder.parentId?.trim().isEmpty == true
             ? null
@@ -1567,10 +1551,8 @@ class CompanionApp {
               : const <String, Object?>{},
         );
         final name = reference.name.trim();
-        if (reference.id.trim().isEmpty || name.isEmpty || name.length > 80) {
-          throw StateError(
-            'Reference names must be between 1 and 80 characters.',
-          );
+        if (reference.id.trim().isEmpty || !isValidSavedReferenceName(name)) {
+          throw StateError(savedReferenceNameRule);
         }
         if (reference.folderId != null &&
             !current.folders.any(
@@ -1759,8 +1741,8 @@ class CompanionApp {
       throw StateError('Choose a valid range within the reference video.');
     }
     final name = output.name.trim();
-    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
-      throw StateError('Reference names must be between 1 and 80 characters.');
+    if (output.id.trim().isEmpty || !isValidSavedReferenceName(name)) {
+      throw StateError(savedReferenceNameRule);
     }
     if (current.savedReferences.any((item) => item.id == output.id)) {
       throw StateError('That reference already exists.');
@@ -2267,6 +2249,7 @@ class CompanionApp {
         pollingUrl: pollingUrl,
         status: 'Pending',
         clearProgress: true,
+        providerAcceptedAt: acceptedAt,
         estimatedCreditsMax: receiptEstimate,
         estimateBasis: receiptEstimate == null
             ? null
@@ -2456,6 +2439,11 @@ class CompanionApp {
             : normalizedProgress(payload['progress']),
         resultUrl: resultUrl,
         resultAsset: resultAsset,
+        // Mirrors DirectGateway: the duration gauges read these stamps, and
+        // the Electron path had silently fallen back to updatedAt.
+        providerCompletedAt: status == 'Ready' && !current.isReady
+            ? providerGenerationCompletedAt(payload) ?? checkedAt
+            : null,
         deliveryExpired: status == 'Ready' ? false : current.deliveryExpired,
         draftCacheUrl: draftUrl,
         deliveryExpiresAt: status == 'Ready' && deliveryAvailability != null
@@ -2492,6 +2480,9 @@ class CompanionApp {
         // the previously captured delivery link, so the generation completes.
         next = current.copyWith(
           resultAsset: rescue.asset,
+          providerCompletedAt: !current.isReady
+              ? providerGenerationCompletedAt(payload) ?? checkedAt
+              : null,
           lastResultRetentionAttemptAt: checkedAt,
           resultRetentionFailures: 0,
           clearResultRetentionError: true,

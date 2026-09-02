@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -11,8 +11,10 @@ import 'apple_local_runtime.dart';
 import 'background_delivery.dart';
 import 'bfl_api.dart';
 import 'asset_extensions.dart';
+import 'completion_notifications.dart';
 import 'data_location.dart';
 import 'direct_gateway.dart';
+import 'gateway.dart';
 import 'directory_reveal.dart';
 import 'flutter_secure_value_store.dart';
 import 'google_drive.dart';
@@ -24,6 +26,7 @@ import 'generation_status.dart';
 import 'hybrid_data_store.dart';
 import 'local_data_store.dart';
 import 'media_cache_gateway.dart';
+import 'media_share.dart';
 import 'models.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
@@ -84,7 +87,10 @@ class NativeGateway extends DirectGateway
         SettingsVaultGateway,
         DataLocationGateway,
         MediaCacheGateway,
-        VideoCacheGateway {
+        VideoCacheGateway,
+        LocalGenerationAvailabilityGateway,
+        GenerationNotificationGateway,
+        MediaShareGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
   // ignore: use_super_parameters
@@ -107,6 +113,8 @@ class NativeGateway extends DirectGateway
     ProviderApiRouter? providerRouter,
     AppleLocalRuntime? appleLocalRuntime,
     BackgroundResultDelivery? backgroundDelivery,
+    GenerationNotifier? completionNotifier,
+    MediaShareSheet? shareSheet,
     bool? isIos,
     bool? isMobile,
     SecureValueStore? secureValueStore,
@@ -178,6 +186,8 @@ class NativeGateway extends DirectGateway
       providerRouter: providerRouter,
       appleLocalRuntime: appleLocalRuntime,
       backgroundDelivery: backgroundDelivery,
+      completionNotifier: completionNotifier,
+      shareSheet: shareSheet,
       isIos: isIos,
       isMobile: isMobile,
       referenceVideoNormalizer:
@@ -216,6 +226,8 @@ class NativeGateway extends DirectGateway
     ProviderApiRouter? providerRouter,
     AppleLocalRuntime? appleLocalRuntime,
     BackgroundResultDelivery? backgroundDelivery,
+    GenerationNotifier? completionNotifier,
+    MediaShareSheet? shareSheet,
     bool? isIos,
     bool? isMobile,
     required ReferenceVideoNormalizationService referenceVideoNormalizer,
@@ -252,6 +264,9 @@ class NativeGateway extends DirectGateway
                .trim(),
        _appleLocal =
            appleLocalRuntime ?? const MethodChannelAppleLocalRuntime(),
+       _completionNotifier =
+           completionNotifier ?? MethodChannelGenerationNotifier(),
+       _shareSheet = shareSheet ?? MethodChannelMediaShareSheet(),
        _isIos = isIos ?? Platform.isIOS,
        _isMobile = isMobile ?? isIos ?? (Platform.isIOS || Platform.isAndroid),
        super(
@@ -297,6 +312,8 @@ class NativeGateway extends DirectGateway
   final String _mobileTestArtCraftApiKey;
   final String _mobileTestArtCraftApiKeyId;
   final AppleLocalRuntime _appleLocal;
+  final GenerationNotifier _completionNotifier;
+  final MediaShareSheet _shareSheet;
   final bool _isIos;
   final bool _isMobile;
 
@@ -876,6 +893,112 @@ class NativeGateway extends DirectGateway
       } on FileSystemException {
         // The operating system also cleans this temporary directory.
       }
+    }
+  }
+
+  /// Whether Apple Intelligence image creation can run on this device. A
+  /// missing or failing local runtime answers false rather than throwing.
+  @override
+  Future<bool> localGenerationAvailable() async {
+    if (!_isIos) return false;
+    try {
+      return await _appleLocal.isAvailable();
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Asks for permission to post "your film is ready" alerts — the system
+  /// prompts at most once — and reports whether they may be posted.
+  @override
+  Future<bool> requestGenerationNotifications() async {
+    if (!_isIos) return false;
+    return _completionNotifier.requestPermission();
+  }
+
+  /// Posts a "your film is ready" alert for [item] and reports whether it was
+  /// shown: never while the app is in the foreground, never without
+  /// permission, and never off iOS. The generation id threads the alert so a
+  /// repeat post for the same film replaces the first instead of stacking.
+  @override
+  Future<bool> notifyGenerationReady(Generation item) async {
+    if (!_isIos) return false;
+    final notice = generationReadyNotice(item);
+    return _completionNotifier.notify(
+      title: notice.title,
+      body: notice.body,
+      threadId: item.localId,
+    );
+  }
+
+  /// Whether this platform can hand a generation's media to a share sheet.
+  bool get supportsShareSheet => _isIos;
+
+  /// Opens the share sheet for [item]'s media and reports whether the user
+  /// completed an activity. The retained asset file is copied into the
+  /// temporary directory under its user-facing name — the one Save to Files
+  /// and Save to Photos use — and, when no local file resolves, the bytes
+  /// those destinations would read are written there instead.
+  @override
+  Future<bool> shareMedia(Generation item) async {
+    if (!supportsShareSheet) return false;
+    if (item.resultAsset == null && item.resultUrl == null) {
+      throw StateError('This media is not available.');
+    }
+    final directory = Directory(
+      '${(await getTemporaryDirectory()).path}'
+      '${Platform.pathSeparator}clawnsole-share',
+    );
+    await directory.create(recursive: true);
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}${generationMediaFileName(item)}',
+    );
+    try {
+      final retained = await _retainedMediaFile(item.resultAsset);
+      if (retained != null) {
+        await retained.copy(file.path);
+      } else {
+        await file.writeAsBytes(await _generationMediaBytes(item), flush: true);
+      }
+      return await _shareSheet.share(
+        path: file.path,
+        subject: generationShareSubject(item),
+      );
+    } finally {
+      try {
+        if (await file.exists()) await file.delete();
+      } on FileSystemException {
+        // The operating system also cleans this temporary directory.
+      }
+    }
+  }
+
+  /// The on-disk file behind a retained asset when one resolves locally,
+  /// including a Drive film already pulled into the video cache.
+  Future<File?> _retainedMediaFile(AssetReference? asset) async {
+    if (asset == null) return null;
+    try {
+      final uri = await assetUri(asset);
+      if (uri.scheme != 'file') return null;
+      final file = File.fromUri(uri);
+      return await file.exists() ? file : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// The byte resolution Save to Files and Save to Photos use: the retained
+  /// asset first, then the provider link while it is still live.
+  Future<Uint8List> _generationMediaBytes(Generation item) async {
+    final asset = item.resultAsset;
+    if (asset == null) return downloadMedia(item.resultUrl!);
+    try {
+      return await readAsset(asset);
+    } on Object {
+      if (item.resultUrl == null) rethrow;
+      return await downloadMedia(item.resultUrl!);
     }
   }
 }

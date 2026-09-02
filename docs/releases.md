@@ -167,9 +167,38 @@ and the unsigned native Windows x64 build. Release assets can include:
 - `Clawnsole-windows-x64.zip` (stable alias used by latest-download links)
 - `SHA256SUMS.txt`
 
-The macOS ZIP is the Electron updater asset. Windows updates remain a manual ZIP
-download, and the unsigned executable may trigger a Microsoft Defender
-SmartScreen warning. Artifact naming, architecture selection, and digest parsing
-are covered by Electron tests. The iOS binary is delivered privately to App
-Store Connect, not published on GitHub. Android distribution remains outside
-this workflow.
+The macOS ZIP is the Electron updater asset. Artifact naming, architecture
+selection, and digest parsing are covered by Electron tests. The iOS binary is
+delivered privately to App Store Connect, not published on GitHub. Android
+distribution remains outside this workflow.
+
+### Windows archive
+
+The Windows ZIP extracts to a single `Clawnsole/` folder so the app, its
+libraries, and its data stay together:
+
+- `Clawnsole.exe`, `flutter_windows.dll`, and the plugin DLLs.
+- `msvcp140.dll`, `vcruntime140.dll`, and `vcruntime140_1.dll`. The Flutter
+  engine links the MSVC runtime dynamically, so `flutter/scripts/build_windows`
+  copies these from the Visual Studio redistributable (`VCToolsRedistDir` in a
+  Developer Command Prompt, otherwise the newest `VC/Redist/MSVC/<version>`
+  reported by `vswhere`) and fails the build when they cannot be found. The
+  app therefore runs without a separately installed Visual C++ runtime.
+- `data/` with the Flutter assets and AOT snapshot, and `media-tools/` with the
+  pinned LGPL FFmpeg build.
+- `README.txt`, copied from `flutter/windows/package.README.txt`, with plain
+  install, SmartScreen, and update steps.
+
+The asset names above are part of the naming contract shared with the macOS
+updater and the Electron tests; changes belong inside the archive, not in its
+name. The build is unsigned, so the first launch shows the Microsoft Defender
+SmartScreen "Windows protected your PC" prompt until the user chooses **More
+info → Run anyway**; `SHA256SUMS.txt` is the integrity check in the meantime.
+Windows updates remain a manual ZIP download: close Clawnsole and replace the
+extracted folder, which leaves the library untouched — `%LOCALAPPDATA%\Clawnsole`
+for new installs, `Documents\Clawnsole` where an earlier version created it
+there, or the folder chosen in Settings — along with the settings and caches
+under the user's `AppData`. The intended next step is an installer with code signing,
+through Azure Trusted Signing for the executable and installer or an MSIX
+package, which removes the SmartScreen prompt and makes in-place updates
+possible.

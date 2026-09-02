@@ -33,6 +33,30 @@ test("the default data directory is userData until a move is recorded", (t) => {
   );
 });
 
+// A truncated pointer would send the companion at the wrong library, so the
+// record is written to a sibling and renamed into place.
+test("the data-directory pointer is replaced atomically", (t) => {
+  const userData = temporaryDirectory(t, "clawnsole-data-location-");
+  const first = temporaryDirectory(t, "clawnsole-data-target-");
+  const second = temporaryDirectory(t, "clawnsole-data-target-");
+
+  dataLocation.rememberDataDirectory(userData, first);
+  assert.deepEqual(fs.readdirSync(userData), [
+    dataLocation.DATA_LOCATION_FILE,
+  ]);
+
+  dataLocation.rememberDataDirectory(userData, second);
+  assert.equal(dataLocation.storedDataDirectory(userData), second);
+  // No temporary sibling survives either write.
+  assert.deepEqual(fs.readdirSync(userData), [
+    dataLocation.DATA_LOCATION_FILE,
+  ]);
+  assert.equal(
+    fs.readFileSync(path.join(userData, dataLocation.DATA_LOCATION_FILE), "utf8"),
+    `${JSON.stringify({ dataDirectory: second })}\n`,
+  );
+});
+
 test("a missing or malformed pointer falls back to userData", (t) => {
   const userData = temporaryDirectory(t, "clawnsole-data-location-");
   const pointer = path.join(userData, dataLocation.DATA_LOCATION_FILE);

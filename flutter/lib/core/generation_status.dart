@@ -63,6 +63,25 @@ bool _identifierLike(String value) =>
         value.startsWith('http://') ||
         value.startsWith('https://'));
 
+/// Whether stored failure copy is unfit to show: a bare task id, hash, or URL
+/// rather than a sentence. Records written before the parser learned to skip
+/// identifier fields still carry these and must fall back at display time.
+bool isIdentifierLikeFailureText(String? value) {
+  final clean = value?.trim() ?? '';
+  return clean.isNotEmpty && _identifierLike(clean);
+}
+
+/// Plain-language failure copy for a record whose provider no longer holds
+/// the task; the delivery window has closed, so re-polling cannot help.
+const String expiredGenerationMessage =
+    'The provider no longer has this task; its delivery link expired before '
+    'the film could be retained.';
+
+/// Whether [status] means the provider forgot the task — the one failure that
+/// nothing but the film itself can overturn.
+bool isExpiryShapedStatus(String status) =>
+    normalizeGenerationStatus(status) == 'Task not found';
+
 String providerFailureMessage(Object? payload, {required String fallback}) {
   String? find(Object? value, {bool guessing = false}) {
     if (value is String) {
@@ -158,6 +177,20 @@ Duration automaticPollDelay(int consecutiveFailures) =>
       3 => const Duration(seconds: 32),
       _ => const Duration(minutes: 1),
     };
+
+/// [automaticPollDelay] spread by up to ±20% so records that failed together
+/// stop retrying in lockstep; without jitter every concurrent job for one
+/// provider re-synchronizes into the same burst and amplifies rate limits.
+///
+/// The spread is derived from [seed] (record id plus attempt number) rather
+/// than a random draw so a record's due time is stable across the repeated
+/// "is it due yet?" checks between two polls.
+Duration spreadPollDelay(int consecutiveFailures, {required String seed}) {
+  final base = automaticPollDelay(consecutiveFailures);
+  final unit = (seed.hashCode & 0xFFFF) / 0xFFFF;
+  final spread = (unit * 2 - 1) * .2;
+  return Duration(milliseconds: (base.inMilliseconds * (1 + spread)).round());
+}
 
 extension<T> on Iterable<T> {
   T? get firstOrNull {

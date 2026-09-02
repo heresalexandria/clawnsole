@@ -27,6 +27,7 @@ Future<void> showVideoPlayerModal(
   Future<Uri?>? deferredUri,
   required Future<void> Function(VideoSaveDestination destination) onDownload,
   bool supportsPhotos = false,
+  Future<void> Function()? onShare,
   double initialAspectRatio = 16 / 9,
   VideoPlayerController Function(Uri uri)? controllerFactory,
   VideoFrameLoader? frameLoader,
@@ -52,6 +53,7 @@ Future<void> showVideoPlayerModal(
                     autoplay: true,
                     onClose: () => Navigator.of(routeContext).pop(),
                     supportsPhotos: supportsPhotos,
+                    onShare: onShare,
                     controllerFactory: controllerFactory,
                     frameLoader: frameLoader,
                     progress: progress,
@@ -63,6 +65,7 @@ Future<void> showVideoPlayerModal(
                     autoplay: true,
                     onClose: () => Navigator.of(routeContext).pop(),
                     supportsPhotos: supportsPhotos,
+                    onShare: onShare,
                     controllerFactory: controllerFactory,
                     frameLoader: frameLoader,
                     progress: progress,
@@ -79,6 +82,7 @@ Future<void> showVideoPlayerModal(
       deferredUri: deferredUri,
       onDownload: onDownload,
       supportsPhotos: supportsPhotos,
+      onShare: onShare,
       initialAspectRatio: initialAspectRatio,
       controllerFactory: controllerFactory,
       frameLoader: frameLoader,
@@ -105,6 +109,7 @@ class DeferredGenerationVideo extends StatelessWidget {
     this.controllerFactory,
     this.frameLoader,
     this.supportsPhotos = false,
+    this.onShare,
     this.progress,
   });
 
@@ -118,6 +123,9 @@ class DeferredGenerationVideo extends StatelessWidget {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final bool supportsPhotos;
+
+  /// Opens the platform share sheet for the film; null hides "Share…".
+  final Future<void> Function()? onShare;
   final ValueListenable<double?>? progress;
 
   @override
@@ -151,6 +159,7 @@ class DeferredGenerationVideo extends StatelessWidget {
         controllerFactory: controllerFactory,
         frameLoader: frameLoader,
         supportsPhotos: supportsPhotos,
+        onShare: onShare,
         progress: progress,
       );
     },
@@ -163,6 +172,7 @@ class _VideoPlayerModal extends StatefulWidget {
     required this.deferredUri,
     required this.onDownload,
     required this.supportsPhotos,
+    this.onShare,
     required this.initialAspectRatio,
     this.controllerFactory,
     this.frameLoader,
@@ -176,6 +186,9 @@ class _VideoPlayerModal extends StatefulWidget {
   final Future<Uri?>? deferredUri;
   final Future<void> Function(VideoSaveDestination destination) onDownload;
   final bool supportsPhotos;
+
+  /// Opens the platform share sheet for the film; null hides "Share…".
+  final Future<void> Function()? onShare;
   final double initialAspectRatio;
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
@@ -224,6 +237,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
                   onClose: () => Navigator.of(context).pop(),
                   onAspectRatio: _adoptAspect,
                   supportsPhotos: widget.supportsPhotos,
+                  onShare: widget.onShare,
                   controllerFactory: widget.controllerFactory,
                   frameLoader: widget.frameLoader,
                   progress: widget.progress,
@@ -235,6 +249,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
                   onClose: () => Navigator.of(context).pop(),
                   onAspectRatio: _adoptAspect,
                   supportsPhotos: widget.supportsPhotos,
+                  onShare: widget.onShare,
                   controllerFactory: widget.controllerFactory,
                   frameLoader: widget.frameLoader,
                   progress: widget.progress,
@@ -259,6 +274,7 @@ class GenerationVideo extends StatefulWidget {
     this.controllerFactory,
     this.frameLoader,
     this.supportsPhotos = false,
+    this.onShare,
     this.progress,
   });
 
@@ -293,6 +309,9 @@ class GenerationVideo extends StatefulWidget {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final bool supportsPhotos;
+
+  /// Opens the platform share sheet for the film; null hides "Share…".
+  final Future<void> Function()? onShare;
 
   /// Live delivery progress rendered while the film is still loading. A null
   /// fraction (or a null listenable) keeps the loader indeterminate.
@@ -395,6 +414,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
     final destination = await chooseVideoSaveDestination(
       context,
       supportsPhotos: widget.supportsPhotos,
+      onShare: widget.onShare,
     );
     if (destination == null || !mounted) return;
     setState(() => _saving = true);
@@ -425,6 +445,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
               controllerFactory: widget.controllerFactory,
               frameLoader: widget.frameLoader,
               supportsPhotos: widget.supportsPhotos,
+              onShare: widget.onShare,
               progress: widget.progress,
             ),
           ),

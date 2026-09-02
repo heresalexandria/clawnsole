@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/generation_status.dart';
 import '../core/models.dart';
 import '../core/generation_timing.dart';
 import '../core/loading_timing.dart';
@@ -1690,7 +1691,15 @@ class GenerationStatusButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Once the provider has forgotten the task and no delivery link is left
+    // to retry, another status check can only fail again; the card's Retry
+    // (reuse) verb is the honest next step, so no check button is offered.
+    final expired =
+        isExpiryShapedStatus(item.status) &&
+        !item.needsResultRetention &&
+        !item.hasDeliveredMedia;
     if (!item.canCheckStatus ||
+        expired ||
         (item.hasDeliveredMedia &&
             !item.needsResultRetention &&
             !item.isWorking) ||
@@ -1713,10 +1722,8 @@ class GenerationStatusButton extends StatelessWidget {
             ? 'Checking…'
             : item.isReady
             ? 'Retry retrieval'
-            : item.lastCheckError != null
-            ? 'Retry status'
-            : item.isFailed
-            ? 'Retry status'
+            : item.lastCheckError != null || item.isFailed
+            ? 'Check again'
             : compact
             ? 'Check now'
             : 'Check status',
@@ -2101,6 +2108,7 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
           progress: delivery.progress,
           onDownload: _download,
           supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+          onShare: shareGenerationMediaAction(widget.controller, widget.item),
         ),
       );
       return;
@@ -2110,6 +2118,7 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
       deferredUri: delivery.uri,
       progress: delivery.progress,
       supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+      onShare: shareGenerationMediaAction(widget.controller, widget.item),
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
       onDownload: _download,
     );
@@ -2392,6 +2401,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
           progress: delivery.progress,
           onDownload: _download,
           supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+          onShare: shareGenerationMediaAction(widget.controller, widget.item),
         ),
       );
       return;
@@ -2401,6 +2411,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
       deferredUri: delivery.uri,
       progress: delivery.progress,
       supportsPhotos: widget.controller.supportsPhotoLibrarySave,
+      onShare: shareGenerationMediaAction(widget.controller, widget.item),
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
       onDownload: _download,
     );

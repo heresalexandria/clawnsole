@@ -73,8 +73,16 @@ class _VersionDialogState extends State<_VersionDialog> {
     super.initState();
     // Opening the dialog is an explicit ask, so re-check rather than trusting
     // the launch-time result — except where the store owns updates, since a
-    // GitHub tag says nothing about what the mobile store has published.
-    if (!storeManagedPlatform) unawaited(_status.refresh());
+    // GitHub tag says nothing about what the mobile store has published. A
+    // store build still re-queries when its launch check failed outright, so
+    // a flaky first network request does not stick until relaunch.
+    if (!storeManagedPlatform || _status.result?.error != null) {
+      // refresh() notifies synchronously; the dialog is inflated during a
+      // build, so the re-check must wait for the frame to finish.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_status.refresh());
+      });
+    }
   }
 
   Future<void> _install() async {
@@ -176,6 +184,8 @@ class _VersionDialogState extends State<_VersionDialog> {
                             ? 'Updates for this app arrive through $storeName.'
                             : _status.shellDeclinesInstall
                             ? 'This development build updates from source with git rather than replacing itself.'
+                            : defaultTargetPlatform == TargetPlatform.windows
+                            ? 'Download the new ZIP from the GitHub release, extract it, and replace your Clawnsole folder. Your library is stored separately and is not touched.'
                             : 'This build can open the GitHub release for a manual update.',
                         style: TextStyle(
                           fontSize: 12.5,
