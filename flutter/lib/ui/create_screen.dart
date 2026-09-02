@@ -241,10 +241,12 @@ class _CreateHeading extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (inlineTabs) ...<Widget>[
+              // The display line and the strip split the slack evenly: the
+              // title never needs half of it, and the strip scrolls past
+              // whatever it cannot show.
               Flexible(child: title),
               const SizedBox(width: 24),
               Expanded(
-                flex: 2,
                 child: Align(alignment: Alignment.centerRight, child: tabs),
               ),
             ] else
