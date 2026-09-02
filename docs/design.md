@@ -279,9 +279,10 @@ long-press or double-tap renames. Labels derive from the first words of the
 prompt until renamed. Reuse and Enhance fill the active tab when it is still
 blank and otherwise open a new tab, so no draft is ever clobbered. A tab born
 from AI Rewrite wears a small brass `auto_awesome` mark whose tooltip is the
-model's one-line summary of what changed. At desktop widths the strip sits
-trailing in the heading row so the fold contract holds; under ~700 px it
-becomes its own one-line scrolling row. Tabs persist on the device
+model's one-line summary of what changed. From 1200 px the strip sits
+trailing in the heading row, taking the slack between the display line and
+the model plaque, so the fold contract holds; narrower layouts give it its
+own one-line scrolling row under the heading. Tabs persist on the device
 (`StoredData.composerTabs`, never in Drive data): the prompt, settings, and
 ids survive a restart, and media that came from a generation is re-hydrated
 from that generation's record; media picked from disk stays session-only, as

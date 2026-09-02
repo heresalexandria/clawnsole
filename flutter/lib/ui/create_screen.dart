@@ -231,17 +231,20 @@ class _CreateHeading extends StatelessWidget {
             ],
           );
         }
+        // Desktop widths hang the strip off the heading's slack, where it
+        // costs the composer no vertical space at all: the display line
+        // keeps its natural width and the strip takes the rest, so several
+        // drafts sit side by side before it has to scroll. Narrower layouts
+        // give the strip its own single line under the heading.
+        final inlineTabs = constraints.maxWidth >= 1200;
         final heading = Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            if (constraints.maxWidth >= 880) ...<Widget>[
-              title,
+            if (inlineTabs) ...<Widget>[
+              Flexible(child: title),
               const SizedBox(width: 24),
-              // Desktop widths hang the strip off the heading's slack, where
-              // it costs the composer no vertical space at all. It takes all
-              // the room between the display line and the plaque, so several
-              // drafts sit side by side before the strip has to scroll.
               Expanded(
+                flex: 2,
                 child: Align(alignment: Alignment.centerRight, child: tabs),
               ),
             ] else
@@ -254,8 +257,7 @@ class _CreateHeading extends StatelessWidget {
             plaque,
           ],
         );
-        if (constraints.maxWidth >= 880) return heading;
-        // Between phone and desktop the strip gets its own single line.
+        if (inlineTabs) return heading;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[heading, const SizedBox(height: 8), tabs],
