@@ -17,12 +17,15 @@ import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
+import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
+
+part 'app_controller_rewrite.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -424,6 +427,16 @@ class AppController extends ChangeNotifier {
       <String, ProviderAccountStatus>{};
   final Map<String, List<ProviderModelPrice>> providerPrices =
       <String, List<ProviderModelPrice>>{};
+
+  /// AI Rewrite choices, remembered in preferences: the provider used last
+  /// and the model and effort per provider.
+  String? rewriteProviderId;
+  final Map<String, String> rewriteModelIds = <String, String>{};
+  final Map<String, String> rewriteEfforts = <String, String>{};
+
+  /// Live model listings per rewrite provider, fetched on demand.
+  final Map<String, List<RewriteModel>> rewriteModels =
+      <String, List<RewriteModel>>{};
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -1785,6 +1798,13 @@ class AppController extends ChangeNotifier {
       localThumbnailCacheMb = value.preferences.localThumbnailCacheMb;
       autoFixReferenceVideos = value.preferences.autoFixReferenceVideos;
       costDeskColumns = value.preferences.costDeskColumns;
+      rewriteProviderId = value.preferences.rewriteProvider;
+      rewriteModelIds
+        ..clear()
+        ..addAll(value.preferences.rewriteModels);
+      rewriteEfforts
+        ..clear()
+        ..addAll(value.preferences.rewriteEfforts);
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
           : LibraryStorage.drive;
@@ -3737,6 +3757,9 @@ class AppController extends ChangeNotifier {
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
     themeMode: themeMode ?? this.themeMode,
+    rewriteProvider: rewriteProviderId,
+    rewriteModels: Map<String, String>.of(rewriteModelIds),
+    rewriteEfforts: Map<String, String>.of(rewriteEfforts),
   );
 
   int _validDuration(int value) {
@@ -6591,6 +6614,23 @@ class AppController extends ChangeNotifier {
     _invalidateProviderEstimate();
     formRevision += 1;
     notifyListeners();
+  }
+
+  /// Opens a fresh composer tab seeded from [item] (prompt, settings, and
+  /// retained references), optionally replacing the prompt with [prompt].
+  ///
+  /// Composer tabs are being introduced; until the tab strip lands this
+  /// fills the single composer in place.
+  Future<void> openGenerationInNewTab(
+    Generation item, {
+    String? prompt,
+    String? rewriteSummary,
+  }) async {
+    await _restoreGenerationSettings(item, includePrompt: true);
+    if (prompt != null) form.prompt = prompt;
+    formRevision += 1;
+    notifyListeners();
+    await navigate(AppSection.create);
   }
 
   Future<void> reuse(Generation item) async {

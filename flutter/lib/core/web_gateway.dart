@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
+import 'composer_tabs.dart';
 import 'data_location.dart';
 import 'data_location_shell.dart';
 import 'gateway.dart';
@@ -11,6 +12,7 @@ import 'google_drive.dart';
 import 'google_drive_auth.dart';
 import 'media_cache_gateway.dart';
 import 'models.dart';
+import 'prompt_rewrite.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_shell.dart';
 import 'video_cache_gateway.dart';
@@ -30,6 +32,8 @@ class WebGateway
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
+        ComposerTabsGateway,
+        PromptRewriteGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         ReferenceVideoEditingGateway,
@@ -156,6 +160,102 @@ class WebGateway
         headers: const <String, String>{'Content-Type': 'application/json'},
         body: jsonEncode(<String, Object?>{'cache': cache}),
       ),
+    );
+  }
+
+  @override
+  Future<ComposerTabsState?> loadComposerTabs() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/composer-tabs'))),
+    );
+    final state = payload['composerTabs'];
+    return state is Map<Object?, Object?>
+        ? ComposerTabsState.fromJson(
+            state.map((key, value) => MapEntry(key.toString(), value)),
+          )
+        : null;
+  }
+
+  @override
+  Future<void> saveComposerTabs(ComposerTabsState state) async {
+    await _read(
+      await _client.put(
+        _url('/composer-tabs'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'composerTabs': state.toJson()}),
+      ),
+    );
+  }
+
+  @override
+  Future<List<RewriteModel>> listRewriteModels(
+    String providerId, {
+    String? candidateKey,
+  }) async {
+    final supplied = candidateKey?.trim().isNotEmpty == true;
+    final payload = await _readRewrite(
+      await _client.post(
+        _url('/rewrite/models'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{
+          'provider': providerId,
+          if (supplied) 'apiKey': candidateKey!.trim(),
+        }),
+      ),
+    );
+    final models = payload['models'];
+    if (models is! List<Object?>) return const <RewriteModel>[];
+    return models
+        .whereType<Map<Object?, Object?>>()
+        .map(
+          (item) => RewriteModel.fromJson(
+            item.map((key, value) => MapEntry(key.toString(), value)),
+          ),
+        )
+        .where((model) => model.id.isNotEmpty)
+        .toList();
+  }
+
+  @override
+  Future<PromptRewriteResult> rewritePrompt(
+    PromptRewriteRequest request,
+  ) async {
+    final payload = await _readRewrite(
+      await _client.post(
+        _url('/rewrite/prompt'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(request.toJson()),
+      ),
+    );
+    return PromptRewriteResult.fromJson(payload);
+  }
+
+  /// Rewrite routes answer errors as `{error, failure, status}` so the typed
+  /// failure survives the companion hop.
+  Future<Map<String, Object?>> _readRewrite(http.Response response) async {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(response.bodyBytes));
+    } on FormatException {
+      decoded = null;
+    }
+    final payload = decoded is Map<Object?, Object?>
+        ? decoded.map((key, value) => MapEntry(key.toString(), value))
+        : <String, Object?>{};
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return payload;
+    }
+    final failureName = payload['failure']?.toString();
+    throw PromptRewriteException(
+      payload['error']?.toString() ??
+          'The companion could not complete the rewrite '
+              '(HTTP ${response.statusCode}).',
+      failure:
+          PromptRewriteFailure.values
+              .where((value) => value.name == failureName)
+              .firstOrNull ??
+          PromptRewriteFailure.other,
+      status: response.statusCode,
     );
   }
 

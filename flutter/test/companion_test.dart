@@ -5,11 +5,14 @@ import 'dart:typed_data';
 
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/provider_api.dart';
+import 'package:clawnsole/core/prompt_rewrite.dart';
+import 'package:clawnsole/core/prompt_rewrite_router.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/secure_value_store.dart';
@@ -1458,6 +1461,202 @@ void main() {
       await temporary.delete(recursive: true);
     }
   });
+  test('companion persists composer tabs beside the library', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-composer-tabs-test.',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+    final file = File('${temporary.path}/clawnsole.json');
+    final application = CompanionApp(
+      store: CompanionStore(file),
+      api: BflApi(),
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+    const headers = <String, String>{'Content-Type': 'application/json'};
+    try {
+      final empty = await http.get(base.resolve('/composer-tabs'));
+      expect(empty.statusCode, 200);
+      expect(jsonDecode(empty.body), <String, Object?>{'composerTabs': null});
+
+      const state = ComposerTabsState(
+        tabs: <ComposerTabRecord>[
+          ComposerTabRecord(id: 'a', prompt: 'first'),
+          ComposerTabRecord(id: 'b', prompt: 'second', providerId: 'artcraft'),
+        ],
+        activeTabId: 'b',
+      );
+      final saved = await http.put(
+        base.resolve('/composer-tabs'),
+        headers: headers,
+        body: jsonEncode(<String, Object?>{'composerTabs': state.toJson()}),
+      );
+      expect(saved.statusCode, 200);
+
+      final loaded = await http.get(base.resolve('/composer-tabs'));
+      final payload = jsonDecode(loaded.body) as Map<String, Object?>;
+      final decoded = ComposerTabsState.fromJson(
+        (payload['composerTabs'] as Map<Object?, Object?>).map(
+          (key, value) => MapEntry(key.toString(), value),
+        ),
+      );
+      expect(decoded.tabs.map((tab) => tab.id), <String>['a', 'b']);
+      expect(decoded.tabs.last.providerId, 'artcraft');
+      expect(decoded.activeTabId, 'b');
+
+      final onDisk = StoredData.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, Object?>,
+      );
+      expect(onDisk.composerTabs?.activeTabId, 'b');
+      expect(onDisk.composerTabs?.tabs, hasLength(2));
+
+      final invalid = await http.put(
+        base.resolve('/composer-tabs'),
+        headers: headers,
+        body: jsonEncode(<String, Object?>{'composerTabs': 'junk'}),
+      );
+      expect(invalid.statusCode, isNot(200));
+      final after = await http.get(base.resolve('/composer-tabs'));
+      expect(
+        (jsonDecode(after.body) as Map<String, Object?>)['composerTabs'],
+        isNotNull,
+        reason: 'an invalid write must not blank the saved tabs',
+      );
+    } finally {
+      await subscription.cancel();
+      await server.close(force: true);
+    }
+  });
+
+  test(
+    'companion rewrite routes use the saved key and keep typed failures',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-rewrite-routes-test.',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final store = CompanionStore(File('${temporary.path}/clawnsole.json'));
+      final openai = _RecordingRewriteApi('openai');
+      final anthropic = _RecordingRewriteApi('anthropic');
+      // Without a settings vault the companion keeps keys out of the plain
+      // library file, so tests supply them the way the desktop shell does.
+      final application = CompanionApp(
+        store: store,
+        api: BflApi(),
+        fallbackApiKeys: const <String, String>{'openai': 'sk-saved'},
+        rewriteRouter: PromptRewriteRouter(
+          apis: <String, PromptRewriteApi>{
+            'openai': openai,
+            'anthropic': anthropic,
+          },
+        ),
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+      const headers = <String, String>{'Content-Type': 'application/json'};
+      Future<http.Response> post(String path, Map<String, Object?> body) => http
+          .post(base.resolve(path), headers: headers, body: jsonEncode(body));
+      try {
+        final state = await http.get(base.resolve('/state'));
+        expect(
+          LocalSnapshot.fromJson(
+            jsonDecode(state.body) as Map<String, Object?>,
+          ).connectedRewriteProviders,
+          <String>{'openai'},
+        );
+
+        final models = await post('/rewrite/models', <String, Object?>{
+          'provider': 'openai',
+        });
+        expect(models.statusCode, 200);
+        expect(openai.keys, <String>['sk-saved']);
+        final listed =
+            (jsonDecode(models.body) as Map<String, Object?>)['models']
+                as List<Object?>;
+        expect(listed, hasLength(1));
+        expect((listed.single as Map<Object?, Object?>)['id'], 'openai-model');
+
+        final candidate = await post('/rewrite/models', <String, Object?>{
+          'provider': 'openai',
+          'apiKey': ' sk-candidate ',
+        });
+        expect(candidate.statusCode, 200);
+        expect(openai.keys.last, 'sk-candidate');
+
+        final missing = await post('/rewrite/models', <String, Object?>{
+          'provider': 'anthropic',
+        });
+        expect(missing.statusCode, 401);
+        final missingBody = jsonDecode(missing.body) as Map<String, Object?>;
+        expect(missingBody['failure'], 'missingKey');
+        expect(missingBody['error'], contains('Anthropic'));
+        expect(anthropic.keys, isEmpty);
+
+        final unknown = await post('/rewrite/models', <String, Object?>{
+          'provider': 'bfl',
+        });
+        expect(unknown.statusCode, 400);
+        expect(
+          (jsonDecode(unknown.body) as Map<String, Object?>)['failure'],
+          'badRequest',
+        );
+
+        final request = PromptRewriteRequest(
+          providerId: 'openai',
+          modelId: 'gpt-5.5',
+          effort: 'high',
+          originalPrompt: 'A red kite',
+          direction: 'Make it blue',
+          frames: <RewriteFrame>[
+            RewriteFrame(bytes: Uint8List.fromList(<int>[1, 2]), seconds: 1.5),
+          ],
+          referenceMentions: const <String>['@Image 1'],
+        );
+        final rewritten = await post('/rewrite/prompt', request.toJson());
+        expect(rewritten.statusCode, 200);
+        final result = PromptRewriteResult.fromJson(
+          jsonDecode(rewritten.body) as Map<String, Object?>,
+        );
+        expect(result.prompt, 'rewritten A red kite');
+        expect(result.modelId, 'gpt-5.5');
+        expect(openai.keys.last, 'sk-saved');
+        expect(openai.lastRequest?.effort, 'high');
+        expect(openai.lastRequest?.frames.single.bytes, <int>[1, 2]);
+        expect(openai.lastRequest?.frames.single.seconds, 1.5);
+        expect(openai.lastRequest?.referenceMentions, <String>['@Image 1']);
+
+        openai.failure = PromptRewriteFailure.refused;
+        final refused = await post('/rewrite/prompt', request.toJson());
+        expect(refused.statusCode, 422);
+        final refusedBody = jsonDecode(refused.body) as Map<String, Object?>;
+        expect(refusedBody['failure'], 'refused');
+        expect(refusedBody['error'], 'openai declined');
+
+        openai.failure = PromptRewriteFailure.rateLimited;
+        expect(
+          (await post('/rewrite/prompt', request.toJson())).statusCode,
+          429,
+        );
+        openai.failure = PromptRewriteFailure.unauthorized;
+        expect(
+          (await post('/rewrite/prompt', request.toJson())).statusCode,
+          401,
+        );
+
+        final noKey = await post(
+          '/rewrite/prompt',
+          request.toJson()..['provider'] = 'anthropic',
+        );
+        expect(noKey.statusCode, 401);
+        expect(anthropic.lastRequest, isNull);
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+      }
+    },
+  );
 }
 
 class _StateCountingDriveStore extends _MemoryDriveStore {
@@ -1742,5 +1941,45 @@ class _MemorySettingsVaultRemote implements SettingsVaultRemote {
       Uint8List.fromList(bytes),
       etag: 'version-$_version',
     );
+  }
+}
+
+class _RecordingRewriteApi implements PromptRewriteApi {
+  _RecordingRewriteApi(this.providerId);
+
+  final String providerId;
+  final List<String> keys = <String>[];
+  PromptRewriteRequest? lastRequest;
+  PromptRewriteFailure? failure;
+
+  @override
+  Future<List<RewriteModel>> listModels(String apiKey) async {
+    keys.add(apiKey);
+    _maybeFail();
+    return <RewriteModel>[
+      RewriteModel(id: '$providerId-model', label: '$providerId model'),
+    ];
+  }
+
+  @override
+  Future<PromptRewriteResult> rewrite(
+    PromptRewriteRequest request,
+    String apiKey,
+  ) async {
+    keys.add(apiKey);
+    lastRequest = request;
+    _maybeFail();
+    return PromptRewriteResult(
+      prompt: 'rewritten ${request.originalPrompt}',
+      summary: 'ok',
+      providerId: providerId,
+      modelId: request.modelId,
+    );
+  }
+
+  void _maybeFail() {
+    final reason = failure;
+    if (reason == null) return;
+    throw PromptRewriteException('$providerId declined', failure: reason);
   }
 }

@@ -125,6 +125,28 @@ test("every provider catalog link is allowlisted for desktop", () => {
   }
 });
 
+test("every AI Rewrite console link is allowlisted for desktop", () => {
+  const source = fs.readFileSync(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "flutter",
+      "lib",
+      "core",
+      "prompt_rewrite.dart",
+    ),
+    "utf8",
+  );
+  const urls = [...source.matchAll(/\bconsoleUrl:\s*'([^']+)'/g)].map(
+    (match) => match[1],
+  );
+  assert.ok(urls.length >= 2, "rewrite provider console URLs must be discoverable");
+  for (const url of urls) {
+    assert.equal(isAllowedExternalUrl(url), true, `${url} must be allowlisted`);
+  }
+});
+
 test("explicit external opens are HTTPS and purpose scoped", () => {
   assert.equal(
     isAllowedExplicitExternalUrl(

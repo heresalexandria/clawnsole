@@ -5,13 +5,16 @@ import 'package:http/http.dart' as http;
 
 import 'background_delivery.dart';
 import 'bfl_api.dart';
+import 'composer_tabs.dart';
 import 'durable_data_store.dart';
+import 'gateway.dart';
 import 'generation_status.dart';
 import 'generation_timing.dart';
-import 'gateway.dart';
 import 'library_rules.dart';
 import 'models.dart';
 import 'pricing.dart';
+import 'prompt_rewrite.dart';
+import 'prompt_rewrite_router.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
@@ -32,6 +35,8 @@ class DirectGateway
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
+        ComposerTabsGateway,
+        PromptRewriteGateway,
         BackgroundDeliveryGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
@@ -45,6 +50,7 @@ class DirectGateway
     BflApi? api,
     http.Client? client,
     ProviderApiRouter? providerRouter,
+    PromptRewriteRouter? rewriteRouter,
     BackgroundResultDelivery? backgroundDelivery,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
@@ -52,6 +58,7 @@ class DirectGateway
     this.availableProviders = remoteProviderIds,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
+       _rewrite = rewriteRouter ?? PromptRewriteRouter(client: client),
        _client = client ?? http.Client(),
        _backgroundDelivery = backgroundDelivery,
        _referenceVideoNormalizer = referenceVideoNormalizer,
@@ -62,6 +69,7 @@ class DirectGateway
 
   final DurableDataStore _store;
   final ProviderApiRouter _providers;
+  final PromptRewriteRouter _rewrite;
   final http.Client _client;
   final BackgroundResultDelivery? _backgroundDelivery;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
@@ -192,6 +200,9 @@ class DirectGateway
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      connectedRewriteProviders: rewriteProviderIds
+          .where((provider) => activeApiKey(provider, data) != null)
+          .toSet(),
       availableProviders: availableProviders,
       providerRetentionAcknowledgements: connected.where((provider) {
         final credential = activeApiKey(provider, data);
@@ -245,6 +256,49 @@ class DirectGateway
   Future<void> saveProviderCatalogCache(Map<String, Object?> cache) async {
     final current = await _store.read();
     await _store.write(current.copyWith(providerCatalogCache: cache));
+  }
+
+  @override
+  Future<ComposerTabsState?> loadComposerTabs() async =>
+      (await _store.read()).composerTabs;
+
+  @override
+  Future<void> saveComposerTabs(ComposerTabsState state) async {
+    final current = await _store.read();
+    await _store.write(current.copyWith(composerTabs: state));
+  }
+
+  @override
+  Future<List<RewriteModel>> listRewriteModels(
+    String providerId, {
+    String? candidateKey,
+  }) async {
+    final key = candidateKey?.trim().isNotEmpty == true
+        ? candidateKey!.trim()
+        : activeApiKey(providerId, await _store.read())?.value ?? '';
+    if (key.isEmpty) {
+      throw PromptRewriteException(
+        'Add a ${RewriteProvider.byId(providerId)?.name ?? providerId} '
+        'API key first.',
+        failure: PromptRewriteFailure.missingKey,
+      );
+    }
+    return _rewrite.listModels(providerId: providerId, apiKey: key);
+  }
+
+  @override
+  Future<PromptRewriteResult> rewritePrompt(
+    PromptRewriteRequest request,
+  ) async {
+    final key = activeApiKey(request.providerId, await _store.read())?.value;
+    if (key == null || key.isEmpty) {
+      throw PromptRewriteException(
+        'Add a ${RewriteProvider.byId(request.providerId)?.name ?? request.providerId} '
+        'API key first.',
+        failure: PromptRewriteFailure.missingKey,
+      );
+    }
+    return _rewrite.rewrite(request, apiKey: key);
   }
 
   @override
