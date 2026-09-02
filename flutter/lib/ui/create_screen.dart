@@ -249,9 +249,14 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
   @override
   void initState() {
     super.initState();
+    // Starred providers open expanded: they are pinned for quick reach.
     _collapsedProviders.addAll(
       controller.providers
-          .where((provider) => provider.id != controller.selectedProviderId)
+          .where(
+            (provider) =>
+                provider.id != controller.selectedProviderId &&
+                !controller.isFavoriteProvider(provider.id),
+          )
           .map((provider) => provider.id),
     );
   }
@@ -285,10 +290,8 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
             enabled: false,
             padding: EdgeInsets.zero,
             child: _ProviderSearchMenu(
-              providers: controller.providers,
+              controller: controller,
               collapsedProviders: _collapsedProviders,
-              selectedProviderId: controller.selectedProviderId,
-              selectedModelId: controller.selectedModel.id,
               onExpandedChanged: (providerId, expanded) {
                 if (expanded) {
                   _collapsedProviders.remove(providerId);
@@ -365,17 +368,13 @@ IconData _providerPlaqueIcon(String providerId) => switch (providerId) {
 
 class _ProviderSearchMenu extends StatefulWidget {
   const _ProviderSearchMenu({
-    required this.providers,
+    required this.controller,
     required this.collapsedProviders,
-    required this.selectedProviderId,
-    required this.selectedModelId,
     required this.onExpandedChanged,
   });
 
-  final List<VideoProviderDefinition> providers;
+  final AppController controller;
   final Set<String> collapsedProviders;
-  final String selectedProviderId;
-  final String selectedModelId;
   final void Function(String providerId, bool expanded) onExpandedChanged;
 
   @override
@@ -391,8 +390,22 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
     super.dispose();
   }
 
+  void _toggleProviderFavorite(String providerId) {
+    // A freshly starred provider opens so its models are in reach at once.
+    if (!widget.controller.isFavoriteProvider(providerId)) {
+      widget.onExpandedChanged(providerId, true);
+    }
+    unawaited(widget.controller.toggleFavoriteProvider(providerId));
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) => _buildMenu(context),
+  );
+
+  Widget _buildMenu(BuildContext context) {
+    final controller = widget.controller;
     final query = _search.text.trim().toLowerCase();
     final terms = query.split(RegExp(r'\s+')).where((term) => term.isNotEmpty);
     bool containsAll(String value) {
@@ -407,7 +420,8 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
             List<VideoModelDefinition> models,
           })
         >[];
-    for (final provider in widget.providers) {
+    // Starred providers lead the list; a search keeps that order too.
+    for (final provider in controller.providersByPreference) {
       final providerIdentity = '${provider.name} ${provider.id}';
       final providerMatches = query.isNotEmpty && containsAll(providerIdentity);
       final models = query.isEmpty || providerMatches
@@ -421,6 +435,11 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                 .toList();
       if (models.isNotEmpty) matches.add((provider: provider, models: models));
     }
+    // Favorites sit above the provider sections while browsing; a search
+    // already narrows the list, so it speaks for itself.
+    final favorites = query.isEmpty
+        ? controller.favoriteModels
+        : const <FavoriteModel>[];
     final menuHeight = (MediaQuery.sizeOf(context).height * .68)
         .clamp(320.0, 560.0)
         .toDouble();
@@ -471,24 +490,50 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                   )
                 : ListView(
                     padding: EdgeInsets.zero,
-                    children: matches
-                        .map(
-                          (match) => _ProviderMenuSection(
-                            key: ValueKey(
-                              'provider-model-section-${match.provider.id}',
+                    children: <Widget>[
+                      if (favorites.isNotEmpty)
+                        _FavoriteModelsSection(
+                          key: const ValueKey('provider-model-favorites'),
+                          favorites: favorites,
+                          selectedProviderId: controller.selectedProviderId,
+                          selectedModelId: controller.selectedModel.id,
+                          onUnstar: (favorite) => unawaited(
+                            controller.toggleFavoriteModel(
+                              favorite.provider.id,
+                              favorite.model.id,
                             ),
-                            provider: match.provider,
-                            models: match.models,
-                            forceExpanded: query.isNotEmpty,
-                            initiallyExpanded: !widget.collapsedProviders
-                                .contains(match.provider.id),
-                            selectedProviderId: widget.selectedProviderId,
-                            selectedModelId: widget.selectedModelId,
-                            onExpandedChanged: (expanded) => widget
-                                .onExpandedChanged(match.provider.id, expanded),
                           ),
-                        )
-                        .toList(),
+                        ),
+                      ...matches.map(
+                        (match) => _ProviderMenuSection(
+                          key: ValueKey(
+                            'provider-model-section-${match.provider.id}',
+                          ),
+                          provider: match.provider,
+                          models: match.models,
+                          forceExpanded: query.isNotEmpty,
+                          initiallyExpanded: !widget.collapsedProviders
+                              .contains(match.provider.id),
+                          selectedProviderId: controller.selectedProviderId,
+                          selectedModelId: controller.selectedModel.id,
+                          favorite: controller.isFavoriteProvider(
+                            match.provider.id,
+                          ),
+                          isModelFavorite: (model) => controller
+                              .isFavoriteModel(match.provider.id, model.id),
+                          onProviderFavoriteToggle: () =>
+                              _toggleProviderFavorite(match.provider.id),
+                          onModelFavoriteToggle: (model) => unawaited(
+                            controller.toggleFavoriteModel(
+                              match.provider.id,
+                              model.id,
+                            ),
+                          ),
+                          onExpandedChanged: (expanded) => widget
+                              .onExpandedChanged(match.provider.id, expanded),
+                        ),
+                      ),
+                    ],
                   ),
           ),
         ],
@@ -505,6 +550,10 @@ class _ProviderMenuSection extends StatefulWidget {
     required this.initiallyExpanded,
     required this.selectedProviderId,
     required this.selectedModelId,
+    required this.favorite,
+    required this.isModelFavorite,
+    required this.onProviderFavoriteToggle,
+    required this.onModelFavoriteToggle,
     required this.onExpandedChanged,
     super.key,
   });
@@ -515,6 +564,10 @@ class _ProviderMenuSection extends StatefulWidget {
   final bool initiallyExpanded;
   final String selectedProviderId;
   final String selectedModelId;
+  final bool favorite;
+  final bool Function(VideoModelDefinition model) isModelFavorite;
+  final VoidCallback onProviderFavoriteToggle;
+  final ValueChanged<VideoModelDefinition> onModelFavoriteToggle;
   final ValueChanged<bool> onExpandedChanged;
 
   @override
@@ -523,6 +576,16 @@ class _ProviderMenuSection extends StatefulWidget {
 
 class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
   late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  void didUpdateWidget(covariant _ProviderMenuSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The host changes this while the menu is open (starring a provider
+    // opens it), so follow the change instead of freezing the first value.
+    if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
+      _expanded = widget.initiallyExpanded;
+    }
+  }
 
   void _toggle() {
     setState(() => _expanded = !_expanded);
@@ -562,6 +625,13 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                       ),
                     ),
                   ),
+                  _FavoriteStar(
+                    key: ValueKey('provider-favorite-${widget.provider.id}'),
+                    starred: widget.favorite,
+                    subject: widget.provider.name,
+                    onPressed: widget.onProviderFavoriteToggle,
+                  ),
+                  const SizedBox(width: 2),
                   Text(
                     '${widget.models.length}',
                     style: TextStyle(
@@ -606,7 +676,7 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                                 alpha: .5,
                               )
                             : null,
-                        padding: const EdgeInsets.fromLTRB(24, 10, 14, 10),
+                        padding: const EdgeInsets.fromLTRB(24, 6, 10, 6),
                         child: Row(
                           children: <Widget>[
                             Expanded(
@@ -627,6 +697,16 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                                 size: 17,
                                 color: context.colors.primary,
                               ),
+                            const SizedBox(width: 4),
+                            _FavoriteStar(
+                              key: ValueKey(
+                                'provider-model-star-${widget.provider.id}-${model.id}',
+                              ),
+                              starred: widget.isModelFavorite(model),
+                              subject: model.label,
+                              onPressed: () =>
+                                  widget.onModelFavoriteToggle(model),
+                            ),
                           ],
                         ),
                       ),
@@ -639,6 +719,158 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
       ],
     );
   }
+}
+
+/// The starred models pinned above the provider sections of the picker.
+class _FavoriteModelsSection extends StatelessWidget {
+  const _FavoriteModelsSection({
+    required this.favorites,
+    required this.selectedProviderId,
+    required this.selectedModelId,
+    required this.onUnstar,
+    super.key,
+  });
+
+  final List<FavoriteModel> favorites;
+  final String selectedProviderId;
+  final String selectedModelId;
+  final ValueChanged<FavoriteModel> onUnstar;
+
+  @override
+  Widget build(BuildContext context) {
+    final headingBackground = Theme.of(context).brightness == Brightness.dark
+        ? context.colors.surfaceContainerLowest
+        : context.colors.surfaceContainerHighest;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        ColoredBox(
+          color: headingBackground,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.star_rounded, size: 14, color: context.tokens.brass),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'FAVORITES',
+                    style: TextStyle(
+                      color: context.colors.onSurface,
+                      fontSize: 10,
+                      letterSpacing: 1.1,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${favorites.length}',
+                  style: TextStyle(
+                    color: context.colors.onSurface.withValues(alpha: .72),
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        ...favorites.map((favorite) {
+          final selected =
+              favorite.provider.id == selectedProviderId &&
+              favorite.model.id == selectedModelId;
+          return InkWell(
+            key: ValueKey(
+              'provider-model-favorite-${favorite.provider.id}-${favorite.model.id}',
+            ),
+            onTap: () => Navigator.of(
+              context,
+            ).pop('${favorite.provider.id}|${favorite.model.id}'),
+            child: Container(
+              color: selected
+                  ? context.colors.primaryContainer.withValues(alpha: .5)
+                  : null,
+              padding: const EdgeInsets.fromLTRB(24, 6, 10, 6),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          favorite.model.label,
+                          style: TextStyle(
+                            color: context.colors.onSurface,
+                            fontSize: 13,
+                            fontWeight: selected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                          ),
+                        ),
+                        Text(
+                          favorite.provider.name,
+                          style: TextStyle(
+                            color: context.colors.onSurfaceVariant,
+                            fontSize: 10.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (selected)
+                    Icon(
+                      Icons.check_rounded,
+                      size: 17,
+                      color: context.colors.primary,
+                    ),
+                  const SizedBox(width: 4),
+                  _FavoriteStar(
+                    starred: true,
+                    subject: favorite.model.label,
+                    onPressed: () => onUnstar(favorite),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+        Divider(height: 1, color: context.colors.outlineVariant),
+      ],
+    );
+  }
+}
+
+/// A compact star toggle: brass when lit, quiet outline otherwise. Brass is
+/// jewelry here, never a fill.
+class _FavoriteStar extends StatelessWidget {
+  const _FavoriteStar({
+    required this.starred,
+    required this.subject,
+    required this.onPressed,
+    super.key,
+  });
+
+  final bool starred;
+  final String subject;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: starred
+        ? 'Remove $subject from favorites'
+        : 'Add $subject to favorites',
+    onPressed: onPressed,
+    isSelected: starred,
+    visualDensity: VisualDensity.compact,
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+    iconSize: 17,
+    selectedIcon: Icon(Icons.star_rounded, color: context.tokens.brass),
+    icon: Icon(
+      Icons.star_border_rounded,
+      color: context.colors.onSurface.withValues(alpha: .45),
+    ),
+  );
 }
 
 class _Composer extends StatefulWidget {

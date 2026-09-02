@@ -115,10 +115,10 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
                     : constraints.maxWidth >= 620
                     ? (constraints.maxWidth - 16) / 2
                     : constraints.maxWidth;
-                return Wrap(
+                Widget cards(List<VideoProviderDefinition> providers) => Wrap(
                   spacing: 16,
                   runSpacing: 16,
-                  children: widget.controller.providers
+                  children: providers
                       .map(
                         (provider) => SizedBox(
                           width: width,
@@ -145,6 +145,30 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
                         ),
                       )
                       .toList(),
+                );
+                // Starred providers lead the desk under their own label; the
+                // rest keep catalog order beneath.
+                final favorites = widget.controller.favoriteProviders;
+                final others = widget.controller.providers
+                    .where(
+                      (provider) =>
+                          !widget.controller.isFavoriteProvider(provider.id),
+                    )
+                    .toList();
+                if (favorites.isEmpty) return cards(others);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Eyebrow('Favorites', icon: Icons.star_rounded),
+                    const SizedBox(height: 10),
+                    cards(favorites),
+                    if (others.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 22),
+                      const Eyebrow('Other providers'),
+                      const SizedBox(height: 10),
+                      cards(others),
+                    ],
+                  ],
                 );
               },
             ),
@@ -212,6 +236,7 @@ class _ProviderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final connected = controller.hasApiKeyFor(provider.id);
     final selected = controller.selectedProviderId == provider.id;
+    final favorite = controller.isFavoriteProvider(provider.id);
     return SurfaceCard(
       padding: const EdgeInsets.all(18),
       child: Column(
@@ -265,6 +290,19 @@ class _ProviderCard extends StatelessWidget {
                 ),
               ),
               if (selected) const Icon(Icons.check_circle_rounded, size: 19),
+              IconButton(
+                key: ValueKey('provider-card-star-${provider.id}'),
+                tooltip: favorite
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+                onPressed: () =>
+                    unawaited(controller.toggleFavoriteProvider(provider.id)),
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  favorite ? Icons.star_rounded : Icons.star_border_rounded,
+                  color: favorite ? context.tokens.brass : null,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
