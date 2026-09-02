@@ -3919,7 +3919,10 @@ void main() {
     await tester.pumpAndSettle();
 
     Finder promptField() => find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+      ValueKey<String>(
+        'generation-prompt-${controller.activeComposerTabId}-'
+        '${controller.formRevision}',
+      ),
     );
     await tester.enterText(promptField(), 'Stale visible desktop prompt.');
     // Recent work renders the Library's full cards, whose reuse button
@@ -5260,7 +5263,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final prompt = find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+      ValueKey<String>(
+        'generation-prompt-${controller.activeComposerTabId}-'
+        '${controller.formRevision}',
+      ),
     );
     await tester.ensureVisible(prompt);
     await tester.tap(prompt);
@@ -5339,7 +5345,10 @@ void main() {
     await tester.pumpAndSettle();
 
     final inlinePrompt = find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+      ValueKey<String>(
+        'generation-prompt-${controller.activeComposerTabId}-'
+        '${controller.formRevision}',
+      ),
     );
     expect(
       find.byKey(const ValueKey('prompt-character-limit')),
@@ -5550,7 +5559,10 @@ void main() {
     );
 
     final prompt = find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+      ValueKey<String>(
+        'generation-prompt-${controller.activeComposerTabId}-'
+        '${controller.formRevision}',
+      ),
     );
     await tester.enterText(prompt, 'Follow @');
     await tester.pump();
@@ -5732,7 +5744,10 @@ void main() {
     expect(controller.form.prompt, 'Follow @Alexandria.');
 
     final prompt = find.byKey(
-      ValueKey<String>('generation-prompt-${controller.formRevision}'),
+      ValueKey<String>(
+        'generation-prompt-${controller.activeComposerTabId}-'
+        '${controller.formRevision}',
+      ),
     );
     await tester.enterText(prompt, 'Use @Ale');
     await tester.pump();

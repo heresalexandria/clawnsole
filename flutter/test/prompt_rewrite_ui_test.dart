@@ -304,6 +304,23 @@ void main() {
     expect(find.text('Anthropic rejected this key.'), findsOneWidget);
   });
 
+  test('a preference write keeps the connected rewrite providers', () async {
+    final gateway = _gateway(
+      connectedRewriteProviders: const <String>{'openai'},
+    );
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    expect(controller.connectedRewriteProviders, <String>{'openai'});
+
+    // Navigation persists preferences, and the controller rebuilds its
+    // snapshot from the write's answer without restoring preferences; the
+    // rewrite providers must ride along or the action vanishes mid-session.
+    await controller.navigate(AppSection.library);
+
+    expect(controller.connectedRewriteProviders, <String>{'openai'});
+    expect(controller.canRewriteAnything, isTrue);
+  });
+
   test('frame sampling drops repeats and survives a sourceless film', () async {
     final controller = _controller(_gateway());
     addTearDown(controller.dispose);

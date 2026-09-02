@@ -9,6 +9,7 @@ import 'package:mime/mime.dart';
 import '../core/asset_extensions.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
+import '../core/composer_tabs.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
@@ -348,6 +349,76 @@ class GenerationFormState {
       references.where((item) => item.kind == kind).length;
 }
 
+/// One composer workspace on the Create screen: an independent Direction
+/// prompt plus every generation setting that goes with it.
+///
+/// Everything the composer treats as "the draft" lives here rather than on
+/// [AppController], so several films can be written side by side. The
+/// controller's `form`, `selectedProviderId`, `formRevision` and friends are
+/// views onto whichever tab is in front.
+class ComposerTab {
+  ComposerTab({
+    required this.id,
+    required this.providerId,
+    required this.modelId,
+    this.title,
+    this.generateAudioExplicitlyDisabled = false,
+    this.formRevision = 0,
+    this.sourceGenerationId,
+    this.rewriteSummary,
+    this.localFolderId,
+    this.driveFolderId,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) : createdAt = createdAt ?? DateTime.now().toUtc(),
+       updatedAt = updatedAt ?? createdAt ?? DateTime.now().toUtc();
+
+  final String id;
+
+  /// A name typed by the director; null derives the label from the prompt.
+  String? title;
+
+  final GenerationFormState form = GenerationFormState();
+  String providerId;
+  String modelId;
+
+  /// Whether the director turned audio off by hand, so a model switch does
+  /// not silently turn it back on.
+  bool generateAudioExplicitlyDisabled;
+
+  /// References set aside because this tab's model cannot take them.
+  final List<MediaReferenceDraft> disabledReferences = <MediaReferenceDraft>[];
+
+  /// Bumped whenever the whole draft is replaced, so text fields and the
+  /// disclosure panels rebuild from the new contents.
+  int formRevision;
+
+  /// The generation this tab was seeded from (startup carry-over, Reuse, or
+  /// AI Rewrite). Retained media is re-hydrated from it on the next launch.
+  String? sourceGenerationId;
+
+  /// The one-sentence change summary from AI Rewrite, when it made this tab.
+  String? rewriteSummary;
+
+  /// Save-to folders, one per storage, seeded from the last-used defaults.
+  String? localFolderId;
+  String? driveFolderId;
+  final DateTime createdAt;
+  DateTime updatedAt;
+
+  /// Media expected to appear in this tab but not yet attached. Async picks
+  /// keep counting against the tab they started in.
+  int pendingPickerReferenceAdds = 0;
+  int pendingDropReferenceAdds = 0;
+  int pendingFrameAdds = 0;
+
+  String get label => composerTabTitle(title, form.prompt);
+
+  /// Nothing has been directed here yet, so seeding it in place clobbers no
+  /// work of the director's.
+  bool get isBlank => form.prompt.trim().isEmpty;
+}
+
 class AppController extends ChangeNotifier {
   AppController({
     AppGateway? gateway,
@@ -364,6 +435,13 @@ class AppController extends ChangeNotifier {
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
+    final first = ComposerTab(
+      id: _uid(),
+      providerId: 'bfl',
+      modelId: 'flux-3-video',
+    );
+    _composerTabs.add(first);
+    _activeComposerTabId = first.id;
   }
 
   final AppGateway gateway;
@@ -371,9 +449,22 @@ class AppController extends ChangeNotifier {
   final ProviderCatalogClient _providerCatalogClient;
   final BackgroundActivityCoordinator _backgroundActivity;
   final bool _mobileTestBuild;
-  final GenerationFormState form = GenerationFormState();
-  bool _generateAudioExplicitlyDisabled = false;
-  final List<MediaReferenceDraft> _disabledReferences = <MediaReferenceDraft>[];
+
+  final List<ComposerTab> _composerTabs = <ComposerTab>[];
+  String _activeComposerTabId = '';
+
+  /// Where draft writes land. It is [activeComposerTab] except inside
+  /// [_inComposerTab], which async media work uses to keep writing into the
+  /// tab it started in after the director has moved on.
+  ComposerTab? _composerDraftTarget;
+  Timer? _composerTabsSaveTimer;
+  Future<void> _composerTabWrites = Future<void>.value();
+  bool _restoringComposerTabs = false;
+
+  /// True once startup has read the saved strip (or found none). Writing
+  /// before that would file a default tab over the session the director
+  /// actually left open.
+  bool _composerTabsRestored = false;
 
   LocalSnapshot? _snapshot;
   int _snapshotRevision = 0;
@@ -420,8 +511,14 @@ class AppController extends ChangeNotifier {
   String? referenceTag;
   MediaReferenceKind? referenceKind;
   ReferenceSort referenceSort = ReferenceSort.newest;
-  String selectedProviderId = 'bfl';
-  String selectedModelId = 'flux-3-video';
+
+  /// The provider and model of the composer tab in front. Every tab keeps
+  /// its own pair, so one draft can wait on Runway while another is set up
+  /// for FLUX.
+  String get selectedProviderId => _draftTab.providerId;
+  set selectedProviderId(String value) => _draftTab.providerId = value;
+  String get selectedModelId => _draftTab.modelId;
+  set selectedModelId(String value) => _draftTab.modelId = value;
   double? credits;
   final Map<String, ProviderAccountStatus> providerAccounts =
       <String, ProviderAccountStatus>{};
@@ -442,7 +539,8 @@ class AppController extends ChangeNotifier {
   bool refreshingCredits = false;
   int _referenceUploadDepth = 0;
   String? referenceUploadStatus;
-  int formRevision = 0;
+  int get formRevision => _draftTab.formRevision;
+  set formRevision(int value) => _draftTab.formRevision = value;
   String? loadError;
   String? creditError;
   String? notice;
@@ -525,9 +623,14 @@ class AppController extends ChangeNotifier {
 
   bool get referenceUploadInProgress => _referenceUploadDepth > 0;
 
-  int _pendingPickerReferenceAdds = 0;
-  int _pendingDropReferenceAdds = 0;
-  int _pendingFrameAdds = 0;
+  int get _pendingPickerReferenceAdds => _draftTab.pendingPickerReferenceAdds;
+  set _pendingPickerReferenceAdds(int value) =>
+      _draftTab.pendingPickerReferenceAdds = value;
+  int get _pendingDropReferenceAdds => _draftTab.pendingDropReferenceAdds;
+  set _pendingDropReferenceAdds(int value) =>
+      _draftTab.pendingDropReferenceAdds = value;
+  int get _pendingFrameAdds => _draftTab.pendingFrameAdds;
+  set _pendingFrameAdds(int value) => _draftTab.pendingFrameAdds = value;
 
   /// Reference cards expected to appear but not yet appended to the form —
   /// a picker still choosing or reading files, or dropped files being read.
@@ -538,6 +641,333 @@ class AppController extends ChangeNotifier {
   /// Keyframe cards expected to appear but not yet appended to the form
   /// (the pick-and-retain pipeline runs before a frame attaches).
   int get pendingFrameAdds => _pendingFrameAdds;
+
+  // ---------------------------------------------------------------------
+  // Composer tabs
+  // ---------------------------------------------------------------------
+
+  /// Every open composer workspace, in strip order.
+  List<ComposerTab> get composerTabs =>
+      List<ComposerTab>.unmodifiable(_composerTabs);
+
+  /// The workspace the Create screen is showing. There is always exactly one.
+  ComposerTab get activeComposerTab => _composerTabs.firstWhere(
+    (tab) => tab.id == _activeComposerTabId,
+    orElse: () => _composerTabs.first,
+  );
+
+  String get activeComposerTabId => activeComposerTab.id;
+
+  /// The draft every form mutation reads and writes.
+  ComposerTab get _draftTab => _composerDraftTarget ?? activeComposerTab;
+
+  /// The Direction prompt and settings of the tab in front.
+  GenerationFormState get form => _draftTab.form;
+
+  bool get _generateAudioExplicitlyDisabled =>
+      _draftTab.generateAudioExplicitlyDisabled;
+  set _generateAudioExplicitlyDisabled(bool value) =>
+      _draftTab.generateAudioExplicitlyDisabled = value;
+
+  List<MediaReferenceDraft> get _disabledReferences =>
+      _draftTab.disabledReferences;
+
+  /// Runs [action] with draft writes aimed at [tab] rather than the visible
+  /// one, so a picker or download that finished after a tab switch still
+  /// lands its media in the draft it was started from.
+  ///
+  /// [action] is deliberately synchronous: the aim is restored the moment it
+  /// returns, so no director interaction can ever interleave with it. Never
+  /// await inside one of these — capture the tab and open a new scope after
+  /// the await instead.
+  T _inComposerTab<T>(ComposerTab tab, T Function() action) {
+    final previous = _composerDraftTarget;
+    _composerDraftTarget = tab;
+    try {
+      return action();
+    } finally {
+      _composerDraftTarget = previous;
+    }
+  }
+
+  ComposerTab? _composerTabById(String id) =>
+      _composerTabs.where((tab) => tab.id == id).firstOrNull;
+
+  /// Opens a blank workspace. It inherits only the current tab's provider,
+  /// model, and save-to folders; the direction and everything attached start
+  /// empty.
+  ComposerTab addComposerTab({bool activate = true}) {
+    final source = activeComposerTab;
+    final tab = ComposerTab(
+      id: _uid(),
+      providerId: source.providerId,
+      modelId: source.modelId,
+      localFolderId: source.localFolderId,
+      driveFolderId: source.driveFolderId,
+    );
+    _composerTabs.add(tab);
+    if (activate) {
+      _activeComposerTabId = tab.id;
+      _invalidateProviderEstimate();
+    }
+    _flushComposerTabsSave();
+    notifyListeners();
+    return tab;
+  }
+
+  /// Brings [id] to the front. Unknown ids are ignored.
+  void activateComposerTab(String id) {
+    if (id == _activeComposerTabId) return;
+    final tab = _composerTabById(id);
+    if (tab == null) return;
+    _activeComposerTabId = tab.id;
+    _invalidateProviderEstimate();
+    _ensureProviderModelsLoaded(tab.providerId);
+    _flushComposerTabsSave();
+    notifyListeners();
+  }
+
+  /// Closes [id]. The strip never empties: closing the only tab replaces it
+  /// with a blank one that keeps its provider, model, and folders. Closing
+  /// the tab in front moves to its right-hand neighbour, else the left.
+  void closeComposerTab(String id) {
+    final index = _composerTabs.indexWhere((tab) => tab.id == id);
+    if (index < 0) return;
+    final closed = _composerTabs.removeAt(index);
+    final wasActive = closed.id == _activeComposerTabId;
+    if (_composerTabs.isEmpty) {
+      final replacement = ComposerTab(
+        id: _uid(),
+        providerId: closed.providerId,
+        modelId: closed.modelId,
+        localFolderId: closed.localFolderId,
+        driveFolderId: closed.driveFolderId,
+      );
+      _composerTabs.add(replacement);
+      _activeComposerTabId = replacement.id;
+    } else if (wasActive) {
+      final next = index < _composerTabs.length
+          ? index
+          : _composerTabs.length - 1;
+      _activeComposerTabId = _composerTabs[next].id;
+    }
+    _invalidateProviderEstimate();
+    _ensureProviderModelsLoaded(activeComposerTab.providerId);
+    _flushComposerTabsSave();
+    notifyListeners();
+  }
+
+  /// Names [id]. An empty or blank [title] goes back to deriving the label
+  /// from the prompt.
+  void renameComposerTab(String id, String? title) {
+    final tab = _composerTabById(id);
+    if (tab == null) return;
+    final clean = title?.trim() ?? '';
+    tab.title = clean.isEmpty ? null : clean;
+    _scheduleComposerTabsSave(touched: tab);
+    notifyListeners();
+  }
+
+  /// Fetches a newly fronted tab's live model list once, so switching to a
+  /// draft set up for another provider does not sit on stale pricing.
+  void _ensureProviderModelsLoaded(String providerId) {
+    if (providerPrices.containsKey(providerId)) return;
+    final provider = providers
+        .where((item) => item.id == providerId)
+        .firstOrNull;
+    if (provider == null || !provider.requiresApiKey) return;
+    unawaited(refreshProviderModels(providerId));
+  }
+
+  /// How long a draft rests before it is written down. Typing must not put a
+  /// file write behind every keystroke.
+  static const Duration composerTabsSaveDebounce = Duration(milliseconds: 750);
+
+  bool get _persistsComposerTabs =>
+      _composerTabsRestored && gateway is ComposerTabsGateway;
+
+  ComposerTabRecord _composerTabRecord(ComposerTab tab) => ComposerTabRecord(
+    id: tab.id,
+    title: tab.title,
+    prompt: tab.form.prompt,
+    providerId: tab.providerId,
+    modelId: tab.modelId,
+    aspectRatio: tab.form.aspectRatio,
+    autoDuration: tab.form.autoDuration,
+    durationSeconds: tab.form.durationSeconds,
+    frameRate: tab.form.frameRate,
+    resolution: tab.form.resolution,
+    generateAudio: tab.form.generateAudio,
+    safetyTolerance: tab.form.safetyTolerance,
+    draft: tab.form.draft,
+    exactTiming: tab.form.exactTiming,
+    referenceTask: tab.form.referenceTask.name,
+    upscale: tab.form.upscale,
+    upscaleFactor: tab.form.upscaleFactor,
+    upscaleCreativity: tab.form.upscaleCreativity,
+    seed: tab.form.seed,
+    videoUrl: tab.form.videoUrl,
+    draftUrl: tab.form.draftUrl,
+    sourceGenerationId: tab.sourceGenerationId,
+    rewriteSummary: tab.rewriteSummary,
+    localFolderId: tab.localFolderId,
+    driveFolderId: tab.driveFolderId,
+    createdAt: tab.createdAt,
+    updatedAt: tab.updatedAt,
+  );
+
+  /// Notes that [touched] (the tab being drafted in, by default) changed and
+  /// arms the debounced write.
+  void _scheduleComposerTabsSave({ComposerTab? touched}) {
+    if (_disposed || _restoringComposerTabs || !_persistsComposerTabs) return;
+    (touched ?? _draftTab).updatedAt = DateTime.now().toUtc();
+    _composerTabsSaveTimer?.cancel();
+    _composerTabsSaveTimer = Timer(
+      composerTabsSaveDebounce,
+      () => unawaited(_saveComposerTabs()),
+    );
+  }
+
+  /// Writes the strip now. Tab switches, closes, navigation, and submission
+  /// are the moments a half-typed draft must already be on disk.
+  /// [onlyIfPending] skips the write when nothing has changed since the last.
+  void _flushComposerTabsSave({bool onlyIfPending = false}) {
+    final pending = _composerTabsSaveTimer?.isActive ?? false;
+    _composerTabsSaveTimer?.cancel();
+    _composerTabsSaveTimer = null;
+    if (_disposed || _restoringComposerTabs || !_persistsComposerTabs) return;
+    if (onlyIfPending && !pending) return;
+    unawaited(_saveComposerTabs());
+  }
+
+  Future<void> _saveComposerTabs() async {
+    if (_disposed) return;
+    if (gateway case final ComposerTabsGateway tabsGateway) {
+      final state = ComposerTabsState(
+        tabs: _composerTabs.map(_composerTabRecord).toList(growable: false),
+        activeTabId: _activeComposerTabId,
+      );
+      // Serialized like the preference writes so two quick changes cannot
+      // land out of order, and silent: a draft never raises a notice.
+      _composerTabWrites = _composerTabWrites.then((_) async {
+        try {
+          await tabsGateway.saveComposerTabs(state);
+        } on Object {
+          // The next change writes the whole strip again.
+        }
+      });
+      await _composerTabWrites;
+    }
+  }
+
+  /// Rebuilds the strip saved by the last session. Returns false when there
+  /// is nothing stored, so startup falls back to seeding one tab from the
+  /// most recent generation.
+  Future<bool> _restoreComposerTabs() async {
+    if (gateway case final ComposerTabsGateway tabsGateway) {
+      ComposerTabsState? stored;
+      try {
+        stored = await tabsGateway.loadComposerTabs();
+      } on Object {
+        return false;
+      }
+      if (_disposed || stored == null || stored.tabs.isEmpty) return false;
+      final known = <String, Generation>{
+        for (final item in generations) item.localId: item,
+      };
+      final rebuilt = <ComposerTab>[
+        for (final record in stored.tabs)
+          ComposerTab(
+            id: record.id,
+            providerId: record.providerId ?? selectedProviderId,
+            modelId: record.modelId ?? selectedModelId,
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt,
+          ),
+      ];
+      _restoringComposerTabs = true;
+      try {
+        _composerTabs
+          ..clear()
+          ..addAll(rebuilt);
+        _activeComposerTabId = stored.activeTab?.id ?? rebuilt.first.id;
+        for (var index = 0; index < stored.tabs.length; index += 1) {
+          final record = stored.tabs[index];
+          final tab = rebuilt[index];
+          final source = known[record.sourceGenerationId];
+          if (source != null) {
+            try {
+              // Keyframes, references, and the source clip come back from the
+              // generation; the record's own scalars are applied on top.
+              await _restoreGenerationSettings(
+                source,
+                cacheOnly: true,
+                tab: tab,
+              );
+            } on Object {
+              // A missing retained file must not cost the whole strip.
+            }
+            if (_disposed) return true;
+          }
+          _inComposerTab(tab, () => _applyComposerTabRecord(tab, record));
+        }
+      } finally {
+        _restoringComposerTabs = false;
+      }
+      _invalidateProviderEstimate();
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Lays a saved record over [tab], overruling anything the source
+  /// generation seeded: the record is what the director last had on screen.
+  void _applyComposerTabRecord(ComposerTab tab, ComposerTabRecord record) {
+    tab.title = record.title;
+    tab.sourceGenerationId = record.sourceGenerationId;
+    tab.rewriteSummary = record.rewriteSummary;
+    tab.localFolderId =
+        folderById(record.localFolderId)?.storage == LibraryStorage.local
+        ? record.localFolderId
+        : null;
+    tab.driveFolderId =
+        folderById(record.driveFolderId)?.storage == LibraryStorage.drive
+        ? record.driveFolderId
+        : null;
+    final provider = record.providerId;
+    if (provider != null && providers.any((item) => item.id == provider)) {
+      tab.providerId = provider;
+      tab.modelId = modelById(provider, record.modelId ?? '').id;
+    }
+    tab.form
+      ..prompt = record.prompt
+      ..aspectRatio = record.aspectRatio
+      ..autoDuration = record.autoDuration
+      ..durationSeconds = record.durationSeconds
+      ..frameRate = record.frameRate
+      ..resolution = record.resolution
+      ..generateAudio = record.generateAudio
+      ..safetyTolerance = record.safetyTolerance
+      ..draft = record.draft
+      ..exactTiming = record.exactTiming
+      ..referenceTask =
+          MediaReferenceTask.values
+              .where((task) => task.name == record.referenceTask)
+              .firstOrNull ??
+          MediaReferenceTask.reference
+      ..upscale = record.upscale
+      ..upscaleFactor = record.upscaleFactor
+      ..upscaleCreativity = record.upscaleCreativity
+      ..seed = record.seed
+      ..videoUrl = record.videoUrl
+      ..draftUrl = record.draftUrl;
+    // The record has no separate "muted by hand" flag; a saved false is one.
+    tab.generateAudioExplicitlyDisabled = !record.generateAudio;
+    _selectCompatibleModel();
+    _normalizeFormForModel();
+    tab.formRevision += 1;
+  }
 
   /// Reserves loading tiles for files just dropped on the references area,
   /// covering the read phase before [addDroppedReferenceFiles] can run.
@@ -1680,8 +2110,17 @@ class AppController extends ChangeNotifier {
     try {
       await _restoreCachedFirstPage();
       if (_disposed) return;
+      // Saved composer tabs are the session the director left open; they win
+      // over the last-generation carry-over below.
+      final reopened = await _restoreComposerTabs();
+      if (_disposed) return;
+      // From here on the strip may be written back over what was stored.
+      _composerTabsRestored = true;
+      if (reopened) return;
       if (generations.isNotEmpty) {
-        await _restoreGenerationSettings(generations.first, cacheOnly: true);
+        final latest = generations.first;
+        await _restoreGenerationSettings(latest, cacheOnly: true);
+        activeComposerTab.sourceGenerationId = latest.localId;
       } else {
         notifyListeners();
       }
@@ -1820,6 +2259,24 @@ class AppController extends ChangeNotifier {
       if (folderById(lastDriveGenerationFolderId)?.storage !=
           LibraryStorage.drive) {
         lastDriveGenerationFolderId = null;
+      }
+      for (final tab in _composerTabs) {
+        if (!_composerTabsRestored) {
+          // Before the saved strip is read back, the tab in front simply
+          // follows the restored studio defaults.
+          tab
+            ..localFolderId = lastLocalGenerationFolderId
+            ..driveFolderId = lastDriveGenerationFolderId;
+          continue;
+        }
+        // Afterwards each tab keeps its own destination, minus any folder
+        // that has since gone.
+        if (folderById(tab.localFolderId)?.storage != LibraryStorage.local) {
+          tab.localFolderId = null;
+        }
+        if (folderById(tab.driveFolderId)?.storage != LibraryStorage.drive) {
+          tab.driveFolderId = null;
+        }
       }
       final preferredProvider = providerById(value.preferences.provider);
       final available = providers;
@@ -1979,6 +2436,8 @@ class AppController extends ChangeNotifier {
 
   Future<void> navigate(AppSection value) async {
     section = value;
+    // Leaving the composer is a natural save point for a half-typed draft.
+    _flushComposerTabsSave(onlyIfPending: true);
     _scheduleListingPrefetch();
     notifyListeners();
     // A cache warm-up must never sit between a navigation tap and the first
@@ -2345,10 +2804,12 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The destination folder of the tab in front. The `last…` fields stay the
+  /// studio-wide defaults a new tab starts from.
   String? get selectedGenerationFolderId =>
       effectiveStorage == LibraryStorage.drive
-      ? lastDriveGenerationFolderId
-      : lastLocalGenerationFolderId;
+      ? activeComposerTab.driveFolderId
+      : activeComposerTab.localFolderId;
 
   Future<void> setGenerationFolder(String? folderId) async {
     final folder = folderById(folderId);
@@ -2357,11 +2818,15 @@ class AppController extends ChangeNotifier {
       showNotice('That destination folder is no longer available.');
       return;
     }
+    final tab = activeComposerTab;
     if (effectiveStorage == LibraryStorage.drive) {
+      tab.driveFolderId = folderId;
       lastDriveGenerationFolderId = folderId;
     } else {
+      tab.localFolderId = folderId;
       lastLocalGenerationFolderId = folderId;
     }
+    _scheduleComposerTabsSave(touched: tab);
     notifyListeners();
     try {
       await _savePreferences(
@@ -3400,6 +3865,7 @@ class AppController extends ChangeNotifier {
     MediaReferenceKind kind,
     Iterable<ReferenceCandidate> candidates,
   ) async {
+    final tab = activeComposerTab;
     final available = referenceLimit(kind) - form.referenceCount(kind);
     final selected = candidates
         .where((item) => item.kind == kind)
@@ -3410,53 +3876,56 @@ class AppController extends ChangeNotifier {
     // queue so choosing saved references never blocks further adds — even
     // when the media has to come down from Google Drive first.
     final hydrating = <(String, ReferenceCandidate)>[];
-    for (final candidate in selected) {
-      if (!candidate.generated &&
-          form.references.any(
-            (reference) => reference.savedReferenceId == candidate.id,
-          )) {
-        showNotice('“${candidate.name}” is already attached.');
-        continue;
-      }
-      final promptName = candidate.generated
-          ? _nextReferencePromptName(kind)
-          : candidate.name.trim();
-      final nameProblem = candidate.generated
-          ? null
-          : referenceNameProblem(
-              promptName,
-              excludeSavedReferenceId: candidate.id,
-            );
-      if (nameProblem != null) {
-        showNotice(nameProblem);
-        continue;
-      }
-      final draftId = _uid();
-      form.references = <MediaReferenceDraft>[
-        ...form.references,
-        MediaReferenceDraft(
-          id: draftId,
-          label: candidate.name,
-          kind: kind,
-          source: candidate.asset.isLocal ? '' : candidate.asset.value,
-          promptName: promptName,
-          retained: candidate.asset,
-          thumbnailAsset: _previewForStorage(
-            candidate.thumbnailAsset,
-            effectiveStorage,
+    _inComposerTab(tab, () {
+      for (final candidate in selected) {
+        if (!candidate.generated &&
+            form.references.any(
+              (reference) => reference.savedReferenceId == candidate.id,
+            )) {
+          showNotice('“${candidate.name}” is already attached.');
+          continue;
+        }
+        final promptName = candidate.generated
+            ? _nextReferencePromptName(kind)
+            : candidate.name.trim();
+        final nameProblem = candidate.generated
+            ? null
+            : referenceNameProblem(
+                promptName,
+                excludeSavedReferenceId: candidate.id,
+              );
+        if (nameProblem != null) {
+          showNotice(nameProblem);
+          continue;
+        }
+        final draftId = _uid();
+        form.references = <MediaReferenceDraft>[
+          ...form.references,
+          MediaReferenceDraft(
+            id: draftId,
+            label: candidate.name,
+            kind: kind,
+            source: candidate.asset.isLocal ? '' : candidate.asset.value,
+            promptName: promptName,
+            retained: candidate.asset,
+            thumbnailAsset: _previewForStorage(
+              candidate.thumbnailAsset,
+              effectiveStorage,
+            ),
+            savedReferenceId: candidate.generated ? null : candidate.id,
+            durationSeconds: candidate.durationSeconds,
           ),
-          savedReferenceId: candidate.generated ? null : candidate.id,
-          durationSeconds: candidate.durationSeconds,
-        ),
-      ];
-      if (candidate.asset.isLocal) {
-        hydrating.add((draftId, candidate));
-        _hydratingReferenceDraftIds.add(draftId);
+        ];
+        if (candidate.asset.isLocal) {
+          hydrating.add((draftId, candidate));
+          _hydratingReferenceDraftIds.add(draftId);
+        }
       }
-    }
-    _selectCompatibleModel();
-    _normalizeFormForModel();
-    _invalidateProviderEstimate();
+      _selectCompatibleModel();
+      _normalizeFormForModel();
+      _invalidateProviderEstimate();
+      _scheduleComposerTabsSave();
+    });
     notifyListeners();
     if (hydrating.isEmpty) return;
     _beginReferenceUpload('Loading ${kind.pluralLabel}…');
@@ -3464,7 +3933,7 @@ class AppController extends ChangeNotifier {
       await _enqueueReferenceWork(() async {
         for (final entry in hydrating.indexed) {
           final (draftId, candidate) = entry.$2;
-          if (!form.references.any((item) => item.id == draftId)) {
+          if (!tab.form.references.any((item) => item.id == draftId)) {
             _hydratingReferenceDraftIds.remove(draftId);
             continue; // Removed while queued.
           }
@@ -3484,9 +3953,21 @@ class AppController extends ChangeNotifier {
               }
             }
             final bytes = await gateway.readAsset(candidate.asset);
-            _hydrateReferenceDraft(draftId, candidate, bytes, thumbnailBytes);
+            _inComposerTab(
+              tab,
+              () => _hydrateReferenceDraft(
+                draftId,
+                candidate,
+                bytes,
+                thumbnailBytes,
+              ),
+            );
           } on Object catch (error) {
-            _dropUnhydratedReferenceDraft(draftId, candidate.name, error);
+            _inComposerTab(
+              tab,
+              () =>
+                  _dropUnhydratedReferenceDraft(draftId, candidate.name, error),
+            );
           } finally {
             _hydratingReferenceDraftIds.remove(draftId);
           }
@@ -3696,6 +4177,7 @@ class AppController extends ChangeNotifier {
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -3833,6 +4315,7 @@ class AppController extends ChangeNotifier {
     _normalizeFormForModel();
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
+    _scheduleComposerTabsSave();
     notifyListeners();
     _kickProviderRefresh(provider);
     await _persistSelection();
@@ -3842,6 +4325,7 @@ class AppController extends ChangeNotifier {
     selectedModelId = modelById(selectedProviderId, modelId).id;
     _normalizeFormForModel();
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
     await _persistSelection();
   }
@@ -3861,6 +4345,7 @@ class AppController extends ChangeNotifier {
     _normalizeFormForModel();
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
+    _scheduleComposerTabsSave();
     notifyListeners();
     if (providerChanged) _kickProviderRefresh(provider);
     await _persistSelection();
@@ -4230,6 +4715,7 @@ class AppController extends ChangeNotifier {
     if (task != MediaReferenceTask.reference) form.aspectRatio = 'auto';
     if (task == MediaReferenceTask.edit) form.autoDuration = true;
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -4276,6 +4762,7 @@ class AppController extends ChangeNotifier {
       form.frameRate = form.frameRate.clamp(1, 6);
     }
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -4284,10 +4771,15 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
+    // The pick belongs to the tab it was started from, however long the
+    // picker sits open and whatever the director does meanwhile.
+    final tab = activeComposerTab;
     // The whole pick-and-retain pipeline runs before the frame attaches, so
     // a loading tile holds the card's spot from the first tap.
-    _pendingFrameAdds += 1;
-    notifyListeners();
+    _inComposerTab(tab, () {
+      _pendingFrameAdds += 1;
+      notifyListeners();
+    });
     try {
       final asset = await _pick(type: FileType.image, source: source);
       if (asset != null) {
@@ -4295,19 +4787,24 @@ class AppController extends ChangeNotifier {
           MediaReferenceKind.image,
           asset,
         );
-        _appendFrame(
-          role,
-          label: asset.name,
-          asset: saved == null ? asset : _withSavedReference(asset, saved),
-          retained: saved?.asset,
-          savedReferenceId: saved?.id,
+        _inComposerTab(
+          tab,
+          () => _appendFrame(
+            role,
+            label: asset.name,
+            asset: saved == null ? asset : _withSavedReference(asset, saved),
+            retained: saved?.asset,
+            savedReferenceId: saved?.id,
+          ),
         );
       }
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
-      _pendingFrameAdds -= 1;
-      notifyListeners();
+      _inComposerTab(tab, () {
+        _pendingFrameAdds -= 1;
+        notifyListeners();
+      });
     }
   }
 
@@ -4348,8 +4845,9 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
+    final tab = activeComposerTab;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
-    _pendingPickerReferenceAdds += 1;
+    _inComposerTab(tab, () => _pendingPickerReferenceAdds += 1);
     List<PickedAsset> picked;
     try {
       picked = await _pickMany(switch (kind) {
@@ -4363,10 +4861,10 @@ class AppController extends ChangeNotifier {
     } finally {
       // The decrement and the appends below land in one synchronous stretch,
       // so the loading tile swaps for the real drafts without a gap frame.
-      _pendingPickerReferenceAdds -= 1;
+      _inComposerTab(tab, () => _pendingPickerReferenceAdds -= 1);
       _finishReferenceUpload();
     }
-    await attachPickedReferences(kind, picked);
+    await attachPickedReferences(kind, picked, tab: tab);
   }
 
   /// Attaches [picked] as creative references. Drafts appear immediately and
@@ -4375,38 +4873,42 @@ class AppController extends ChangeNotifier {
   /// queue without locking the add buttons.
   Future<void> attachPickedReferences(
     MediaReferenceKind kind,
-    List<PickedAsset> picked,
-  ) async {
+    List<PickedAsset> picked, {
+    ComposerTab? tab,
+  }) async {
     if (picked.isEmpty) return;
-    final available = referenceLimit(kind) - form.referenceCount(kind);
-    final totalAvailable = selectedModel.maxTotalReferences == null
-        ? available
-        : selectedModel.maxTotalReferences! - form.references.length;
-    final accepted = available < totalAvailable ? available : totalAvailable;
-    final uploads = picked.take(accepted < 0 ? 0 : accepted).toList();
-    if (picked.length > uploads.length) {
-      final totalLimit = selectedModel.maxTotalReferences;
-      showNotice(
-        totalLimit != null && totalAvailable <= available
-            ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
-            : '${selectedModel.label} accepts up to '
-                  '${referenceLimit(kind)} ${kind.pluralLabel}.',
-      );
-    }
-    if (uploads.isEmpty) return;
-    final attached = <(String, PickedAsset)>[];
-    for (final asset in uploads) {
-      final draftId = _appendReference(kind, label: asset.name, asset: asset);
-      if (draftId == null) break;
-      attached.add((draftId, asset));
-    }
+    final target = tab ?? activeComposerTab;
+    final attached = _inComposerTab(target, () {
+      final available = referenceLimit(kind) - form.referenceCount(kind);
+      final totalAvailable = selectedModel.maxTotalReferences == null
+          ? available
+          : selectedModel.maxTotalReferences! - form.references.length;
+      final accepted = available < totalAvailable ? available : totalAvailable;
+      final uploads = picked.take(accepted < 0 ? 0 : accepted).toList();
+      if (picked.length > uploads.length) {
+        final totalLimit = selectedModel.maxTotalReferences;
+        showNotice(
+          totalLimit != null && totalAvailable <= available
+              ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
+              : '${selectedModel.label} accepts up to '
+                    '${referenceLimit(kind)} ${kind.pluralLabel}.',
+        );
+      }
+      final added = <(String, PickedAsset)>[];
+      for (final asset in uploads) {
+        final draftId = _appendReference(kind, label: asset.name, asset: asset);
+        if (draftId == null) break;
+        added.add((draftId, asset));
+      }
+      return added;
+    });
     if (attached.isEmpty) return;
     _beginReferenceUpload('Processing ${attached.first.$2.name}…');
     try {
       await _enqueueReferenceWork(() async {
         for (final entry in attached.indexed) {
           final (draftId, asset) = entry.$2;
-          if (!form.references.any((item) => item.id == draftId)) {
+          if (!target.form.references.any((item) => item.id == draftId)) {
             continue; // Removed while queued.
           }
           _updateReferenceUpload(
@@ -4414,7 +4916,10 @@ class AppController extends ChangeNotifier {
           );
           final saved = await _retainCreateUpload(kind, asset);
           if (saved != null) {
-            _linkDraftToSavedReference(draftId, asset, saved);
+            _inComposerTab(
+              target,
+              () => _linkDraftToSavedReference(draftId, asset, saved),
+            );
           }
         }
       });
@@ -4476,9 +4981,12 @@ class AppController extends ChangeNotifier {
   /// Attaches files dropped on the Create screen's references area, sorting
   /// each file into its reference kind by MIME type or extension.
   Future<void> addDroppedReferenceFiles(List<DroppedFile> files) async {
+    final tab = activeComposerTab;
     // Loading tiles reserved by [noteIncomingDroppedFiles] hand over to the
     // real drafts appended below (or clear outright for unsupported drops).
-    if (_pendingDropReferenceAdds != 0) _pendingDropReferenceAdds = 0;
+    _inComposerTab(tab, () {
+      if (_pendingDropReferenceAdds != 0) _pendingDropReferenceAdds = 0;
+    });
     if (files.isEmpty) {
       notifyListeners();
       return;
@@ -4493,14 +5001,18 @@ class AppController extends ChangeNotifier {
       );
     });
     for (final entry in grouped.entries) {
-      if (referenceLimit(entry.key) <= 0) {
-        showNotice(
-          '${selectedModel.label} does not accept reference '
-          '${entry.key.pluralLabel}.',
-        );
+      final blocked = _inComposerTab(
+        tab,
+        () => referenceLimit(entry.key) <= 0
+            ? '${selectedModel.label} does not accept reference '
+                  '${entry.key.pluralLabel}.'
+            : null,
+      );
+      if (blocked != null) {
+        showNotice(blocked);
         continue;
       }
-      await attachPickedReferences(entry.key, entry.value);
+      await attachPickedReferences(entry.key, entry.value, tab: tab);
     }
   }
 
@@ -4778,6 +5290,7 @@ class AppController extends ChangeNotifier {
       }).toList();
     }
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -4789,6 +5302,7 @@ class AppController extends ChangeNotifier {
           : frame;
     }).toList();
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -4801,16 +5315,19 @@ class AppController extends ChangeNotifier {
     if (form.autoDuration == value) return;
     form.autoDuration = value;
     _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
   void setFrameRate(int value) {
     form.frameRate = value.clamp(1, 6);
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
   void setSeed(int? value) {
     form.seed = value;
+    _scheduleComposerTabsSave();
     notifyListeners();
   }
 
@@ -4858,6 +5375,7 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo({
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
+    final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.video, source: source);
       if (asset != null) {
@@ -4865,14 +5383,17 @@ class AppController extends ChangeNotifier {
           MediaReferenceKind.video,
           asset,
         );
-        updateForm((value) {
-          value.videoAsset = saved == null
-              ? asset
-              : _withSavedReference(asset, saved);
-          value.videoSavedReferenceId = saved?.id;
-          value.videoThumbnailBytes = null;
-          value.videoMetadata = null;
-        });
+        _inComposerTab(
+          tab,
+          () => updateForm((value) {
+            value.videoAsset = saved == null
+                ? asset
+                : _withSavedReference(asset, saved);
+            value.videoSavedReferenceId = saved?.id;
+            value.videoThumbnailBytes = null;
+            value.videoMetadata = null;
+          }),
+        );
       }
     } on Object catch (error) {
       showNotice(_message(error));
@@ -4880,9 +5401,15 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pickDraft() async {
+    final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.any);
-      if (asset != null) updateForm((value) => value.draftAsset = asset);
+      if (asset != null) {
+        _inComposerTab(
+          tab,
+          () => updateForm((value) => value.draftAsset = asset),
+        );
+      }
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -5288,6 +5815,9 @@ class AppController extends ChangeNotifier {
       return;
     }
     if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
+    // Whatever is being generated is worth having on disk before the render
+    // starts, however it goes.
+    _flushComposerTabsSave(onlyIfPending: true);
     // The first real submission is the moment a "your film is ready" alert
     // starts to matter; asking earlier would be noise on a fresh install.
     unawaited(_requestNotificationsOnce());
@@ -5822,6 +6352,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _invalidateProviderEstimate() {
+    // The cost desk only ever quotes the tab in front; background work
+    // landing in another draft must not repoint it.
+    if (!identical(_draftTab, activeComposerTab)) return;
     final signature = jsonEncode(<String, Object?>{
       'provider': selectedProviderId,
       'model': selectedModel.id,
@@ -6416,15 +6949,21 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  /// Rehydrates [tab] (the tab in front by default) from [item]: retained
+  /// keyframes, references, and source media plus every scalar setting.
   Future<void> _restoreGenerationSettings(
     Generation item, {
     bool includePrompt = false,
     bool cacheOnly = false,
+    ComposerTab? tab,
   }) async {
+    final target = tab ?? activeComposerTab;
     if (includePrompt &&
         providers.any((provider) => provider.id == item.provider)) {
-      selectedProviderId = item.provider;
-      selectedModelId = modelById(item.provider, item.model).id;
+      _inComposerTab(target, () {
+        selectedProviderId = item.provider;
+        selectedModelId = modelById(item.provider, item.model).id;
+      });
     }
     final retainedFrames = <KeyframeDraft>[];
     for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
@@ -6562,76 +7101,106 @@ class AppController extends ChangeNotifier {
         // Reused source media can regenerate its preview in the Create panel.
       }
     }
-    final restoredTask =
-        selectedModel.referenceTasks.contains(item.config.referenceTask)
-        ? item.config.referenceTask
-        : MediaReferenceTask.reference;
     if (_disposed) return;
-    _disabledReferences.clear();
-    form
-      ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
-          ? item.prompt
-          : form.prompt
-      ..aspectRatio = item.config.aspectRatio
-      ..autoDuration = item.config.duration == 'auto'
-      ..durationSeconds = item.config.duration is num
-          ? (item.config.duration as num).toInt()
-          : form.durationSeconds
-      ..frameRate = item.config.frameRate
-      ..resolution = item.config.resolution
-      ..generateAudio = item.config.generateAudio
-      ..safetyTolerance = item.config.safetyTolerance
-      ..draft = item.config.draft
-      ..upscale = item.mode == VideoMode.upscale
-      ..upscaleFactor = item.config.upscaleFactor
-      ..upscaleCreativity = item.config.upscaleCreativity
-      // _normalizeFormForModel clears this when the model lacks seed support.
-      ..seed = item.config.seed
-      ..exactTiming = item.config.exactTiming
-      ..keyframes = retainedFrames
-      ..references = retainedReferences
-      ..referenceTask = restoredTask
-      ..videoAsset =
-          item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
-          ? retainedSource
-          : null
-      ..videoSavedReferenceId =
-          item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
-          ? savedSource?.id ?? item.config.sourceReferenceId
-          : null
-      ..videoUrl =
-          (item.mode == VideoMode.v2v || item.mode == VideoMode.upscale) &&
-              durableSource?.kind == 'remote'
-          ? durableSource!.value
-          : ''
-      ..videoThumbnailBytes = sourceThumbnailBytes
-      ..videoMetadata = null
-      ..draftAsset = item.mode == VideoMode.draftEnhance ? retainedSource : null
-      ..draftUrl =
-          item.mode == VideoMode.draftEnhance && durableSource?.kind == 'remote'
-          ? durableSource!.value
-          : '';
-    _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(item);
-    _selectCompatibleModel();
-    _normalizeFormForModel();
-    _invalidateProviderEstimate();
-    formRevision += 1;
+    // Everything below is one synchronous stretch aimed at the target tab,
+    // so nothing the director does meanwhile can land in the wrong draft.
+    _inComposerTab(target, () {
+      final restoredTask =
+          selectedModel.referenceTasks.contains(item.config.referenceTask)
+          ? item.config.referenceTask
+          : MediaReferenceTask.reference;
+      _disabledReferences.clear();
+      form
+        ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
+            ? item.prompt
+            : form.prompt
+        ..aspectRatio = item.config.aspectRatio
+        ..autoDuration = item.config.duration == 'auto'
+        ..durationSeconds = item.config.duration is num
+            ? (item.config.duration as num).toInt()
+            : form.durationSeconds
+        ..frameRate = item.config.frameRate
+        ..resolution = item.config.resolution
+        ..generateAudio = item.config.generateAudio
+        ..safetyTolerance = item.config.safetyTolerance
+        ..draft = item.config.draft
+        ..upscale = item.mode == VideoMode.upscale
+        ..upscaleFactor = item.config.upscaleFactor
+        ..upscaleCreativity = item.config.upscaleCreativity
+        // _normalizeFormForModel clears this when the model lacks seed support.
+        ..seed = item.config.seed
+        ..exactTiming = item.config.exactTiming
+        ..keyframes = retainedFrames
+        ..references = retainedReferences
+        ..referenceTask = restoredTask
+        ..videoAsset =
+            item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
+            ? retainedSource
+            : null
+        ..videoSavedReferenceId =
+            item.mode == VideoMode.v2v || item.mode == VideoMode.upscale
+            ? savedSource?.id ?? item.config.sourceReferenceId
+            : null
+        ..videoUrl =
+            (item.mode == VideoMode.v2v || item.mode == VideoMode.upscale) &&
+                durableSource?.kind == 'remote'
+            ? durableSource!.value
+            : ''
+        ..videoThumbnailBytes = sourceThumbnailBytes
+        ..videoMetadata = null
+        ..draftAsset = item.mode == VideoMode.draftEnhance
+            ? retainedSource
+            : null
+        ..draftUrl =
+            item.mode == VideoMode.draftEnhance &&
+                durableSource?.kind == 'remote'
+            ? durableSource!.value
+            : '';
+      _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
+        item,
+      );
+      _selectCompatibleModel();
+      _normalizeFormForModel();
+      _invalidateProviderEstimate();
+      formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: target);
     notifyListeners();
+  }
+
+  /// Files the destination folder [item] was saved to on [tab], so a tab
+  /// opened from a film generates back into the same place.
+  void _adoptGenerationFolder(ComposerTab tab, Generation item) {
+    if (item.storage == LibraryStorage.drive) {
+      tab.driveFolderId = item.folderId;
+    } else {
+      tab.localFolderId = item.folderId;
+    }
   }
 
   /// Opens a fresh composer tab seeded from [item] (prompt, settings, and
   /// retained references), optionally replacing the prompt with [prompt].
   ///
-  /// Composer tabs are being introduced; until the tab strip lands this
-  /// fills the single composer in place.
+  /// Shows no notice of its own — Reuse and AI Rewrite each say their piece.
   Future<void> openGenerationInNewTab(
     Generation item, {
     String? prompt,
     String? rewriteSummary,
   }) async {
-    await _restoreGenerationSettings(item, includePrompt: true);
-    if (prompt != null) form.prompt = prompt;
-    formRevision += 1;
+    final tab = addComposerTab();
+    try {
+      await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+    _inComposerTab(tab, () {
+      if (prompt != null) tab.form.prompt = prompt;
+      tab.sourceGenerationId = item.localId;
+      tab.rewriteSummary = rewriteSummary;
+      _adoptGenerationFolder(tab, item);
+      tab.formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
     notifyListeners();
     await navigate(AppSection.create);
   }
@@ -6643,8 +7212,23 @@ class AppController extends ChangeNotifier {
       );
       return;
     }
+    // A tab with direction already typed in it is somebody's work; the film
+    // reopens beside it instead of over it.
+    if (!activeComposerTab.isBlank) {
+      await openGenerationInNewTab(item);
+      showNotice(
+        'Prompt, settings, and retained references copied to a new tab.',
+      );
+      return;
+    }
+    final tab = activeComposerTab;
     try {
-      await _restoreGenerationSettings(item, includePrompt: true);
+      await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
+      _inComposerTab(tab, () {
+        tab.sourceGenerationId = item.localId;
+        _adoptGenerationFolder(tab, item);
+      });
+      _scheduleComposerTabsSave(touched: tab);
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -6654,19 +7238,34 @@ class AppController extends ChangeNotifier {
 
   void enhance(Generation item) {
     if (item.draftCacheUrl == null) return;
-    form
-      ..autoDuration = item.config.duration == 'auto'
-      ..durationSeconds = item.config.duration is num
-          ? (item.config.duration as num).toInt()
-          : form.durationSeconds
-      ..resolution = 'fhd'
-      ..generateAudio = item.config.generateAudio
-      ..draft = false
-      ..draftAsset = null
-      ..draftUrl = item.draftCacheUrl!;
-    _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(item);
-    _invalidateProviderEstimate();
-    formRevision += 1;
+    // Draft enhance hides the prompt entirely, so an enhance-born tab is
+    // "blank" by prompt alone: the attached cache is what makes it occupied.
+    final current = activeComposerTab;
+    final free =
+        current.isBlank &&
+        current.form.draftAsset == null &&
+        current.form.draftUrl.trim().isEmpty;
+    final tab = free ? current : addComposerTab();
+    _inComposerTab(tab, () {
+      form
+        ..autoDuration = item.config.duration == 'auto'
+        ..durationSeconds = item.config.duration is num
+            ? (item.config.duration as num).toInt()
+            : form.durationSeconds
+        ..resolution = 'fhd'
+        ..generateAudio = item.config.generateAudio
+        ..draft = false
+        ..draftAsset = null
+        ..draftUrl = item.draftCacheUrl!;
+      _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
+        item,
+      );
+      tab.sourceGenerationId = item.localId;
+      _adoptGenerationFolder(tab, item);
+      _invalidateProviderEstimate();
+      formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
     notifyListeners();
     unawaited(navigate(AppSection.create));
   }
@@ -6906,6 +7505,7 @@ class AppController extends ChangeNotifier {
     _estimateTimer?.cancel();
     _noticeTimer?.cancel();
     _prefetchDebounce?.cancel();
+    _composerTabsSaveTimer?.cancel();
     super.dispose();
   }
 }

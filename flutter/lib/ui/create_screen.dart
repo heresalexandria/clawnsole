@@ -13,6 +13,7 @@ import '../core/provider_catalog.dart';
 import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
+import 'composer_tab_strip.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -122,7 +123,14 @@ class _CreateScreenState extends State<CreateScreen> {
                   children: <Widget>[
                     _CreateHeading(controller: controller),
                     SizedBox(height: short ? 8 : 18),
-                    _Composer(controller: controller),
+                    // Each tab owns its disclosure panels and field state, so
+                    // switching drafts rebuilds the composer from scratch.
+                    KeyedSubtree(
+                      key: ValueKey<String>(
+                        'composer-${controller.activeComposerTabId}',
+                      ),
+                      child: _Composer(controller: controller),
+                    ),
                     SizedBox(height: short ? 12 : 24),
                     _RecentWork(
                       controller: controller,
@@ -209,23 +217,48 @@ class _CreateHeading extends StatelessWidget {
             letterSpacing: .3,
           ),
         );
+        final tabs = ComposerTabStrip(controller: controller);
         // Wide layouts keep the quiet label and pin the plaque to the far
         // right. Phones drop the heading entirely and place the model selector
         // at the top-right edge to keep the composer compact.
         if (constraints.maxWidth < 720) {
-          return Align(alignment: Alignment.topRight, child: plaque);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Align(alignment: Alignment.topRight, child: plaque),
+              const SizedBox(height: 8),
+              tabs,
+            ],
+          );
         }
-        return Row(
+        final heading = Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Expanded(
               child: Align(alignment: Alignment.centerLeft, child: title),
             ),
+            // Desktop widths hang the strip off the heading's slack, where it
+            // costs the composer no vertical space at all. The bounded box
+            // lets the strip shrink to its keys instead of taking the room
+            // the display line needs.
+            if (constraints.maxWidth >= 880) ...<Widget>[
+              const SizedBox(width: 16),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 300),
+                child: tabs,
+              ),
+            ],
             const SizedBox(width: 22),
             plaqueLabel,
             const SizedBox(width: 10),
             plaque,
           ],
+        );
+        if (constraints.maxWidth >= 880) return heading;
+        // Between phone and desktop the strip gets its own single line.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[heading, const SizedBox(height: 8), tabs],
         );
       },
     );
@@ -805,7 +838,10 @@ class _ComposerState extends State<_Composer> {
             ),
             const SizedBox(height: 7),
             ReferencePromptField(
-              key: ValueKey('generation-prompt-${controller.formRevision}'),
+              key: ValueKey(
+                'generation-prompt-${controller.activeComposerTabId}-'
+                '${controller.formRevision}',
+              ),
               prompt: form.prompt,
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(controller),
