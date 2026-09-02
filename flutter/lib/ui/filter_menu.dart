@@ -8,8 +8,22 @@ import '../core/models.dart';
 import 'common_widgets.dart';
 import 'hardware.dart';
 
+/// The glyph each saved-reference media kind wears on segments, menus, and
+/// pickers, so one kind always looks the same across surfaces.
+IconData mediaKindIcon(MediaReferenceKind kind) => switch (kind) {
+  MediaReferenceKind.image => Icons.image_rounded,
+  MediaReferenceKind.video => Icons.video_library_rounded,
+  MediaReferenceKind.audio => Icons.graphic_eq_rounded,
+};
+
+/// The glyph each generated-media kind wears on the Library's type segments.
+IconData outputKindIcon(GenerationOutputKind kind) => switch (kind) {
+  GenerationOutputKind.video => Icons.video_library_rounded,
+  GenerationOutputKind.image => Icons.image_rounded,
+};
+
 /// A console-key segment used for the always-visible primary filter rows
-/// (generation status, reference media kind).
+/// (generation status, reference media kind, generated media type).
 ///
 /// Each key is one selectable button node — label plus count, spoken once —
 /// that takes keyboard focus and Space or Enter, and answers to a

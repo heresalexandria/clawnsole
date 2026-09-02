@@ -128,6 +128,18 @@ extension MediaReferenceTaskValue on MediaReferenceTask {
       );
 }
 
+extension GenerationOutputKindValue on GenerationOutputKind {
+  String get label => switch (this) {
+    GenerationOutputKind.video => 'Video',
+    GenerationOutputKind.image => 'Image',
+  };
+
+  String get pluralLabel => switch (this) {
+    GenerationOutputKind.video => 'videos',
+    GenerationOutputKind.image => 'images',
+  };
+}
+
 extension MediaReferenceKindValue on MediaReferenceKind {
   String get label => switch (this) {
     MediaReferenceKind.image => 'Image',
@@ -1250,6 +1262,22 @@ enum AppThemeMode {
   );
 }
 
+/// The preference key that stars one model of one provider. Provider and model
+/// ids are URL-safe slugs, so the pipe can never occur inside either half.
+String modelFavoriteKey(String providerId, String modelId) =>
+    '$providerId|$modelId';
+
+/// Splits a [modelFavoriteKey] back into its provider and model ids, or null
+/// for a malformed key.
+({String providerId, String modelId})? parseModelFavoriteKey(String key) {
+  final divider = key.indexOf('|');
+  if (divider <= 0 || divider == key.length - 1) return null;
+  return (
+    providerId: key.substring(0, divider),
+    modelId: key.substring(divider + 1),
+  );
+}
+
 class AppPreferences {
   const AppPreferences({
     this.activeSection = AppSection.create,
@@ -1273,6 +1301,8 @@ class AppPreferences {
     this.rewriteProvider,
     this.rewriteModels = const <String, String>{},
     this.rewriteEfforts = const <String, String>{},
+    this.favoriteModels = const <String>[],
+    this.favoriteProviders = const <String>[],
   });
 
   static const int defaultLocalVideoCacheMb = 100;
@@ -1321,6 +1351,14 @@ class AppPreferences {
   /// Last-used AI Rewrite effort level per provider id.
   final Map<String, String> rewriteEfforts;
 
+  /// Starred models as [modelFavoriteKey] values, oldest star first. They
+  /// surface in a Favorites section at the top of the model picker.
+  final List<String> favoriteModels;
+
+  /// Starred provider ids, oldest star first. Their sections lead the model
+  /// picker and the provider desk.
+  final List<String> favoriteProviders;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1346,6 +1384,8 @@ class AppPreferences {
     bool clearRewriteProvider = false,
     Map<String, String>? rewriteModels,
     Map<String, String>? rewriteEfforts,
+    List<String>? favoriteModels,
+    List<String>? favoriteProviders,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1378,6 +1418,8 @@ class AppPreferences {
         : rewriteProvider ?? this.rewriteProvider,
     rewriteModels: rewriteModels ?? this.rewriteModels,
     rewriteEfforts: rewriteEfforts ?? this.rewriteEfforts,
+    favoriteModels: favoriteModels ?? this.favoriteModels,
+    favoriteProviders: favoriteProviders ?? this.favoriteProviders,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1405,7 +1447,23 @@ class AppPreferences {
       'rewriteModels': _sortedStringMap(rewriteModels),
     if (rewriteEfforts.isNotEmpty)
       'rewriteEfforts': _sortedStringMap(rewriteEfforts),
+    // Empty favorites stay out of the JSON so untouched preferences keep
+    // their previous shape byte for byte.
+    if (favoriteModels.isNotEmpty) 'favoriteModels': favoriteModels,
+    if (favoriteProviders.isNotEmpty) 'favoriteProviders': favoriteProviders,
   };
+
+  /// Reads a favorites list, dropping non-strings, blanks, and repeats while
+  /// keeping the first occurrence's position.
+  static List<String> _favoriteList(Object? value) {
+    if (value is! List<Object?>) return const <String>[];
+    final seen = <String>{};
+    return <String>[
+      for (final item in value)
+        if (item is String && item.trim().isNotEmpty && seen.add(item.trim()))
+          item.trim(),
+    ];
+  }
 
   factory AppPreferences.fromJson(Map<String, Object?> json) {
     final videoCacheMb = switch (json['localVideoCacheMb']) {
@@ -1473,6 +1531,8 @@ class AppPreferences {
       },
       rewriteModels: _stringMap(json['rewriteModels']),
       rewriteEfforts: _stringMap(json['rewriteEfforts']),
+      favoriteModels: _favoriteList(json['favoriteModels']),
+      favoriteProviders: _favoriteList(json['favoriteProviders']),
     );
   }
 }

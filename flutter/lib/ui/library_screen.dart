@@ -12,9 +12,9 @@ import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
-import 'hardware.dart';
 import 'inline_video.dart';
 import 'prompt_rewrite_dialog.dart';
+import 'library_folders.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -78,6 +78,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       controller.libraryVisibilityFilter,
       controller.libraryFolderView,
       controller.libraryTag,
+      controller.libraryOutputKind,
       controller.librarySearch,
       controller.libraryViewMode,
     ].join('|');
@@ -90,56 +91,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     _syncListingPage();
+    final scope = FolderScope.generated(controller);
     return LayoutBuilder(
       builder: (context, constraints) {
         final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
         final desktop = constraints.maxWidth >= 960;
-        return SingleChildScrollView(
-          controller: _scrollController,
-          padding: EdgeInsets.all(padding),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  _LibraryHeading(controller: controller),
-                  const SizedBox(height: 22),
-                  if (desktop)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        SizedBox(
-                          width: 228,
-                          child: _FolderSidebar(controller: controller),
-                        ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: _LibraryResults(
-                            controller: controller,
-                            itemLimit: _itemLimit,
-                            onLoadMore: _loadMore,
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        _MobileFolderBar(controller: controller),
-                        const SizedBox(height: 12),
-                        _LibraryResults(
-                          controller: controller,
-                          itemLimit: _itemLimit,
-                          onLoadMore: _loadMore,
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
+        return FolderRailLayout(
+          heading: _LibraryHeading(controller: controller),
+          rail: FolderRail(scope: scope),
+          narrowRail: FolderDropdownBar(scope: scope),
+          results: _LibraryResults(
+            controller: controller,
+            itemLimit: _itemLimit,
+            onLoadMore: _loadMore,
+            dragToFolders: desktop,
           ),
+          scrollController: _scrollController,
+          desktop: desktop,
+          padding: padding,
         );
       },
     );
@@ -151,11 +120,16 @@ class _LibraryResults extends StatefulWidget {
     required this.controller,
     required this.itemLimit,
     required this.onLoadMore,
+    required this.dragToFolders,
   });
 
   final AppController controller;
   final int itemLimit;
   final VoidCallback onLoadMore;
+
+  /// Whether cards can be dragged onto the folder rail (wide layouts only —
+  /// the narrow dropdown has no rows to drop on).
+  final bool dragToFolders;
 
   @override
   State<_LibraryResults> createState() => _LibraryResultsState();
@@ -188,12 +162,31 @@ class _LibraryResultsState extends State<_LibraryResults> {
   }
 
   Future<void> _moveSelected(BuildContext context) async {
-    final moved = await _showGenerationMoveDialog(
+    final moved = await showMoveToFolderDialog(
       context,
-      controller: controller,
-      localIds: selectedIds,
+      FolderScope.generated(controller),
+      Set<String>.of(selectedIds),
     );
     if (moved && mounted) _setSelecting(false);
+  }
+
+  /// What dragging [item] carries: the whole selection when the card is part
+  /// of one (and the selection shares a storage), otherwise the card alone.
+  LibraryDragData _dragDataFor(Generation item) {
+    var ids = selecting && selectedIds.contains(item.localId)
+        ? Set<String>.of(selectedIds)
+        : <String>{item.localId};
+    final storages = controller.generations
+        .where((candidate) => ids.contains(candidate.localId))
+        .map((candidate) => candidate.storage)
+        .toSet();
+    if (storages.length != 1) ids = <String>{item.localId};
+    return LibraryDragData(
+      collection: LibraryCollection.generated,
+      storage: item.storage,
+      itemIds: ids,
+      label: 'Move ${ids.length} ${ids.length == 1 ? 'film' : 'films'}',
+    );
   }
 
   Future<void> _setSelectedHidden(bool hidden) async {
@@ -217,6 +210,7 @@ class _LibraryResultsState extends State<_LibraryResults> {
       selecting: selecting,
       selected: selectedIds.contains(item.localId),
       onSelected: () => _toggleSelection(item.localId),
+      dragData: widget.dragToFolders ? _dragDataFor(item) : null,
     );
     return InlineVideoRegistryScope(
       registry: _inlinePlayback,
@@ -320,313 +314,6 @@ class _LibraryResultsState extends State<_LibraryResults> {
   }
 }
 
-class _FolderSidebar extends StatelessWidget {
-  const _FolderSidebar({required this.controller});
-
-  final AppController controller;
-
-  Map<LibraryStorageFilter, int> get _storageCounts =>
-      <LibraryStorageFilter, int>{
-        for (final filter in LibraryStorageFilter.values)
-          filter: controller.generations
-              .where((item) => filter.matches(item.storage))
-              .length,
-      };
-
-  @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.all(10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        StorageSidebarSection(
-          controller: controller,
-          value: controller.libraryStorageFilter,
-          counts: _storageCounts,
-          onChanged: (value) =>
-              unawaited(controller.setLibraryStorageFilter(value)),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  'Folders',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              IconButton(
-                tooltip: 'New folder',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => unawaited(
-                  _showFolderEditor(context, controller: controller),
-                ),
-                icon: const Icon(Icons.create_new_folder_outlined, size: 19),
-              ),
-            ],
-          ),
-        ),
-        _FolderRow(
-          icon: Icons.video_library_outlined,
-          label: 'All films',
-          count: controller.folderCount(AppController.libraryFolderAll),
-          selected:
-              controller.libraryFolderView == AppController.libraryFolderAll,
-          onTap: () =>
-              controller.setLibraryFolderView(AppController.libraryFolderAll),
-        ),
-        _FolderRow(
-          icon: Icons.inbox_outlined,
-          label: 'Unfiled',
-          count: controller.folderCount(AppController.libraryFolderUnfiled),
-          selected:
-              controller.libraryFolderView ==
-              AppController.libraryFolderUnfiled,
-          onTap: () => controller.setLibraryFolderView(
-            AppController.libraryFolderUnfiled,
-          ),
-        ),
-        if (controller.folders.isNotEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            child: Divider(height: 1),
-          ),
-        ...controller.folderTree.map(
-          (folder) => _FolderRow(
-            icon: Icons.folder_outlined,
-            label: folder.name,
-            count: controller.folderCount(folder.id),
-            selected: controller.libraryFolderView == folder.id,
-            onTap: () => controller.setLibraryFolderView(folder.id),
-            depth: controller.folderDepth(folder.id),
-            folder: folder,
-            controller: controller,
-          ),
-        ),
-        if (controller.folders.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
-            child: Text(
-              'Create a folder for a project, client, or collection.',
-              style: TextStyle(
-                height: 1.4,
-                fontSize: 11.5,
-                color: context.colors.onSurfaceVariant,
-              ),
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
-class _FolderRow extends StatelessWidget {
-  const _FolderRow({
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-    this.folder,
-    this.controller,
-    this.depth = 0,
-  });
-
-  final IconData icon;
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-  final LibraryFolder? folder;
-  final AppController? controller;
-  final int depth;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 3),
-    child: Material(
-      color: selected ? context.colors.primaryContainer : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(9 + depth * 14, 9, 9, 9),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                icon,
-                size: 18,
-                color: selected
-                    ? context.colors.primary
-                    : context.colors.onSurfaceVariant,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? context.colors.onPrimaryContainer
-                        : context.colors.onSurface,
-                  ),
-                ),
-              ),
-              if (folder != null) ...<Widget>[
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: folder!.storage.label,
-                  child: Icon(
-                    folder!.storage == LibraryStorage.drive
-                        ? Icons.cloud_outlined
-                        : Icons.devices_outlined,
-                    size: 13,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                ),
-              ],
-              const SizedBox(width: 5),
-              Text(
-                '$count',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
-              if (folder != null && controller != null) ...<Widget>[
-                const SizedBox(width: 2),
-                SizedBox.square(
-                  dimension: 25,
-                  child: PopupMenuButton<String>(
-                    tooltip: '${folder!.name} options',
-                    padding: EdgeInsets.zero,
-                    iconSize: 17,
-                    onSelected: (value) {
-                      if (value == 'subfolder') {
-                        unawaited(
-                          _showFolderEditor(
-                            context,
-                            controller: controller!,
-                            parentId: folder!.id,
-                          ),
-                        );
-                      } else if (value == 'rename') {
-                        unawaited(
-                          _showFolderEditor(
-                            context,
-                            controller: controller!,
-                            folder: folder,
-                          ),
-                        );
-                      } else {
-                        unawaited(
-                          _confirmFolderDelete(context, controller!, folder!),
-                        );
-                      }
-                    },
-                    itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                      PopupMenuItem(
-                        value: 'subfolder',
-                        child: Text('New subfolder'),
-                      ),
-                      PopupMenuItem(value: 'rename', child: Text('Rename')),
-                      PopupMenuItem(value: 'delete', child: Text('Remove')),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-/// Narrow layouts trade the folder sidebar for one console-key dropdown that
-/// hugs its label — a bordered key with a chevron reads as a control, where
-/// the old full-width row read as a heading.
-class _MobileFolderBar extends StatelessWidget {
-  const _MobileFolderBar({required this.controller});
-
-  final AppController controller;
-
-  @override
-  Widget build(BuildContext context) => Row(
-    children: <Widget>[
-      Flexible(
-        child: Tooltip(
-          message: 'Choose a storage or folder view',
-          child: InkWell(
-            key: const ValueKey('mobile-folder-dropdown'),
-            onTap: () => unawaited(_showFolderPicker(context, controller)),
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
-              decoration: consoleKeyDecoration(
-                context,
-                selected: false,
-                radius: 10,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(
-                    controller.libraryFolderView ==
-                            AppController.libraryFolderAll
-                        ? Icons.video_library_outlined
-                        : Icons.folder_outlined,
-                    color: context.colors.primary,
-                    size: 17,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      controller.activeFolderLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    '${controller.folderCount(controller.libraryFolderView)}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 17,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      const SizedBox(width: 4),
-      IconButton(
-        tooltip: 'New folder',
-        onPressed: () =>
-            unawaited(_showFolderEditor(context, controller: controller)),
-        icon: const Icon(Icons.create_new_folder_outlined, size: 20),
-      ),
-    ],
-  );
-}
-
 class _LibraryHeading extends StatelessWidget {
   const _LibraryHeading({required this.controller});
 
@@ -695,7 +382,35 @@ class _LibraryToolbar extends StatelessWidget {
     padding: const EdgeInsets.all(10),
     child: LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 760;
+        // Wide enough for one line of segments, a usable search field, and
+        // the keys; a 1280-px window with the side rail lands just above.
+        final wide = constraints.maxWidth >= 860;
+        // Media type is the one always-visible facet: its counts reflect
+        // every other active filter, so they read as "what is in this view".
+        final keys = <Widget>[
+          ConsoleFilterSegment(
+            key: const ValueKey('library-kind-all'),
+            label: 'All',
+            semanticLabel: 'All media types',
+            icon: Icons.grid_view_rounded,
+            count: controller.libraryOutputKindCount(null),
+            selected: controller.libraryOutputKind == null,
+            onTap: () => controller.setLibraryOutputKind(null),
+          ),
+          ...GenerationOutputKind.values.map(
+            (kind) => ConsoleFilterSegment(
+              key: ValueKey('library-kind-${kind.name}'),
+              label: kind.label,
+              icon: outputKindIcon(kind),
+              count: controller.libraryOutputKindCount(kind),
+              selected: controller.libraryOutputKind == kind,
+              onTap: () => controller.setLibraryOutputKind(kind),
+            ),
+          ),
+        ];
+        final segments = wide
+            ? Wrap(spacing: 5, runSpacing: 5, children: keys)
+            : ConsoleSegmentStrip(children: keys);
         final search = TextField(
           key: const ValueKey('generation-library-search'),
           onChanged: controller.setSearch,
@@ -717,24 +432,51 @@ class _LibraryToolbar extends StatelessWidget {
           value: controller.libraryViewMode,
           onChanged: (value) => unawaited(controller.setLibraryViewMode(value)),
         );
-        final selectButton = OutlinedButton.icon(
-          key: const ValueKey('library-select-button'),
-          onPressed: () => onSelectingChanged(!selecting),
-          icon: Icon(
-            selecting ? Icons.close_rounded : Icons.check_box_outlined,
-            size: 17,
-          ),
-          label: Text(
-            selecting && selectedCount > 0
-                ? '$selectedCount selected'
-                : 'Select',
-          ),
+        final selectIcon = Icon(
+          selecting ? Icons.close_rounded : Icons.check_box_outlined,
+          size: 17,
         );
+        // Narrow toolbars keep Select as an icon key; the bulk bar beneath
+        // already spells out the selected count.
+        final selectButton = wide
+            ? OutlinedButton.icon(
+                key: const ValueKey('library-select-button'),
+                onPressed: () => onSelectingChanged(!selecting),
+                icon: selectIcon,
+                label: Text(
+                  selecting && selectedCount > 0
+                      ? '$selectedCount selected'
+                      : 'Select',
+                ),
+              )
+            : Tooltip(
+                message: selecting ? 'Done selecting' : 'Select',
+                child: OutlinedButton(
+                  key: const ValueKey('library-select-button'),
+                  onPressed: () => onSelectingChanged(!selecting),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  child: selectIcon,
+                ),
+              );
 
         if (wide) {
+          // The segments keep their natural single line; the search field is
+          // what gives up width first on narrower desktops.
           return Row(
             children: <Widget>[
-              Expanded(child: search),
+              segments,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: search,
+                  ),
+                ),
+              ),
               const SizedBox(width: 8),
               filterButton,
               const SizedBox(width: 8),
@@ -744,10 +486,15 @@ class _LibraryToolbar extends StatelessWidget {
             ],
           );
         }
+        // Narrow: search, then the scrolling type strip on its own line, then
+        // the keys — the three-key view toggle grows to finger size on touch
+        // and would squeeze the strip to nothing beside it.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             search,
+            const SizedBox(height: 10),
+            segments,
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -790,7 +537,7 @@ class _LibraryEmpty extends StatelessWidget {
           Text(
             controller.generations.isEmpty
                 ? 'Your first generation will arrive here with its settings and live status.'
-                : 'Try another folder, tag, status, or a broader search.',
+                : 'Try another folder, media type, tag, status, or a broader search.',
             textAlign: TextAlign.center,
             style: TextStyle(color: context.colors.onSurfaceVariant),
           ),
@@ -894,6 +641,7 @@ class _SelectableGenerationCard extends StatelessWidget {
     required this.selecting,
     required this.selected,
     required this.onSelected,
+    this.dragData,
   });
 
   final AppController controller;
@@ -903,8 +651,17 @@ class _SelectableGenerationCard extends StatelessWidget {
   final bool selected;
   final VoidCallback onSelected;
 
+  /// When set, the card can be dragged onto a folder row carrying this.
+  final LibraryDragData? dragData;
+
   @override
-  Widget build(BuildContext context) => Stack(
+  Widget build(BuildContext context) {
+    final card = _card(context);
+    if (dragData == null) return card;
+    return LibraryDraggable(data: dragData!, child: card);
+  }
+
+  Widget _card(BuildContext context) => Stack(
     clipBehavior: Clip.none,
     children: <Widget>[
       AnimatedContainer(
@@ -1025,10 +782,10 @@ class _GenerationCardState extends State<GenerationCard> {
   Widget build(BuildContext context) {
     final item = widget.item;
     void move() => unawaited(
-      _showGenerationMoveDialog(
+      showMoveToFolderDialog(
         context,
-        controller: widget.controller,
-        localIds: <String>{item.localId},
+        FolderScope.generated(widget.controller),
+        <String>{item.localId},
       ),
     );
     void tag() => unawaited(
@@ -1375,616 +1132,6 @@ class _GenerationCardState extends State<GenerationCard> {
       ),
     );
   }
-}
-
-Future<void> _showFolderPicker(
-  BuildContext context,
-  AppController controller,
-) async {
-  await showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (sheetContext) => SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(sheetContext).height * .72,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 12, 10),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      'Choose a folder',
-                      style: Theme.of(sheetContext).textTheme.headlineSmall,
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'New folder',
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      unawaited(
-                        _showFolderEditor(context, controller: controller),
-                      );
-                    },
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
-                children: <Widget>[
-                  ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) => StorageSidebarSection(
-                      controller: controller,
-                      value: controller.libraryStorageFilter,
-                      counts: <LibraryStorageFilter, int>{
-                        for (final filter in LibraryStorageFilter.values)
-                          filter: controller.generations
-                              .where((item) => filter.matches(item.storage))
-                              .length,
-                      },
-                      onChanged: (value) {
-                        unawaited(controller.setLibraryStorageFilter(value));
-                        Navigator.pop(sheetContext);
-                      },
-                    ),
-                  ),
-                  _FolderPickerTile(
-                    icon: Icons.video_library_outlined,
-                    label: 'All films',
-                    count: controller.folderCount(
-                      AppController.libraryFolderAll,
-                    ),
-                    selected:
-                        controller.libraryFolderView ==
-                        AppController.libraryFolderAll,
-                    onTap: () {
-                      controller.setLibraryFolderView(
-                        AppController.libraryFolderAll,
-                      );
-                      Navigator.pop(sheetContext);
-                    },
-                  ),
-                  _FolderPickerTile(
-                    icon: Icons.inbox_outlined,
-                    label: 'Unfiled',
-                    count: controller.folderCount(
-                      AppController.libraryFolderUnfiled,
-                    ),
-                    selected:
-                        controller.libraryFolderView ==
-                        AppController.libraryFolderUnfiled,
-                    onTap: () {
-                      controller.setLibraryFolderView(
-                        AppController.libraryFolderUnfiled,
-                      );
-                      Navigator.pop(sheetContext);
-                    },
-                  ),
-                  const Divider(),
-                  ...controller.folderTree.map(
-                    (folder) => _FolderPickerTile(
-                      icon: Icons.folder_outlined,
-                      label: folder.name,
-                      count: controller.folderCount(folder.id),
-                      selected: controller.libraryFolderView == folder.id,
-                      depth: controller.folderDepth(folder.id),
-                      onTap: () {
-                        controller.setLibraryFolderView(folder.id);
-                        Navigator.pop(sheetContext);
-                      },
-                      trailing: PopupMenuButton<String>(
-                        tooltip: '${folder.name} options',
-                        onSelected: (value) {
-                          Navigator.pop(sheetContext);
-                          if (value == 'subfolder') {
-                            unawaited(
-                              _showFolderEditor(
-                                context,
-                                controller: controller,
-                                parentId: folder.id,
-                              ),
-                            );
-                          } else if (value == 'rename') {
-                            unawaited(
-                              _showFolderEditor(
-                                context,
-                                controller: controller,
-                                folder: folder,
-                              ),
-                            );
-                          } else {
-                            unawaited(
-                              _confirmFolderDelete(context, controller, folder),
-                            );
-                          }
-                        },
-                        itemBuilder: (context) =>
-                            const <PopupMenuEntry<String>>[
-                              PopupMenuItem(
-                                value: 'subfolder',
-                                child: Text('New subfolder'),
-                              ),
-                              PopupMenuItem(
-                                value: 'rename',
-                                child: Text('Rename'),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Remove'),
-                              ),
-                            ],
-                      ),
-                    ),
-                  ),
-                  if (controller.folders.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: Text(
-                        'No custom folders yet. Tap the folder + button to make one.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: sheetContext.colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-class _FolderPickerTile extends StatelessWidget {
-  const _FolderPickerTile({
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-    this.trailing,
-    this.depth = 0,
-  });
-
-  final IconData icon;
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-  final Widget? trailing;
-  final int depth;
-
-  @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: EdgeInsets.only(left: 16 + depth * 18, right: 8),
-    selected: selected,
-    selectedTileColor: context.colors.primaryContainer,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-    leading: Icon(icon, size: 21),
-    title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-    subtitle: Text('$count ${count == 1 ? 'film' : 'films'}'),
-    trailing:
-        trailing ??
-        (selected
-            ? Icon(Icons.check_rounded, color: context.colors.primary)
-            : null),
-    onTap: onTap,
-  );
-}
-
-Future<bool?> _showFolderEditor(
-  BuildContext context, {
-  required AppController controller,
-  LibraryFolder? folder,
-  String? parentId,
-}) async {
-  final nameController = TextEditingController(text: folder?.name ?? '');
-  var selectedParentId = folder?.parentId ?? parentId;
-  var destination =
-      folder?.storage ??
-      controller.folderById(parentId)?.storage ??
-      controller.effectiveStorage;
-  final blockedParents = folder == null
-      ? const <String>{}
-      : controller.folderBranch(folder.id);
-  var saving = false;
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(folder == null ? 'New folder' : 'Edit folder'),
-        content: SizedBox(
-          width: 390,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (controller.supportsLocalLibrary &&
-                  controller.supportsGoogleDrive &&
-                  folder == null) ...<Widget>[
-                DropdownButtonFormField<LibraryStorage>(
-                  initialValue: destination,
-                  decoration: const InputDecoration(
-                    labelText: 'Save folder in',
-                    prefixIcon: Icon(Icons.storage_outlined),
-                  ),
-                  items: LibraryStorage.values
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(value.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: saving
-                      ? null
-                      : (value) => setState(() {
-                          destination = value ?? destination;
-                          selectedParentId = null;
-                        }),
-                ),
-                const SizedBox(height: 8),
-              ],
-              TextField(
-                controller: nameController,
-                autofocus: true,
-                maxLength: 48,
-                textCapitalization: TextCapitalization.sentences,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(
-                  labelText: 'Folder name',
-                  hintText: 'Campaign, favorites, client work…',
-                  prefixIcon: Icon(Icons.folder_outlined),
-                ),
-                onSubmitted: saving
-                    ? null
-                    : (_) async {
-                        setState(() => saving = true);
-                        final saved = await controller.saveLibraryFolder(
-                          nameController.text,
-                          existing: folder,
-                          parentId: selectedParentId,
-                          storage: destination,
-                        );
-                        if (dialogContext.mounted && saved) {
-                          Navigator.pop(dialogContext, true);
-                        } else if (dialogContext.mounted) {
-                          setState(() => saving = false);
-                        }
-                      },
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: selectedParentId ?? '',
-                decoration: const InputDecoration(
-                  labelText: 'Inside',
-                  prefixIcon: Icon(Icons.account_tree_outlined),
-                ),
-                items: <DropdownMenuItem<String>>[
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('Library (top level)'),
-                  ),
-                  ...controller.folderTree
-                      .where(
-                        (candidate) =>
-                            candidate.storage == destination &&
-                            !blockedParents.contains(candidate.id),
-                      )
-                      .map(
-                        (candidate) => DropdownMenuItem(
-                          value: candidate.id,
-                          child: Text(
-                            controller.folderPath(candidate.id),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                ],
-                onChanged: saving
-                    ? null
-                    : (value) => setState(
-                        () => selectedParentId = value?.isEmpty == true
-                            ? null
-                            : value,
-                      ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: saving ? null : () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            onPressed: saving
-                ? null
-                : () async {
-                    setState(() => saving = true);
-                    final saved = await controller.saveLibraryFolder(
-                      nameController.text,
-                      existing: folder,
-                      parentId: selectedParentId,
-                      storage: destination,
-                    );
-                    if (dialogContext.mounted && saved) {
-                      Navigator.pop(dialogContext, true);
-                    } else if (dialogContext.mounted) {
-                      setState(() => saving = false);
-                    }
-                  },
-            icon: saving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.folder_outlined, size: 18),
-            label: Text(folder == null ? 'Create' : 'Save'),
-          ),
-        ],
-      ),
-    ),
-  );
-  nameController.dispose();
-  return result;
-}
-
-Future<void> _confirmFolderDelete(
-  BuildContext context,
-  AppController controller,
-  LibraryFolder folder,
-) async {
-  final directCount = controller.generations
-      .where((item) => item.folderId == folder.id)
-      .length;
-  final childCount = controller.childFolders(folder.id).length;
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Remove “${folder.name}”?'),
-      content: Text(
-        '${directCount == 0 ? 'No films' : '$directCount ${directCount == 1 ? 'film' : 'films'}'} directly inside will move to Unfiled. '
-        '${childCount == 0 ? 'There are no subfolders.' : '$childCount ${childCount == 1 ? 'subfolder moves' : 'subfolders move'} up one level.'} Nothing will be deleted.',
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Keep folder'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Remove folder'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) await controller.deleteLibraryFolder(folder.id);
-}
-
-Future<bool> _showGenerationMoveDialog(
-  BuildContext context, {
-  required AppController controller,
-  required Iterable<String> localIds,
-}) async {
-  final ids = localIds.toSet();
-  final items = controller.generations
-      .where((item) => ids.contains(item.localId))
-      .toList();
-  if (items.isEmpty) return false;
-  final storages = items.map((item) => item.storage).toSet();
-  if (storages.length != 1) {
-    controller.showNotice(
-      'Bulk moves require items from the same storage. Filter by Local or Drive, then select again.',
-    );
-    return false;
-  }
-  final storage = storages.single;
-  final currentFolders = items.map((item) => item.folderId).toSet();
-  String? folderId = currentFolders.length == 1 ? currentFolders.single : null;
-  var moving = false;
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(
-          items.length == 1 ? 'Move film' : 'Move ${items.length} films',
-        ),
-        content: SizedBox(
-          width: 470,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  StorageBadge(storage: storage),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: moving
-                        ? null
-                        : () async {
-                            await _showFolderEditor(
-                              dialogContext,
-                              controller: controller,
-                              parentId: folderId,
-                            );
-                            if (dialogContext.mounted) setState(() {});
-                          },
-                    icon: const Icon(
-                      Icons.create_new_folder_outlined,
-                      size: 18,
-                    ),
-                    label: const Text('New folder'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Choose a destination',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 360),
-                child: ListenableBuilder(
-                  listenable: controller,
-                  builder: (context, _) => DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: context.colors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(color: context.colors.outlineVariant),
-                    ),
-                    child: ListView(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.all(7),
-                      children: <Widget>[
-                        _MoveDestinationTile(
-                          label: 'Unfiled',
-                          icon: Icons.inbox_outlined,
-                          selected: folderId == null,
-                          onTap: moving
-                              ? null
-                              : () => setState(() => folderId = null),
-                        ),
-                        ...controller.folderTree
-                            .where((folder) => folder.storage == storage)
-                            .map(
-                              (folder) => _MoveDestinationTile(
-                                label: folder.name,
-                                icon: Icons.folder_outlined,
-                                depth: controller.folderDepth(folder.id),
-                                selected: folderId == folder.id,
-                                onTap: moving
-                                    ? null
-                                    : () =>
-                                          setState(() => folderId = folder.id),
-                                trailing: PopupMenuButton<String>(
-                                  tooltip: '${folder.name} folder actions',
-                                  onSelected: (value) async {
-                                    if (value == 'subfolder') {
-                                      await _showFolderEditor(
-                                        dialogContext,
-                                        controller: controller,
-                                        parentId: folder.id,
-                                      );
-                                    } else {
-                                      await _showFolderEditor(
-                                        dialogContext,
-                                        controller: controller,
-                                        folder: folder,
-                                      );
-                                    }
-                                    if (dialogContext.mounted) setState(() {});
-                                  },
-                                  itemBuilder: (context) =>
-                                      const <PopupMenuEntry<String>>[
-                                        PopupMenuItem(
-                                          value: 'subfolder',
-                                          child: Text('New subfolder'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'edit',
-                                          child: Text('Rename or move folder'),
-                                        ),
-                                      ],
-                                ),
-                              ),
-                            ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: moving
-                ? null
-                : () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            key: const ValueKey('confirm-generation-move'),
-            onPressed: moving
-                ? null
-                : () async {
-                    setState(() => moving = true);
-                    final moved = await controller.moveGenerations(
-                      ids,
-                      folderId: folderId,
-                    );
-                    if (dialogContext.mounted && moved) {
-                      Navigator.pop(dialogContext, true);
-                    } else if (dialogContext.mounted) {
-                      setState(() => moving = false);
-                    }
-                  },
-            icon: moving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.drive_file_move_outline, size: 18),
-            label: const Text('Move'),
-          ),
-        ],
-      ),
-    ),
-  );
-  return result == true;
-}
-
-class _MoveDestinationTile extends StatelessWidget {
-  const _MoveDestinationTile({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-    this.depth = 0,
-    this.trailing,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback? onTap;
-  final int depth;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.only(left: 10 + depth * 20, right: 4),
-      selected: selected,
-      selectedTileColor: context.colors.primaryContainer,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      leading: Icon(icon, size: 20),
-      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing:
-          trailing ??
-          (selected
-              ? Icon(Icons.check_circle_rounded, color: context.colors.primary)
-              : null),
-      onTap: onTap,
-    ),
-  );
 }
 
 Future<void> _showGenerationTagDialog(

@@ -419,6 +419,12 @@ class ComposerTab {
   bool get isBlank => form.prompt.trim().isEmpty;
 }
 
+/// A starred model resolved against the live catalog.
+typedef FavoriteModel = ({
+  VideoProviderDefinition provider,
+  VideoModelDefinition model,
+});
+
 class AppController extends ChangeNotifier {
   AppController({
     AppGateway? gateway,
@@ -510,7 +516,17 @@ class AppController extends ChangeNotifier {
   String referenceFolderView = libraryFolderAll;
   String? referenceTag;
   MediaReferenceKind? referenceKind;
+  GenerationOutputKind? libraryOutputKind;
   ReferenceSort referenceSort = ReferenceSort.newest;
+
+  /// Starred models ([modelFavoriteKey] values) and provider ids, oldest star
+  /// first. Both live in preferences so they follow the user across devices.
+  List<String> favoriteModelKeys = <String>[];
+  List<String> favoriteProviderIds = <String>[];
+
+  /// Folder ids whose subtrees are folded in the folder rails. Session-only:
+  /// a fresh launch opens every branch again.
+  final Set<String> collapsedFolderIds = <String>{};
 
   /// The provider and model of the composer tab in front. Every tab keeps
   /// its own pair, so one draft can wait on Runway while another is set up
@@ -1177,6 +1193,60 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
+  bool isFavoriteModel(String providerId, String modelId) =>
+      favoriteModelKeys.contains(modelFavoriteKey(providerId, modelId));
+
+  bool isFavoriteProvider(String providerId) =>
+      favoriteProviderIds.contains(providerId);
+
+  /// Starred models that still exist in the live catalog, in catalog order so
+  /// the Favorites section reads like the rest of the picker.
+  List<FavoriteModel> get favoriteModels => <FavoriteModel>[
+    for (final provider in providers)
+      for (final model in provider.models)
+        if (isFavoriteModel(provider.id, model.id))
+          (provider: provider, model: model),
+  ];
+
+  /// Starred providers that are available on this build, in catalog order.
+  List<VideoProviderDefinition> get favoriteProviders =>
+      providers.where((provider) => isFavoriteProvider(provider.id)).toList();
+
+  /// Every available provider with the starred ones first, then the rest in
+  /// catalog order — the ordering the model picker and provider desk share.
+  List<VideoProviderDefinition> get providersByPreference =>
+      <VideoProviderDefinition>[
+        ...favoriteProviders,
+        ...providers.where((provider) => !isFavoriteProvider(provider.id)),
+      ];
+
+  Future<void> toggleFavoriteModel(String providerId, String modelId) async {
+    final key = modelFavoriteKey(providerId, modelId);
+    final next = List<String>.from(favoriteModelKeys);
+    if (!next.remove(key)) next.add(key);
+    favoriteModelKeys = List<String>.unmodifiable(next);
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(favoriteModels: favoriteModelKeys));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  Future<void> toggleFavoriteProvider(String providerId) async {
+    final next = List<String>.from(favoriteProviderIds);
+    if (!next.remove(providerId)) next.add(providerId);
+    favoriteProviderIds = List<String>.unmodifiable(next);
+    notifyListeners();
+    try {
+      await _savePreferences(
+        _preferences(favoriteProviders: favoriteProviderIds),
+      );
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
   List<LibraryFolder> foldersFor(
     LibraryCollection collection, {
     LibraryStorage? storage,
@@ -1415,6 +1485,115 @@ class AppController extends ChangeNotifier {
     return ids;
   }
 
+  /// Ancestor ids of [folderId], nearest parent first.
+  List<String> folderAncestors(
+    String folderId, {
+    LibraryCollection collection = LibraryCollection.generated,
+  }) {
+    final ids = <String>[];
+    var current = folderById(folderId, collection: collection);
+    final visited = <String>{folderId};
+    while (current?.parentId != null && visited.add(current!.parentId!)) {
+      ids.add(current.parentId!);
+      current = folderById(current.parentId, collection: collection);
+    }
+    return ids;
+  }
+
+  bool isFolderCollapsed(String folderId) =>
+      collapsedFolderIds.contains(folderId);
+
+  /// Whether a collapsed ancestor hides [folderId] from the folder rail.
+  bool isFolderHidden(
+    String folderId, {
+    LibraryCollection collection = LibraryCollection.generated,
+  }) => folderAncestors(
+    folderId,
+    collection: collection,
+  ).any(collapsedFolderIds.contains);
+
+  void setFolderCollapsed(String folderId, bool collapsed) {
+    final changed = collapsed
+        ? collapsedFolderIds.add(folderId)
+        : collapsedFolderIds.remove(folderId);
+    if (changed) notifyListeners();
+  }
+
+  /// Opens every branch above [folderId] so a freshly selected or freshly
+  /// moved folder is never tucked out of sight.
+  void _revealFolder(String folderId, LibraryCollection collection) {
+    for (final ancestor in folderAncestors(folderId, collection: collection)) {
+      collapsedFolderIds.remove(ancestor);
+    }
+  }
+
+  /// The live record for [folder], so a caller holding a stale copy never
+  /// writes an old parent or name back over a newer one.
+  LibraryFolder _currentFolder(LibraryFolder folder) =>
+      folderById(folder.id, collection: folder.collection) ?? folder;
+
+  Future<bool> renameFolder(LibraryFolder folder, String name) {
+    final current = _currentFolder(folder);
+    return saveLibraryFolder(
+      name,
+      existing: current,
+      parentId: current.parentId,
+      collection: current.collection,
+      successNotice: 'Folder renamed.',
+    );
+  }
+
+  /// Whether [folder] may be re-parented under [parentId] (null = top level):
+  /// same storage, and never inside its own branch.
+  bool canMoveFolder(LibraryFolder stale, {required String? parentId}) {
+    final folder = _currentFolder(stale);
+    if (parentId == null) return true;
+    final parent = folderById(parentId, collection: folder.collection);
+    return parent != null &&
+        parent.storage == folder.storage &&
+        !folderBranch(
+          folder.id,
+          collection: folder.collection,
+        ).contains(parentId);
+  }
+
+  /// Re-parents [folder] under [parentId] (null = top level), refusing moves
+  /// across storages or into the folder's own branch with a plain reason.
+  Future<bool> moveFolder(
+    LibraryFolder stale, {
+    required String? parentId,
+  }) async {
+    final folder = _currentFolder(stale);
+    if (parentId == folder.parentId) return true;
+    final collection = folder.collection;
+    final parent = folderById(parentId, collection: collection);
+    if (parentId != null && parent == null) {
+      showNotice('That folder no longer exists.');
+      return false;
+    }
+    if (parent != null && parent.storage != folder.storage) {
+      showNotice('Folders can only move within the same storage.');
+      return false;
+    }
+    if (parent != null &&
+        folderBranch(folder.id, collection: collection).contains(parent.id)) {
+      showNotice('A folder cannot move inside itself.');
+      return false;
+    }
+    final saved = await saveLibraryFolder(
+      folder.name,
+      existing: folder,
+      parentId: parentId,
+      collection: collection,
+      successNotice: 'Folder moved.',
+    );
+    if (saved) {
+      _revealFolder(folder.id, collection);
+      notifyListeners();
+    }
+    return saved;
+  }
+
   String get activeFolderLabel => switch (libraryFolderView) {
     libraryFolderAll => 'All films',
     libraryFolderUnfiled => 'Unfiled',
@@ -1472,15 +1651,37 @@ class AppController extends ChangeNotifier {
       )
       .length;
 
-  List<Generation> get filteredGenerations {
+  List<Generation> get filteredGenerations =>
+      generations.where(_libraryPredicate()).toList();
+
+  /// How many films the current view would list under media type [kind]
+  /// (null counts every type) with every other filter still applied, so the
+  /// type segments read as facet counts for the folder in view.
+  int libraryOutputKindCount(GenerationOutputKind? kind) {
+    final matches = _libraryPredicate(includeOutputKind: false);
+    return generations
+        .where(
+          (item) => matches(item) && (kind == null || item.outputKind == kind),
+        )
+        .length;
+  }
+
+  bool Function(Generation item) _libraryPredicate({
+    bool includeOutputKind = true,
+  }) {
     final query = librarySearch.trim().toLowerCase();
     final selectedBranch =
         libraryFolderView != libraryFolderAll &&
             libraryFolderView != libraryFolderUnfiled
         ? folderBranch(libraryFolderView)
         : const <String>{};
-    return generations.where((item) {
+    return (item) {
       if (!libraryStorageFilter.matches(item.storage)) return false;
+      if (includeOutputKind &&
+          libraryOutputKind != null &&
+          item.outputKind != libraryOutputKind) {
+        return false;
+      }
       if (!libraryFavoriteFilter.matches(item.favorite)) return false;
       if (!libraryVisibilityFilter.matches(item.hidden)) return false;
       final folderName = item.folderId == null
@@ -1513,7 +1714,7 @@ class AppController extends ChangeNotifier {
         LibraryFilter.ready => item.isReady,
         LibraryFilter.failed => item.isFailed,
       };
-    }).toList();
+    };
   }
 
   String get activeReferenceFolderLabel => switch (referenceFolderView) {
@@ -1587,7 +1788,18 @@ class AppController extends ChangeNotifier {
       )
       .length;
 
-  List<SavedReference> get filteredSavedReferences {
+  /// How many references the current view would list under media [kind]
+  /// (null counts every kind) with every other filter still applied.
+  int referenceKindCount(MediaReferenceKind? kind) {
+    final matches = _referencePredicate(includeKind: false);
+    return savedReferences
+        .where((item) => matches(item) && (kind == null || item.kind == kind))
+        .length;
+  }
+
+  bool Function(SavedReference item) _referencePredicate({
+    bool includeKind = true,
+  }) {
     final query = referenceSearch.trim().toLowerCase();
     final selectedBranch =
         referenceFolderView != libraryFolderAll &&
@@ -1597,7 +1809,7 @@ class AppController extends ChangeNotifier {
             collection: LibraryCollection.references,
           )
         : const <String>{};
-    final values = savedReferences.where((item) {
+    return (item) {
       if (!referenceStorageFilter.matches(item.storage)) return false;
       if (!referenceFavoriteFilter.matches(item.favorite)) return false;
       if (!referenceVisibilityFilter.matches(item.hidden)) return false;
@@ -1629,8 +1841,14 @@ class AppController extends ChangeNotifier {
           )) {
         return false;
       }
-      return referenceKind == null || item.kind == referenceKind;
-    }).toList();
+      return !includeKind ||
+          referenceKind == null ||
+          item.kind == referenceKind;
+    };
+  }
+
+  List<SavedReference> get filteredSavedReferences {
+    final values = savedReferences.where(_referencePredicate()).toList();
     int compareDuration(
       SavedReference first,
       SavedReference second, {
@@ -2245,6 +2463,12 @@ class AppController extends ChangeNotifier {
       rewriteEfforts
         ..clear()
         ..addAll(value.preferences.rewriteEfforts);
+      favoriteModelKeys = List<String>.unmodifiable(
+        value.preferences.favoriteModels,
+      );
+      favoriteProviderIds = List<String>.unmodifiable(
+        value.preferences.favoriteProviders,
+      );
       defaultStorage = supportsLocalLibrary
           ? value.preferences.defaultStorage
           : LibraryStorage.drive;
@@ -3109,6 +3333,7 @@ class AppController extends ChangeNotifier {
       );
     }
     libraryFolderView = value;
+    _revealFolder(value, LibraryCollection.generated);
     _scheduleListingPrefetch();
     notifyListeners();
   }
@@ -3136,6 +3361,7 @@ class AppController extends ChangeNotifier {
       );
     }
     referenceFolderView = value;
+    _revealFolder(value, LibraryCollection.references);
     notifyListeners();
   }
 
@@ -3146,6 +3372,12 @@ class AppController extends ChangeNotifier {
 
   void setReferenceKind(MediaReferenceKind? value) {
     referenceKind = value;
+    notifyListeners();
+  }
+
+  void setLibraryOutputKind(GenerationOutputKind? value) {
+    libraryOutputKind = value;
+    _scheduleListingPrefetch();
     notifyListeners();
   }
 
@@ -3163,6 +3395,7 @@ class AppController extends ChangeNotifier {
     String? parentId,
     LibraryCollection collection = LibraryCollection.generated,
     LibraryStorage? storage,
+    String? successNotice,
   }) async {
     final clean = name.trim();
     if (!library_rules.isValidLibraryFolderName(clean)) {
@@ -3197,7 +3430,11 @@ class AppController extends ChangeNotifier {
     );
     try {
       _apply(await organization.saveLibraryFolder(folder));
-      showNotice(existing == null ? 'Folder created.' : 'Folder updated.');
+      if (parentId != null) collapsedFolderIds.remove(parentId);
+      showNotice(
+        successNotice ??
+            (existing == null ? 'Folder created.' : 'Folder updated.'),
+      );
       return true;
     } on Object catch (error) {
       showNotice(_message(error));
@@ -4214,6 +4451,8 @@ class AppController extends ChangeNotifier {
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
     AppThemeMode? themeMode,
+    List<String>? favoriteModels,
+    List<String>? favoriteProviders,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -4243,6 +4482,8 @@ class AppController extends ChangeNotifier {
     rewriteProvider: rewriteProviderId,
     rewriteModels: Map<String, String>.of(rewriteModelIds),
     rewriteEfforts: Map<String, String>.of(rewriteEfforts),
+    favoriteModels: favoriteModels ?? favoriteModelKeys,
+    favoriteProviders: favoriteProviders ?? favoriteProviderIds,
   );
 
   int _validDuration(int value) {

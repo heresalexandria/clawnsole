@@ -54,13 +54,17 @@ and optional Google Drive sync keep work organized wherever you create.
   film's frames, prompt, and your change notes go to the model you pick
   (vendor, model, effort) and the revised prompt opens in a new tab with the
   film's full recipe
-- Nested project folders, multi-tag organization, and combined prompt/tag/folder search
+- Nested project folders with a pinned rail, collapsible branches, in-place
+  rename, and drag-and-drop filing, plus multi-tag organization and combined
+  prompt/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
   duration-aware sorting, non-destructive video trimming, and Saved/Generated
   pickers directly in Create
 - Live reference-count and media-duration gauges that track each selected
   model's per-kind and total input ceilings
-- One-tap folder and tag filters with a desktop folder rail and compact mobile picker
+- One-tap folder, media-type, and tag filters with a desktop folder rail and compact mobile picker
+- Starred models and providers pinned in a Favorites section of the model
+  picker and the provider desk, carried with your synced preferences
 - System-aware light and dark themes with an explicit appearance switcher
 - Uncapped compact history with retained media files and granular clear controls
 - OS-secure API-key storage with no database, `localStorage`, or IndexedDB
