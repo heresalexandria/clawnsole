@@ -269,6 +269,25 @@ included, fit above the fold at 1440×900, with the Recent work header
 visible beneath — enforced by a widget test. Recent work always sits
 below the composer (the old ≥1160 side column is gone).
 
+**Tabs are workspaces, not modes.** The Create heading carries a strip of
+console-key tabs (`ComposerTabStrip`); each tab is a complete, independent
+draft — Direction, provider and model, every setting, attachments, and the
+save-to folder — so several films can be worked on side by side. A "+" key
+opens a blank tab that inherits only the active tab's provider, model, and
+folder; the × on a tab closes it (the last tab is replaced by a blank one);
+long-press or double-tap renames. Labels derive from the first words of the
+prompt until renamed. Reuse and Enhance fill the active tab when it is still
+blank and otherwise open a new tab, so no draft is ever clobbered. A tab born
+from AI Rewrite wears a small brass `auto_awesome` mark whose tooltip is the
+model's one-line summary of what changed. At desktop widths the strip sits
+trailing in the heading row so the fold contract holds; under ~700 px it
+becomes its own one-line scrolling row. Tabs persist on the device
+(`StoredData.composerTabs`, never in Drive data): the prompt, settings, and
+ids survive a restart, and media that came from a generation is re-hydrated
+from that generation's record; media picked from disk stays session-only, as
+it always has. The generation-mode rule above still stands — tabs never
+select a mode.
+
 ## 8. Library & recent work
 
 - The toolbar is **one quiet row**: console-key status segments
@@ -301,9 +320,11 @@ below the composer (the old ≥1160 side column is gone).
   so `StatusBadge` renders nothing for ready work and only appears for
   in-progress, failed, or status-unavailable items.
 - Card actions stay light: the primary verbs (**Save**, **Reuse/Retry**,
-  **Check status**) are buttons; everything else (Organize, Enhance,
+  **Check status**, and — once an AI Rewrite key is saved — **AI Rewrite**
+  on delivered films) are buttons; everything else (Organize, Enhance,
   Copy to Drive, View details, Delete) folds into the shared
-  `GenerationActionsMenu` (⋯). The cost readout is a compact amount chip
+  `GenerationActionsMenu` (⋯), which also lists AI Rewrite for the dense
+  card sizes. The cost readout is a compact amount chip
   (`GenerationCostChip`) on the same row — just the credit or dollar
   figure at a glance, with the realized/estimated wording, USD
   conversion, balance trail, and quote-vs-realized lines in a small
@@ -332,6 +353,34 @@ below the composer (the old ≥1160 side column is gone).
 - Status semantics: working = navy chip with spinner; ready = plum;
   needs attention / status unavailable = madder; exact provider charges
   render on plum containers, estimates on navy.
+
+### AI Rewrite
+
+An **AI Rewrite** button on a delivered film opens a dialog that asks a
+multimodal LLM to revise the film's prompt. The director picks the vendor
+(OpenAI or Anthropic — only vendors with a saved key are offered; the row is
+hidden when there is one), the model (a live listing with the vendor's newest
+chat models first, a curated fallback when the listing is unavailable, and a
+"Custom model id…" escape hatch), the vendor's own effort level, and types
+what should be different next time in the Courier Prime direction voice. The
+original prompt sits collapsed underneath for reference, and a small strip
+shows the frames being sent (eight evenly spaced samples, downscaled). The
+request carries the frames, the original prompt, the target provider and
+model, the duration and ratio, the published prompt limit, and the exact
+reference mentions (`@Image 1`) the prompt may use, so the answer respects
+them. The vendor is constrained to structured JSON (`prompt` + a one-line
+`summary`); the revised prompt lands in a **new composer tab** seeded from the
+film's full recipe — settings, references, frames, folder — with the summary
+in the tab's brass mark and in a notice. Errors stay inline in the dialog
+(rejected key, rate limit, a vendor refusal, or an unusable answer) and never
+open a tab.
+
+Keys live in **Settings › AI Rewrite** (one masked field per vendor with
+Verify & save, Replace, Remove, and a Get-a-key link), stored beside the
+provider keys in the OS-secure vault. On desktop the Electron renderer never
+sees them: the companion holds the key and makes the vendor call; native
+builds call the vendor directly. The last-used vendor, model, and effort are
+remembered per vendor in preferences.
 
 ## 9. Version & updates
 

@@ -48,6 +48,12 @@ and optional Google Drive sync keep work organized wherever you create.
 - Provider balance when exposed by the API, plus setting-aware USD or credit estimates
 - Per-generation quoted and realized USD cost history with provenance
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
+- Composer tabs on Create: several independent drafts (direction, model,
+  settings, attachments) open side by side, persisted on the device
+- AI Rewrite: with an OpenAI or Anthropic key saved in Settings, a finished
+  film's frames, prompt, and your change notes go to the model you pick
+  (vendor, model, effort) and the revised prompt opens in a new tab with the
+  film's full recipe
 - Nested project folders, multi-tag organization, and combined prompt/tag/folder search
 - A saved References tab with naming, nested folders, tags, media-type filters,
   duration-aware sorting, non-destructive video trimming, and Saved/Generated
