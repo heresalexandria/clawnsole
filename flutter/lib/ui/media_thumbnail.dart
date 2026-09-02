@@ -9,14 +9,49 @@ import 'media_duration_loader.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
 
-final Map<String, Future<Uint8List>> _assetImageJobs =
-    <String, Future<Uint8List>>{};
-final Map<String, Future<Uint8List?>> _videoThumbnailJobs =
-    <String, Future<Uint8List?>>{};
-final Map<String, Future<VideoSourceMetadata?>> _videoMetadataJobs =
-    <String, Future<VideoSourceMetadata?>>{};
-final Map<String, Future<double?>> _mediaDurationJobs =
-    <String, Future<double?>>{};
+/// Per-process memo of in-flight and completed loads, bounded so a long
+/// session browsing a large library does not retain every asset's bytes for
+/// its lifetime: the least recently touched entries fall out first.
+class _BoundedJobs<T> {
+  _BoundedJobs({this.capacity = 240});
+
+  final int capacity;
+  final Map<String, T> _entries = <String, T>{};
+
+  T? operator [](String key) {
+    final value = _entries.remove(key);
+    if (value != null) _entries[key] = value;
+    return value;
+  }
+
+  void operator []=(String key, T value) {
+    _entries.remove(key);
+    _entries[key] = value;
+    while (_entries.length > capacity) {
+      _entries.remove(_entries.keys.first);
+    }
+  }
+
+  T? remove(String key) => _entries.remove(key);
+}
+
+final _BoundedJobs<Future<Uint8List>> _assetImageJobs =
+    _BoundedJobs<Future<Uint8List>>();
+final _BoundedJobs<Future<Uint8List?>> _videoThumbnailJobs =
+    _BoundedJobs<Future<Uint8List?>>();
+final _BoundedJobs<Future<VideoSourceMetadata?>> _videoMetadataJobs =
+    _BoundedJobs<Future<VideoSourceMetadata?>>();
+final _BoundedJobs<Future<double?>> _mediaDurationJobs =
+    _BoundedJobs<Future<double?>>();
+
+/// Decodes at the tile's pixel width instead of the source's: a 1080p frame
+/// filling a 200 px tile otherwise costs a full-size decode on every scroll
+/// and evicts the whole image cache behind it.
+int? _decodeWidthFor(BuildContext context, BoxConstraints constraints) {
+  if (!constraints.maxWidth.isFinite || constraints.maxWidth <= 0) return null;
+  final ratio = MediaQuery.devicePixelRatioOf(context);
+  return (constraints.maxWidth * ratio).ceil();
+}
 
 /// A single preview surface for picked, retained, Drive, and remote media.
 ///
@@ -309,18 +344,21 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     },
   );
 
+  Widget _decodedImage(Uint8List bytes) => LayoutBuilder(
+    builder: (context, constraints) => Image.memory(
+      bytes,
+      key: const ValueKey('media-thumbnail-image'),
+      fit: widget.fit,
+      gaplessPlayback: true,
+      cacheWidth: _decodeWidthFor(context, constraints),
+      errorBuilder: (_, _, _) =>
+          const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
+    ),
+  );
+
   Widget _image(BuildContext context) {
     final bytes = widget.bytes;
-    if (bytes != null && bytes.isNotEmpty) {
-      return Image.memory(
-        bytes,
-        key: const ValueKey('media-thumbnail-image'),
-        fit: widget.fit,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) =>
-            const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
-      );
-    }
+    if (bytes != null && bytes.isNotEmpty) return _decodedImage(bytes);
     final reference = widget.reference;
     if (reference != null && !reference.isLocal) {
       return _networkImage(reference.value);
@@ -342,29 +380,27 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
             loading: !snapshot.hasError,
           );
         }
-        return Image.memory(
-          snapshot.data!,
-          key: const ValueKey('media-thumbnail-image'),
-          fit: widget.fit,
-          gaplessPlayback: true,
-        );
+        return _decodedImage(snapshot.data!);
       },
     );
   }
 
-  Widget _networkImage(String source) => Image.network(
-    source,
-    key: const ValueKey('media-thumbnail-image'),
-    fit: widget.fit,
-    gaplessPlayback: true,
-    errorBuilder: (_, _, _) =>
-        const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
-    loadingBuilder: (context, child, progress) => progress == null
-        ? child
-        : const _ThumbnailPlaceholder(
-            icon: Icons.image_outlined,
-            loading: true,
-          ),
+  Widget _networkImage(String source) => LayoutBuilder(
+    builder: (context, constraints) => Image.network(
+      source,
+      key: const ValueKey('media-thumbnail-image'),
+      fit: widget.fit,
+      gaplessPlayback: true,
+      cacheWidth: _decodeWidthFor(context, constraints),
+      errorBuilder: (_, _, _) =>
+          const _ThumbnailPlaceholder(icon: Icons.broken_image_outlined),
+      loadingBuilder: (context, child, progress) => progress == null
+          ? child
+          : const _ThumbnailPlaceholder(
+              icon: Icons.image_outlined,
+              loading: true,
+            ),
+    ),
   );
 
   Widget _video(BuildContext context) {
@@ -390,7 +426,14 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
           key: const ValueKey('media-thumbnail-video-frame'),
           fit: StackFit.expand,
           children: <Widget>[
-            Image.memory(result.bytes, fit: widget.fit, gaplessPlayback: true),
+            LayoutBuilder(
+              builder: (context, constraints) => Image.memory(
+                result.bytes,
+                fit: widget.fit,
+                gaplessPlayback: true,
+                cacheWidth: _decodeWidthFor(context, constraints),
+              ),
+            ),
             Center(
               child: DecoratedBox(
                 decoration: BoxDecoration(

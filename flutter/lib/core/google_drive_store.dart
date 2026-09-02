@@ -189,13 +189,19 @@ class GoogleDriveStore implements DurableDataStore {
       final base = _lastData ?? await read();
       var remote = await read();
       var merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
-      try {
-        await _writeRemote(merged);
-      } on GoogleDriveException catch (error) {
-        if (error.status != 412) rethrow;
-        remote = await read();
-        merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
-        await _writeRemote(merged);
+      // A 412 means another device published between our read and write.
+      // Re-merge onto the newer remote and try again; three attempts matches
+      // the settings vault so active multi-device editing does not drop a
+      // whole poll cycle's outcome on the first collision.
+      for (var attempt = 1; ; attempt += 1) {
+        try {
+          await _writeRemote(merged);
+          break;
+        } on GoogleDriveException catch (error) {
+          if (error.status != 412 || attempt >= 3) rethrow;
+          remote = await read();
+          merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
+        }
       }
       _lastData = merged;
       _acknowledgePublishedAssets(merged);

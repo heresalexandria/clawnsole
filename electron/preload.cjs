@@ -90,6 +90,15 @@ rendererWindow.addEventListener("pointerdown", (event) => {
   }, 0);
 }, true);
 
+// Main-process events reach the renderer through per-channel subscriptions
+// that hand back their own unsubscribe function.
+function subscribe(channel, callback) {
+  if (typeof callback !== "function") return () => {};
+  const listener = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 // The renderer-facing shell surface. The Flutter app feature-detects
 // `window.clawnsole` to offer in-place updates with download progress.
 contextBridge.exposeInMainWorld("clawnsole", {
@@ -109,10 +118,15 @@ contextBridge.exposeInMainWorld("clawnsole", {
     ipcRenderer.invoke("clawnsole:external:open", url, purpose),
   revealDataFolder: () => ipcRenderer.invoke("clawnsole:data:reveal"),
   chooseDataDirectory: () => ipcRenderer.invoke("clawnsole:data:choose"),
-  onUpdateEvent: (callback) => {
-    if (typeof callback !== "function") return () => {};
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("clawnsole:update:event", listener);
-    return () => ipcRenderer.removeListener("clawnsole:update:event", listener);
-  },
+  // notify({ title, body }) resolves to true when a system notification was
+  // actually posted. The shell posts one only while its window is not
+  // focused, so a false result means the in-app UI should say it instead.
+  notify: (options) => ipcRenderer.invoke("clawnsole:notify", {
+    title: options?.title,
+    body: options?.body,
+  }).then((shown) => shown === true),
+  onUpdateEvent: (callback) => subscribe("clawnsole:update:event", callback),
+  // onNavigate receives { section } when a menu item or shortcut such as
+  // Settings… (⌘,) asks the app to show a section.
+  onNavigate: (callback) => subscribe("clawnsole:navigate", callback),
 });

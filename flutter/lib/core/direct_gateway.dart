@@ -9,26 +9,13 @@ import 'durable_data_store.dart';
 import 'generation_status.dart';
 import 'generation_timing.dart';
 import 'gateway.dart';
+import 'library_rules.dart';
 import 'models.dart';
 import 'pricing.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
-
-List<String> _cleanLibraryTags(Iterable<String> input) {
-  final tags = <String>[];
-  final seen = <String>{};
-  for (final value in input) {
-    final clean = value.trim().replaceFirst(RegExp(r'^#+'), '').trim();
-    final key = clean.toLowerCase();
-    if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
-    seen.add(key);
-    tags.add(clean);
-    if (tags.length == 12) break;
-  }
-  return tags;
-}
 
 enum ApiKeySource { saved, configured }
 
@@ -358,8 +345,8 @@ class DirectGateway
   @override
   Future<LocalSnapshot> saveLibraryFolder(LibraryFolder folder) async {
     final name = folder.name.trim();
-    if (folder.id.trim().isEmpty || name.isEmpty || name.length > 48) {
-      throw StateError('Folder names must be between 1 and 48 characters.');
+    if (folder.id.trim().isEmpty || !isValidLibraryFolderName(name)) {
+      throw StateError(libraryFolderNameRule);
     }
     final current = await _store.read();
     final parentId = folder.parentId?.trim().isEmpty == true
@@ -472,7 +459,7 @@ class DirectGateway
         )) {
       throw StateError('That folder no longer exists.');
     }
-    final cleanTags = _cleanLibraryTags(tags);
+    final cleanTags = cleanLibraryTags(tags);
     var found = false;
     final generations = current.generations.map((item) {
       if (item.localId != localId) return item;
@@ -495,8 +482,8 @@ class DirectGateway
     String? source,
   }) async {
     final name = reference.name.trim();
-    if (reference.id.trim().isEmpty || name.isEmpty || name.length > 80) {
-      throw StateError('Reference names must be between 1 and 80 characters.');
+    if (reference.id.trim().isEmpty || !isValidSavedReferenceName(name)) {
+      throw StateError(savedReferenceNameRule);
     }
     final current = await _store.read();
     if (reference.folderId != null &&
@@ -534,7 +521,7 @@ class DirectGateway
       createdAt: existing?.createdAt ?? reference.createdAt,
       updatedAt: reference.updatedAt,
       folderId: reference.folderId,
-      tags: _cleanLibraryTags(reference.tags),
+      tags: cleanLibraryTags(reference.tags),
       favorite: reference.favorite,
       hidden: reference.hidden,
       storage: reference.storage,
@@ -581,8 +568,8 @@ class DirectGateway
       throw StateError('Choose a valid range within the reference video.');
     }
     final name = output.name.trim();
-    if (output.id.trim().isEmpty || name.isEmpty || name.length > 80) {
-      throw StateError('Reference names must be between 1 and 80 characters.');
+    if (output.id.trim().isEmpty || !isValidSavedReferenceName(name)) {
+      throw StateError(savedReferenceNameRule);
     }
     if (current.savedReferences.any((item) => item.id == output.id)) {
       throw StateError('That reference already exists.');
@@ -618,7 +605,7 @@ class DirectGateway
       createdAt: now,
       updatedAt: now,
       folderId: output.folderId,
-      tags: _cleanLibraryTags(output.tags),
+      tags: cleanLibraryTags(output.tags),
       favorite: output.favorite,
       hidden: output.hidden,
       storage: source.storage,
@@ -1133,7 +1120,7 @@ class DirectGateway
       // The provider receipt is the irreplaceable part of the transaction.
       // Persist it before optional balance/cost bookkeeping makes another
       // network request or the app has another opportunity to be suspended.
-      record = await _replaceGeneration(record);
+      record = await _persistReceipt(record);
       final liveAfter = await _balanceSafely(provider, key);
       final realized = resolveProviderCost(
         record,
@@ -1179,6 +1166,26 @@ class DirectGateway
         await invalidateCredential(provider, credential);
       }
       rethrow;
+    }
+  }
+
+  /// Persists a freshly accepted provider receipt, retrying briefly when the
+  /// store is momentarily unwritable. The provider has already charged for
+  /// the job at this point, so a transient disk or Drive hiccup must not be
+  /// the reason its polling URL is lost.
+  Future<Generation> _persistReceipt(Generation record) async {
+    const delays = <Duration>[
+      Duration(milliseconds: 250),
+      Duration(seconds: 1),
+      Duration(seconds: 3),
+    ];
+    for (var attempt = 0; ; attempt += 1) {
+      try {
+        return await _replaceGeneration(record);
+      } on Object {
+        if (attempt >= delays.length) rethrow;
+        await Future<void>.delayed(delays[attempt]);
+      }
     }
   }
 

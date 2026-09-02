@@ -1,4 +1,5 @@
 import 'package:clawnsole/app/app_theme.dart';
+import 'package:clawnsole/ui/filter_menu.dart';
 import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/panels.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,23 @@ double _contrast(Color a, Color b) {
   final high = _luminance(a) > _luminance(b) ? _luminance(a) : _luminance(b);
   final low = _luminance(a) > _luminance(b) ? _luminance(b) : _luminance(a);
   return (high + .05) / (low + .05);
+}
+
+/// The colour the ink actually sits on, read back off the widget that paints
+/// it rather than copied out of the theme by hand.
+BoxDecoration _decorationOf(WidgetTester tester, Finder finder) =>
+    switch (tester.widget(finder)) {
+      Container(:final decoration) => decoration! as BoxDecoration,
+      AnimatedContainer(:final decoration) => decoration! as BoxDecoration,
+      _ => throw StateError('no decoration on $finder'),
+    };
+
+/// Every colour the ink might land on: a gradient's stops, or a flat fill.
+List<Color> _grounds(BoxDecoration decoration) {
+  final gradient = decoration.gradient;
+  return gradient is LinearGradient
+      ? gradient.colors
+      : <Color>[decoration.color!];
 }
 
 Widget _host(Widget child, {Brightness brightness = Brightness.light}) =>
@@ -183,6 +201,127 @@ void main() {
           _contrast(surface.ink(tokens).on, surface.ground(tokens)),
           greaterThan(4.5),
           reason: '$surface ink must clear the body-text floor',
+        );
+      }
+    }
+  });
+
+  testWidgets('the selected label clears 4.5:1 on the brushed carriage', (
+    tester,
+  ) async {
+    for (final brightness in Brightness.values) {
+      await tester.pumpWidget(
+        _host(
+          HardwareChoiceSwitch(
+            firstLabel: 'AUTO',
+            secondLabel: 'MANUAL',
+            firstSelected: true,
+            onChanged: (_) {},
+          ),
+          brightness: brightness,
+        ),
+      );
+      // MaterialApp lerps between themes; settle before reading the paint.
+      await tester.pumpAndSettle();
+      final ink = tester.widget<Text>(find.text('AUTO')).style!.color!;
+      final carriage = _grounds(
+        _decorationOf(
+          tester,
+          find.descendant(
+            of: find.byType(FractionallySizedBox),
+            matching: find.byType(Container),
+          ),
+        ),
+      );
+      for (final ground in carriage) {
+        expect(
+          _contrast(ink, ground),
+          greaterThan(4.5),
+          reason:
+              'the lit half of the carriage must stay readable in '
+              '$brightness (ground $ground)',
+        );
+      }
+      // …and the idle half, which sits on the recessed well.
+      final idle = tester.widget<Text>(find.text('MANUAL')).style!.color!;
+      final well = _decorationOf(
+        tester,
+        find
+            .descendant(
+              of: find.byType(HardwareChoiceSwitch),
+              matching: find.byType(Container),
+            )
+            .first,
+      ).color!;
+      expect(
+        _contrast(idle, well),
+        greaterThan(4.5),
+        reason: 'the unlit half must stay readable in $brightness',
+      );
+    }
+  });
+
+  testWidgets('counter numerals clear 4.5:1 on the readout window', (
+    tester,
+  ) async {
+    for (final brightness in Brightness.values) {
+      await tester.pumpWidget(
+        _host(const CounterReadout('10', unit: 's'), brightness: brightness),
+      );
+      await tester.pumpAndSettle();
+      final window = _grounds(
+        _decorationOf(
+          tester,
+          find.descendant(
+            of: find.byType(CounterReadout),
+            matching: find.byType(Container),
+          ),
+        ),
+      );
+      final numerals = tester.widget<Text>(find.text('10')).style!.color!;
+      final unit = tester.widget<Text>(find.text('s')).style!.color!;
+      for (final ground in window) {
+        expect(
+          _contrast(numerals, ground),
+          greaterThan(4.5),
+          reason: 'readout numerals must stay readable in $brightness',
+        );
+        expect(
+          _contrast(unit, ground),
+          greaterThan(4.5),
+          reason: 'the readout unit must stay readable in $brightness',
+        );
+      }
+    }
+  });
+
+  testWidgets('a lit console key clears 4.5:1 on the plum gradient', (
+    tester,
+  ) async {
+    for (final brightness in Brightness.values) {
+      await tester.pumpWidget(
+        _host(
+          ConsoleFilterSegment(
+            label: 'Ready',
+            count: 3,
+            selected: true,
+            onTap: () {},
+          ),
+          brightness: brightness,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final key = _grounds(
+        _decorationOf(tester, find.byType(AnimatedContainer)),
+      );
+      final ink = tester.widget<Text>(find.text('Ready')).style!.color!;
+      for (final ground in key) {
+        expect(
+          _contrast(ink, ground),
+          greaterThan(4.5),
+          reason:
+              'a selected console key must stay readable in $brightness '
+              '(ground $ground)',
         );
       }
     }

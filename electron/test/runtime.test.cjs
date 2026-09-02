@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
 const test = require("node:test");
 const {
@@ -177,8 +178,45 @@ test("explicit external opens are HTTPS and purpose scoped", () => {
   );
 });
 
+test("the Help menu's Clawnsole pages are allowlisted", () => {
+  assert.equal(isAllowedExternalUrl("https://clawnsole.app/privacy/"), true);
+  assert.equal(isAllowedExternalUrl("https://clawnsole.app/tos/"), true);
+  assert.equal(
+    isAllowedExternalUrl("https://github.com/heresalexandria/clawnsole/issues"),
+    true,
+  );
+  assert.equal(isAllowedExternalUrl("http://clawnsole.app/privacy/"), false);
+  assert.equal(isAllowedExternalUrl("https://clawnsole.app.example.com/"), false);
+  assert.equal(isAllowedExternalUrl("https://www.clawnsole.app/"), false);
+});
+
 test("findOpenPort allocates a loopback port", async () => {
   const port = await findOpenPort();
   assert.equal(Number.isInteger(port), true);
   assert.equal(port > 0 && port < 65_536, true);
+});
+
+// A restarted companion asks for the port it had so the renderer origin, and
+// with it the session header and any open window, can stay put.
+test("findOpenPort prefers a named port and falls back when it is taken", async (t) => {
+  const wanted = await findOpenPort();
+  assert.equal(await findOpenPort("127.0.0.1", { preferred: wanted }), wanted);
+
+  const occupant = net.createServer();
+  t.after(() => new Promise((resolve) => occupant.close(resolve)));
+  await new Promise((resolve, reject) => {
+    occupant.once("error", reject);
+    occupant.listen(wanted, "127.0.0.1", resolve);
+  });
+
+  const fallback = await findOpenPort("127.0.0.1", { preferred: wanted });
+  assert.notEqual(fallback, wanted);
+  assert.equal(fallback > 0 && fallback < 65_536, true);
+});
+
+test("an unusable preferred port is simply ignored", async () => {
+  for (const preferred of [null, 0, -1, 70_000, "43123", 1.5]) {
+    const port = await findOpenPort("127.0.0.1", { preferred });
+    assert.equal(port > 0 && port < 65_536, true, String(preferred));
+  }
 });

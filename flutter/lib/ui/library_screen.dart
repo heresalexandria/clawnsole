@@ -222,12 +222,16 @@ class _LibraryResultsState extends State<_LibraryResults> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _LibraryToolbar(
-            controller: controller,
-            selecting: selecting,
-            selectedCount: selected.length,
-            onSelectingChanged: _setSelecting,
-          ),
+          // Search, filters, view modes, and Select have nothing to act on
+          // until a first film exists; the empty state carries the one call
+          // to action that matters then.
+          if (controller.generations.isNotEmpty)
+            _LibraryToolbar(
+              controller: controller,
+              selecting: selecting,
+              selectedCount: selected.length,
+              onSelectingChanged: _setSelecting,
+            ),
           if (DriveReconnectNotice.needed(controller)) ...<Widget>[
             const SizedBox(height: 12),
             DriveReconnectNotice(controller: controller, subject: 'films'),
@@ -1261,7 +1265,7 @@ class _GenerationCardState extends State<GenerationCard> {
                 if (item.deliveryExpired) ...<Widget>[
                   const SizedBox(height: 9),
                   Text(
-                    'The provider’s delivery link expired; the generation record remains.',
+                    'The provider’s delivery link expired before the film could be retained; the record stays so you can reuse its settings.',
                     style: TextStyle(
                       fontSize: 11,
                       color: context.colors.onSurfaceVariant,

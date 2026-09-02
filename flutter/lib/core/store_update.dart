@@ -7,6 +7,10 @@ const clawnsoleIosAppStoreWebUrl =
     'https://apps.apple.com/app/id$clawnsoleIosAppStoreId';
 const clawnsoleAndroidPackageId = 'app.clawnsole.clawnsole';
 
+/// Flip once the Play listing is live. Android builds are compiled but not
+/// released, so update prompts must not point at a store page that 404s.
+const bool clawnsoleAndroidStoreListed = false;
+
 /// The store destination for a supported mobile platform.
 class StoreUpdateDestination {
   const StoreUpdateDestination({
@@ -29,14 +33,15 @@ StoreUpdateDestination? clawnsoleStoreDestination(TargetPlatform platform) =>
         ),
         webUri: Uri.parse(clawnsoleIosAppStoreWebUrl),
       ),
-      TargetPlatform.android => StoreUpdateDestination(
-        name: 'Google Play',
-        appUri: Uri.parse('market://details?id=$clawnsoleAndroidPackageId'),
-        webUri: Uri.parse(
-          'https://play.google.com/store/apps/details?id='
-          '$clawnsoleAndroidPackageId',
+      TargetPlatform.android when clawnsoleAndroidStoreListed =>
+        StoreUpdateDestination(
+          name: 'Google Play',
+          appUri: Uri.parse('market://details?id=$clawnsoleAndroidPackageId'),
+          webUri: Uri.parse(
+            'https://play.google.com/store/apps/details?id='
+            '$clawnsoleAndroidPackageId',
+          ),
         ),
-      ),
       _ => null,
     };
 

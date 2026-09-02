@@ -37,6 +37,20 @@ int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
 }
 
+// Returns the outer window size, in physical pixels, whose client area
+// measures |client_size| logical pixels for a window with |style| and
+// |extended_style| displayed at |dpi|.
+SIZE WindowSizeForClientSize(const Win32Window::Size& client_size,
+                             DWORD style,
+                             DWORD extended_style,
+                             UINT dpi) {
+  double scale_factor = dpi / 96.0;
+  RECT frame = {0, 0, Scale(client_size.width, scale_factor),
+                Scale(client_size.height, scale_factor)};
+  AdjustWindowRectExForDpi(&frame, style, FALSE, extended_style, dpi);
+  return {frame.right - frame.left, frame.bottom - frame.top};
+}
+
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
 // This API is only needed for PerMonitor V1 awareness mode.
 void EnableFullDpiSupportIfAvailable(HWND hwnd) {
@@ -120,24 +134,41 @@ Win32Window::~Win32Window() {
   Destroy();
 }
 
-bool Win32Window::Create(const std::wstring& title,
-                         const Point& origin,
-                         const Size& size) {
+bool Win32Window::Create(const std::wstring& title, const Size& size) {
   Destroy();
 
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
 
-  const POINT target_point = {static_cast<LONG>(origin.x),
-                              static_cast<LONG>(origin.y)};
-  HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
+  // Open centered in the primary monitor's work area so a fresh window never
+  // starts under the taskbar or hanging off the edge of the screen.
+  const POINT primary_point = {0, 0};
+  HMONITOR monitor = MonitorFromPoint(primary_point, MONITOR_DEFAULTTOPRIMARY);
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
-  double scale_factor = dpi / 96.0;
+
+  MONITORINFO monitor_info = {};
+  monitor_info.cbSize = sizeof(monitor_info);
+  RECT work_area = {0, 0, GetSystemMetrics(SM_CXSCREEN),
+                    GetSystemMetrics(SM_CYSCREEN)};
+  if (GetMonitorInfo(monitor, &monitor_info)) {
+    work_area = monitor_info.rcWork;
+  }
+
+  const DWORD style = WS_OVERLAPPEDWINDOW;
+  SIZE window_size = WindowSizeForClientSize(size, style, 0, dpi);
+  const LONG work_width = work_area.right - work_area.left;
+  const LONG work_height = work_area.bottom - work_area.top;
+  if (window_size.cx > work_width) {
+    window_size.cx = work_width;
+  }
+  if (window_size.cy > work_height) {
+    window_size.cy = work_height;
+  }
+  const LONG x = work_area.left + (work_width - window_size.cx) / 2;
+  const LONG y = work_area.top + (work_height - window_size.cy) / 2;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      window_class, title.c_str(), style, x, y, window_size.cx, window_size.cy,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
@@ -207,6 +238,22 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
 
+    case WM_GETMINMAXINFO: {
+      if (minimum_size_.width == 0 && minimum_size_.height == 0) {
+        break;
+      }
+      // Track sizes are outer window sizes in physical pixels, so convert the
+      // logical client-area floor using this window's current DPI and frame.
+      SIZE minimum = WindowSizeForClientSize(
+          minimum_size_, static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_STYLE)),
+          static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_EXSTYLE)),
+          FlutterDesktopGetDpiForHWND(hwnd));
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = minimum.cx;
+      info->ptMinTrackSize.y = minimum.cy;
+      return 0;
+    }
+
     case WM_ACTIVATE:
       if (child_content_ != nullptr) {
         SetFocus(child_content_);
@@ -261,6 +308,15 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetMinimumSize(const Size& size) {
+  minimum_size_ = size;
+}
+
+// static
+const wchar_t* Win32Window::GetWindowClassName() {
+  return kWindowClassName;
 }
 
 bool Win32Window::OnCreate() {

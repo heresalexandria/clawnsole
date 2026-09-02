@@ -67,6 +67,41 @@ test("the session header is confined to the renderer origin", () => {
   assert.equal(external.requestHeaders.Accept, "application/json");
 });
 
+// A restarted companion keeps its session token but can come back on another
+// port, and the token must follow the live origin without ever leaking to the
+// dead one.
+test("the session header follows a restarted companion's origin", () => {
+  let listener;
+  const webRequest = {
+    onBeforeSendHeaders: (_filter, value) => {
+      listener = value;
+    },
+  };
+  const session = installCompanionSessionHeader(
+    webRequest,
+    rendererUrl,
+    requestToken,
+  );
+  const headersFor = (url) => {
+    let result;
+    listener({ url, requestHeaders: {} }, (value) => {
+      result = value;
+    });
+    return result.requestHeaders;
+  };
+
+  const movedUrl = "http://127.0.0.1:43124";
+  assert.equal(headersFor(`${rendererUrl}/state`)[SESSION_HEADER], requestToken);
+  assert.equal(headersFor(`${movedUrl}/state`)[SESSION_HEADER], undefined);
+
+  session.rebind(movedUrl);
+  assert.equal(headersFor(`${movedUrl}/state`)[SESSION_HEADER], requestToken);
+  assert.equal(headersFor(`${rendererUrl}/state`)[SESSION_HEADER], undefined);
+
+  assert.throws(() => session.rebind("not a URL"), /invalid/i);
+  assert.equal(headersFor(`${movedUrl}/state`)[SESSION_HEADER], requestToken);
+});
+
 test("settings-vault requests use a strict action and value contract", () => {
   assert.deepEqual(validateVaultRequest("setup", "a passphrase"), {
     action: "setup",

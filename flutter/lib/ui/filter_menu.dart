@@ -10,6 +10,10 @@ import 'hardware.dart';
 
 /// A console-key segment used for the always-visible primary filter rows
 /// (generation status, reference media kind).
+///
+/// Each key is one selectable button node — label plus count, spoken once —
+/// that takes keyboard focus and Space or Enter, and answers to a
+/// finger-sized area on touch platforms without growing the drawn key.
 class ConsoleFilterSegment extends StatelessWidget {
   const ConsoleFilterSegment({
     required this.label,
@@ -18,6 +22,7 @@ class ConsoleFilterSegment extends StatelessWidget {
     super.key,
     this.icon,
     this.count,
+    this.semanticLabel,
   });
 
   final String label;
@@ -26,65 +31,93 @@ class ConsoleFilterSegment extends StatelessWidget {
   final IconData? icon;
   final int? count;
 
+  /// Overrides [label] as the spoken name, for keys whose text only reads
+  /// well beside its neighbours ('All' → 'All references').
+  final String? semanticLabel;
+
+  void _handleTap() {
+    hardwareSelectionFeedback();
+    onTap();
+  }
+
   @override
   Widget build(BuildContext context) {
     final foreground = selected
         ? context.colors.onPrimary
         : context.colors.onSurfaceVariant;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 140),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-        decoration: consoleKeyDecoration(
-          context,
-          selected: selected,
-          radius: 10,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (icon != null) ...<Widget>[
-              Icon(icon, size: 14, color: foreground),
-              const SizedBox(width: 6),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                color: selected
-                    ? context.colors.onPrimary
-                    : context.colors.onSurface,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
+    return MergeSemantics(
+      child: Semantics(
+        container: true,
+        button: true,
+        inMutuallyExclusiveGroup: true,
+        selected: selected,
+        label: semanticLabel ?? label,
+        value: count != null && count! > 0 ? '$count' : null,
+        child: HardwareTouchTarget(
+          onTap: _handleTap,
+          child: InkWell(
+            onTap: _handleTap,
+            borderRadius: BorderRadius.circular(10),
+            // The key already speaks its own label and count above.
+            child: ExcludeSemantics(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 140),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 8,
+                ),
+                decoration: consoleKeyDecoration(
+                  context,
+                  selected: selected,
+                  radius: 10,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (icon != null) ...<Widget>[
+                      Icon(icon, size: 14, color: foreground),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: selected
+                            ? context.colors.onPrimary
+                            : context.colors.onSurface,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (count != null && count! > 0) ...<Widget>[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5.5,
+                          vertical: 1.5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? context.colors.onPrimary.withValues(alpha: .18)
+                              : context.colors.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '$count',
+                          style: TextStyle(
+                            color: selected
+                                ? context.colors.onPrimary
+                                : context.colors.onSurfaceVariant,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
-            if (count != null && count! > 0) ...<Widget>[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 5.5,
-                  vertical: 1.5,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? context.colors.onPrimary.withValues(alpha: .18)
-                      : context.colors.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    color: selected
-                        ? context.colors.onPrimary
-                        : context.colors.onSurfaceVariant,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
@@ -376,55 +409,71 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
       menuChildren: <Widget>[_panel(context)],
       builder: (context, menu, _) => Tooltip(
         message: 'Status, visibility, storage, favorites, and tags',
-        child: InkWell(
-          key: ValueKey('${_keyPrefix()}-filter-button'),
-          borderRadius: BorderRadius.circular(10),
-          onTap: () => menu.isOpen ? menu.close() : menu.open(),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 140),
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-            decoration: consoleKeyDecoration(
-              context,
-              selected: active > 0,
-              radius: 10,
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(Icons.tune_rounded, size: 15, color: foreground),
-                if (!widget.compact) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Text(
-                    'Filters',
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
+        child: Semantics(
+          container: true,
+          button: true,
+          label: 'Filters',
+          value: active > 0 ? '$active active' : null,
+          child: HardwareTouchTarget(
+            onTap: () => menu.isOpen ? menu.close() : menu.open(),
+            child: InkWell(
+              key: ValueKey('${_keyPrefix()}-filter-button'),
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => menu.isOpen ? menu.close() : menu.open(),
+              child: ExcludeSemantics(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 8,
                   ),
-                ],
-                if (active > 0) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5.5,
-                      vertical: 1.5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: context.colors.onPrimary.withValues(alpha: .2),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      '$active',
-                      style: TextStyle(
-                        color: context.colors.onPrimary,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                  decoration: consoleKeyDecoration(
+                    context,
+                    selected: active > 0,
+                    radius: 10,
                   ),
-                ],
-              ],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(Icons.tune_rounded, size: 15, color: foreground),
+                      if (!widget.compact) ...<Widget>[
+                        const SizedBox(width: 6),
+                        Text(
+                          'Filters',
+                          style: TextStyle(
+                            color: foreground,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                      if (active > 0) ...<Widget>[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5.5,
+                            vertical: 1.5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: context.colors.onPrimary.withValues(
+                              alpha: .2,
+                            ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '$active',
+                            style: TextStyle(
+                              color: context.colors.onPrimary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -701,29 +750,46 @@ class ReferenceSortButton extends StatelessWidget {
           ),
         )
         .toList(),
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      decoration: consoleKeyDecoration(context, selected: false, radius: 10),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.swap_vert_rounded,
-            size: 15,
-            color: context.colors.onSurfaceVariant,
-          ),
-          if (!compact) ...<Widget>[
-            const SizedBox(width: 6),
-            Text(
-              sortLabel(controller.referenceSort),
-              style: TextStyle(
-                color: context.colors.onSurface,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-              ),
+    // The popup owns the tap, so the key only needs to grow the box it
+    // hands the menu button to hit-test.
+    child: Semantics(
+      container: true,
+      button: true,
+      label: 'Sort references',
+      value: sortLabel(controller.referenceSort),
+      child: ExcludeSemantics(
+        child: HardwareTouchTarget(
+          onTap: null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+            decoration: consoleKeyDecoration(
+              context,
+              selected: false,
+              radius: 10,
             ),
-          ],
-        ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.swap_vert_rounded,
+                  size: 15,
+                  color: context.colors.onSurfaceVariant,
+                ),
+                if (!compact) ...<Widget>[
+                  const SizedBox(width: 6),
+                  Text(
+                    sortLabel(controller.referenceSort),
+                    style: TextStyle(
+                      color: context.colors.onSurface,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     ),
   );

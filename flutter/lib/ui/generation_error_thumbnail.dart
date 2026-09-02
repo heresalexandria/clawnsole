@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/generation_status.dart';
 import '../core/models.dart';
 
 /// Thumbnail for a generation that failed before delivering media: the SMPTE
@@ -25,12 +26,24 @@ class GenerationErrorThumbnail extends StatelessWidget {
   static bool shouldShow(Generation item) =>
       !item.hasDeliveredMedia && (item.isFailed || item.error != null);
 
-  /// The most specific problem the record carries.
-  static String message(Generation item) =>
-      item.error ??
-      item.resultRetentionError ??
-      item.lastCheckError ??
-      'This generation failed.';
+  /// The most specific problem the record carries. Identifier-shaped values
+  /// (a bare task id stored by older builds) are never shown; an expired
+  /// task explains itself instead.
+  static String message(Generation item) {
+    for (final candidate in <String?>[
+      item.error,
+      item.resultRetentionError,
+      item.lastCheckError,
+    ]) {
+      if (candidate == null || candidate.trim().isEmpty) continue;
+      if (isIdentifierLikeFailureText(candidate)) continue;
+      return candidate;
+    }
+    if (isExpiryShapedStatus(item.status) || item.deliveryExpired) {
+      return expiredGenerationMessage;
+    }
+    return 'This generation failed.';
+  }
 
   @override
   Widget build(BuildContext context) => Semantics(

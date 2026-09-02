@@ -603,6 +603,7 @@ class _ReferenceToolbar extends StatelessWidget {
         final keys = <Widget>[
           ConsoleFilterSegment(
             label: 'All',
+            semanticLabel: 'All references',
             icon: Icons.grid_view_rounded,
             selected: controller.referenceKind == null,
             onTap: () => controller.setReferenceKind(null),

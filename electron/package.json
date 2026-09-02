@@ -53,6 +53,8 @@
     "mac": {
       "category": "public.app-category.graphics-design",
       "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
       "gatekeeperAssess": false,
       "icon": "assets/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",

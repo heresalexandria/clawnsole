@@ -12,12 +12,6 @@
 // rendering and input handling
 class Win32Window {
  public:
-  struct Point {
-    unsigned int x;
-    unsigned int y;
-    Point(unsigned int x, unsigned int y) : x(x), y(y) {}
-  };
-
   struct Size {
     unsigned int width;
     unsigned int height;
@@ -28,13 +22,22 @@ class Win32Window {
   Win32Window();
   virtual ~Win32Window();
 
-  // Creates a win32 window with |title| that is positioned and sized using
-  // |origin| and |size|. New windows are created on the default monitor. Window
-  // sizes are specified to the OS in physical pixels, hence to ensure a
-  // consistent size this function will scale the inputted width and height as
-  // as appropriate for the default monitor. The window is invisible until
-  // |Show| is called. Returns true if the window was created successfully.
-  bool Create(const std::wstring& title, const Point& origin, const Size& size);
+  // Creates a win32 window with |title| whose client area initially measures
+  // |size| logical pixels. The window is centered on the primary monitor's
+  // work area and shrunk to fit it when the screen is smaller. Window sizes
+  // are specified to the OS in physical pixels, hence to ensure a consistent
+  // size this function will scale the inputted width and height as
+  // appropriate for the primary monitor. The window is invisible until |Show|
+  // is called. Returns true if the window was created successfully.
+  bool Create(const std::wstring& title, const Size& size);
+
+  // Sets the smallest client area, in logical pixels, that the window can be
+  // resized to. Call before |Create|; a zero size leaves the OS defaults.
+  void SetMinimumSize(const Size& size);
+
+  // Returns the name of the window class shared by every Win32Window, so
+  // another process can find a running instance's top-level window.
+  static const wchar_t* GetWindowClassName();
 
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
@@ -91,6 +94,10 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+
+  // Smallest client area, in logical pixels, that the window may be resized
+  // to. A zero size leaves the OS defaults in place.
+  Size minimum_size_ = Size(0, 0);
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

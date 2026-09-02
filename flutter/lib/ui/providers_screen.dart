@@ -244,14 +244,19 @@ class _ProviderCard extends StatelessWidget {
                     ),
                     Text(
                       !provider.requiresApiKey
-                          ? 'Ready on this device'
+                          ? (controller.localGenerationAvailable
+                                ? 'Ready on this device'
+                                : 'Needs iOS 18.4 and Apple Intelligence')
                           : connected
                           ? _connectedProviderLabel(controller)
                           : 'Key required',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: connected
+                        color:
+                            connected ||
+                                (!provider.requiresApiKey &&
+                                    controller.localGenerationAvailable)
                             ? context.colors.primary
                             : context.colors.onSurfaceVariant,
                       ),
@@ -287,14 +292,16 @@ class _ProviderCard extends StatelessWidget {
                 color: context.colors.primaryContainer,
                 borderRadius: BorderRadius.circular(11),
               ),
-              child: const Row(
+              child: Row(
                 children: <Widget>[
-                  Icon(Icons.lock_rounded, size: 17),
-                  SizedBox(width: 8),
+                  const Icon(Icons.lock_rounded, size: 17),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Ready without a key when Apple Intelligence image creation is enabled on this device.',
-                      style: TextStyle(fontSize: 11.5),
+                      controller.localGenerationAvailable
+                          ? 'Ready without a key: Apple Intelligence image creation is enabled on this device.'
+                          : 'Needs an iPhone or iPad with iOS 18.4 or later and Apple Intelligence image creation turned on in Settings.',
+                      style: const TextStyle(fontSize: 11.5),
                     ),
                   ),
                 ],
@@ -377,10 +384,12 @@ class _ProviderCard extends StatelessWidget {
           Wrap(
             spacing: 12,
             children: <Widget>[
-              if (provider.consoleUrl.isNotEmpty)
+              // A keyless on-device provider has no console to sign in to
+              // and nothing to price; only its documentation applies.
+              if (provider.consoleUrl.isNotEmpty && !provider.isLocal)
                 _ExternalLink('Console', provider.consoleUrl),
               _ExternalLink('Docs', provider.docsUrl),
-              if (provider.pricingUrl.isNotEmpty)
+              if (provider.pricingUrl.isNotEmpty && !provider.isLocal)
                 _ExternalLink('Pricing', provider.pricingUrl),
             ],
           ),

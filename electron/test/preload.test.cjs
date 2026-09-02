@@ -7,7 +7,7 @@ const test = require("node:test");
 
 // The preload runs inside Electron, so the real module is swapped for a
 // recorder that captures the renderer contract it publishes.
-function loadPreload() {
+function loadPreload({ invokeResult } = {}) {
   const exposed = {};
   const invoked = [];
   const listeners = new Map();
@@ -31,7 +31,7 @@ function loadPreload() {
       send: (channel, payload) => sent.push({ channel, payload }),
       invoke: async (channel, ...args) => {
         invoked.push({ channel, args });
-        return { channel };
+        return invokeResult === undefined ? { channel } : invokeResult;
       },
       on: (channel, listener) => {
         listeners.set(channel, listener);
@@ -94,6 +94,8 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.openExternalUrl, "function");
   assert.equal(typeof bridge.revealDataFolder, "function");
   assert.equal(typeof bridge.chooseDataDirectory, "function");
+  assert.equal(typeof bridge.notify, "function");
+  assert.equal(typeof bridge.onNavigate, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);
@@ -105,6 +107,7 @@ test("the preload publishes the renderer update bridge", async () => {
   await bridge.openExternalUrl("https://cdn.example/video.mp4", "media");
   await bridge.revealDataFolder();
   await bridge.chooseDataDirectory();
+  await bridge.notify({ title: "Clawnsole", body: "Your video is ready." });
   assert.deepEqual(
     invoked.map((call) => call.channel),
     [
@@ -118,6 +121,7 @@ test("the preload publishes the renderer update bridge", async () => {
       "clawnsole:external:open",
       "clawnsole:data:reveal",
       "clawnsole:data:choose",
+      "clawnsole:notify",
     ],
   );
   assert.deepEqual(invoked[0].args, [false]);
@@ -128,6 +132,45 @@ test("the preload publishes the renderer update bridge", async () => {
     "https://cdn.example/video.mp4",
     "media",
   ]);
+});
+
+test("notify passes only a title and body and resolves to a boolean", async () => {
+  const shown = loadPreload({ invokeResult: true });
+  assert.equal(
+    await shown.exposed.clawnsole.notify({
+      title: "Clawnsole",
+      body: "Your video is ready.",
+      icon: "/etc/passwd",
+    }),
+    true,
+  );
+  assert.deepEqual(shown.invoked[0].args, [
+    { title: "Clawnsole", body: "Your video is ready." },
+  ]);
+
+  const suppressed = loadPreload({ invokeResult: false });
+  assert.equal(await suppressed.exposed.clawnsole.notify({ title: "x" }), false);
+
+  // A main process that answers with anything but true never reads as shown.
+  const malformed = loadPreload({ invokeResult: { ok: true, shown: true } });
+  assert.equal(await malformed.exposed.clawnsole.notify(), false);
+  assert.deepEqual(malformed.invoked[0].args, [
+    { title: undefined, body: undefined },
+  ]);
+});
+
+test("menu navigation reaches the renderer as a section payload", () => {
+  const { exposed, listeners } = loadPreload();
+  const seen = [];
+  const unsubscribe = exposed.clawnsole.onNavigate((payload) => seen.push(payload));
+
+  const listener = listeners.get("clawnsole:navigate");
+  assert.ok(listener, "the bridge must subscribe to the navigate channel");
+  listener({}, { section: "settings" });
+  assert.deepEqual(seen, [{ section: "settings" }]);
+
+  unsubscribe();
+  assert.equal(listeners.has("clawnsole:navigate"), false);
 });
 
 test("update events reach the renderer and unsubscribe cleanly", () => {

@@ -110,14 +110,17 @@ with C++ workload installed.
 
 ## Persistence
 
-Clawnsole has no database. Native apps store `clawnsole.json` inside their
-application support sandbox. Electron's companion stores the same compact
-schema in a local file, with retained inputs and videos in an adjacent
-`assets/` directory. Desktop installs can move the data directory from
-Settings for portable use: a small `data-location.json` pointer stays in the
-default location (the documents root on native desktop, `userData` in
-Electron) and names the chosen folder, and the previous copy is kept as a
-safety net. All installed targets can additionally connect to the same
+Clawnsole has no database. Native mobile apps store `clawnsole.json` inside
+their application sandbox; native Windows stores it in
+`%LOCALAPPDATA%\Clawnsole` (a library that already lives in
+`Documents\Clawnsole` keeps being used). Electron's companion stores the same
+compact schema in a local file, with retained inputs and videos in an adjacent
+`assets/` directory. Every write replaces the file atomically and keeps the
+previous copy beside it as `clawnsole.json.bak`, which is read back
+automatically if the main file is ever missing or damaged. Desktop installs can
+move the data directory from Settings for portable use: a small
+`data-location.json` pointer stays in the default location and names the
+chosen folder, and the previous copy is kept as a safety net. All installed targets can additionally connect to the same
 app-owned Google Drive folder. Local and Drive generations, references, and
 folders remain separate records with visible provenance; copying local work to
 Drive is non-destructive, and the separate move action deletes local originals

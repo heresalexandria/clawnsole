@@ -167,12 +167,20 @@ final class BackgroundDeliveryPlugin: NSObject, URLSessionDownloadDelegate {
       let destination = try resultsDirectory().appendingPathComponent(id)
       try? FileManager.default.removeItem(at: destination)
       try FileManager.default.moveItem(at: location, to: destination)
+      let contentType = downloadTask.response?.mimeType ?? ""
       var entries = manifest
-      entries[id] = [
-        "file": id,
-        "contentType": downloadTask.response?.mimeType ?? "",
-      ]
+      entries[id] = ["file": id, "contentType": contentType]
       manifest = entries
+      // Dart is suspended or gone whenever a transfer lands in the
+      // background, so a local alert is the only way to say the generation
+      // arrived. The helper skips an active app (the UI shows the result
+      // itself) and posts nothing without permission.
+      CompletionNotifications.post(
+        title: contentType.hasPrefix("image/")
+          ? "Your image is ready" : "Your film is ready",
+        body: "A generation finished while you were away. Open Clawnsole to watch it.",
+        threadId: id
+      ) { _ in }
     } catch {
       failures[downloadTask.taskIdentifier] = FlutterError(
         code: "io",

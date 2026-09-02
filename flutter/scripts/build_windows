@@ -9,7 +9,9 @@ if [[ "${1:-}" == "--help" ]]; then
   echo "Run this script from Windows or Git Bash with Visual Studio installed."
   echo "Provider credential Dart defines are rejected. Optional Google Desktop"
   echo "OAuth configuration is read from CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID"
-  echo "and CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET."
+  echo "and CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET. The MSVC runtime DLLs are"
+  echo "copied beside Clawnsole.exe from VCToolsRedistDir when set, otherwise"
+  echo "from the newest Visual Studio redistributable found through vswhere."
   exit 0
 fi
 
@@ -40,6 +42,78 @@ unset CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KEY CLAWNSOLE_IOS_REVIEW_ARTCRAFT_API_KE
 unset CLAWNSOLE_MOBILE_TEST_BUILD ARTCRAFT_TEST_KEY
 unset CLAWNSOLE_ARTCRAFT_TEST_API_KEY CLAWNSOLE_ARTCRAFT_TEST_API_KEY_ID
 
+RELEASE_DIRECTORY="$FLUTTER_DIRECTORY/build/windows/x64/runner/Release"
+
+# flutter_windows.dll, the plugins, and Clawnsole.exe link the MSVC runtime
+# dynamically, so the release must carry these DLLs beside Clawnsole.exe for
+# machines without the Visual C++ redistributable installed.
+RUNTIME_DLLS=(msvcp140.dll vcruntime140.dll vcruntime140_1.dll)
+VSWHERE="C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+
+# Converts a Windows path from the environment or vswhere into one that bash
+# and its globs accept.
+posix_path() {
+  local value="${1//$'\r'/}"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$value"
+  else
+    printf '%s\n' "${value//\\//}"
+  fi
+}
+
+has_runtime_dlls() {
+  local dll
+  for dll in "${RUNTIME_DLLS[@]}"; do
+    [[ -f "$1/$dll" ]] || return 1
+  done
+}
+
+# Prints the redistributable CRT directory that holds every runtime DLL. A
+# Developer Command Prompt's VCToolsRedistDir matches the toolset that compiled
+# the app; otherwise the newest redistributable of any Visual Studio or Build
+# Tools installation with C++ tools is used, because CMake builds with the
+# newest toolset and the runtime is backward compatible.
+find_runtime_directory() {
+  local candidates=()
+  if [[ -n "${VCToolsRedistDir:-}" ]]; then
+    candidates+=("$(posix_path "$VCToolsRedistDir")")
+  fi
+  local vswhere
+  vswhere="$(posix_path "$VSWHERE")"
+  if [[ -f "$vswhere" ]]; then
+    local installations
+    installations="$("$vswhere" -products '*' \
+      -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+      -property installationPath 2>/dev/null || true)"
+    local installation version_directory
+    local versioned=()
+    while IFS= read -r installation; do
+      installation="$(posix_path "$installation")"
+      [[ -n "$installation" ]] || continue
+      for version_directory in "$installation"/VC/Redist/MSVC/*/; do
+        [[ -d "$version_directory" ]] || continue
+        versioned+=("$(basename "$version_directory")"$'\t'"$version_directory")
+      done
+    done <<<"$installations"
+    if [[ ${#versioned[@]} -gt 0 ]]; then
+      # Newest toolset first, whichever installation provides it.
+      while IFS= read -r version_directory; do
+        candidates+=("$version_directory")
+      done < <(printf '%s\n' "${versioned[@]}" | sort -t $'\t' -k1,1 -V -r | cut -f2-)
+    fi
+  fi
+  local candidate crt_directory
+  for candidate in "${candidates[@]}"; do
+    for crt_directory in "${candidate%/}"/x64/Microsoft.VC*.CRT; do
+      if has_runtime_dlls "$crt_directory"; then
+        printf '%s\n' "$crt_directory"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
 print_heading "Windows x64 release build"
 prepare_flutter
 "$FLUTTER_DIRECTORY/scripts/prepare_windows_media_tools"
@@ -61,5 +135,24 @@ flutter build windows --release \
   "${OAUTH_BUILD_ARGUMENTS[@]}" \
   "$@"
 
+if [[ ! -f "$RELEASE_DIRECTORY/Clawnsole.exe" ]]; then
+  echo "Clawnsole.exe was not built at $RELEASE_DIRECTORY." >&2
+  exit 1
+fi
+
+runtime_directory="$(find_runtime_directory)" || {
+  echo "Could not find the MSVC runtime DLLs to bundle (${RUNTIME_DLLS[*]})." >&2
+  echo "Install the Visual Studio 'Desktop development with C++' workload, or" >&2
+  echo "run this script from a Developer Command Prompt so VCToolsRedistDir is set." >&2
+  exit 1
+}
+echo "Bundling the MSVC runtime from $runtime_directory"
+bundled_runtime_dlls=()
+for dll in "${RUNTIME_DLLS[@]}"; do
+  cp "$runtime_directory/$dll" "$RELEASE_DIRECTORY/$dll"
+  bundled_runtime_dlls+=("$RELEASE_DIRECTORY/$dll")
+done
+python "$FLUTTER_DIRECTORY/scripts/verify_pe_security.py" "${bundled_runtime_dlls[@]}"
+
 echo
-echo "Windows release: $FLUTTER_DIRECTORY/build/windows/x64/runner/Release"
+echo "Windows release: $RELEASE_DIRECTORY"

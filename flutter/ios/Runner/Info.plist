@@ -39,12 +39,12 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSCameraUsageDescription</key>
-	<string>Clawnsole uses the camera when you choose to capture an image for a generation input or video keyframe.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Clawnsole uses selected images as FLUX video keyframes.</string>
+	<string>Clawnsole lets you choose images and videos from your Photos library as generation inputs or references for any provider.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Clawnsole saves generated videos to your Photos library when you choose Save to Photos.</string>
+	<string>Clawnsole adds the generated images and videos you choose to save to your Photos library.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Clawnsole lets you choose a song from your Music library as an audio reference for a generation.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Clawnsole's media picker may access location metadata attached to photos and videos while you choose generation inputs. Clawnsole does not request your current location.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

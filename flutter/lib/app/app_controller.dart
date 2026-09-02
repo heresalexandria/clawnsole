@@ -13,6 +13,7 @@ import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
 import '../core/google_drive.dart';
+import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
@@ -20,6 +21,7 @@ import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
+import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
@@ -444,6 +446,20 @@ class AppController extends ChangeNotifier {
   Timer? _pollTimer;
   Timer? _creditTimer;
   Future<void> _preferenceWrites = Future<void>.value();
+
+  /// The appearance chosen from the top bar; persisted with the other
+  /// preferences so it survives relaunch.
+  AppThemeMode themeMode = AppThemeMode.system;
+
+  /// Whether the keyless on-device provider can render on this device, as
+  /// reported by the platform at startup and on resume (never assumed).
+  bool localGenerationAvailable = false;
+
+  /// Mirrors the widget lifecycle so finished work can be announced with a
+  /// system notification only when nobody is looking at the app.
+  bool appInForeground = true;
+
+  bool _notificationsRequested = false;
   int _preferenceRevision = 0;
   Future<bool>? _creditRefreshFuture;
   Timer? _estimateTimer;
@@ -1438,6 +1454,7 @@ class AppController extends ChangeNotifier {
     try {
       await _restoreProviderCatalogCache();
       _apply(await gateway.load(), restorePreferences: true);
+      unawaited(_probeLocalGeneration());
       if (selectedProvider.requiresApiKey && hasApiKey) {
         unawaited(refreshCredits());
       }
@@ -1475,6 +1492,90 @@ class AppController extends ChangeNotifier {
         unawaited(refreshCredits());
       }
     });
+  }
+
+  /// Re-runs startup after a failed open (a locked file, an unmounted
+  /// volume, a companion that was still starting) without relaunching.
+  Future<void> retryInitialize() async {
+    if (loading) return;
+    _pollTimer?.cancel();
+    _creditTimer?.cancel();
+    loadError = null;
+    loading = true;
+    notifyListeners();
+    await initialize();
+  }
+
+  Future<void> _probeLocalGeneration() async {
+    if (gateway case final LocalGenerationAvailabilityGateway probe) {
+      bool available;
+      try {
+        available = await probe.localGenerationAvailable();
+      } on Object {
+        available = false;
+      }
+      if (_disposed || available == localGenerationAvailable) return;
+      localGenerationAvailable = available;
+      notifyListeners();
+    }
+  }
+
+  /// Whether the studio has nothing it can render with yet: no provider key
+  /// on any provider and no working on-device provider. Drives the one-line
+  /// first-run guidance on Create.
+  bool get needsProviderSetup => !hasAnyApiKey && !localGenerationAvailable;
+
+  /// Whether any delivered film could be picked as a draft to enhance.
+  bool get hasDraftEnhanceCandidates =>
+      generations.any((item) => item.draftCacheUrl != null);
+
+  Future<void> setThemeMode(AppThemeMode value) async {
+    if (value == themeMode) return;
+    themeMode = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(themeMode: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  /// Announces films that became ready while the app was out of view, via
+  /// the platform (iOS local notification) or the desktop shell.
+  void _announceNewlyReady(Set<String>? previouslyReady) {
+    if (previouslyReady == null || appInForeground) return;
+    for (final item in generations) {
+      if (!item.isReady || !item.hasDeliveredMedia) continue;
+      if (previouslyReady.contains(item.localId)) continue;
+      if (gateway case final GenerationNotificationGateway notifier) {
+        unawaited(
+          notifier.notifyGenerationReady(item).catchError((Object _) => false),
+        );
+      } else {
+        unawaited(
+          notifyViaShell(
+            'Your film is ready',
+            item.prompt.trim().isEmpty
+                ? '${providerById(item.provider).name} finished a generation.'
+                : item.prompt.trim().length > 80
+                ? '${item.prompt.trim().substring(0, 80)}…'
+                : item.prompt.trim(),
+          ).catchError((Object _) => false),
+        );
+      }
+    }
+  }
+
+  Future<void> _requestNotificationsOnce() async {
+    if (_notificationsRequested) return;
+    _notificationsRequested = true;
+    if (gateway case final GenerationNotificationGateway notifier) {
+      try {
+        await notifier.requestGenerationNotifications();
+      } on Object {
+        // Permission is a courtesy; generation must never wait on it.
+      }
+    }
   }
 
   Future<void> _restoreProviderCatalogCache() async {
@@ -1621,6 +1722,7 @@ class AppController extends ChangeNotifier {
   /// recovery is independent of whichever product screen is visible and does
   /// not wait for the next periodic timer tick.
   Future<void> reconcileGenerationWork() async {
+    unawaited(_probeLocalGeneration());
     if (_reconcilingGenerationWork) return;
     _reconcilingGenerationWork = true;
     try {
@@ -1648,6 +1750,12 @@ class AppController extends ChangeNotifier {
   }
 
   void _apply(LocalSnapshot value, {bool restorePreferences = false}) {
+    final previouslyReady = snapshot == null
+        ? null
+        : <String>{
+            for (final item in snapshot!.generations)
+              if (item.isReady && item.hasDeliveredMedia) item.localId,
+          };
     snapshot = restorePreferences
         ? value
         : LocalSnapshot(
@@ -1663,7 +1771,9 @@ class AppController extends ChangeNotifier {
             storage: value.storage,
             settingsVault: value.settingsVault,
           );
+    _announceNewlyReady(previouslyReady);
     if (restorePreferences) {
+      themeMode = value.preferences.themeMode;
       section = value.preferences.activeSection;
       libraryFilter = value.preferences.libraryFilter;
       recentWorkViewMode = value.preferences.recentWorkViewMode;
@@ -2558,19 +2668,8 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<String> cleanLibraryTags(Iterable<String> input) {
-    final tags = <String>[];
-    final seen = <String>{};
-    for (final value in input) {
-      final clean = value.trim().replaceFirst(RegExp(r'^#+'), '').trim();
-      final key = clean.toLowerCase();
-      if (clean.isEmpty || clean.length > 28 || seen.contains(key)) continue;
-      seen.add(key);
-      tags.add(clean);
-      if (tags.length == 12) break;
-    }
-    return tags;
-  }
+  List<String> cleanLibraryTags(Iterable<String> input) =>
+      library_rules.cleanLibraryTags(input);
 
   Future<bool> saveLibraryFolder(
     String name, {
@@ -2580,8 +2679,8 @@ class AppController extends ChangeNotifier {
     LibraryStorage? storage,
   }) async {
     final clean = name.trim();
-    if (clean.isEmpty || clean.length > 48) {
-      showNotice('Folder names must be between 1 and 48 characters.');
+    if (!library_rules.isValidLibraryFolderName(clean)) {
+      showNotice(library_rules.libraryFolderNameRule);
       return false;
     }
     if (gateway is! LibraryOrganizationGateway) {
@@ -3611,6 +3710,7 @@ class AppController extends ChangeNotifier {
     int? localVideoCacheMb,
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
+    AppThemeMode? themeMode,
   }) => AppPreferences(
     activeSection: activeSection ?? section,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -3636,6 +3736,7 @@ class AppController extends ChangeNotifier {
     localThumbnailCacheMb: localThumbnailCacheMb ?? this.localThumbnailCacheMb,
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
+    themeMode: themeMode ?? this.themeMode,
   );
 
   int _validDuration(int value) {
@@ -5163,6 +5264,9 @@ class AppController extends ChangeNotifier {
       return;
     }
     if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
+    // The first real submission is the moment a "your film is ready" alert
+    // starts to matter; asking earlier would be noise on a fresh install.
+    unawaited(_requestNotificationsOnce());
     await refreshProviderEstimate();
     final now = DateTime.now().toUtc();
     final estimate = currentEstimate;

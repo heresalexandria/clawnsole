@@ -10,6 +10,7 @@ const EXTERNAL_HOSTS = new Set([
   "app.getartcraft.com",
   "app.runwayml.com",
   "docs.dev.runwayml.com",
+  "clawnsole.app",
   "github.com",
   "storyteller-docs.netlify.app",
   "support.apple.com",
@@ -69,20 +70,31 @@ function isAllowedExplicitExternalUrl(value, purpose) {
   );
 }
 
-function findOpenPort(host = "127.0.0.1") {
+// A preferred port is tried first so a restarted companion can keep the
+// renderer origin it had; any other port is acceptable when it is taken.
+function findOpenPort(host = "127.0.0.1", { preferred = null } = {}) {
+  const wanted = Number.isInteger(preferred) && preferred > 0 && preferred < 65_536
+    ? preferred
+    : null;
   return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.once("error", reject);
-    server.listen(0, host, () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : null;
-      server.close((error) => {
-        if (error) reject(error);
-        else if (port) resolve(port);
-        else reject(new Error("Clawnsole could not allocate a local port."));
+    const attempt = (port, fallback) => {
+      const server = net.createServer();
+      server.unref();
+      server.once("error", (error) => {
+        if (fallback === null) reject(error);
+        else attempt(fallback, null);
       });
-    });
+      server.listen(port, host, () => {
+        const address = server.address();
+        const bound = typeof address === "object" && address ? address.port : null;
+        server.close((error) => {
+          if (error) reject(error);
+          else if (bound) resolve(bound);
+          else reject(new Error("Clawnsole could not allocate a local port."));
+        });
+      });
+    };
+    attempt(wanted ?? 0, wanted === null ? null : 0);
   });
 }
 

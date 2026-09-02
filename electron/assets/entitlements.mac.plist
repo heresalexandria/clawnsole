@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!--
+      Hardened-runtime entitlements for the app and, through
+      entitlementsInherit, every helper it contains. V8 needs JIT and
+      unsigned executable memory. Library validation stays enabled and dyld
+      environment variables stay blocked: every binary in the bundle is
+      signed by the same Developer ID, so nothing unsigned may be loaded.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+  </dict>
+</plist>

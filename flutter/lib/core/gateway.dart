@@ -148,4 +148,26 @@ abstract interface class MediaPreviewGateway {
   );
 }
 
+/// Whether the keyless on-device provider can actually render here. The
+/// Providers desk must never call a provider "ready" on a device whose OS or
+/// hardware cannot run it, so the real platform check is exposed and probed
+/// at startup instead of being discovered at submit time.
+abstract interface class LocalGenerationAvailabilityGateway {
+  Future<bool> localGenerationAvailable();
+}
+
+/// System notifications for work that finishes while the app is out of view.
+abstract interface class GenerationNotificationGateway {
+  /// Asks for permission once; later calls report the stored decision.
+  Future<bool> requestGenerationNotifications();
+
+  /// Posts "your film is ready" for [item]; false when nothing was shown.
+  Future<bool> notifyGenerationReady(Generation item);
+}
+
+/// The platform share sheet for a delivered film.
+abstract interface class MediaShareGateway {
+  Future<bool> shareMedia(Generation item);
+}
+
 AppGateway createGateway() => kIsWeb ? WebGateway() : NativeGateway();
