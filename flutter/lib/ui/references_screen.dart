@@ -11,6 +11,7 @@ import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
+import 'library_folders.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
@@ -107,6 +108,7 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
   @override
   Widget build(BuildContext context) {
     _syncListingPage();
+    final scope = FolderScope.references(controller);
     return LayoutBuilder(
       builder: (context, constraints) {
         final desktop = constraints.maxWidth >= 960;
@@ -127,50 +129,19 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
                 : controller.referenceFolderView,
             videoPreviewLoader: _loadReferenceVideoPreview,
           ),
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            padding: EdgeInsets.all(padding),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1440),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    _ReferencesHeading(controller: controller),
-                    const SizedBox(height: 22),
-                    if (desktop)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          SizedBox(
-                            width: 228,
-                            child: _ReferenceFolderSidebar(
-                              controller: controller,
-                            ),
-                          ),
-                          const SizedBox(width: 18),
-                          Expanded(
-                            child: _ReferenceResults(
-                              controller: controller,
-                              itemLimit: _itemLimit,
-                              onLoadMore: _loadMore,
-                            ),
-                          ),
-                        ],
-                      )
-                    else ...<Widget>[
-                      _ReferenceFolderPicker(controller: controller),
-                      const SizedBox(height: 12),
-                      _ReferenceResults(
-                        controller: controller,
-                        itemLimit: _itemLimit,
-                        onLoadMore: _loadMore,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+          child: FolderRailLayout(
+            heading: _ReferencesHeading(controller: controller),
+            rail: FolderRail(scope: scope),
+            narrowRail: FolderDropdownBar(scope: scope),
+            results: _ReferenceResults(
+              controller: controller,
+              itemLimit: _itemLimit,
+              onLoadMore: _loadMore,
+              dragToFolders: desktop,
             ),
+            scrollController: _scrollController,
+            desktop: desktop,
+            padding: padding,
           ),
         );
       },
@@ -266,7 +237,7 @@ class _ReferencesHeading extends StatelessWidget {
                             value: kind,
                             child: Row(
                               children: <Widget>[
-                                Icon(_kindIcon(kind), size: 18),
+                                Icon(mediaKindIcon(kind), size: 18),
                                 const SizedBox(width: 10),
                                 Text('Add ${kind.pluralLabel}'),
                               ],
@@ -326,11 +297,15 @@ class _ReferenceResults extends StatefulWidget {
     required this.controller,
     required this.itemLimit,
     required this.onLoadMore,
+    required this.dragToFolders,
   });
 
   final AppController controller;
   final int itemLimit;
   final VoidCallback onLoadMore;
+
+  /// Whether cards can be dragged onto the folder rail (wide layouts only).
+  final bool dragToFolders;
 
   @override
   State<_ReferenceResults> createState() => _ReferenceResultsState();
@@ -350,6 +325,26 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
   void _toggle(String id) => setState(() {
     if (!selectedIds.add(id)) selectedIds.remove(id);
   });
+
+  /// What dragging [item] carries: the whole selection when the card is part
+  /// of one (and the selection shares a storage), otherwise the card alone.
+  LibraryDragData _dragDataFor(SavedReference item) {
+    var ids = selecting && selectedIds.contains(item.id)
+        ? Set<String>.of(selectedIds)
+        : <String>{item.id};
+    final storages = controller.savedReferences
+        .where((candidate) => ids.contains(candidate.id))
+        .map((candidate) => candidate.storage)
+        .toSet();
+    if (storages.length != 1) ids = <String>{item.id};
+    return LibraryDragData(
+      collection: LibraryCollection.references,
+      storage: item.storage,
+      itemIds: ids,
+      label:
+          'Move ${ids.length} ${ids.length == 1 ? 'reference' : 'references'}',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -392,10 +387,10 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
             onMove: selected.isEmpty
                 ? null
                 : () async {
-                    final moved = await _showReferenceMoveDialog(
+                    final moved = await showMoveToFolderDialog(
                       context,
-                      controller,
-                      selectedIds,
+                      FolderScope.references(controller),
+                      Set<String>.of(selectedIds),
                     );
                     if (moved && mounted) _setSelecting(false);
                   },
@@ -440,38 +435,45 @@ class _ReferenceResultsState extends State<_ReferenceResults> {
                   ...shown.map(
                     (item) => SizedBox(
                       width: width,
-                      child: Stack(
-                        children: <Widget>[
-                          _ReferenceCard(
-                            controller: controller,
-                            reference: item,
-                          ),
-                          if (selecting)
-                            Positioned(
-                              top: 8,
-                              left: 8,
-                              child: Material(
-                                elevation: 7,
-                                color: context.colors.surface,
-                                borderRadius: BorderRadius.circular(9),
-                                child: IconButton(
-                                  key: ValueKey('select-reference-${item.id}'),
-                                  tooltip: selectedIds.contains(item.id)
-                                      ? 'Deselect ${item.name}'
-                                      : 'Select ${item.name}',
-                                  onPressed: () => _toggle(item.id),
-                                  icon: Icon(
-                                    selectedIds.contains(item.id)
-                                        ? Icons.check_box_rounded
-                                        : Icons.check_box_outline_blank_rounded,
-                                    color: selectedIds.contains(item.id)
-                                        ? context.tokens.brass
-                                        : null,
+                      child: LibraryDraggable(
+                        data: _dragDataFor(item),
+                        enabled: widget.dragToFolders,
+                        child: Stack(
+                          children: <Widget>[
+                            _ReferenceCard(
+                              controller: controller,
+                              reference: item,
+                            ),
+                            if (selecting)
+                              Positioned(
+                                top: 8,
+                                left: 8,
+                                child: Material(
+                                  elevation: 7,
+                                  color: context.colors.surface,
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: IconButton(
+                                    key: ValueKey(
+                                      'select-reference-${item.id}',
+                                    ),
+                                    tooltip: selectedIds.contains(item.id)
+                                        ? 'Deselect ${item.name}'
+                                        : 'Select ${item.name}',
+                                    onPressed: () => _toggle(item.id),
+                                    icon: Icon(
+                                      selectedIds.contains(item.id)
+                                          ? Icons.check_box_rounded
+                                          : Icons
+                                                .check_box_outline_blank_rounded,
+                                      color: selectedIds.contains(item.id)
+                                          ? context.tokens.brass
+                                          : null,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -525,7 +527,7 @@ class _ReferenceImportCard extends StatelessWidget {
                 alignment: Alignment.center,
                 children: <Widget>[
                   Icon(
-                    _kindIcon(import.kind),
+                    mediaKindIcon(import.kind),
                     size: 46,
                     color: context.colors.onSurfaceVariant.withValues(
                       alpha: .34,
@@ -599,19 +601,27 @@ class _ReferenceToolbar extends StatelessWidget {
     padding: const EdgeInsets.all(10),
     child: LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 900;
+        // Wide enough for one line of segments, a usable search field, and
+        // the keys; a 1280-px window with the side rail lands just above.
+        final wide = constraints.maxWidth >= 860;
+        // Media kind is the always-visible facet; its counts reflect every
+        // other active filter so they describe the folder in view.
         final keys = <Widget>[
           ConsoleFilterSegment(
+            key: const ValueKey('reference-kind-all'),
             label: 'All',
             semanticLabel: 'All references',
             icon: Icons.grid_view_rounded,
+            count: controller.referenceKindCount(null),
             selected: controller.referenceKind == null,
             onTap: () => controller.setReferenceKind(null),
           ),
           ...MediaReferenceKind.values.map(
             (kind) => ConsoleFilterSegment(
+              key: ValueKey('reference-kind-${kind.name}'),
               label: kind.label,
-              icon: _kindIcon(kind),
+              icon: mediaKindIcon(kind),
+              count: controller.referenceKindCount(kind),
               selected: controller.referenceKind == kind,
               onTap: () => controller.setReferenceKind(kind),
             ),
@@ -640,25 +650,50 @@ class _ReferenceToolbar extends StatelessWidget {
           collection: LibraryCollection.references,
           compact: !wide,
         );
-        final selectButton = OutlinedButton.icon(
-          key: const ValueKey('reference-select-button'),
-          onPressed: () => onSelectingChanged(!selecting),
-          icon: Icon(
-            selecting ? Icons.close_rounded : Icons.check_box_outlined,
-            size: 17,
-          ),
-          label: Text(
-            selecting && selectedCount > 0
-                ? '$selectedCount selected'
-                : 'Select',
-          ),
+        final selectIcon = Icon(
+          selecting ? Icons.close_rounded : Icons.check_box_outlined,
+          size: 17,
         );
+        // Narrow toolbars keep Select as an icon key; the bulk bar beneath
+        // already spells out the selected count.
+        final selectButton = wide
+            ? OutlinedButton.icon(
+                key: const ValueKey('reference-select-button'),
+                onPressed: () => onSelectingChanged(!selecting),
+                icon: selectIcon,
+                label: Text(
+                  selecting && selectedCount > 0
+                      ? '$selectedCount selected'
+                      : 'Select',
+                ),
+              )
+            : Tooltip(
+                message: selecting ? 'Done selecting' : 'Select',
+                child: OutlinedButton(
+                  key: const ValueKey('reference-select-button'),
+                  onPressed: () => onSelectingChanged(!selecting),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  child: selectIcon,
+                ),
+              );
         if (wide) {
+          // The segments keep their natural single line; the search field is
+          // what gives up width first on narrower desktops.
           return Row(
             children: <Widget>[
-              Expanded(child: segments),
-              const SizedBox(width: 16),
-              SizedBox(width: 320, child: search),
+              segments,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    child: search,
+                  ),
+                ),
+              ),
               const SizedBox(width: 8),
               sortButton,
               const SizedBox(width: 8),
@@ -952,9 +987,11 @@ class _ReferenceCard extends StatelessWidget {
                       );
                     } else if (value == 'move') {
                       unawaited(
-                        _showReferenceMoveDialog(context, controller, <String>{
-                          reference.id,
-                        }),
+                        showMoveToFolderDialog(
+                          context,
+                          FolderScope.references(controller),
+                          <String>{reference.id},
+                        ),
                       );
                     } else if (value == 'trim') {
                       unawaited(
@@ -1417,479 +1454,6 @@ class _ReferenceEmpty extends StatelessWidget {
           ),
         ],
       ),
-    ),
-  );
-}
-
-class _ReferenceFolderSidebar extends StatelessWidget {
-  const _ReferenceFolderSidebar({required this.controller});
-
-  final AppController controller;
-
-  Map<LibraryStorageFilter, int> get _storageCounts =>
-      <LibraryStorageFilter, int>{
-        for (final filter in LibraryStorageFilter.values)
-          filter: controller.savedReferences
-              .where((item) => filter.matches(item.storage))
-              .length,
-      };
-
-  @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.all(10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        StorageSidebarSection(
-          controller: controller,
-          value: controller.referenceStorageFilter,
-          counts: _storageCounts,
-          onChanged: (value) =>
-              unawaited(controller.setReferenceStorageFilter(value)),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
-          child: Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  'Folders',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              IconButton(
-                tooltip: 'New reference folder',
-                onPressed: () =>
-                    unawaited(_showReferenceFolderEditor(context, controller)),
-                icon: const Icon(Icons.create_new_folder_outlined, size: 19),
-              ),
-            ],
-          ),
-        ),
-        _ReferenceFolderRow(
-          controller: controller,
-          label: 'All references',
-          id: AppController.libraryFolderAll,
-          icon: Icons.collections_bookmark_outlined,
-        ),
-        _ReferenceFolderRow(
-          controller: controller,
-          label: 'Unfiled',
-          id: AppController.libraryFolderUnfiled,
-          icon: Icons.inbox_outlined,
-        ),
-        if (controller.referenceFolders.isNotEmpty) const Divider(height: 11),
-        ...controller.referenceFolderTree.map(
-          (folder) => _ReferenceFolderRow(
-            controller: controller,
-            label: folder.name,
-            id: folder.id,
-            icon: Icons.folder_outlined,
-            folder: folder,
-            depth: controller.folderDepth(
-              folder.id,
-              collection: LibraryCollection.references,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _ReferenceFolderRow extends StatelessWidget {
-  const _ReferenceFolderRow({
-    required this.controller,
-    required this.label,
-    required this.id,
-    required this.icon,
-    this.folder,
-    this.depth = 0,
-  });
-
-  final AppController controller;
-  final String label;
-  final String id;
-  final IconData icon;
-  final LibraryFolder? folder;
-  final int depth;
-
-  @override
-  Widget build(BuildContext context) {
-    final selected = controller.referenceFolderView == id;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 3),
-      child: Material(
-        color: selected ? context.colors.primaryContainer : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: () => controller.setReferenceFolderView(id),
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(9 + depth * 14, 8, 6, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(icon, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    ),
-                  ),
-                ),
-                if (folder != null) ...<Widget>[
-                  Tooltip(
-                    message: folder!.storage.label,
-                    child: Icon(
-                      folder!.storage == LibraryStorage.drive
-                          ? Icons.cloud_outlined
-                          : Icons.devices_outlined,
-                      size: 13,
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                ],
-                Text(
-                  '${controller.referenceFolderCount(id)}',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: context.colors.onSurfaceVariant,
-                  ),
-                ),
-                if (folder != null)
-                  SizedBox.square(
-                    dimension: 26,
-                    child: PopupMenuButton<String>(
-                      padding: EdgeInsets.zero,
-                      onSelected: (value) {
-                        if (value == 'subfolder') {
-                          unawaited(
-                            _showReferenceFolderEditor(
-                              context,
-                              controller,
-                              parentId: folder!.id,
-                            ),
-                          );
-                        } else if (value == 'rename') {
-                          unawaited(
-                            _showReferenceFolderEditor(
-                              context,
-                              controller,
-                              folder: folder,
-                            ),
-                          );
-                        } else {
-                          unawaited(
-                            _confirmFolderDelete(context, controller, folder!),
-                          );
-                        }
-                      },
-                      itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem(
-                          value: 'subfolder',
-                          child: Text('New subfolder'),
-                        ),
-                        PopupMenuItem(value: 'rename', child: Text('Rename')),
-                        PopupMenuItem(value: 'delete', child: Text('Remove')),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ReferenceFolderPicker extends StatelessWidget {
-  const _ReferenceFolderPicker({required this.controller});
-
-  final AppController controller;
-
-  Map<LibraryStorageFilter, int> get _storageCounts =>
-      <LibraryStorageFilter, int>{
-        for (final filter in LibraryStorageFilter.values)
-          filter: controller.savedReferences
-              .where((item) => filter.matches(item.storage))
-              .length,
-      };
-
-  @override
-  Widget build(BuildContext context) => SurfaceCard(
-    padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: controller.referenceFolderView,
-                  isExpanded: true,
-                  onChanged: (value) {
-                    if (value != null) controller.setReferenceFolderView(value);
-                  },
-                  items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem(
-                      value: AppController.libraryFolderAll,
-                      child: Text('All references'),
-                    ),
-                    const DropdownMenuItem(
-                      value: AppController.libraryFolderUnfiled,
-                      child: Text('Unfiled'),
-                    ),
-                    ...controller.referenceFolderTree.map(
-                      (folder) => DropdownMenuItem(
-                        value: folder.id,
-                        child: Text(
-                          controller.folderPath(
-                            folder.id,
-                            collection: LibraryCollection.references,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: 'New reference folder',
-              onPressed: () =>
-                  unawaited(_showReferenceFolderEditor(context, controller)),
-              icon: const Icon(Icons.create_new_folder_outlined),
-            ),
-          ],
-        ),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          child: Divider(height: 1),
-        ),
-        StorageSidebarSection(
-          controller: controller,
-          value: controller.referenceStorageFilter,
-          counts: _storageCounts,
-          trailingDivider: false,
-          onChanged: (value) =>
-              unawaited(controller.setReferenceStorageFilter(value)),
-        ),
-      ],
-    ),
-  );
-}
-
-Future<bool> _showReferenceMoveDialog(
-  BuildContext context,
-  AppController controller,
-  Iterable<String> referenceIds,
-) async {
-  final ids = referenceIds.toSet();
-  final items = controller.savedReferences
-      .where((item) => ids.contains(item.id))
-      .toList();
-  if (items.isEmpty) return false;
-  final storages = items.map((item) => item.storage).toSet();
-  if (storages.length != 1) {
-    controller.showNotice(
-      'Bulk moves require items from the same storage. Filter by Local or Drive, then select again.',
-    );
-    return false;
-  }
-  final storage = storages.single;
-  final currentFolders = items.map((item) => item.folderId).toSet();
-  String? folderId = currentFolders.length == 1 ? currentFolders.single : null;
-  var moving = false;
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(
-          items.length == 1
-              ? 'Move reference'
-              : 'Move ${items.length} references',
-        ),
-        content: SizedBox(
-          width: 470,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  StorageBadge(storage: storage),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: moving
-                        ? null
-                        : () async {
-                            await _showReferenceFolderEditor(
-                              dialogContext,
-                              controller,
-                              parentId: folderId,
-                            );
-                            if (dialogContext.mounted) setState(() {});
-                          },
-                    icon: const Icon(
-                      Icons.create_new_folder_outlined,
-                      size: 18,
-                    ),
-                    label: const Text('New folder'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 360),
-                child: ListenableBuilder(
-                  listenable: controller,
-                  builder: (context, _) => DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: context.colors.surfaceContainerLow,
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(color: context.colors.outlineVariant),
-                    ),
-                    child: ListView(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.all(7),
-                      children: <Widget>[
-                        _ReferenceMoveTile(
-                          label: 'Unfiled',
-                          icon: Icons.inbox_outlined,
-                          selected: folderId == null,
-                          onTap: moving
-                              ? null
-                              : () => setState(() => folderId = null),
-                        ),
-                        ...controller.referenceFolderTree
-                            .where((folder) => folder.storage == storage)
-                            .map(
-                              (folder) => _ReferenceMoveTile(
-                                label: folder.name,
-                                icon: Icons.folder_outlined,
-                                depth: controller.folderDepth(
-                                  folder.id,
-                                  collection: LibraryCollection.references,
-                                ),
-                                selected: folderId == folder.id,
-                                onTap: moving
-                                    ? null
-                                    : () =>
-                                          setState(() => folderId = folder.id),
-                                trailing: PopupMenuButton<String>(
-                                  tooltip: '${folder.name} folder actions',
-                                  onSelected: (value) async {
-                                    await _showReferenceFolderEditor(
-                                      dialogContext,
-                                      controller,
-                                      folder: value == 'edit' ? folder : null,
-                                      parentId: value == 'subfolder'
-                                          ? folder.id
-                                          : null,
-                                    );
-                                    if (dialogContext.mounted) setState(() {});
-                                  },
-                                  itemBuilder: (context) =>
-                                      const <PopupMenuEntry<String>>[
-                                        PopupMenuItem(
-                                          value: 'subfolder',
-                                          child: Text('New subfolder'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'edit',
-                                          child: Text('Rename or move folder'),
-                                        ),
-                                      ],
-                                ),
-                              ),
-                            ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: moving
-                ? null
-                : () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            onPressed: moving
-                ? null
-                : () async {
-                    setState(() => moving = true);
-                    final saved = await controller.moveReferences(
-                      ids,
-                      folderId: folderId,
-                    );
-                    if (saved && dialogContext.mounted) {
-                      Navigator.pop(dialogContext, true);
-                    } else if (dialogContext.mounted) {
-                      setState(() => moving = false);
-                    }
-                  },
-            icon: moving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.drive_file_move_outline, size: 18),
-            label: const Text('Move'),
-          ),
-        ],
-      ),
-    ),
-  );
-  return result == true;
-}
-
-class _ReferenceMoveTile extends StatelessWidget {
-  const _ReferenceMoveTile({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-    this.depth = 0,
-    this.trailing,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback? onTap;
-  final int depth;
-  final Widget? trailing;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 2),
-    child: ListTile(
-      dense: true,
-      contentPadding: EdgeInsets.only(left: 10 + depth * 20, right: 4),
-      selected: selected,
-      selectedTileColor: context.colors.primaryContainer,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      leading: Icon(icon, size: 20),
-      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing:
-          trailing ??
-          (selected
-              ? Icon(Icons.check_circle_rounded, color: context.colors.primary)
-              : null),
-      onTap: onTap,
     ),
   );
 }
@@ -3073,165 +2637,6 @@ class _ReferenceCandidateCard extends StatelessWidget {
   }
 }
 
-Future<void> _showReferenceFolderEditor(
-  BuildContext context,
-  AppController controller, {
-  LibraryFolder? folder,
-  String? parentId,
-}) async {
-  final name = TextEditingController(text: folder?.name ?? '');
-  var selectedParent = folder?.parentId ?? parentId;
-  var destination =
-      folder?.storage ??
-      controller
-          .folderById(parentId, collection: LibraryCollection.references)
-          ?.storage ??
-      controller.effectiveStorage;
-  final excluded = folder == null
-      ? const <String>{}
-      : controller.folderBranch(
-          folder.id,
-          collection: LibraryCollection.references,
-        );
-  var saving = false;
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(folder == null ? 'New reference folder' : 'Rename folder'),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              if (controller.supportsLocalLibrary &&
-                  controller.supportsGoogleDrive &&
-                  folder == null) ...<Widget>[
-                DropdownButtonFormField<LibraryStorage>(
-                  initialValue: destination,
-                  decoration: const InputDecoration(
-                    labelText: 'Save folder in',
-                  ),
-                  items: LibraryStorage.values
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(value.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: saving
-                      ? null
-                      : (value) => setState(() {
-                          destination = value ?? destination;
-                          selectedParent = null;
-                        }),
-                ),
-                const SizedBox(height: 8),
-              ],
-              TextField(
-                controller: name,
-                enabled: !saving,
-                autofocus: true,
-                maxLength: 48,
-                decoration: const InputDecoration(labelText: 'Folder name'),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String?>(
-                initialValue: selectedParent,
-                decoration: const InputDecoration(labelText: 'Inside'),
-                items: <DropdownMenuItem<String?>>[
-                  const DropdownMenuItem(value: null, child: Text('Top level')),
-                  ...controller.referenceFolderTree
-                      .where(
-                        (item) =>
-                            item.storage == destination &&
-                            !excluded.contains(item.id),
-                      )
-                      .map(
-                        (item) => DropdownMenuItem(
-                          value: item.id,
-                          child: Text(
-                            controller.folderPath(
-                              item.id,
-                              collection: LibraryCollection.references,
-                            ),
-                          ),
-                        ),
-                      ),
-                ],
-                onChanged: saving
-                    ? null
-                    : (value) => setState(() => selectedParent = value),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: saving ? null : () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            onPressed: saving
-                ? null
-                : () async {
-                    setState(() => saving = true);
-                    final saved = await controller.saveLibraryFolder(
-                      name.text,
-                      existing: folder,
-                      parentId: selectedParent,
-                      collection: LibraryCollection.references,
-                      storage: destination,
-                    );
-                    if (saved && dialogContext.mounted) {
-                      Navigator.pop(dialogContext);
-                    } else if (dialogContext.mounted) {
-                      setState(() => saving = false);
-                    }
-                  },
-            icon: saving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.folder_outlined, size: 18),
-            label: Text(saving ? 'Saving…' : 'Save'),
-          ),
-        ],
-      ),
-    ),
-  );
-  name.dispose();
-}
-
-Future<void> _confirmFolderDelete(
-  BuildContext context,
-  AppController controller,
-  LibraryFolder folder,
-) async {
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Remove “${folder.name}”?'),
-      content: const Text(
-        'Saved references become unfiled. Direct subfolders move up one level.',
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton.tonal(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Remove folder'),
-        ),
-      ],
-    ),
-  );
-  if (confirmed == true) await controller.deleteLibraryFolder(folder.id);
-}
-
 Future<void> _confirmReferenceDelete(
   BuildContext context,
   AppController controller,
@@ -3260,9 +2665,3 @@ Future<void> _confirmReferenceDelete(
     await controller.deleteSavedReference(reference.id);
   }
 }
-
-IconData _kindIcon(MediaReferenceKind kind) => switch (kind) {
-  MediaReferenceKind.image => Icons.image_rounded,
-  MediaReferenceKind.video => Icons.video_library_rounded,
-  MediaReferenceKind.audio => Icons.graphic_eq_rounded,
-};

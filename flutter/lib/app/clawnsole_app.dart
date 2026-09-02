@@ -522,6 +522,9 @@ class _RailButton extends StatelessWidget {
         button: true,
         selected: selected,
         label: navigationSemanticsLabel(label, badge),
+        // The label replaces the InkWell's own node, so the tap action has
+        // to ride on this node or assistive tech cannot navigate.
+        onTap: onTap,
         excludeSemantics: true,
         child: InkWell(
           onTap: onTap,
@@ -1055,6 +1058,9 @@ class _BottomNavButton extends StatelessWidget {
         button: true,
         selected: selected,
         label: navigationSemanticsLabel(label, badge),
+        // The label replaces the InkWell's own node, so the tap action has
+        // to ride on this node or assistive tech cannot navigate.
+        onTap: onTap,
         excludeSemantics: true,
         child: InkWell(
           onTap: onTap,

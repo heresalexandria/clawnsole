@@ -206,7 +206,18 @@ reads what you attach; `GenerationFormState.mode` is derived:
 4. otherwise → **Text to video**
 
 The current inference is always visible as a quiet chip beside the
-Generate button. Layout order:
+Generate button.
+
+**Model & Provider plaque:** the navy stitched plaque opens a searchable
+picker. Every model row and provider heading carries a small star (brass
+when lit); starred models pin into a **FAVORITES** section at the top of
+the picker (model + provider name, one tap to select), starred providers'
+sections sort first and open expanded, and the Providers desk groups the
+same starred providers under a *Favorites* eyebrow. Stars live in
+preferences (`favoriteModels` as `provider|model` keys, `favoriteProviders`),
+so they follow the settings vault across devices.
+
+Layout order:
 
 1. **Direction**: the prompt field (4–10 lines), set in bundled Courier
    Prime — the typewriter voice for anything the director types. A quiet
@@ -271,25 +282,45 @@ below the composer (the old ≥1160 side column is gone).
 
 ## 8. Library & recent work
 
-- The toolbar is **one quiet row**: console-key status segments
-  (All / In progress / Ready / Needs attention, icon + label + count),
-  a search field, a **Filters** console key, and the view toggle. Selected
-  segments = plum fill with cream icon and text; both modes were verified
-  against the old unreadable-active-tab bug. Narrow layouts stack the
-  search above the segment row.
-- **Filters popover** (`LibraryFilterButton`): favorites and tags live in
-  an anchored panel instead of stacked chip rows. The key lights plum with
-  a count while either narrows the view, and the panel offers *Reset
-  filters*. The References toolbar shares the same pattern (kind segments
-  + search + sort key + Filters key).
+- The toolbar is **one quiet row**: console-key **media-type segments**
+  (All / Video / Image on the Library, All / Image / Video / Audio on
+  References; icon + label + count), a search field, a **Filters** console
+  key, and the view toggle (References: a sort key instead). The segment
+  counts are *facet counts* — they honour every other active filter, so
+  they describe what is in the folder in view. Selected segments = plum
+  fill with cream icon and text; both modes were verified against the old
+  unreadable-active-tab bug. Narrow layouts stack the search above the
+  segment row and shrink Select to an icon key.
+- **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
+  live in an anchored panel instead of stacked chip rows. The key lights
+  plum with a count while any of them narrows the view, and the panel
+  offers *Reset filters*. The References toolbar shares the same pattern.
 - **Storage lives with the folders** (`StorageSidebarSection`): the left
-  sidebar leads with All storage / On this device / Google Drive rows and
+  rail leads with All storage / On this device / Google Drive rows and
   per-storage counts, above the folder tree; narrow layouts get the same
-  rows in the folder picker. The Drive row carries the connection state
+  rows in the folder sheet. The Drive row carries the connection state
   and a brass *Reconnect* action when a configured session is signed out.
-  Narrow layouts open that picker from a **console-key folder dropdown**
+  Narrow layouts open that sheet from a **console-key folder dropdown**
   that hugs its label (bordered key, count, chevron) — a control, not a
-  full-width heading.
+  full-width heading — on both Library and References.
+- **The folder rail is a file manager, not a list**
+  (`lib/ui/library_folders.dart`, shared by both collections through
+  `FolderScope`): on wide layouts the heading and rail are **pinned** while
+  the results scroll on their own, so folders never drift off-screen.
+  Branches **collapse** behind chevrons (session state; choosing or moving a
+  folder reopens its ancestors). *New folder*, *New subfolder*, and *Rename*
+  are **editor rows in place** (Enter saves, Esc cancels, blur saves like
+  Finder; a top-level row offers a device/Drive toggle when both storages
+  exist) — no modal. Each row's ⋯ menu appears on hover or selection
+  (always on touch) and also opens on right-click / long-press; *Move to…*
+  is the only dialog, and it is the same tree limited to the folder's
+  storage without its own branch. **Drag and drop**: cards (the whole
+  selection when the card is part of one) and folder rows drop onto folder
+  rows or *Unfiled*; a mouse drags at once, a finger long-presses first so
+  lists still scroll; the target lights plum, a closed branch opens after a
+  moment of hovering, and cross-storage or into-own-branch drops are simply
+  not accepted. The item **move dialog** reuses the tree and can grow a new
+  folder in place.
 - **Drive reconnects itself at startup** (`resumeGoogleDrive`): the
   companion and shell hold Drive sessions per process, so the controller
   quietly reattaches a previously configured connection on launch using a
