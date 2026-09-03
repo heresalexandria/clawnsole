@@ -16,15 +16,72 @@ extension AiRewriteController on AppController {
       gateway is PromptRewriteGateway && connectedRewriteProviders.isNotEmpty;
 
   /// AI Rewrite applies to delivered films whose recipe can still be reused
-  /// with this build's providers and models.
+  /// with this build's providers and models. It does not wait for a key:
+  /// the dialog asks for one the first time, so the action is discoverable.
   bool canRewrite(Generation item) =>
-      canRewriteAnything &&
+      gateway is PromptRewriteGateway &&
       item.hasDeliveredMedia &&
       !item.isImage &&
       item.mode != VideoMode.upscale &&
       item.mode != VideoMode.draftEnhance &&
       item.prompt.trim().isNotEmpty &&
       canReuse(item);
+
+  /// Whether the Direction box in front holds something to rewrite.
+  bool get canRewriteDirection =>
+      gateway is PromptRewriteGateway && form.prompt.trim().isNotEmpty;
+
+  /// Puts [result] into the tab it was written for, keeping the direction it
+  /// replaced one notice tap away. A tab closed meanwhile drops the result
+  /// with a word rather than landing it somewhere else.
+  void applyRewrittenDirection(
+    PromptRewriteResult result, {
+    required String tabId,
+  }) {
+    final tab = _composerTabById(tabId);
+    if (tab == null) {
+      showNotice('That tab was closed before the rewrite came back.');
+      return;
+    }
+    _directionRewriteUndo = (
+      tabId: tab.id,
+      previous: tab.form.prompt,
+      rewritten: result.prompt,
+    );
+    _inComposerTab(tab, () {
+      tab.form.prompt = result.prompt;
+      tab.formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
+    notifyListeners();
+    final summary = result.summary.trim();
+    showNotice(
+      summary.isEmpty
+          ? 'Direction rewritten.'
+          : 'Direction rewritten: $summary',
+      action: AppNoticeAction.undoDirectionRewrite,
+    );
+  }
+
+  /// Restores the direction the last rewrite replaced, unless it has been
+  /// edited since or its tab is gone.
+  void undoDirectionRewrite() {
+    final undo = _directionRewriteUndo;
+    _directionRewriteUndo = null;
+    if (undo == null) return;
+    final tab = _composerTabById(undo.tabId);
+    if (tab == null || tab.form.prompt != undo.rewritten) {
+      showNotice('That direction has changed since; nothing to undo.');
+      return;
+    }
+    _inComposerTab(tab, () {
+      tab.form.prompt = undo.previous;
+      tab.formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
+    notifyListeners();
+    showNotice('Direction restored.');
+  }
 
   /// The provider the rewrite dialog should open with: the remembered one
   /// when it still has a key, else the first connected provider.

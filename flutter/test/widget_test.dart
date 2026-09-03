@@ -8081,7 +8081,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Make it sharper.'), findsOneWidget);
+    expect(find.text('VIDEO FINISHING STUDIO'), findsOneWidget);
     expect(find.text('Video to upscale'), findsOneWidget);
     expect(find.byKey(const ValueKey('upscale-factor-slider')), findsOneWidget);
     expect(find.text('PRECISE'), findsOneWidget);

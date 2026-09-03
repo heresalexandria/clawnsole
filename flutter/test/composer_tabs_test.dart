@@ -372,7 +372,9 @@ void main() {
       controller.dispose();
     });
 
-    testWidgets('desktop hangs the strip off the heading row', (tester) async {
+    testWidgets('desktop runs the rail from the tabs to the plaque', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1440, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -380,19 +382,22 @@ void main() {
       await tester.pumpWidget(_host(controller));
       await tester.pumpAndSettle();
 
-      // Same line as the display headline, so the composer keeps its place
-      // above the fold at the size the fold contract names.
-      final headline = tester.getRect(find.text('Make it move.'));
+      // The tabs are the heading: no display headline, the tabs flush left
+      // on the same row as the model plaque pinned to the far right, and the
+      // composer still above the fold at the size the fold contract names.
+      expect(find.text('Make it move.'), findsNothing);
+      expect(find.text('VIDEO STUDIO'), findsOne);
       final add = tester.getRect(
         find.byKey(const ValueKey('composer-tab-add')),
       );
-      expect(add.left, greaterThan(headline.right));
-      expect(add.top, lessThan(headline.bottom));
-      expect(add.bottom, greaterThan(headline.top));
-      expect(
-        tester.getBottomLeft(find.text('Generate video')).dy,
-        lessThan(900),
+      final plaque = tester.getRect(
+        find.byKey(const ValueKey('provider-plaque')),
       );
+      final generate = tester.getRect(find.text('Generate video'));
+      expect(add.right, lessThan(plaque.left));
+      expect(add.bottom, closeTo(plaque.bottom, 1));
+      expect(plaque.right, closeTo(generate.right, 40));
+      expect(generate.bottom, lessThan(900));
       controller.dispose();
     });
 

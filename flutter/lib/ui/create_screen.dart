@@ -13,7 +13,7 @@ import '../core/provider_catalog.dart';
 import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
-import 'composer_tab_strip.dart';
+import 'composer_tab_rail.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -22,6 +22,7 @@ import 'library_screen.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
+import 'prompt_rewrite_dialog.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
 import 'visual_reference_viewer.dart';
@@ -155,114 +156,75 @@ class _CreateHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final local = controller.selectedProvider.isLocal;
     final upscaling = controller.selectedModel.isUpscaler;
     final short = _isShort(context);
+    final plaque = _ProviderPlaque(controller: controller);
+    // A studio with nothing to render with yet explains the
+    // bring-your-own-key model under the rail; short viewports drop the line
+    // so the composer itself stays above the fold.
+    final guidance = !short && controller.needsProviderSetup && !local
+        ? _FirstRunGuidance(controller: controller)
+        : null;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final title = ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Eyebrow(
-                controller.selectedProvider.isLocal
-                    ? 'On-device image studio'
-                    : upscaling
-                    ? 'Video finishing studio'
-                    : 'Video studio',
-              ),
-              SizedBox(height: short ? 5 : 10),
-              Text(
-                controller.selectedProvider.isLocal
-                    ? 'Make it local.'
-                    : upscaling
-                    ? 'Make it sharper.'
-                    : 'Make it move.',
-                style: short
-                    ? Theme.of(context).textTheme.headlineLarge
-                    : Theme.of(context).textTheme.displayLarge,
-              ),
-              // A studio with nothing to render with yet explains the
-              // bring-your-own-key model here, in the description's slot, so
-              // the composer keeps its place above the fold.
-              if (!short &&
-                  controller.needsProviderSetup &&
-                  !controller.selectedProvider.isLocal) ...<Widget>[
-                const SizedBox(height: 10),
-                _FirstRunGuidance(controller: controller),
-              ]
-              // Short viewports drop the description so the composer itself
-              // stays above the fold.
-              else if (!short) ...<Widget>[
-                const SizedBox(height: 10),
-                Text(
-                  controller.selectedProvider.isLocal
-                      ? 'Create private still images on this Apple device, with no account or API key.'
-                      : upscaling
-                      ? 'Remaster a finished clip with source-faithful or creative detail, up to 4K.'
-                      : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
-                  style: TextStyle(color: context.colors.onSurfaceVariant),
-                ),
-              ],
-            ],
-          ),
-        );
-        final plaque = _ProviderPlaque(controller: controller);
-        final plaqueLabel = Text(
-          'Model & Provider:',
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: .3,
-          ),
-        );
-        final tabs = ComposerTabStrip(controller: controller);
-        // Wide layouts keep the quiet label and pin the plaque to the far
-        // right. Phones drop the heading entirely and place the model selector
-        // at the top-right edge to keep the composer compact.
+        // Phones keep the model selector at the top-right edge and give the
+        // rail its own line beneath it, the rule running to the edge.
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Align(alignment: Alignment.topRight, child: plaque),
               const SizedBox(height: 8),
-              tabs,
+              ComposerTabRail(controller: controller),
+              if (guidance != null) ...<Widget>[
+                const SizedBox(height: 10),
+                guidance,
+              ],
             ],
           );
         }
-        // Desktop widths hang the strip off the heading's slack, where it
-        // costs the composer no vertical space at all: the display line
-        // keeps its natural width and the strip takes the rest, so several
-        // drafts sit side by side before it has to scroll. Narrower layouts
-        // give the strip its own single line under the heading.
-        final inlineTabs = constraints.maxWidth >= 1200;
-        final heading = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: <Widget>[
-            if (inlineTabs) ...<Widget>[
-              // The display line and the strip split the slack evenly: the
-              // title never needs half of it, and the strip scrolls past
-              // whatever it cannot show.
-              Flexible(child: title),
-              const SizedBox(width: 24),
-              Expanded(
-                child: Align(alignment: Alignment.centerRight, child: tabs),
-              ),
-            ] else
-              Expanded(
-                child: Align(alignment: Alignment.centerLeft, child: title),
-              ),
-            const SizedBox(width: 22),
-            plaqueLabel,
-            const SizedBox(width: 10),
-            plaque,
-          ],
-        );
-        if (inlineTabs) return heading;
+        // Wider layouts: a quiet eyebrow names the studio, then the rail —
+        // tabs on the left, the rule running on to the plaque pinned to the
+        // far right. There is no display headline; the tabs are the heading.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[heading, const SizedBox(height: 8), tabs],
+          children: <Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Eyebrow(
+                local
+                    ? 'On-device image studio'
+                    : upscaling
+                    ? 'Video finishing studio'
+                    : 'Video studio',
+              ),
+            ),
+            SizedBox(height: short ? 6 : 8),
+            ComposerTabRail(
+              controller: controller,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    'Model & Provider:',
+                    style: TextStyle(
+                      color: context.colors.onSurfaceVariant,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: .3,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  plaque,
+                ],
+              ),
+            ),
+            if (guidance != null) ...<Widget>[
+              const SizedBox(height: 12),
+              guidance,
+            ],
+          ],
         );
       },
     );
@@ -1053,6 +1015,20 @@ class _ComposerState extends State<_Composer> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
+                  IconButton(
+                    key: const ValueKey('prompt-rewrite-button'),
+                    tooltip: 'Rewrite with AI',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: controller.canRewriteDirection
+                        ? () => unawaited(
+                            showPromptRewriteDialog(
+                              context,
+                              controller: controller,
+                            ),
+                          )
+                        : null,
+                    icon: const Icon(Icons.auto_fix_high_rounded),
+                  ),
                   _PromptCharacterCounter(controller: controller),
                   IconButton(
                     key: const ValueKey('prompt-copy-button'),
