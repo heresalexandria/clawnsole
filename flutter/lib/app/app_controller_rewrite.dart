@@ -201,7 +201,12 @@ extension AiRewriteController on AppController {
     _apply(
       await (gateway as ProviderGateway).setProviderApiKey(provider.id, clean),
     );
-    showNotice('${provider.name} key verified and saved locally.');
+    await _retryPendingSettingsVaultSync();
+    showNotice(
+      settingsVaultStatus.isReady
+          ? '${provider.name} key verified and encrypted sync is up to date.'
+          : '${provider.name} key verified and saved locally.',
+    );
   }
 
   /// Forgets the saved key for [provider] on this device.
@@ -213,6 +218,7 @@ extension AiRewriteController on AppController {
       );
     }
     _apply(await (gateway as ProviderGateway).clearProviderApiKey(provider.id));
+    await _retryPendingSettingsVaultSync();
     rewriteModels.remove(provider.id);
     showNotice('${provider.name} access removed from this device.');
   }

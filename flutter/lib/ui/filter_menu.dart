@@ -37,6 +37,7 @@ class ConsoleFilterSegment extends StatelessWidget {
     this.icon,
     this.count,
     this.semanticLabel,
+    this.compact = false,
   });
 
   final String label;
@@ -44,6 +45,7 @@ class ConsoleFilterSegment extends StatelessWidget {
   final VoidCallback onTap;
   final IconData? icon;
   final int? count;
+  final bool compact;
 
   /// Overrides [label] as the spoken name, for keys whose text only reads
   /// well beside its neighbours ('All' → 'All references').
@@ -76,8 +78,8 @@ class ConsoleFilterSegment extends StatelessWidget {
             child: ExcludeSemantics(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 140),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 11,
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 8 : 11,
                   vertical: 8,
                 ),
                 decoration: consoleKeyDecoration(
@@ -167,6 +169,7 @@ class LibraryFilterButton extends StatefulWidget {
     required this.collection,
     super.key,
     this.compact = false,
+    this.panelOnly = false,
   });
 
   final AppController controller;
@@ -174,6 +177,10 @@ class LibraryFilterButton extends StatefulWidget {
 
   /// Hides the text label so the key fits narrow toolbars.
   final bool compact;
+
+  /// Builds only the filter controls, for a narrow-screen sheet opened from
+  /// a shared More menu instead of adding another toolbar row.
+  final bool panelOnly;
 
   @override
   State<LibraryFilterButton> createState() => _LibraryFilterButtonState();
@@ -404,6 +411,12 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.panelOnly) {
+      return KeyedSubtree(
+        key: ValueKey('${_keyPrefix()}-filter-panel'),
+        child: _panel(context),
+      );
+    }
     final active = _activeCount;
     final foreground = active > 0
         ? context.colors.onPrimary
@@ -495,6 +508,30 @@ class _LibraryFilterButtonState extends State<LibraryFilterButton> {
     );
   }
 }
+
+/// Opens the full filter controls without requiring a separate toolbar key.
+Future<void> showLibraryFilterSheet(
+  BuildContext context, {
+  required AppController controller,
+  required LibraryCollection collection,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  showDragHandle: true,
+  useSafeArea: true,
+  builder: (context) => Padding(
+    padding: EdgeInsets.only(
+      left: 12,
+      right: 12,
+      bottom: MediaQuery.viewInsetsOf(context).bottom + 12,
+    ),
+    child: LibraryFilterButton(
+      controller: controller,
+      collection: collection,
+      panelOnly: true,
+    ),
+  ),
+);
 
 /// The storage filter as sidebar rows, living beside the folder tree so
 /// Local and Google Drive stay one glance away. The Drive row also carries

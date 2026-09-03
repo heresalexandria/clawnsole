@@ -11,6 +11,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('settings writes retry a pending encrypted vault sync', () async {
+    final gateway = _VaultGateway(SettingsVaultState.pending);
+    final controller = await _controller(gateway);
+
+    await controller.setLibraryViewMode(GenerationViewMode.compact);
+
+    expect(gateway.values, contains(('sync', '')));
+    expect(controller.settingsVaultStatus.state, SettingsVaultState.ready);
+    controller.dispose();
+  });
+
   testWidgets(
     'vault setup preserves the exact passphrase and gates recovery dismissal',
     (tester) async {

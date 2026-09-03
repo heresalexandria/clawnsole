@@ -502,6 +502,59 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('narrow library keeps primary filters and More on one row', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(375, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = OrganizationGateway(
+        snapshotFor(
+          activeSection: AppSection.library,
+          generations: <Generation>[
+            film(0),
+            film(1, outputKind: GenerationOutputKind.image),
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+
+      final more = find.byKey(const ValueKey('library-more-menu'));
+      expect(more, findsOneWidget);
+      expect(find.byKey(const ValueKey('library-filter-button')), findsNothing);
+      expect(find.byKey(const ValueKey('library-select-button')), findsNothing);
+      final rowY = tester
+          .getCenter(find.byKey(const ValueKey('library-kind-all')))
+          .dy;
+      expect(<double>[
+        tester.getCenter(find.byKey(const ValueKey('library-kind-video'))).dy,
+        tester.getCenter(find.byKey(const ValueKey('library-kind-image'))).dy,
+        tester.getCenter(more).dy,
+      ], everyElement(closeTo(rowY, 1)));
+      expect(
+        tester.getRect(find.byKey(const ValueKey('library-kind-image'))).right,
+        lessThanOrEqualTo(tester.getRect(more).left),
+      );
+
+      await tester.tap(more);
+      await tester.pumpAndSettle();
+      expect(find.text('Filters'), findsOneWidget);
+      expect(find.text('Full cards'), findsOneWidget);
+      expect(find.text('Mini cards'), findsOneWidget);
+      expect(find.text('Compact list'), findsOneWidget);
+      expect(find.text('Select films'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('library-more-filters')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('library-filter-panel')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('narrow references use the console-key folder dropdown', (
       tester,
     ) async {
