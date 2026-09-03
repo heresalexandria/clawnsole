@@ -15,7 +15,6 @@ import 'generation_loading_placeholder.dart';
 import 'generation_provenance.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
-import 'prompt_rewrite_dialog.dart';
 import 'library_folders.dart';
 import 'video_save_sheet.dart';
 
@@ -366,6 +365,8 @@ class _LibraryHeading extends StatelessWidget {
   );
 }
 
+enum _LibraryToolbarAction { filters, full, mini, compact, select }
+
 class _LibraryToolbar extends StatelessWidget {
   const _LibraryToolbar({
     required this.controller,
@@ -395,18 +396,20 @@ class _LibraryToolbar extends StatelessWidget {
             label: 'All',
             semanticLabel: 'All media types',
             icon: Icons.grid_view_rounded,
-            count: controller.libraryOutputKindCount(null),
+            count: wide ? controller.libraryOutputKindCount(null) : null,
             selected: controller.libraryOutputKind == null,
             onTap: () => controller.setLibraryOutputKind(null),
+            compact: !wide,
           ),
           ...GenerationOutputKind.values.map(
             (kind) => ConsoleFilterSegment(
               key: ValueKey('library-kind-${kind.name}'),
               label: kind.label,
               icon: outputKindIcon(kind),
-              count: controller.libraryOutputKindCount(kind),
+              count: wide ? controller.libraryOutputKindCount(kind) : null,
               selected: controller.libraryOutputKind == kind,
               onTap: () => controller.setLibraryOutputKind(kind),
+              compact: !wide,
             ),
           ),
         ];
@@ -488,22 +491,124 @@ class _LibraryToolbar extends StatelessWidget {
             ],
           );
         }
-        // Narrow: search, then the scrolling type strip on its own line, then
-        // the keys — the three-key view toggle grows to finger size on touch
-        // and would squeeze the strip to nothing beside it.
+        // Narrow: keep the three primary media facets on one clean line and
+        // gather the secondary filters, view choice, and selection mode under
+        // one More key. Search remains directly editable above them.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             search,
             const SizedBox(height: 10),
-            segments,
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[filterButton, viewToggle, selectButton],
+            Row(
+              children: <Widget>[
+                Expanded(child: segments),
+                const SizedBox(width: 6),
+                SizedBox.square(
+                  dimension: 44,
+                  child: PopupMenuButton<_LibraryToolbarAction>(
+                    key: const ValueKey('library-more-menu'),
+                    tooltip: 'More library options',
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.more_horiz_rounded),
+                    onSelected: (action) {
+                      switch (action) {
+                        case _LibraryToolbarAction.filters:
+                          unawaited(
+                            showLibraryFilterSheet(
+                              context,
+                              controller: controller,
+                              collection: LibraryCollection.generated,
+                            ),
+                          );
+                        case _LibraryToolbarAction.full:
+                          unawaited(
+                            controller.setLibraryViewMode(
+                              GenerationViewMode.full,
+                            ),
+                          );
+                        case _LibraryToolbarAction.mini:
+                          unawaited(
+                            controller.setLibraryViewMode(
+                              GenerationViewMode.mini,
+                            ),
+                          );
+                        case _LibraryToolbarAction.compact:
+                          unawaited(
+                            controller.setLibraryViewMode(
+                              GenerationViewMode.compact,
+                            ),
+                          );
+                        case _LibraryToolbarAction.select:
+                          onSelectingChanged(!selecting);
+                      }
+                    },
+                    itemBuilder: (context) =>
+                        <PopupMenuEntry<_LibraryToolbarAction>>[
+                          const PopupMenuItem<_LibraryToolbarAction>(
+                            key: ValueKey('library-more-filters'),
+                            value: _LibraryToolbarAction.filters,
+                            child: ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(Icons.tune_rounded),
+                              title: Text('Filters'),
+                            ),
+                          ),
+                          const PopupMenuDivider(),
+                          for (final entry
+                              in const <
+                                (
+                                  GenerationViewMode,
+                                  _LibraryToolbarAction,
+                                  String,
+                                )
+                              >[
+                                (
+                                  GenerationViewMode.full,
+                                  _LibraryToolbarAction.full,
+                                  'Full cards',
+                                ),
+                                (
+                                  GenerationViewMode.mini,
+                                  _LibraryToolbarAction.mini,
+                                  'Mini cards',
+                                ),
+                                (
+                                  GenerationViewMode.compact,
+                                  _LibraryToolbarAction.compact,
+                                  'Compact list',
+                                ),
+                              ])
+                            CheckedPopupMenuItem<_LibraryToolbarAction>(
+                              value: entry.$2,
+                              checked: controller.libraryViewMode == entry.$1,
+                              child: Text(entry.$3),
+                            ),
+                          const PopupMenuDivider(),
+                          PopupMenuItem<_LibraryToolbarAction>(
+                            key: const ValueKey('library-more-select'),
+                            value: _LibraryToolbarAction.select,
+                            child: ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(
+                                selecting
+                                    ? Icons.close_rounded
+                                    : Icons.check_box_outlined,
+                              ),
+                              title: Text(
+                                selecting && selectedCount > 0
+                                    ? 'Done selecting ($selectedCount)'
+                                    : selecting
+                                    ? 'Done selecting'
+                                    : 'Select films',
+                              ),
+                            ),
+                          ),
+                        ],
+                  ),
+                ),
+              ],
             ),
           ],
         );
@@ -1087,28 +1192,6 @@ class _GenerationCardState extends State<GenerationCard> {
                                       : 'Reuse',
                                 ),
                               ),
-                            if (widget.controller.canRewrite(item))
-                              OutlinedButton.icon(
-                                key: const ValueKey('library-rewrite'),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size(88, 40),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 15,
-                                  ),
-                                ),
-                                onPressed: () => unawaited(
-                                  showPromptRewriteDialog(
-                                    context,
-                                    controller: widget.controller,
-                                    item: item,
-                                  ),
-                                ),
-                                icon: const Icon(
-                                  Icons.auto_awesome_outlined,
-                                  size: 16,
-                                ),
-                                label: const Text('AI Rewrite'),
-                              ),
                             GenerationStatusButton(
                               controller: widget.controller,
                               item: item,
@@ -1122,7 +1205,6 @@ class _GenerationCardState extends State<GenerationCard> {
                         item: item,
                         includeSave: false,
                         includeReuse: false,
-                        includeRewrite: false,
                         includeCheckStatus: false,
                         onMove: move,
                         onTag: tag,

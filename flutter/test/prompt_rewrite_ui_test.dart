@@ -18,7 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('AI Rewrite is offered for every rewritable film', (
+  testWidgets('full cards keep AI Rewrite in their actions menu', (
     tester,
   ) async {
     await _sized(tester, const Size(1400, 1600));
@@ -26,16 +26,19 @@ void main() {
     addTearDown(controller.dispose);
 
     await _pump(tester, GenerationCard(controller: controller, item: _film()));
-    expect(find.text('AI Rewrite'), findsOneWidget);
-
-    // The full card carries the button, so its ⋯ menu must not repeat it —
-    // the same exclusion Save, Reuse, and Check status already get.
+    expect(find.text('AI Rewrite'), findsNothing);
     expect(
       tester
           .widget<GenerationActionsMenu>(find.byType(GenerationActionsMenu))
           .includeRewrite,
-      isFalse,
+      isTrue,
     );
+    await tester.tap(find.byType(GenerationActionsMenu));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('AI Rewrite'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
 
     // An image has no frames to read and no film to re-cut.
     await _pump(
@@ -64,6 +67,9 @@ void main() {
     );
     addTearDown(keyless.dispose);
     await _pump(tester, GenerationCard(controller: keyless, item: _film()));
+    await tester.tap(find.byType(GenerationActionsMenu));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('AI Rewrite'), findsOneWidget);
   });
 

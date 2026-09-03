@@ -2652,6 +2652,7 @@ class AppController extends ChangeNotifier {
     final operation = _preferenceWrites.then((_) async {
       try {
         _apply(await gateway.setPreferences(preferences));
+        await _retryPendingSettingsVaultSync();
       } on Object {
         // Mobile and companion Drive tokens are short-lived. The client can
         // still look connected when a preference write (tab selection is one)
@@ -2659,10 +2660,33 @@ class AppController extends ChangeNotifier {
         // session and retry the idempotent preference write once.
         if (!await resumeGoogleDrive(force: true)) rethrow;
         _apply(await gateway.setPreferences(preferences));
+        await _retryPendingSettingsVaultSync();
       }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
     return operation;
+  }
+
+  /// Credential and preference writes finish locally even when an expired or
+  /// transient Drive session leaves the encrypted vault pending. Refresh that
+  /// session once and retry the vault so every settings/config write gets the
+  /// same cross-device guarantee without making a local save fragile.
+  Future<void> _retryPendingSettingsVaultSync() async {
+    if (settingsVaultStatus.state != SettingsVaultState.pending ||
+        gateway is! SettingsVaultGateway ||
+        settingsVaultBusy) {
+      return;
+    }
+    if (gateway is GoogleDriveGateway) {
+      await resumeGoogleDrive(force: true);
+      if (settingsVaultStatus.state != SettingsVaultState.pending) return;
+    }
+    try {
+      _apply(await (gateway as SettingsVaultGateway).syncSettingsVault());
+    } on Object {
+      // The settings vault keeps the verified local write and its pending
+      // status. The ordinary refresh/manual-sync paths can finish it later.
+    }
   }
 
   Future<void> navigate(AppSection value) async {
@@ -6553,9 +6577,12 @@ class AppController extends ChangeNotifier {
       }
       _apply(await gateway.setApiKey(clean));
     }
+    await _retryPendingSettingsVaultSync();
     creditError = null;
     showNotice(
-      '${providerById(provider).name} key verified and saved locally.',
+      settingsVaultStatus.isReady
+          ? '${providerById(provider).name} key verified and encrypted sync is up to date.'
+          : '${providerById(provider).name} key verified and saved locally.',
     );
   }
 
@@ -6586,6 +6613,7 @@ class AppController extends ChangeNotifier {
       }
       _apply(await gateway.clearApiKey());
     }
+    await _retryPendingSettingsVaultSync();
     providerAccounts.remove(provider);
     if (provider == selectedProviderId) credits = null;
     showNotice(
