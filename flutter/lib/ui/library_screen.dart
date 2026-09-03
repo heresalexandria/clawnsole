@@ -10,7 +10,9 @@ import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
+import 'generation_detail_modal.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_provenance.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'prompt_rewrite_dialog.dart';
@@ -754,26 +756,7 @@ class _GenerationCardState extends State<GenerationCard> {
   }
 
   Future<void> _remove() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove this record?'),
-        content: const Text(
-          'This removes compact history only. It does not cancel work already submitted to the provider.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep it'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
+    if (await confirmGenerationRecordRemoval(context)) {
       await widget.controller.deleteGeneration(widget.item.localId);
     }
   }
@@ -789,7 +772,7 @@ class _GenerationCardState extends State<GenerationCard> {
       ),
     );
     void tag() => unawaited(
-      _showGenerationTagDialog(
+      showGenerationTagDialog(
         context,
         controller: widget.controller,
         item: item,
@@ -961,171 +944,196 @@ class _GenerationCardState extends State<GenerationCard> {
                     ],
                   ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                GenerationPrompt(
-                  controller: widget.controller,
-                  prompt: item.displayPrompt,
-                  style: Theme.of(context).textTheme.titleLarge,
-                  reserveCollapsedHeight: true,
-                ),
-                if (folder != null || item.tags.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 9),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: <Widget>[
-                      if (folder != null)
-                        ActionChip(
-                          avatar: const Icon(Icons.folder_outlined, size: 14),
-                          label: Text(folder.name),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () =>
-                              widget.controller.setLibraryFolderView(folder.id),
-                        ),
-                      ...item.tags
-                          .take(3)
-                          .map(
-                            (tag) => ActionChip(
-                              label: Text('#$tag'),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () =>
-                                  widget.controller.setLibraryTag(tag),
-                            ),
+          // The body is the way into the film's detail modal; the buttons
+          // and chips inside keep their own taps.
+          InkWell(
+            key: ValueKey<String>('generation-open-${item.localId}'),
+            onTap: () => unawaited(
+              showGenerationDetailModal(
+                context,
+                controller: widget.controller,
+                item: item,
+              ),
+            ),
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(15),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (GenerationProvenance.applies(item)) ...<Widget>[
+                    GenerationProvenance(
+                      controller: widget.controller,
+                      item: item,
+                    ),
+                    const SizedBox(height: 7),
+                  ],
+                  GenerationPrompt(
+                    controller: widget.controller,
+                    prompt: item.displayPrompt,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    reserveCollapsedHeight: true,
+                  ),
+                  if (folder != null || item.tags.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 9),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: <Widget>[
+                        if (folder != null)
+                          ActionChip(
+                            avatar: const Icon(Icons.folder_outlined, size: 14),
+                            label: Text(folder.name),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => widget.controller
+                                .setLibraryFolderView(folder.id),
                           ),
-                      if (item.tags.length > 3)
-                        Chip(
-                          label: Text('+${item.tags.length - 3}'),
-                          visualDensity: VisualDensity.compact,
+                        ...item.tags
+                            .take(3)
+                            .map(
+                              (tag) => ActionChip(
+                                label: Text('#$tag'),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () =>
+                                    widget.controller.setLibraryTag(tag),
+                              ),
+                            ),
+                        if (item.tags.length > 3)
+                          Chip(
+                            label: Text('+${item.tags.length - 3}'),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 11),
+                  GenerationSpecChips(item: item),
+                  if (item.config.keyframes?.isNotEmpty == true ||
+                      item.config.references?.isNotEmpty == true ||
+                      item.config.source != null) ...<Widget>[
+                    const SizedBox(height: 9),
+                    ReferenceInputsStrip(
+                      controller: widget.controller,
+                      item: item,
+                    ),
+                  ],
+                  if (GenerationStatusDetails.shouldShow(item) &&
+                      (hasMedia || isGeneratingVideo)) ...<Widget>[
+                    const SizedBox(height: 9),
+                    GenerationStatusDetails(item: item),
+                  ],
+                  if (item.deliveryExpired) ...<Widget>[
+                    const SizedBox(height: 9),
+                    Text(
+                      'The provider’s delivery link expired before the film could be retained; the record stays so you can reuse its settings.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 13),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Wrap(
+                          spacing: 7,
+                          runSpacing: 7,
+                          children: <Widget>[
+                            if (item.resultAsset != null ||
+                                item.resultUrl != null)
+                              FilledButton.tonalIcon(
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(88, 40),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 15,
+                                  ),
+                                ),
+                                onPressed: saving
+                                    ? null
+                                    : () => unawaited(_save()),
+                                icon: saving
+                                    ? const SizedBox.square(
+                                        dimension: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.download_rounded,
+                                        size: 16,
+                                      ),
+                                label: const Text('Save'),
+                              ),
+                            if (widget.controller.canReuse(item))
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(88, 40),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 15,
+                                  ),
+                                ),
+                                onPressed: () =>
+                                    unawaited(widget.controller.reuse(item)),
+                                icon: const Icon(
+                                  Icons.replay_rounded,
+                                  size: 16,
+                                ),
+                                label: Text(
+                                  item.isFailed && !item.hasDeliveredMedia
+                                      ? 'Retry'
+                                      : 'Reuse',
+                                ),
+                              ),
+                            if (widget.controller.canRewrite(item))
+                              OutlinedButton.icon(
+                                key: const ValueKey('library-rewrite'),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(88, 40),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 15,
+                                  ),
+                                ),
+                                onPressed: () => unawaited(
+                                  showPromptRewriteDialog(
+                                    context,
+                                    controller: widget.controller,
+                                    item: item,
+                                  ),
+                                ),
+                                icon: const Icon(
+                                  Icons.auto_awesome_outlined,
+                                  size: 16,
+                                ),
+                                label: const Text('AI Rewrite'),
+                              ),
+                            GenerationStatusButton(
+                              controller: widget.controller,
+                              item: item,
+                            ),
+                            GenerationCostChip(item: item),
+                          ],
                         ),
+                      ),
+                      GenerationActionsMenu(
+                        controller: widget.controller,
+                        item: item,
+                        includeSave: false,
+                        includeReuse: false,
+                        includeRewrite: false,
+                        includeCheckStatus: false,
+                        onMove: move,
+                        onTag: tag,
+                        onVisibility: visibility,
+                        onDelete: () => unawaited(_remove()),
+                        onCopyToDrive: copyToDrive,
+                      ),
                     ],
                   ),
                 ],
-                const SizedBox(height: 11),
-                GenerationSpecChips(item: item),
-                if (item.config.keyframes?.isNotEmpty == true ||
-                    item.config.references?.isNotEmpty == true ||
-                    item.config.source != null) ...<Widget>[
-                  const SizedBox(height: 9),
-                  ReferenceInputsStrip(
-                    controller: widget.controller,
-                    item: item,
-                  ),
-                ],
-                if (GenerationStatusDetails.shouldShow(item) &&
-                    (hasMedia || isGeneratingVideo)) ...<Widget>[
-                  const SizedBox(height: 9),
-                  GenerationStatusDetails(item: item),
-                ],
-                if (item.deliveryExpired) ...<Widget>[
-                  const SizedBox(height: 9),
-                  Text(
-                    'The provider’s delivery link expired before the film could be retained; the record stays so you can reuse its settings.',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 13),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Wrap(
-                        spacing: 7,
-                        runSpacing: 7,
-                        children: <Widget>[
-                          if (item.resultAsset != null ||
-                              item.resultUrl != null)
-                            FilledButton.tonalIcon(
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(88, 40),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 15,
-                                ),
-                              ),
-                              onPressed: saving
-                                  ? null
-                                  : () => unawaited(_save()),
-                              icon: saving
-                                  ? const SizedBox.square(
-                                      dimension: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(
-                                      Icons.download_rounded,
-                                      size: 16,
-                                    ),
-                              label: const Text('Save'),
-                            ),
-                          if (widget.controller.canReuse(item))
-                            OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(88, 40),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 15,
-                                ),
-                              ),
-                              onPressed: () =>
-                                  unawaited(widget.controller.reuse(item)),
-                              icon: const Icon(Icons.replay_rounded, size: 16),
-                              label: Text(
-                                item.isFailed && !item.hasDeliveredMedia
-                                    ? 'Retry'
-                                    : 'Reuse',
-                              ),
-                            ),
-                          if (widget.controller.canRewrite(item))
-                            OutlinedButton.icon(
-                              key: const ValueKey('library-rewrite'),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(88, 40),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 15,
-                                ),
-                              ),
-                              onPressed: () => unawaited(
-                                showPromptRewriteDialog(
-                                  context,
-                                  controller: widget.controller,
-                                  item: item,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.auto_awesome_outlined,
-                                size: 16,
-                              ),
-                              label: const Text('AI Rewrite'),
-                            ),
-                          GenerationStatusButton(
-                            controller: widget.controller,
-                            item: item,
-                          ),
-                          GenerationCostChip(item: item),
-                        ],
-                      ),
-                    ),
-                    GenerationActionsMenu(
-                      controller: widget.controller,
-                      item: item,
-                      includeSave: false,
-                      includeReuse: false,
-                      includeRewrite: false,
-                      includeCheckStatus: false,
-                      onMove: move,
-                      onTag: tag,
-                      onVisibility: visibility,
-                      onDelete: () => unawaited(_remove()),
-                      onCopyToDrive: copyToDrive,
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -1134,7 +1142,32 @@ class _GenerationCardState extends State<GenerationCard> {
   }
 }
 
-Future<void> _showGenerationTagDialog(
+/// Asks before a history record is dropped. Shared by the card menus and the
+/// film modal so the wording never drifts.
+Future<bool> confirmGenerationRecordRemoval(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Remove this record?'),
+      content: const Text(
+        'This removes compact history only. It does not cancel work already submitted to the provider.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Keep it'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}
+
+Future<void> showGenerationTagDialog(
   BuildContext context, {
   required AppController controller,
   required Generation item,

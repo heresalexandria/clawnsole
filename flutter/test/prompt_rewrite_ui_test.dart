@@ -8,6 +8,7 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
+import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/prompt_rewrite_dialog.dart';
@@ -17,7 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('AI Rewrite is offered only for a rewritable film', (
+  testWidgets('AI Rewrite is offered for every rewritable film', (
     tester,
   ) async {
     await _sized(tester, const Size(1400, 1600));
@@ -56,13 +57,175 @@ void main() {
     );
     expect(find.text('AI Rewrite'), findsNothing);
 
-    // Same film, but no rewrite key on this device.
+    // No rewrite key yet: the action still shows, and the dialog asks for
+    // one, so the feature is discoverable before it is set up.
     final keyless = _controller(
       _gateway(connectedRewriteProviders: const <String>{}),
     );
     addTearDown(keyless.dispose);
     await _pump(tester, GenerationCard(controller: keyless, item: _film()));
-    expect(find.text('AI Rewrite'), findsNothing);
+    expect(find.text('AI Rewrite'), findsOneWidget);
+  });
+
+  testWidgets('a keyless dialog asks for a key first, then carries on', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway(connectedRewriteProviders: const <String>{});
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+
+    await _openDialog(tester, controller);
+    expect(find.byKey(const ValueKey('rewrite-key-field')), findsOneWidget);
+    expect(find.byKey(const ValueKey('rewrite-direction')), findsNothing);
+    FilledButton save() => tester.widget<FilledButton>(
+      find.byKey(const ValueKey('rewrite-key-save')),
+    );
+    expect(save().onPressed, isNull);
+
+    await tester.tap(
+      find.byKey(const ValueKey('rewrite-key-provider-anthropic')),
+    );
+    await tester.pump();
+    expect(find.text('Anthropic API key'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-key-field')),
+      ' sk-ant-test ',
+    );
+    await tester.pump();
+    expect(save().onPressed, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('rewrite-key-save')));
+    await tester.pumpAndSettle();
+
+    // Verified through a listing, saved, and the dialog moved on to the
+    // rewrite form on the vendor the key belongs to.
+    expect(gateway.candidateKeys, <String>['sk-ant-test']);
+    expect(gateway.savedKeys, <String, String>{'anthropic': 'sk-ant-test'});
+    expect(find.byKey(const ValueKey('rewrite-key-field')), findsNothing);
+    expect(find.byKey(const ValueKey('rewrite-direction')), findsOneWidget);
+    expect(find.text('Claude Opus 5'), findsOneWidget);
+    await _expireNotice(tester);
+  });
+
+  testWidgets('a rejected first key stays in the dialog with its reason', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway(connectedRewriteProviders: const <String>{})
+      ..listError = const PromptRewriteException(
+        'OpenAI rejected this API key.',
+        failure: PromptRewriteFailure.unauthorized,
+      );
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+
+    await _openDialog(tester, controller);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-key-field')),
+      'sk-bad',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('rewrite-key-save')));
+    await tester.pumpAndSettle();
+
+    expect(gateway.savedKeys, isEmpty);
+    expect(find.byKey(const ValueKey('rewrite-key-field')), findsOneWidget);
+    expect(find.text('OpenAI rejected this API key.'), findsOneWidget);
+  });
+
+  testWidgets('the wand rewrites the draft in place with Undo on the notice', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway();
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    controller.updateForm((form) => form.prompt = _prompt);
+
+    await _openDraftDialog(tester, controller);
+    expect(find.byKey(const ValueKey('rewrite-frame-caption')), findsNothing);
+    expect(find.text('Current direction'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-direction')),
+      'Name the camera move.',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+    await tester.pumpAndSettle();
+
+    final request = gateway.rewriteRequests.single;
+    expect(request.originalPrompt, _prompt);
+    expect(request.frames, isEmpty);
+    expect(request.targetProviderName, controller.selectedProvider.name);
+    expect(request.targetModelName, controller.selectedModel.label);
+    expect(request.mode, 't2v');
+    expect(request.aspectRatio, controller.form.aspectRatio);
+
+    expect(controller.form.prompt, 'A slower dolly past a warm lantern.');
+    expect(controller.notice, 'Direction rewritten: Warmed the lantern.');
+    expect(controller.noticeAction, AppNoticeAction.undoDirectionRewrite);
+    expect(controller.noticeActionLabel, 'Undo');
+    expect(find.byType(AlertDialog), findsNothing);
+
+    await controller.performNoticeAction();
+    expect(controller.form.prompt, _prompt);
+    expect(controller.notice, 'Direction restored.');
+    await _expireNotice(tester);
+  });
+
+  testWidgets('a rewrite lands in the tab it was opened for', (tester) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway();
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    controller.updateForm((form) => form.prompt = _prompt);
+    final draftTab = controller.activeComposerTabId;
+
+    await _openDraftDialog(tester, controller);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-direction')),
+      'Tighter.',
+    );
+    await tester.pump();
+    // The director opens another draft while the model thinks.
+    controller.addComposerTab();
+    await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+    await tester.pumpAndSettle();
+
+    expect(controller.activeComposerTab.form.prompt, isEmpty);
+    expect(
+      controller.composerTabs
+          .firstWhere((tab) => tab.id == draftTab)
+          .form
+          .prompt,
+      'A slower dolly past a warm lantern.',
+    );
+    await _expireNotice(tester);
+  });
+
+  testWidgets('the Direction header carries the rewrite wand', (tester) async {
+    await _sized(tester, const Size(1400, 2000));
+    final controller = _controller(_gateway());
+    addTearDown(controller.dispose);
+
+    await _pumpScreen(
+      tester,
+      AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) => CreateScreen(controller: controller),
+      ),
+    );
+    IconButton wand() => tester.widget<IconButton>(
+      find.byKey(const ValueKey('prompt-rewrite-button')),
+    );
+    expect(wand().onPressed, isNull, reason: 'nothing to rewrite yet');
+
+    controller.updateForm((form) => form.prompt = _prompt);
+    await tester.pumpAndSettle();
+    expect(wand().onPressed, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('prompt-rewrite-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Rewrite direction'), findsOneWidget);
   });
 
   testWidgets('the activity card offers AI Rewrite on a delivered film', (
@@ -304,6 +467,85 @@ void main() {
     expect(find.text('Anthropic rejected this key.'), findsOneWidget);
   });
 
+  testWidgets('cards name their tab and link back to the film they rewrote', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1800));
+    final source = _film(localId: 'film-a', title: 'Kite');
+    final iteration = _film(
+      localId: 'film-b',
+      rewriteOfLocalId: 'film-a',
+      rewriteSummary: 'Recolored the kite.',
+    );
+    final gateway = _gateway();
+    gateway.snapshot = gateway.snapshot.copyWith(
+      generations: <Generation>[iteration, source],
+    );
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+
+    // A named tab shows its name above the prompt; an unnamed one shows no
+    // title row at all.
+    await _pump(tester, GenerationCard(controller: controller, item: source));
+    expect(find.byKey(const ValueKey('generation-title-film-a')), findsOne);
+    expect(find.text('Kite'), findsOneWidget);
+    await _pump(tester, GenerationCard(controller: controller, item: _film()));
+    expect(find.byKey(const ValueKey('generation-title-film-1')), findsNothing);
+
+    // The iteration links to its source, and the link opens that film.
+    await _pump(
+      tester,
+      GenerationCard(controller: controller, item: iteration),
+    );
+    expect(find.text('Rewrite of Kite'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('generation-rewrite-source-film-b')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(
+      find.byType(Dialog).evaluate().isNotEmpty ||
+          find.byType(AlertDialog).evaluate().isNotEmpty,
+      isTrue,
+    );
+    await tester.tap(find.byKey(const ValueKey('detail-close')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // A source that is gone reads as such and is not a link.
+    await _pump(
+      tester,
+      GenerationCard(
+        controller: controller,
+        item: _film(localId: 'film-c', rewriteOfLocalId: 'film-gone'),
+      ),
+    );
+    expect(find.text('Rewrite of a removed film'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('generation-rewrite-source-film-c')),
+      findsNothing,
+    );
+
+    // Dense cards carry the same line, and every card body opens the film.
+    await _pump(
+      tester,
+      MiniGenerationCard(controller: controller, item: iteration),
+    );
+    expect(find.text('Rewrite of Kite'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('generation-open-film-b')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.byKey(const ValueKey('detail-close')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('detail-close')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await _pump(
+      tester,
+      CompactGenerationRow(controller: controller, item: source),
+    );
+    expect(find.text('Kite'), findsOneWidget);
+  });
+
   test('a preference write keeps the connected rewrite providers', () async {
     final gateway = _gateway(
       connectedRewriteProviders: const <String>{'openai'},
@@ -455,6 +697,30 @@ Future<void> _openDialog(
   await tester.pumpAndSettle();
 }
 
+/// Opens the dialog for the draft in front, the way the Direction wand does.
+Future<void> _openDraftDialog(
+  WidgetTester tester,
+  AppController controller,
+) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => unawaited(
+              showPromptRewriteDialog(context, controller: controller),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
+}
+
 FilledButton _submitButton(WidgetTester tester) =>
     tester.widget<FilledButton>(find.byKey(const ValueKey('rewrite-submit')));
 
@@ -472,13 +738,20 @@ AppController _controller(_RewriteGateway gateway) {
 }
 
 Generation _film({
+  String localId = 'film-1',
   String status = 'Ready',
   String? resultUrl = 'https://cdn.example.com/film.mp4',
   GenerationOutputKind outputKind = GenerationOutputKind.video,
+  String? title,
+  String? rewriteOfLocalId,
+  String? rewriteSummary,
 }) {
   final now = DateTime.utc(2026, 9, 1, 21);
   return Generation(
-    localId: 'film-1',
+    localId: localId,
+    title: title,
+    rewriteOfLocalId: rewriteOfLocalId,
+    rewriteSummary: rewriteSummary,
     provider: 'artcraft',
     model: 'seedance_2p5',
     outputKind: outputKind,

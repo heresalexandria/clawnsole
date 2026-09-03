@@ -81,6 +81,7 @@ class HardwareTouchTarget extends StatelessWidget {
     super.key,
     this.minWidth = kHardwareTouchTarget,
     this.minHeight = kHardwareTouchTarget,
+    this.alignment = Alignment.center,
   });
 
   /// Repeats what the child's own gesture handler does. A null callback
@@ -90,13 +91,17 @@ class HardwareTouchTarget extends StatelessWidget {
   final double minWidth;
   final double minHeight;
 
+  /// Where the drawn child sits inside the grown hit area. Controls that
+  /// stand on a rule ask for the bottom so the pad grows upward only.
+  final AlignmentGeometry alignment;
+
   @override
   Widget build(BuildContext context) {
     if (!isHardwareTouchPlatform) return child;
     return ConstrainedBox(
       constraints: BoxConstraints(minWidth: minWidth, minHeight: minHeight),
       child: Stack(
-        alignment: Alignment.center,
+        alignment: alignment,
         children: <Widget>[
           if (onTap != null)
             Positioned.fill(

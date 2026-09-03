@@ -181,6 +181,62 @@ void main() {
     );
   });
 
+  test('generations carry their tab name and rewrite lineage compactly', () {
+    final now = DateTime.utc(2026, 9, 2, 20);
+    final iteration = Generation(
+      localId: 'gen-b',
+      status: 'Ready',
+      prompt: 'A blue kite',
+      mode: VideoMode.t2v,
+      config: const GenerationConfig(
+        aspectRatio: '16:9',
+        duration: 6,
+        resolution: 'hd',
+        generateAudio: true,
+        safetyTolerance: 2,
+        draft: false,
+      ),
+      createdAt: now,
+      updatedAt: now,
+      title: ' Kite take two ',
+      rewriteOfLocalId: 'gen-a',
+      rewriteSummary: 'Recolored the kite.',
+    );
+    final json =
+        jsonDecode(jsonEncode(iteration.toJson())) as Map<String, Object?>;
+    expect(json['title'], ' Kite take two ');
+    expect(json['rewriteOfLocalId'], 'gen-a');
+    expect(json['rewriteSummary'], 'Recolored the kite.');
+    final decoded = Generation.fromJson(json);
+    expect(decoded.title, 'Kite take two');
+    expect(decoded.rewriteOfLocalId, 'gen-a');
+    expect(decoded.rewriteSummary, 'Recolored the kite.');
+    expect(decoded.copyWith(clearTitle: true).title, isNull);
+    expect(decoded.copyWith(status: 'Working').rewriteOfLocalId, 'gen-a');
+
+    // Ordinary films keep their JSON byte for byte.
+    final plain = Generation(
+      localId: 'gen-c',
+      status: 'Ready',
+      prompt: 'A red kite',
+      mode: VideoMode.t2v,
+      config: iteration.config,
+      createdAt: now,
+      updatedAt: now,
+    );
+    final plainJson = plain.toJson();
+    expect(plainJson.containsKey('title'), isFalse);
+    expect(plainJson.containsKey('rewriteSummary'), isFalse);
+    expect(
+      Generation.fromJson(<String, Object?>{
+        ...plainJson,
+        'title': '   ',
+        'rewriteOfLocalId': '',
+      }).title,
+      isNull,
+    );
+  });
+
   test('preferences remember AI Rewrite choices per provider', () {
     const preferences = AppPreferences(
       rewriteProvider: 'anthropic',

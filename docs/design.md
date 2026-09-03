@@ -192,8 +192,8 @@ in light mode.
   the guidance accordions with the settings column, and the cost +
   destination row), 330 (Frame/Finish dropdowns stack instead of
   sharing a row), 480 (composer footer stacks). A viewport under 950 px
-  tall switches the create screen into a dense mode (no heading
-  description, smaller title, tighter gaps).
+  tall switches the create screen into a dense mode (no first-run
+  guidance line, tighter gaps).
 
 ## 7. The composer (Create)
 
@@ -273,27 +273,42 @@ Layout order:
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-8. Footer: claw + readiness line, mode chip, plum **Generate video**.
+8. Footer: claw + readiness line, mode chip, then the navy **model
+   plaque** (provider + model, opens the picker) directly before the plum
+   **Generate video** — under 480 px the plaque takes its own line above
+   the button.
 
 **Fold contract:** the heading and the whole composer, Generate button
 included, fit above the fold at 1440×900, with the Recent work header
 visible beneath — enforced by a widget test. Recent work always sits
 below the composer (the old ≥1160 side column is gone).
 
-**Tabs are workspaces, not modes.** The Create heading carries a strip of
-console-key tabs (`ComposerTabStrip`); each tab is a complete, independent
-draft — Direction, provider and model, every setting, attachments, and the
-save-to folder — so several films can be worked on side by side. A "+" key
-opens a blank tab that inherits only the active tab's provider, model, and
-folder; the × on a tab closes it (the last tab is replaced by a blank one);
-long-press or double-tap renames. Labels derive from the first words of the
-prompt until renamed. Reuse and Enhance fill the active tab when it is still
-blank and otherwise open a new tab, so no draft is ever clobbered. A tab born
-from AI Rewrite wears a small brass `auto_awesome` mark whose tooltip is the
-model's one-line summary of what changed. From 1200 px the strip sits
-trailing in the heading row, taking the slack between the display line and
-the model plaque, so the fold contract holds; narrower layouts give it its
-own one-line scrolling row under the heading. Tabs persist on the device
+**Tabs are workspaces, not modes, and they are the heading.** Create has
+no display headline: a quiet eyebrow names the studio (*Video studio* /
+*Video finishing studio* / *On-device image studio*), and beneath it runs
+the **tab rail** (`ComposerTabRail`) — folder tabs (rounded shoulders,
+flat foot) standing on a hairline rule that runs from the last tab to the
+edge. Idle tabs are raised console keys resting on the rule with muted
+labels; the tab in front is **not a lit button**: it is cut from the
+composer card's own paper, stands a touch taller, wears a 2 px brass lip
+along its top, and covers the rule beneath it, so the open draft reads as
+continuous with the composer (owner rejected a plum-filled active tab as
+"looks like a button"). On touch platforms tabs are a little taller
+(~38–40 pt) so the tab itself is the target; the pencil and × inside keep
+modest hit areas and never stretch the tab past its neighbours.
+Each tab is a complete, independent draft — Direction, provider and model,
+every setting, attachments, and the save-to folder — so several films can be
+worked on side by side. A "+" tab opens a blank draft that inherits only the
+active tab's provider, model, and folder; the × on a tab closes it (the last
+tab is replaced by a blank one); long-press or double-tap renames. Labels
+derive from the first words of the prompt until renamed. Reuse and Enhance
+fill the active tab when it is still blank and otherwise open a new tab, so
+no draft is ever clobbered. A tab born from AI Rewrite wears a small brass
+`auto_awesome` mark whose tooltip is the model's one-line summary of what
+changed. The model plaque is not in the heading at all: it sits in the
+composer footer directly before Generate (see item 8), inside the draft it
+belongs to. Phones drop the eyebrow and keep just the rail; the first-run
+bring-your-own-key line sits under the rail when no provider is set up. Tabs persist on the device
 (`StoredData.composerTabs`, never in Drive data): the prompt, settings, and
 ids survive a restart, and media that came from a generation is re-hydrated
 from that generation's record; media picked from disk stays session-only, as
@@ -386,12 +401,50 @@ select a mode.
   needs attention / status unavailable = madder; exact provider charges
   render on plum containers, estimates on navy.
 
+### Provenance and the film modal
+
+Above its prompt, a card says where a film came from when there is
+something to say (`GenerationProvenance`): the **name of the tab** it was
+rendered from (only when the director named that tab — an unnamed tab
+adds no row), and for an AI Rewrite iteration a brass ✦ **"Rewrite of …"
+link** naming the film it was rewritten from; the link opens that film.
+Generations carry `title`, `rewriteOfLocalId`, and `rewriteSummary` for
+this, stamped at submit time from the composer tab.
+
+**Every card body opens the film modal** (`showGenerationDetailModal`):
+the thumbnail keeps click-to-play, the ⋯ menu's *Open film* is the same
+door, and the body (prompt, chips, provenance) is one tap. The modal is
+nearly the full viewport (a full-screen page on phones) so nothing has to
+be truncated. The header is the film's name — the tab name when the
+director gave one, else the direction's first words — with favorite and
+close. Two columns from about 900 px of content width (so a 1024-wide
+window still gets both): media at true aspect ratio with the inline
+player on the left; on the right the status and storage badges, the
+complete selectable prompt with its copy control, folder and tag chips
+(tapping one leaves the modal and filters the library), spec chips,
+inputs with their labels written out, the cost readout with its breakdown
+inline, the action row (Save, Reuse/Retry, AI Rewrite, Check status, and
+a ⋯ carrying the card's organize verbs — Move, Tag, Hide, Copy to Drive,
+Delete — but never *Open film*, which is where the ⋯ already led), and a
+collapsed *Provider details* accordion holding the request bookkeeping
+the old details dialog showed. Deleting the record from inside the modal
+closes it. When the film has lineage, an **Iterations** strip walks the
+chain both ways — *Rewritten from* → *This film* → *Rewrite* cards, oldest
+first — and tapping another card swaps the modal to that film with a
+*Back* affordance. Escape closes; the modal follows the controller so a
+film that finishes rendering while open updates in place.
+
 ### AI Rewrite
 
 An **AI Rewrite** button on a delivered film opens a dialog that asks a
-multimodal LLM to revise the film's prompt. The director picks the vendor
-(OpenAI or Anthropic — only vendors with a saved key are offered; the row is
-hidden when there is one), the model (a live listing with the vendor's newest
+multimodal LLM to revise the film's prompt; a **magic-wand key** before the
+character counter in the Direction header opens the same dialog for the
+draft in front (no frames — nothing has rendered yet), rewriting the
+direction in place with *Undo* on the notice. Both entry points are always
+present: without a saved key the dialog opens on a first-run step (pick
+OpenAI or Anthropic, paste the key, *Verify & save*, *Get a key* link) and
+carries straight on once the key verifies. The director picks the vendor
+(when both have keys; the row is hidden when there is one), the model (a live listing with the vendor's newest
 chat models first, a curated fallback when the listing is unavailable, and a
 "Custom model id…" escape hatch), the vendor's own effort level, and types
 what should be different next time in the Courier Prime direction voice. The
@@ -409,7 +462,8 @@ open a tab.
 
 Keys live in **Settings › AI Rewrite** (one masked field per vendor with
 Verify & save, Replace, Remove, and a Get-a-key link), stored beside the
-provider keys in the OS-secure vault. On desktop the Electron renderer never
+provider keys in the OS-secure vault and carried with them by secure
+settings sync, so a key saved on one device follows to the others. On desktop the Electron renderer never
 sees them: the companion holds the key and makes the vendor call; native
 builds call the vendor directly. The last-used vendor, model, and effort are
 remembered per vendor in preferences.
@@ -438,7 +492,8 @@ remembered per vendor in preferences.
 ## 10. Voice
 
 Calm, concrete, lightly warm. Headlines are short imperatives or plain
-nouns ("Make it move.", "Your films.", "Room to stretch."). Body copy is
+nouns ("Your films.", "Room to stretch."); Create's heading is its tab
+rail, not a headline. Body copy is
 complete sentences that state what happens and why it is safe. No
 exclamation points, no jargon-as-drama.
 

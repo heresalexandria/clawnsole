@@ -50,10 +50,14 @@ and optional Google Drive sync keep work organized wherever you create.
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - Composer tabs on Create: several independent drafts (direction, model,
   settings, attachments) open side by side, persisted on the device
-- AI Rewrite: with an OpenAI or Anthropic key saved in Settings, a finished
-  film's frames, prompt, and your change notes go to the model you pick
-  (vendor, model, effort) and the revised prompt opens in a new tab with the
-  film's full recipe
+- AI Rewrite: a finished film's frames, prompt, and your change notes go to
+  the OpenAI or Anthropic model you pick (vendor, model, effort) and the
+  revised prompt opens in a new tab with the film's full recipe; a wand on
+  the Direction box rewrites a draft in place with Undo. Keys are asked for
+  on first use, kept in the encrypted vault, and synced with your other keys
+- Named tabs and rewrite lineage on every card, and a film modal (tap any
+  card) that shows the whole recipe untruncated with an iterations strip to
+  walk back through AI Rewrite versions
 - Nested project folders with a pinned rail, collapsible branches, in-place
   rename, and drag-and-drop filing, plus multi-tag organization and combined
   prompt/tag/folder search

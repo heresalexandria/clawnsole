@@ -126,6 +126,49 @@ void main() {
     expect(second.settingsVaultStatus.state, SettingsVaultState.ready);
   });
 
+  test(
+    'AI Rewrite keys ride the vault to other devices like provider keys',
+    () async {
+      // The OpenAI and Anthropic keys are ordinary vault credentials, so a key
+      // saved on one device reaches the next through the same encrypted
+      // envelope — and never as plaintext on Drive.
+      final server = _RemoteServer();
+      final first = SettingsVaultDataStore(
+        delegate: _MemoryStore(
+          const StoredData(
+            apiKeys: <String, String>{
+              'openai': 'sk-openai-shared',
+              'anthropic': 'sk-ant-shared',
+            },
+          ),
+        ),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+        clock: () => DateTime.utc(2026, 9, 2, 12),
+      );
+      await first.read();
+      await first.connectRemote('token', 'folder');
+      await first.setup('a correct horse battery staple');
+      expect(server.text, isNot(contains('sk-openai-shared')));
+      expect(server.text, isNot(contains('sk-ant-shared')));
+
+      final second = SettingsVaultDataStore(
+        delegate: _MemoryStore(const StoredData()),
+        secureStore: MemorySecureValueStore(),
+        remote: _FakeRemote(server),
+        codec: fastCodec,
+        clock: () => DateTime.utc(2026, 9, 2, 13),
+      );
+      await second.read();
+      await second.connectRemote('token', 'folder');
+      await second.unlock('a correct horse battery staple');
+      final synced = await second.read();
+      expect(synced.apiKeyFor('openai'), 'sk-openai-shared');
+      expect(synced.apiKeyFor('anthropic'), 'sk-ant-shared');
+    },
+  );
+
   test('a Drive failure keeps the verified local save pending', () async {
     final server = _RemoteServer();
     final local = _MemoryStore(const StoredData());

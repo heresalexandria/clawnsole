@@ -37,7 +37,6 @@ import 'package:clawnsole/ui/hardware.dart';
 import 'package:clawnsole/ui/inline_video.dart';
 import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
-import 'package:clawnsole/ui/panels.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
@@ -4485,8 +4484,13 @@ void main() {
     expect(find.text('Model & Provider:'), findsNothing);
     expect(find.text('Make it move.'), findsNothing);
     expect(find.text('VIDEO STUDIO'), findsNothing);
+    // The plaque lives in the composer footer now, right above Generate.
     final plaque = find.byKey(const ValueKey('provider-plaque'));
-    expect(tester.getTopRight(plaque).dx, closeTo(374, .1));
+    expect(plaque, findsOneWidget);
+    expect(
+      tester.getTopLeft(plaque).dy,
+      lessThan(tester.getTopLeft(find.text('Generate video')).dy),
+    );
 
     expect(find.text('REFERENCES'), findsOneWidget);
     expect(find.textContaining('REQUIRED'), findsNothing);
@@ -4635,13 +4639,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The label sits beside the plaque card rather than inside it.
-    final plaqueLabel = find.text('Model & Provider:');
-    expect(plaqueLabel, findsOneWidget);
-    expect(
-      find.ancestor(of: plaqueLabel, matching: find.byType(TexturePanel)),
-      findsNothing,
-    );
+    // The plaque carries no label; it sits in the composer footer by
+    // Generate and speaks for itself.
+    expect(find.text('Model & Provider:'), findsNothing);
+    expect(find.byKey(const ValueKey('provider-plaque')), findsOneWidget);
     await tester.tap(find.byTooltip('Choose provider and model'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('provider-model-search')), findsOneWidget);
@@ -8081,7 +8082,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Make it sharper.'), findsOneWidget);
+    expect(find.text('VIDEO FINISHING STUDIO'), findsOneWidget);
     expect(find.text('Video to upscale'), findsOneWidget);
     expect(find.byKey(const ValueKey('upscale-factor-slider')), findsOneWidget);
     expect(find.text('PRECISE'), findsOneWidget);

@@ -13,7 +13,7 @@ import '../core/provider_catalog.dart';
 import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
-import 'composer_tab_strip.dart';
+import 'composer_tab_rail.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -22,6 +22,7 @@ import 'library_screen.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
+import 'prompt_rewrite_dialog.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
 import 'visual_reference_viewer.dart';
@@ -155,114 +156,54 @@ class _CreateHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final local = controller.selectedProvider.isLocal;
     final upscaling = controller.selectedModel.isUpscaler;
     final short = _isShort(context);
+    // A studio with nothing to render with yet explains the
+    // bring-your-own-key model under the rail; short viewports drop the line
+    // so the composer itself stays above the fold.
+    final guidance = !short && controller.needsProviderSetup && !local
+        ? _FirstRunGuidance(controller: controller)
+        : null;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final title = ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // Phones drop the eyebrow and keep just the rail, the rule running
+        // to the edge; the model plaque lives in the composer's footer.
+        if (constraints.maxWidth < 720) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Eyebrow(
-                controller.selectedProvider.isLocal
+              ComposerTabRail(controller: controller),
+              if (guidance != null) ...<Widget>[
+                const SizedBox(height: 10),
+                guidance,
+              ],
+            ],
+          );
+        }
+        // Wider layouts: a quiet eyebrow names the studio, then the rail —
+        // tabs on the left, the rule running to the edge. There is no display
+        // headline; the tabs are the heading.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Eyebrow(
+                local
                     ? 'On-device image studio'
                     : upscaling
                     ? 'Video finishing studio'
                     : 'Video studio',
               ),
-              SizedBox(height: short ? 5 : 10),
-              Text(
-                controller.selectedProvider.isLocal
-                    ? 'Make it local.'
-                    : upscaling
-                    ? 'Make it sharper.'
-                    : 'Make it move.',
-                style: short
-                    ? Theme.of(context).textTheme.headlineLarge
-                    : Theme.of(context).textTheme.displayLarge,
-              ),
-              // A studio with nothing to render with yet explains the
-              // bring-your-own-key model here, in the description's slot, so
-              // the composer keeps its place above the fold.
-              if (!short &&
-                  controller.needsProviderSetup &&
-                  !controller.selectedProvider.isLocal) ...<Widget>[
-                const SizedBox(height: 10),
-                _FirstRunGuidance(controller: controller),
-              ]
-              // Short viewports drop the description so the composer itself
-              // stays above the fold.
-              else if (!short) ...<Widget>[
-                const SizedBox(height: 10),
-                Text(
-                  controller.selectedProvider.isLocal
-                      ? 'Create private still images on this Apple device, with no account or API key.'
-                      : upscaling
-                      ? 'Remaster a finished clip with source-faithful or creative detail, up to 4K.'
-                      : 'Direct one continuous moment, pin the important frames, and let Clawnsole mind the render.',
-                  style: TextStyle(color: context.colors.onSurfaceVariant),
-                ),
-              ],
+            ),
+            SizedBox(height: short ? 6 : 8),
+            ComposerTabRail(controller: controller),
+            if (guidance != null) ...<Widget>[
+              const SizedBox(height: 12),
+              guidance,
             ],
-          ),
-        );
-        final plaque = _ProviderPlaque(controller: controller);
-        final plaqueLabel = Text(
-          'Model & Provider:',
-          style: TextStyle(
-            color: context.colors.onSurfaceVariant,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: .3,
-          ),
-        );
-        final tabs = ComposerTabStrip(controller: controller);
-        // Wide layouts keep the quiet label and pin the plaque to the far
-        // right. Phones drop the heading entirely and place the model selector
-        // at the top-right edge to keep the composer compact.
-        if (constraints.maxWidth < 720) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Align(alignment: Alignment.topRight, child: plaque),
-              const SizedBox(height: 8),
-              tabs,
-            ],
-          );
-        }
-        // Desktop widths hang the strip off the heading's slack, where it
-        // costs the composer no vertical space at all: the display line
-        // keeps its natural width and the strip takes the rest, so several
-        // drafts sit side by side before it has to scroll. Narrower layouts
-        // give the strip its own single line under the heading.
-        final inlineTabs = constraints.maxWidth >= 1200;
-        final heading = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: <Widget>[
-            if (inlineTabs) ...<Widget>[
-              // The display line and the strip split the slack evenly: the
-              // title never needs half of it, and the strip scrolls past
-              // whatever it cannot show.
-              Flexible(child: title),
-              const SizedBox(width: 24),
-              Expanded(
-                child: Align(alignment: Alignment.centerRight, child: tabs),
-              ),
-            ] else
-              Expanded(
-                child: Align(alignment: Alignment.centerLeft, child: title),
-              ),
-            const SizedBox(width: 22),
-            plaqueLabel,
-            const SizedBox(width: 10),
-            plaque,
           ],
-        );
-        if (inlineTabs) return heading;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[heading, const SizedBox(height: 8), tabs],
         );
       },
     );
@@ -1053,6 +994,20 @@ class _ComposerState extends State<_Composer> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
+                  IconButton(
+                    key: const ValueKey('prompt-rewrite-button'),
+                    tooltip: 'Rewrite with AI',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: controller.canRewriteDirection
+                        ? () => unawaited(
+                            showPromptRewriteDialog(
+                              context,
+                              controller: controller,
+                            ),
+                          )
+                        : null,
+                    icon: const Icon(Icons.auto_fix_high_rounded),
+                  ),
                   _PromptCharacterCounter(controller: controller),
                   IconButton(
                     key: const ValueKey('prompt-copy-button'),
@@ -5084,9 +5039,13 @@ class _ComposerFooter extends StatelessWidget {
               )
             else if (!controller.selectedProvider.requiresApiKey ||
                 controller.hasApiKey)
-              const Text(
-                'Ready when you are',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              const Flexible(
+                child: Text(
+                  'Ready when you are',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                ),
               )
             else
               // The status line is where a new studio looks first when
@@ -5158,17 +5117,33 @@ class _ComposerFooter extends StatelessWidget {
             : 'Generate video',
       ),
     );
+    // The model plaque sits in the footer, directly before Generate: the
+    // last thing the eye checks before rendering, inside the draft it
+    // belongs to rather than off in the heading.
+    final plaque = _ProviderPlaque(controller: controller);
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 480) {
+        // The plaque and the button together need real room; narrower
+        // composers stack them, the plaque keeping its place just above
+        // Generate.
+        if (constraints.maxWidth < 640) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[status, const SizedBox(height: 12), generate],
+            children: <Widget>[
+              status,
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerLeft, child: plaque),
+              const SizedBox(height: 10),
+              generate,
+            ],
           );
         }
         return Row(
           children: <Widget>[
             Expanded(child: status),
+            const SizedBox(width: 12),
+            plaque,
+            const SizedBox(width: 12),
             generate,
           ],
         );

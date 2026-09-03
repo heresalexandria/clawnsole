@@ -34,7 +34,7 @@ String _base64Payload(Uint8List bytes) => base64Encode(bytes);
 
 enum MediaPickerSource { library, files }
 
-enum AppNoticeAction { retryWithVisualNormalization }
+enum AppNoticeAction { retryWithVisualNormalization, undoDirectionRewrite }
 
 typedef FilePickerInvocation =
     Future<FilePickerResult?> Function({
@@ -550,6 +550,10 @@ class AppController extends ChangeNotifier {
   /// Live model listings per rewrite provider, fetched on demand.
   final Map<String, List<RewriteModel>> rewriteModels =
       <String, List<RewriteModel>>{};
+
+  /// The direction an AI Rewrite replaced in place, kept one notice tap
+  /// away until the director moves on.
+  ({String tabId, String previous, String rewritten})? _directionRewriteUndo;
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -2575,6 +2579,7 @@ class AppController extends ChangeNotifier {
 
   String? get noticeActionLabel => switch (noticeAction) {
     AppNoticeAction.retryWithVisualNormalization => 'Normalize & retry',
+    AppNoticeAction.undoDirectionRewrite => 'Undo',
     null => null,
   };
 
@@ -2587,6 +2592,8 @@ class AppController extends ChangeNotifier {
       case AppNoticeAction.retryWithVisualNormalization:
         await setAutoFixReferenceVideos(true);
         await submit();
+      case AppNoticeAction.undoDirectionRewrite:
+        undoDirectionRewrite();
     }
   }
 
@@ -6098,6 +6105,13 @@ class AppController extends ChangeNotifier {
       quotedCostUsdMin: estimate.minimumUsd,
       quotedCostUsdMax: estimate.maximumUsd,
       folderId: selectedGenerationFolderId,
+      // The tab's own name and its rewrite lineage travel with the record,
+      // so cards can say which draft made the film and what it iterates on.
+      title: activeComposerTab.title,
+      rewriteOfLocalId: activeComposerTab.rewriteSummary == null
+          ? null
+          : activeComposerTab.sourceGenerationId,
+      rewriteSummary: activeComposerTab.rewriteSummary,
       storage: effectiveStorage,
     );
     final current = snapshot;

@@ -826,6 +826,9 @@ class Generation {
     this.lastProviderResponse,
     this.lastProviderResponseAt,
     this.folderId,
+    this.title,
+    this.rewriteOfLocalId,
+    this.rewriteSummary,
     this.tags = const <String>[],
     this.favorite = false,
     this.hidden = false,
@@ -878,6 +881,17 @@ class Generation {
   final String? lastProviderResponse;
   final DateTime? lastProviderResponseAt;
   final String? folderId;
+
+  /// The custom name of the composer tab this was rendered from, when the
+  /// director named it; null for tabs that were never renamed.
+  final String? title;
+
+  /// The generation whose prompt AI Rewrite revised to make this one, so
+  /// iterations stay linked. Null for everything else.
+  final String? rewriteOfLocalId;
+
+  /// The model's one-line account of what the rewrite changed.
+  final String? rewriteSummary;
   final List<String> tags;
   final bool favorite;
   final bool hidden;
@@ -1008,6 +1022,10 @@ class Generation {
     DateTime? lastProviderResponseAt,
     String? folderId,
     bool clearFolder = false,
+    String? title,
+    bool clearTitle = false,
+    String? rewriteOfLocalId,
+    String? rewriteSummary,
     List<String>? tags,
     bool? favorite,
     bool? hidden,
@@ -1072,6 +1090,9 @@ class Generation {
     lastProviderResponseAt:
         lastProviderResponseAt ?? this.lastProviderResponseAt,
     folderId: clearFolder ? null : folderId ?? this.folderId,
+    title: clearTitle ? null : title ?? this.title,
+    rewriteOfLocalId: rewriteOfLocalId ?? this.rewriteOfLocalId,
+    rewriteSummary: rewriteSummary ?? this.rewriteSummary,
     tags: tags ?? this.tags,
     favorite: favorite ?? this.favorite,
     hidden: hidden ?? this.hidden,
@@ -1141,6 +1162,10 @@ class Generation {
           .toUtc()
           .toIso8601String(),
     if (folderId != null) 'folderId': folderId,
+    if (title != null && title!.trim().isNotEmpty) 'title': title,
+    if (rewriteOfLocalId != null) 'rewriteOfLocalId': rewriteOfLocalId,
+    if (rewriteSummary != null && rewriteSummary!.trim().isNotEmpty)
+      'rewriteSummary': rewriteSummary,
     if (tags.isNotEmpty) 'tags': tags,
     if (favorite) 'favorite': true,
     if (hidden) 'hidden': true,
@@ -1235,6 +1260,18 @@ class Generation {
       json['lastProviderResponseAt'] as String? ?? '',
     ),
     folderId: json['folderId'] as String?,
+    title: switch (json['title']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
+    rewriteOfLocalId: switch (json['rewriteOfLocalId']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
+    rewriteSummary: switch (json['rewriteSummary']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
     tags: (json['tags'] as List<Object?>? ?? const <Object?>[])
         .whereType<String>()
         .where((tag) => tag.trim().isNotEmpty)
