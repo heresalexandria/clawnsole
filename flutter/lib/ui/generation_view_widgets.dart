@@ -9,8 +9,10 @@ import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
+import 'generation_detail_modal.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_provenance.dart';
 import 'hardware.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'video_save_sheet.dart';
@@ -162,70 +164,92 @@ class MiniGenerationCard extends StatelessWidget {
             child: _DenseGenerationPreview(controller: controller, item: item),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 7, 9),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              GenerationPrompt(
-                controller: controller,
-                prompt: item.prompt,
-                collapsedLines: 2,
-                style: Theme.of(context).textTheme.titleSmall,
-                reserveCollapsedHeight: true,
-              ),
-              const SizedBox(height: 7),
-              _DenseGenerationMetadata(item: item),
-              const SizedBox(height: 7),
-              Row(
-                children: <Widget>[
-                  StorageBadge(
-                    storage: item.storage,
-                    compact: true,
-                    pendingUpload: generationPendingDriveUpload(item),
-                  ),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      relativeTime(item.createdAt),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  SizedBox.square(
-                    dimension: 31,
-                    child: IconButton(
-                      tooltip: item.favorite
-                          ? 'Remove from favorites'
-                          : 'Add to favorites',
-                      padding: EdgeInsets.zero,
-                      onPressed: () =>
-                          unawaited(controller.toggleGenerationFavorite(item)),
-                      icon: Icon(
-                        item.favorite
-                            ? Icons.star_rounded
-                            : Icons.star_border_rounded,
-                        size: 18,
-                        color: item.favorite ? context.tokens.brass : null,
-                      ),
-                    ),
-                  ),
-                  GenerationActionsMenu(
+        InkWell(
+          key: ValueKey<String>('generation-open-${item.localId}'),
+          onTap: () => unawaited(
+            showGenerationDetailModal(
+              context,
+              controller: controller,
+              item: item,
+            ),
+          ),
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(15),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 7, 9),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (GenerationProvenance.applies(item)) ...<Widget>[
+                  GenerationProvenance(
                     controller: controller,
                     item: item,
-                    onMove: onMove,
-                    onTag: onTag,
-                    onVisibility: onVisibility,
-                    onDelete: onDelete,
-                    onCopyToDrive: onCopyToDrive,
+                    compact: true,
                   ),
+                  const SizedBox(height: 5),
                 ],
-              ),
-            ],
+                GenerationPrompt(
+                  controller: controller,
+                  prompt: item.prompt,
+                  collapsedLines: 2,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  reserveCollapsedHeight: true,
+                ),
+                const SizedBox(height: 7),
+                _DenseGenerationMetadata(item: item),
+                const SizedBox(height: 7),
+                Row(
+                  children: <Widget>[
+                    StorageBadge(
+                      storage: item.storage,
+                      compact: true,
+                      pendingUpload: generationPendingDriveUpload(item),
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        relativeTime(item.createdAt),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    SizedBox.square(
+                      dimension: 31,
+                      child: IconButton(
+                        tooltip: item.favorite
+                            ? 'Remove from favorites'
+                            : 'Add to favorites',
+                        padding: EdgeInsets.zero,
+                        onPressed: () => unawaited(
+                          controller.toggleGenerationFavorite(item),
+                        ),
+                        icon: Icon(
+                          item.favorite
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded,
+                          size: 18,
+                          color: item.favorite ? context.tokens.brass : null,
+                        ),
+                      ),
+                    ),
+                    GenerationActionsMenu(
+                      controller: controller,
+                      item: item,
+                      onMove: onMove,
+                      onTag: onTag,
+                      onVisibility: onVisibility,
+                      onDelete: onDelete,
+                      onCopyToDrive: onCopyToDrive,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -274,40 +298,59 @@ class CompactGenerationRow extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                item.prompt,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall,
+          child: InkWell(
+            key: ValueKey<String>('generation-open-${item.localId}'),
+            onTap: () => unawaited(
+              showGenerationDetailModal(
+                context,
+                controller: controller,
+                item: item,
               ),
-              const SizedBox(height: 5),
-              _DenseGenerationMetadata(item: item, includeProvider: true),
-              const SizedBox(height: 5),
-              Row(
-                children: <Widget>[
-                  StorageBadge(
-                    storage: item.storage,
+            ),
+            borderRadius: BorderRadius.circular(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (GenerationProvenance.applies(item)) ...<Widget>[
+                  GenerationProvenance(
+                    controller: controller,
+                    item: item,
                     compact: true,
-                    pendingUpload: generationPendingDriveUpload(item),
                   ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      relativeTime(item.createdAt),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        color: context.colors.onSurfaceVariant,
+                  const SizedBox(height: 3),
+                ],
+                Text(
+                  item.prompt,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 5),
+                _DenseGenerationMetadata(item: item, includeProvider: true),
+                const SizedBox(height: 5),
+                Row(
+                  children: <Widget>[
+                    StorageBadge(
+                      storage: item.storage,
+                      compact: true,
+                      pendingUpload: generationPendingDriveUpload(item),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        relativeTime(item.createdAt),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          color: context.colors.onSurfaceVariant,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         SizedBox.square(

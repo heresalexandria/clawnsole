@@ -467,6 +467,85 @@ void main() {
     expect(find.text('Anthropic rejected this key.'), findsOneWidget);
   });
 
+  testWidgets('cards name their tab and link back to the film they rewrote', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1800));
+    final source = _film(localId: 'film-a', title: 'Kite');
+    final iteration = _film(
+      localId: 'film-b',
+      rewriteOfLocalId: 'film-a',
+      rewriteSummary: 'Recolored the kite.',
+    );
+    final gateway = _gateway();
+    gateway.snapshot = gateway.snapshot.copyWith(
+      generations: <Generation>[iteration, source],
+    );
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+
+    // A named tab shows its name above the prompt; an unnamed one shows no
+    // title row at all.
+    await _pump(tester, GenerationCard(controller: controller, item: source));
+    expect(find.byKey(const ValueKey('generation-title-film-a')), findsOne);
+    expect(find.text('Kite'), findsOneWidget);
+    await _pump(tester, GenerationCard(controller: controller, item: _film()));
+    expect(find.byKey(const ValueKey('generation-title-film-1')), findsNothing);
+
+    // The iteration links to its source, and the link opens that film.
+    await _pump(
+      tester,
+      GenerationCard(controller: controller, item: iteration),
+    );
+    expect(find.text('Rewrite of Kite'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('generation-rewrite-source-film-b')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(
+      find.byType(Dialog).evaluate().isNotEmpty ||
+          find.byType(AlertDialog).evaluate().isNotEmpty,
+      isTrue,
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // A source that is gone reads as such and is not a link.
+    await _pump(
+      tester,
+      GenerationCard(
+        controller: controller,
+        item: _film(localId: 'film-c', rewriteOfLocalId: 'film-gone'),
+      ),
+    );
+    expect(find.text('Rewrite of a removed film'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('generation-rewrite-source-film-c')),
+      findsNothing,
+    );
+
+    // Dense cards carry the same line, and every card body opens the film.
+    await _pump(
+      tester,
+      MiniGenerationCard(controller: controller, item: iteration),
+    );
+    expect(find.text('Rewrite of Kite'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('generation-open-film-b')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Done'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await _pump(
+      tester,
+      CompactGenerationRow(controller: controller, item: source),
+    );
+    expect(find.text('Kite'), findsOneWidget);
+  });
+
   test('a preference write keeps the connected rewrite providers', () async {
     final gateway = _gateway(
       connectedRewriteProviders: const <String>{'openai'},
@@ -659,13 +738,20 @@ AppController _controller(_RewriteGateway gateway) {
 }
 
 Generation _film({
+  String localId = 'film-1',
   String status = 'Ready',
   String? resultUrl = 'https://cdn.example.com/film.mp4',
   GenerationOutputKind outputKind = GenerationOutputKind.video,
+  String? title,
+  String? rewriteOfLocalId,
+  String? rewriteSummary,
 }) {
   final now = DateTime.utc(2026, 9, 1, 21);
   return Generation(
-    localId: 'film-1',
+    localId: localId,
+    title: title,
+    rewriteOfLocalId: rewriteOfLocalId,
+    rewriteSummary: rewriteSummary,
     provider: 'artcraft',
     model: 'seedance_2p5',
     outputKind: outputKind,

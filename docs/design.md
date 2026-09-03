@@ -273,7 +273,10 @@ Layout order:
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-8. Footer: claw + readiness line, mode chip, plum **Generate video**.
+8. Footer: claw + readiness line, mode chip, then the navy **model
+   plaque** (provider + model, opens the picker) directly before the plum
+   **Generate video** — under 480 px the plaque takes its own line above
+   the button.
 
 **Fold contract:** the heading and the whole composer, Generate button
 included, fit above the fold at 1440×900, with the Recent work header
@@ -285,7 +288,7 @@ no display headline: a quiet eyebrow names the studio (*Video studio* /
 *Video finishing studio* / *On-device image studio*), and beneath it runs
 the **tab rail** (`ComposerTabRail`) — folder-cut console keys (rounded
 shoulders, flat foot) standing on a hairline rule that runs from the last
-tab to the *Model & Provider* plaque pinned to the far right. Idle tabs rest
+tab to the edge. Idle tabs rest
 on the rule; the tab in front is a touch taller, lit plum, and covers the
 rule beneath it, so the open draft reads as continuous with the composer.
 Each tab is a complete, independent draft — Direction, provider and model,
@@ -297,8 +300,9 @@ derive from the first words of the prompt until renamed. Reuse and Enhance
 fill the active tab when it is still blank and otherwise open a new tab, so
 no draft is ever clobbered. A tab born from AI Rewrite wears a small brass
 `auto_awesome` mark whose tooltip is the model's one-line summary of what
-changed. Phones keep the plaque at the top-right edge and give the rail its
-own line beneath it, the rule running to the edge; the first-run
+changed. The model plaque is not in the heading at all: it sits in the
+composer footer directly before Generate (see item 8), inside the draft it
+belongs to. Phones drop the eyebrow and keep just the rail; the first-run
 bring-your-own-key line sits under the rail when no provider is set up. Tabs persist on the device
 (`StoredData.composerTabs`, never in Drive data): the prompt, settings, and
 ids survive a restart, and media that came from a generation is re-hydrated

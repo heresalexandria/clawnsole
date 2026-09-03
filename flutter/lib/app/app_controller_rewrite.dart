@@ -27,6 +27,21 @@ extension AiRewriteController on AppController {
       item.prompt.trim().isNotEmpty &&
       canReuse(item);
 
+  /// The record for [localId] in the library, if it is still there.
+  Generation? generationById(String? localId) => localId == null
+      ? null
+      : generations.where((item) => item.localId == localId).firstOrNull;
+
+  /// The film [item] was rewritten from, when it was born of AI Rewrite and
+  /// that film still exists.
+  Generation? rewriteSourceOf(Generation item) =>
+      generationById(item.rewriteOfLocalId);
+
+  /// Every film rewritten from [item], newest first.
+  List<Generation> rewritesOf(Generation item) => generations
+      .where((candidate) => candidate.rewriteOfLocalId == item.localId)
+      .toList();
+
   /// Whether the Direction box in front holds something to rewrite.
   bool get canRewriteDirection =>
       gateway is PromptRewriteGateway && form.prompt.trim().isNotEmpty;

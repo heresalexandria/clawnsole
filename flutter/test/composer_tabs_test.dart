@@ -372,7 +372,112 @@ void main() {
       controller.dispose();
     });
 
-    testWidgets('desktop runs the rail from the tabs to the plaque', (
+    testWidgets(
+      'desktop keeps the rail above the composer and the plaque by Generate',
+      (tester) async {
+        tester.view.physicalSize = const Size(1440, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final controller = await _controller(settle: false);
+        await tester.pumpWidget(_host(controller));
+        await tester.pumpAndSettle();
+
+        // The tabs are the heading: no display headline, tabs flush left on
+        // their rail above the composer, the model plaque in the footer right
+        // before Generate, and Generate still above the fold at the size the
+        // fold contract names.
+        expect(find.text('Make it move.'), findsNothing);
+        expect(find.text('Model & Provider:'), findsNothing);
+        expect(find.text('VIDEO STUDIO'), findsOne);
+        final add = tester.getRect(
+          find.byKey(const ValueKey('composer-tab-add')),
+        );
+        final plaque = tester.getRect(
+          find.byKey(const ValueKey('provider-plaque')),
+        );
+        final generate = tester.getRect(find.text('Generate video'));
+        expect(add.bottom, lessThan(plaque.top));
+        expect(plaque.right, lessThan(generate.left));
+        expect(plaque.top, lessThan(generate.bottom));
+        expect(plaque.bottom, greaterThan(generate.top));
+        expect(generate.bottom, lessThan(900));
+        controller.dispose();
+      },
+    );
+
+    test(
+      'a render records its tab name and the film it was rewritten from',
+      () async {
+        final now = DateTime.utc(2026, 8, 15);
+        // A plain text-to-video film: nothing to re-hydrate, nothing to block
+        // the render on.
+        final source = Generation(
+          localId: 'film-source',
+          status: 'Ready',
+          prompt: 'A sloth turns toward the reading lamp.',
+          mode: VideoMode.t2v,
+          config: const GenerationConfig(
+            aspectRatio: '16:9',
+            duration: 8,
+            resolution: 'hd',
+            generateAudio: true,
+            safetyTolerance: 2,
+            draft: false,
+          ),
+          resultUrl: 'https://example.com/film-source.mp4',
+          createdAt: now,
+          updatedAt: now,
+        );
+        // A studio with keys, so the render passes validation and is filed.
+        final controller = AppController(
+          gateway: _PlainGateway(
+            LocalSnapshot(
+              generations: <Generation>[source],
+              preferences: const AppPreferences(),
+              hasApiKey: true,
+              connectedProviders: const <String>{'bfl', _referenceProvider},
+              availableProviders: const <String>{'bfl', _referenceProvider},
+              storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+            ),
+          ),
+        );
+        await controller.initialize();
+        await _settle();
+        addTearDown(controller.dispose);
+
+        await controller.openGenerationInNewTab(
+          source,
+          prompt: 'A sloth turns, slower, toward a warmer lamp.',
+          rewriteSummary: 'Slowed the turn and warmed the lamp.',
+        );
+        controller.renameComposerTab(controller.activeComposerTabId, 'Lamp');
+        // The Create screen collects the retention acknowledgement in a
+        // dialog before a BFL render; here it is simply granted.
+        await controller.submit(providerRetentionRiskAcknowledged: true);
+
+        final rendered = controller.generations.first;
+        expect(rendered.localId, isNot(source.localId));
+        expect(rendered.title, 'Lamp');
+        expect(rendered.rewriteOfLocalId, source.localId);
+        expect(rendered.rewriteSummary, 'Slowed the turn and warmed the lamp.');
+        expect(controller.rewriteSourceOf(rendered)?.localId, source.localId);
+        expect(
+          controller.rewritesOf(source).map((item) => item.localId),
+          <String>[rendered.localId],
+        );
+
+        // A plain tab, never renamed and not a rewrite, stamps nothing.
+        controller.addComposerTab();
+        controller.updateForm((form) => form.prompt = 'Fresh.');
+        await controller.submit(providerRetentionRiskAcknowledged: true);
+        final plain = controller.generations.first;
+        expect(plain.title, isNull);
+        expect(plain.rewriteOfLocalId, isNull);
+        expect(plain.rewriteSummary, isNull);
+      },
+    );
+
+    testWidgets('the tab in front carries a visible rename control', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1440, 900);
@@ -382,22 +487,35 @@ void main() {
       await tester.pumpWidget(_host(controller));
       await tester.pumpAndSettle();
 
-      // The tabs are the heading: no display headline, the tabs flush left
-      // on the same row as the model plaque pinned to the far right, and the
-      // composer still above the fold at the size the fold contract names.
-      expect(find.text('Make it move.'), findsNothing);
-      expect(find.text('VIDEO STUDIO'), findsOne);
-      final add = tester.getRect(
-        find.byKey(const ValueKey('composer-tab-add')),
+      final active = controller.activeComposerTabId;
+      await tester.tap(
+        find.byKey(ValueKey<String>('composer-tab-rename-$active')),
       );
-      final plaque = tester.getRect(
-        find.byKey(const ValueKey('provider-plaque')),
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('composer-tab-rename-field')),
+        'Harbor',
       );
-      final generate = tester.getRect(find.text('Generate video'));
-      expect(add.right, lessThan(plaque.left));
-      expect(add.bottom, closeTo(plaque.bottom, 1));
-      expect(plaque.right, closeTo(generate.right, 40));
-      expect(generate.bottom, lessThan(900));
+      await tester.tap(find.byKey(const ValueKey('composer-tab-rename-save')));
+      await tester.pumpAndSettle();
+      expect(controller.activeComposerTab.title, 'Harbor');
+      expect(find.text('Harbor'), findsOneWidget);
+
+      // Only the tab in front wears the pencil.
+      controller.addComposerTab();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(ValueKey<String>('composer-tab-rename-$active')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(
+          ValueKey<String>(
+            'composer-tab-rename-${controller.activeComposerTabId}',
+          ),
+        ),
+        findsOneWidget,
+      );
       controller.dispose();
     });
 

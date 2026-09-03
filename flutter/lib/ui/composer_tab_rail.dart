@@ -223,7 +223,7 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
                     padding: EdgeInsets.fromLTRB(
                       11,
                       selected ? 8 : 6,
-                      closable ? 4 : 11,
+                      closable || selected ? 4 : 11,
                       selected ? 8 : 6,
                     ),
                     decoration: _tabFill(context, selected: selected),
@@ -257,6 +257,8 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
                             ),
                           ),
                         ),
+                        if (selected)
+                          _RenameTabButton(tab: tab, onTap: _rename),
                         if (closable)
                           _CloseTabButton(
                             controller: widget.controller,
@@ -273,6 +275,42 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
       ),
     );
   }
+}
+
+/// The small pencil on the tab in front: the visible way to rename a draft
+/// (long-press and double-tap still work on any tab).
+class _RenameTabButton extends StatelessWidget {
+  const _RenameTabButton({required this.tab, required this.onTap});
+
+  final ComposerTab tab;
+  final Future<void> Function() onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: 'Rename tab ${tab.label}',
+    onTap: () => unawaited(onTap()),
+    child: HardwareTouchTarget(
+      onTap: () => unawaited(onTap()),
+      minWidth: 32,
+      child: Tooltip(
+        message: 'Rename tab',
+        child: InkResponse(
+          key: ValueKey<String>('composer-tab-rename-${tab.id}'),
+          onTap: () => unawaited(onTap()),
+          radius: 14,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Icon(
+              Icons.edit_outlined,
+              size: 12,
+              color: context.colors.onPrimary.withValues(alpha: .85),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 /// The tiny × inside a tab. It is its own button node so a screen reader

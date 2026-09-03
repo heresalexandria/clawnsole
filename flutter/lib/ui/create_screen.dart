@@ -159,7 +159,6 @@ class _CreateHeading extends StatelessWidget {
     final local = controller.selectedProvider.isLocal;
     final upscaling = controller.selectedModel.isUpscaler;
     final short = _isShort(context);
-    final plaque = _ProviderPlaque(controller: controller);
     // A studio with nothing to render with yet explains the
     // bring-your-own-key model under the rail; short viewports drop the line
     // so the composer itself stays above the fold.
@@ -168,14 +167,12 @@ class _CreateHeading extends StatelessWidget {
         : null;
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Phones keep the model selector at the top-right edge and give the
-        // rail its own line beneath it, the rule running to the edge.
+        // Phones drop the eyebrow and keep just the rail, the rule running
+        // to the edge; the model plaque lives in the composer's footer.
         if (constraints.maxWidth < 720) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Align(alignment: Alignment.topRight, child: plaque),
-              const SizedBox(height: 8),
               ComposerTabRail(controller: controller),
               if (guidance != null) ...<Widget>[
                 const SizedBox(height: 10),
@@ -185,8 +182,8 @@ class _CreateHeading extends StatelessWidget {
           );
         }
         // Wider layouts: a quiet eyebrow names the studio, then the rail —
-        // tabs on the left, the rule running on to the plaque pinned to the
-        // far right. There is no display headline; the tabs are the heading.
+        // tabs on the left, the rule running to the edge. There is no display
+        // headline; the tabs are the heading.
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
@@ -201,25 +198,7 @@ class _CreateHeading extends StatelessWidget {
               ),
             ),
             SizedBox(height: short ? 6 : 8),
-            ComposerTabRail(
-              controller: controller,
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    'Model & Provider:',
-                    style: TextStyle(
-                      color: context.colors.onSurfaceVariant,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: .3,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  plaque,
-                ],
-              ),
-            ),
+            ComposerTabRail(controller: controller),
             if (guidance != null) ...<Widget>[
               const SizedBox(height: 12),
               guidance,
@@ -5060,9 +5039,13 @@ class _ComposerFooter extends StatelessWidget {
               )
             else if (!controller.selectedProvider.requiresApiKey ||
                 controller.hasApiKey)
-              const Text(
-                'Ready when you are',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              const Flexible(
+                child: Text(
+                  'Ready when you are',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                ),
               )
             else
               // The status line is where a new studio looks first when
@@ -5134,17 +5117,33 @@ class _ComposerFooter extends StatelessWidget {
             : 'Generate video',
       ),
     );
+    // The model plaque sits in the footer, directly before Generate: the
+    // last thing the eye checks before rendering, inside the draft it
+    // belongs to rather than off in the heading.
+    final plaque = _ProviderPlaque(controller: controller);
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 480) {
+        // The plaque and the button together need real room; narrower
+        // composers stack them, the plaque keeping its place just above
+        // Generate.
+        if (constraints.maxWidth < 640) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[status, const SizedBox(height: 12), generate],
+            children: <Widget>[
+              status,
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerLeft, child: plaque),
+              const SizedBox(height: 10),
+              generate,
+            ],
           );
         }
         return Row(
           children: <Widget>[
             Expanded(child: status),
+            const SizedBox(width: 12),
+            plaque,
+            const SizedBox(width: 12),
             generate,
           ],
         );
