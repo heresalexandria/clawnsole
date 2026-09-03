@@ -13,6 +13,7 @@ import '../core/provider_catalog.dart';
 import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
+import 'composer_tab_strip.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -122,7 +123,14 @@ class _CreateScreenState extends State<CreateScreen> {
                   children: <Widget>[
                     _CreateHeading(controller: controller),
                     SizedBox(height: short ? 8 : 18),
-                    _Composer(controller: controller),
+                    // Each tab owns its disclosure panels and field state, so
+                    // switching drafts rebuilds the composer from scratch.
+                    KeyedSubtree(
+                      key: ValueKey<String>(
+                        'composer-${controller.activeComposerTabId}',
+                      ),
+                      child: _Composer(controller: controller),
+                    ),
                     SizedBox(height: short ? 12 : 24),
                     _RecentWork(
                       controller: controller,
@@ -209,23 +217,52 @@ class _CreateHeading extends StatelessWidget {
             letterSpacing: .3,
           ),
         );
+        final tabs = ComposerTabStrip(controller: controller);
         // Wide layouts keep the quiet label and pin the plaque to the far
         // right. Phones drop the heading entirely and place the model selector
         // at the top-right edge to keep the composer compact.
         if (constraints.maxWidth < 720) {
-          return Align(alignment: Alignment.topRight, child: plaque);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Align(alignment: Alignment.topRight, child: plaque),
+              const SizedBox(height: 8),
+              tabs,
+            ],
+          );
         }
-        return Row(
+        // Desktop widths hang the strip off the heading's slack, where it
+        // costs the composer no vertical space at all: the display line
+        // keeps its natural width and the strip takes the rest, so several
+        // drafts sit side by side before it has to scroll. Narrower layouts
+        // give the strip its own single line under the heading.
+        final inlineTabs = constraints.maxWidth >= 1200;
+        final heading = Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            Expanded(
-              child: Align(alignment: Alignment.centerLeft, child: title),
-            ),
+            if (inlineTabs) ...<Widget>[
+              // The display line and the strip split the slack evenly: the
+              // title never needs half of it, and the strip scrolls past
+              // whatever it cannot show.
+              Flexible(child: title),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Align(alignment: Alignment.centerRight, child: tabs),
+              ),
+            ] else
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: title),
+              ),
             const SizedBox(width: 22),
             plaqueLabel,
             const SizedBox(width: 10),
             plaque,
           ],
+        );
+        if (inlineTabs) return heading;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[heading, const SizedBox(height: 8), tabs],
         );
       },
     );
@@ -1037,7 +1074,10 @@ class _ComposerState extends State<_Composer> {
             ),
             const SizedBox(height: 7),
             ReferencePromptField(
-              key: ValueKey('generation-prompt-${controller.formRevision}'),
+              key: ValueKey(
+                'generation-prompt-${controller.activeComposerTabId}-'
+                '${controller.formRevision}',
+              ),
               prompt: form.prompt,
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(controller),

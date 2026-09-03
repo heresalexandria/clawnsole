@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
+import 'composer_tabs.dart';
 import 'models.dart';
 import 'native_gateway.dart';
+import 'prompt_rewrite.dart';
 import 'web_gateway.dart';
 
 abstract interface class AppGateway {
@@ -65,6 +67,29 @@ abstract interface class ProviderRetentionAcknowledgementGateway {
 abstract interface class ProviderCatalogCacheGateway {
   Future<Map<String, Object?>?> loadProviderCatalogCache();
   Future<void> saveProviderCatalogCache(Map<String, Object?> cache);
+}
+
+/// Device-local persistence for the Create screen's composer tabs.
+///
+/// Tabs are drafts, not library data: they stay on the device that typed them
+/// and never ride along to Drive. Gateways without this interface keep tabs
+/// for the session only.
+abstract interface class ComposerTabsGateway {
+  Future<ComposerTabsState?> loadComposerTabs();
+  Future<void> saveComposerTabs(ComposerTabsState state);
+}
+
+/// AI Rewrite: multimodal LLM calls that must run beside the saved key.
+///
+/// Native builds call the vendor directly; the web renderer asks the
+/// companion, which holds the credential. [candidateKey] lets Settings test
+/// a key before it is saved.
+abstract interface class PromptRewriteGateway {
+  Future<List<RewriteModel>> listRewriteModels(
+    String providerId, {
+    String? candidateKey,
+  });
+  Future<PromptRewriteResult> rewritePrompt(PromptRewriteRequest request);
 }
 
 /// Recovery of result downloads a platform background transfer service

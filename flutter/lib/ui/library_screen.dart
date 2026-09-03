@@ -13,6 +13,7 @@ import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
+import 'prompt_rewrite_dialog.dart';
 import 'library_folders.dart';
 import 'video_save_sheet.dart';
 
@@ -1079,6 +1080,28 @@ class _GenerationCardState extends State<GenerationCard> {
                                     : 'Reuse',
                               ),
                             ),
+                          if (widget.controller.canRewrite(item))
+                            OutlinedButton.icon(
+                              key: const ValueKey('library-rewrite'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(88, 40),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 15,
+                                ),
+                              ),
+                              onPressed: () => unawaited(
+                                showPromptRewriteDialog(
+                                  context,
+                                  controller: widget.controller,
+                                  item: item,
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.auto_awesome_outlined,
+                                size: 16,
+                              ),
+                              label: const Text('AI Rewrite'),
+                            ),
                           GenerationStatusButton(
                             controller: widget.controller,
                             item: item,
@@ -1092,6 +1115,7 @@ class _GenerationCardState extends State<GenerationCard> {
                       item: item,
                       includeSave: false,
                       includeReuse: false,
+                      includeRewrite: false,
                       includeCheckStatus: false,
                       onMove: move,
                       onTag: tag,

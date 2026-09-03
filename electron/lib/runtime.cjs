@@ -11,6 +11,7 @@ const EXTERNAL_HOSTS = new Set([
   "app.runwayml.com",
   "docs.dev.runwayml.com",
   "clawnsole.app",
+  "console.anthropic.com",
   "github.com",
   "storyteller-docs.netlify.app",
   "support.apple.com",
@@ -18,6 +19,7 @@ const EXTERNAL_HOSTS = new Set([
   "www.krea.ai",
   "heresalexandria.com",
   "heresalexandria.github.io",
+  "platform.openai.com",
 ]);
 
 function parseUrl(value) {

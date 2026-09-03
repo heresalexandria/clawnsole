@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'composer_tabs.dart';
 import 'generation_status.dart';
 
 String providerCredentialAcknowledgementId(
@@ -1297,6 +1298,9 @@ class AppPreferences {
     this.localThumbnailCacheMb = defaultLocalThumbnailCacheMb,
     this.autoFixReferenceVideos = defaultAutoFixReferenceVideos,
     this.themeMode = AppThemeMode.system,
+    this.rewriteProvider,
+    this.rewriteModels = const <String, String>{},
+    this.rewriteEfforts = const <String, String>{},
     this.favoriteModels = const <String>[],
     this.favoriteProviders = const <String>[],
   });
@@ -1338,6 +1342,15 @@ class AppPreferences {
 
   final AppThemeMode themeMode;
 
+  /// The AI Rewrite provider chosen last; null until the first rewrite.
+  final String? rewriteProvider;
+
+  /// Last-used AI Rewrite model id per provider id.
+  final Map<String, String> rewriteModels;
+
+  /// Last-used AI Rewrite effort level per provider id.
+  final Map<String, String> rewriteEfforts;
+
   /// Starred models as [modelFavoriteKey] values, oldest star first. They
   /// surface in a Favorites section at the top of the model picker.
   final List<String> favoriteModels;
@@ -1367,6 +1380,10 @@ class AppPreferences {
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
     AppThemeMode? themeMode,
+    String? rewriteProvider,
+    bool clearRewriteProvider = false,
+    Map<String, String>? rewriteModels,
+    Map<String, String>? rewriteEfforts,
     List<String>? favoriteModels,
     List<String>? favoriteProviders,
   }) => AppPreferences(
@@ -1396,6 +1413,11 @@ class AppPreferences {
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
     themeMode: themeMode ?? this.themeMode,
+    rewriteProvider: clearRewriteProvider
+        ? null
+        : rewriteProvider ?? this.rewriteProvider,
+    rewriteModels: rewriteModels ?? this.rewriteModels,
+    rewriteEfforts: rewriteEfforts ?? this.rewriteEfforts,
     favoriteModels: favoriteModels ?? this.favoriteModels,
     favoriteProviders: favoriteProviders ?? this.favoriteProviders,
   );
@@ -1420,6 +1442,11 @@ class AppPreferences {
     'localThumbnailCacheMb': localThumbnailCacheMb,
     'autoFixReferenceVideos': autoFixReferenceVideos,
     'themeMode': themeMode.name,
+    if (rewriteProvider != null) 'rewriteProvider': rewriteProvider,
+    if (rewriteModels.isNotEmpty)
+      'rewriteModels': _sortedStringMap(rewriteModels),
+    if (rewriteEfforts.isNotEmpty)
+      'rewriteEfforts': _sortedStringMap(rewriteEfforts),
     // Empty favorites stay out of the JSON so untouched preferences keep
     // their previous shape byte for byte.
     if (favoriteModels.isNotEmpty) 'favoriteModels': favoriteModels,
@@ -1498,11 +1525,34 @@ class AppPreferences {
         _ => defaultAutoFixReferenceVideos,
       },
       themeMode: AppThemeMode.parse(json['themeMode']),
+      rewriteProvider: switch (json['rewriteProvider']) {
+        final String value when value.trim().isNotEmpty => value.trim(),
+        _ => null,
+      },
+      rewriteModels: _stringMap(json['rewriteModels']),
+      rewriteEfforts: _stringMap(json['rewriteEfforts']),
       favoriteModels: _favoriteList(json['favoriteModels']),
       favoriteProviders: _favoriteList(json['favoriteProviders']),
     );
   }
 }
+
+Map<String, String> _stringMap(Object? value) {
+  if (value is! Map<Object?, Object?>) return const <String, String>{};
+  return <String, String>{
+    for (final entry in value.entries)
+      if (entry.key is String &&
+          entry.value is String &&
+          (entry.value! as String).trim().isNotEmpty)
+        entry.key! as String: (entry.value! as String).trim(),
+  };
+}
+
+Map<String, String> _sortedStringMap(Map<String, String> value) =>
+    Map<String, String>.fromEntries(
+      value.entries.toList()
+        ..sort((left, right) => left.key.compareTo(right.key)),
+    );
 
 class StoredData {
   const StoredData({
@@ -1519,6 +1569,7 @@ class StoredData {
     this.driveFolderName = '',
     this.driveFolderId = '',
     this.providerCatalogCache,
+    this.composerTabs,
   });
 
   final String apiKey;
@@ -1534,6 +1585,9 @@ class StoredData {
   final String driveFolderName;
   final String driveFolderId;
   final Map<String, Object?>? providerCatalogCache;
+
+  /// Device-local composer tabs; never part of the Drive portable data.
+  final ComposerTabsState? composerTabs;
 
   StoredData copyWith({
     String? apiKey,
@@ -1551,6 +1605,8 @@ class StoredData {
     String? driveFolderId,
     Map<String, Object?>? providerCatalogCache,
     bool clearProviderCatalogCache = false,
+    ComposerTabsState? composerTabs,
+    bool clearComposerTabs = false,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -1573,6 +1629,7 @@ class StoredData {
     providerCatalogCache: clearProviderCatalogCache
         ? null
         : providerCatalogCache ?? this.providerCatalogCache,
+    composerTabs: clearComposerTabs ? null : composerTabs ?? this.composerTabs,
   );
 
   String apiKeyFor(String provider) =>
@@ -1645,6 +1702,7 @@ class StoredData {
     if (driveFolderId.isNotEmpty) 'driveFolderId': driveFolderId,
     if (providerCatalogCache != null)
       'providerCatalogCache': providerCatalogCache,
+    if (composerTabs != null) 'composerTabs': composerTabs!.toJson(),
     if (folders.isNotEmpty)
       'folders': folders.map((folder) => folder.toJson()).toList(),
     if (savedReferences.isNotEmpty)
@@ -1780,6 +1838,12 @@ class StoredData {
         ),
         _ => null,
       },
+      composerTabs: switch (json['composerTabs']) {
+        final Map<Object?, Object?> tabs => ComposerTabsState.fromJson(
+          tabs.map((key, value) => MapEntry(key.toString(), value)),
+        ),
+        _ => null,
+      },
       folders: (json['folders'] as List<Object?>? ?? const <Object?>[])
           .whereType<Map<Object?, Object?>>()
           .map(
@@ -1906,6 +1970,7 @@ class LocalSnapshot {
     this.folders = const <LibraryFolder>[],
     this.savedReferences = const <SavedReference>[],
     this.settingsVault = const SettingsVaultStatus.unavailable(),
+    this.connectedRewriteProviders = const <String>{},
   });
 
   final List<Generation> generations;
@@ -1919,6 +1984,9 @@ class LocalSnapshot {
   final List<SavedReference> savedReferences;
   final SettingsVaultStatus settingsVault;
 
+  /// AI Rewrite providers (`openai`, `anthropic`) with a usable key.
+  final Set<String> connectedRewriteProviders;
+
   LocalSnapshot copyWith({
     List<Generation>? generations,
     AppPreferences? preferences,
@@ -1930,6 +1998,7 @@ class LocalSnapshot {
     List<LibraryFolder>? folders,
     List<SavedReference>? savedReferences,
     SettingsVaultStatus? settingsVault,
+    Set<String>? connectedRewriteProviders,
   }) => LocalSnapshot(
     generations: generations ?? this.generations,
     preferences: preferences ?? this.preferences,
@@ -1943,6 +2012,8 @@ class LocalSnapshot {
     folders: folders ?? this.folders,
     savedReferences: savedReferences ?? this.savedReferences,
     settingsVault: settingsVault ?? this.settingsVault,
+    connectedRewriteProviders:
+        connectedRewriteProviders ?? this.connectedRewriteProviders,
   );
 
   bool hasApiKeyFor(String provider) =>
@@ -1960,6 +2031,7 @@ class LocalSnapshot {
     'savedReferences': savedReferences.map((item) => item.toJson()).toList(),
     'settingsVault': settingsVault.toJson(),
     'storage': storage.toJson(),
+    'connectedRewriteProviders': connectedRewriteProviders.toList()..sort(),
   };
 
   factory LocalSnapshot.fromJson(Map<String, Object?> json) => LocalSnapshot(
@@ -2017,6 +2089,11 @@ class LocalSnapshot {
         (key, value) => MapEntry(key.toString(), value),
       ),
     ),
+    connectedRewriteProviders:
+        (json['connectedRewriteProviders'] as List<Object?>? ??
+                const <Object?>[])
+            .whereType<String>()
+            .toSet(),
   );
 }
 

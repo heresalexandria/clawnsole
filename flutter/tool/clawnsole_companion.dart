@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/atomic_file.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
@@ -19,6 +20,8 @@ import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/library_rules.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
+import 'package:clawnsole/core/prompt_rewrite.dart';
+import 'package:clawnsole/core/prompt_rewrite_router.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/provider_manifest.dart';
@@ -100,6 +103,8 @@ Future<void> main(List<String> arguments) async {
           Platform.environment['RUNWAYML_API_SECRET']?.trim() ??
           '',
       'krea': Platform.environment['KREA_API_KEY']?.trim() ?? '',
+      'openai': Platform.environment['OPENAI_API_KEY']?.trim() ?? '',
+      'anthropic': Platform.environment['ANTHROPIC_API_KEY']?.trim() ?? '',
     },
     webRoot: config.webRoot == null ? null : Directory(config.webRoot!),
     requestToken: bootstrap.requestToken,
@@ -744,6 +749,7 @@ class CompanionApp {
     required CompanionStore store,
     required BflApi api,
     ProviderApiRouter? providerRouter,
+    PromptRewriteRouter? rewriteRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
     String requestToken = '',
@@ -756,6 +762,7 @@ class CompanionApp {
     store: CompanionHybridStore(HybridDataStore(local: store)),
     api: api,
     providerRouter: providerRouter,
+    rewriteRouter: rewriteRouter,
     fallbackApiKeys: fallbackApiKeys,
     webRoot: webRoot,
     requestToken: requestToken,
@@ -769,6 +776,7 @@ class CompanionApp {
     required CompanionHybridStore store,
     required BflApi api,
     ProviderApiRouter? providerRouter,
+    PromptRewriteRouter? rewriteRouter,
     Map<String, String> fallbackApiKeys = const <String, String>{},
     Directory? webRoot,
     String requestToken = '',
@@ -779,6 +787,7 @@ class CompanionApp {
         const DisabledReferenceVideoNormalizationService(),
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
+       _rewrite = rewriteRouter ?? PromptRewriteRouter(),
        _fallbackApiKeys = fallbackApiKeys,
        _webRoot = webRoot,
        _requestToken = requestToken,
@@ -789,6 +798,7 @@ class CompanionApp {
 
   final CompanionHybridStore _store;
   final ProviderApiRouter _providers;
+  final PromptRewriteRouter _rewrite;
   final Map<String, String> _fallbackApiKeys;
   final Directory? _webRoot;
   final String _requestToken;
@@ -860,6 +870,61 @@ class CompanionApp {
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
         });
+      }
+      if (request.method == 'GET' && path == '/composer-tabs') {
+        return await _json(request.response, 200, <String, Object?>{
+          'composerTabs': (await _store.read()).composerTabs?.toJson(),
+        });
+      }
+      if (request.method == 'PUT' && path == '/composer-tabs') {
+        final body = await _bodyMap(request);
+        final raw = body['composerTabs'];
+        if (raw is! Map<Object?, Object?>) {
+          throw const FormatException('The composer tab state is invalid.');
+        }
+        final state = ComposerTabsState.fromJson(
+          raw.map((key, value) => MapEntry(key.toString(), value)),
+        );
+        await _store.mutate<void>(
+          (data) => StoreChange<void>(data.copyWith(composerTabs: state), null),
+        );
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
+      }
+      if (request.method == 'POST' && path == '/rewrite/models') {
+        final body = await _bodyMap(request);
+        final provider = body['provider']?.toString() ?? '';
+        final candidate = body['apiKey']?.toString().trim() ?? '';
+        final key = candidate.isNotEmpty
+            ? candidate
+            : _activeKey(await _store.read(), provider);
+        try {
+          final models = await _rewrite.listModels(
+            providerId: provider,
+            apiKey: _requireRewriteKey(provider, key),
+          );
+          return await _json(request.response, 200, <String, Object?>{
+            'models': models.map((model) => model.toJson()).toList(),
+          });
+        } on PromptRewriteException catch (error) {
+          return await _rewriteError(request.response, error);
+        }
+      }
+      if (request.method == 'POST' && path == '/rewrite/prompt') {
+        final rewrite = PromptRewriteRequest.fromJson(await _bodyMap(request));
+        try {
+          final result = await _rewrite.rewrite(
+            rewrite,
+            apiKey: _requireRewriteKey(
+              rewrite.providerId,
+              _activeKey(await _store.read(), rewrite.providerId),
+            ),
+          );
+          return await _json(request.response, 200, result.toJson());
+        } on PromptRewriteException catch (error) {
+          return await _rewriteError(request.response, error);
+        }
       }
       if (request.method == 'PATCH' && path == '/state') {
         final body = await _bodyMap(request);
@@ -1880,6 +1945,9 @@ class CompanionApp {
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      connectedRewriteProviders: rewriteProviderIds
+          .where((provider) => _activeKey(data, provider).isNotEmpty)
+          .toSet(),
       availableProviders: remoteProviderIds,
       settingsVault:
           _store.vault?.settingsVaultStatus ??
@@ -1927,6 +1995,49 @@ class CompanionApp {
     final saved = data.apiKeyFor(provider).trim();
     return saved.isNotEmpty ? saved : _fallbackApiKeys[provider]?.trim() ?? '';
   }
+
+  String _requireRewriteKey(String provider, String key) {
+    final known = RewriteProvider.byId(provider);
+    if (known == null) {
+      throw PromptRewriteException(
+        'Unknown rewrite provider "$provider".',
+        failure: PromptRewriteFailure.badRequest,
+        status: 400,
+      );
+    }
+    if (key.isEmpty) {
+      throw PromptRewriteException(
+        'Add a ${known.name} API key first.',
+        failure: PromptRewriteFailure.missingKey,
+        status: 401,
+      );
+    }
+    return key;
+  }
+
+  /// Rewrite failures keep their typed reason across the HTTP hop so the
+  /// renderer can word the notice without parsing prose.
+  Future<void> _rewriteError(
+    HttpResponse response,
+    PromptRewriteException error,
+  ) => _json(
+    response,
+    switch (error.failure) {
+      PromptRewriteFailure.missingKey ||
+      PromptRewriteFailure.unauthorized => 401,
+      PromptRewriteFailure.rateLimited => 429,
+      PromptRewriteFailure.badRequest => 400,
+      PromptRewriteFailure.refused ||
+      PromptRewriteFailure.invalidResponse => 422,
+      PromptRewriteFailure.network => 504,
+      PromptRewriteFailure.other => 502,
+    },
+    <String, Object?>{
+      'error': error.message,
+      'failure': error.failure.name,
+      if (error.status != null) 'status': error.status,
+    },
+  );
 
   Future<double?> _balanceSafely(String provider, String key) async {
     try {
