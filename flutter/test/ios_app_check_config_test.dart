@@ -82,4 +82,33 @@ void main() {
     );
     expect(plugin, isNot(contains('request.promptForFrame')));
   });
+
+  test(
+    'iOS keeps a purpose string for every protected API the binary links',
+    () {
+      final infoPlist = File('ios/Runner/Info.plist').readAsStringSync();
+      // App Store Connect rejects an upload (ITMS-90683) when the binary links
+      // an API guarded by a purpose string that Info.plist does not carry, even
+      // if the app never calls it. The media-picker plugins link the camera and
+      // photo APIs, so these keys must stay even when the app itself does not
+      // use them. Builds 118 and 119 were refused for the missing camera key.
+      for (final key in <String>[
+        'NSCameraUsageDescription',
+        'NSPhotoLibraryUsageDescription',
+        'NSPhotoLibraryAddUsageDescription',
+        'NSAppleMusicUsageDescription',
+        'NSLocationWhenInUseUsageDescription',
+      ]) {
+        final match = RegExp(
+          '<key>$key</key>\\s*<string>([^<]*)</string>',
+        ).firstMatch(infoPlist);
+        expect(match, isNotNull, reason: '$key is missing from Info.plist');
+        expect(
+          match!.group(1)!.trim(),
+          isNotEmpty,
+          reason: '$key needs a user-facing purpose string',
+        );
+      }
+    },
+  );
 }

@@ -43,6 +43,8 @@
 	<string>Clawnsole lets you choose images and videos from your Photos library as generation inputs or references for any provider.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clawnsole adds the generated images and videos you choose to save to your Photos library.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Clawnsole never opens the camera on its own. The media picker it uses to choose photos and videos links camera features, so iOS requires this notice; the camera is only used if you choose to capture a new photo or video as a generation input.</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Clawnsole lets you choose a song from your Music library as an audio reference for a generation.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
