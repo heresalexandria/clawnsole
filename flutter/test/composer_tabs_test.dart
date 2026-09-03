@@ -6,6 +6,8 @@ import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -516,6 +518,52 @@ void main() {
         ),
         findsOneWidget,
       );
+      controller.dispose();
+    });
+
+    testWidgets('touch platforms keep every tab the same modest height', (
+      tester,
+    ) async {
+      // On iOS and Android the pencil and × inside a tab get hit areas; they
+      // must not stretch the tab past its neighbours, and the "+" tab must
+      // stand on the same rule at the same height.
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.binding.setSurfaceSize(null);
+      });
+      final controller = await _controller(settle: false);
+      await tester.pumpWidget(_host(controller));
+      await tester.pumpAndSettle();
+      controller.addComposerTab();
+      await tester.pumpAndSettle();
+
+      final active = controller.activeComposerTabId;
+      final idle = controller.composerTabs
+          .firstWhere((tab) => tab.id != active)
+          .id;
+      Rect keyRect(String id) => tester.getRect(
+        find
+            .ancestor(
+              of: find.byKey(ValueKey<String>('composer-tab-rename-$id')),
+              matching: find.byType(InkWell),
+            )
+            .first,
+      );
+      final activeRect = keyRect(active);
+      final add = tester.getRect(
+        find.byKey(const ValueKey('composer-tab-add')),
+      );
+      final idleClose = tester.getRect(
+        find.byKey(ValueKey<String>('composer-tab-close-$idle')),
+      );
+      // The framework checks this variable before tear-downs run.
+      debugDefaultTargetPlatformOverride = null;
+      expect(activeRect.height, lessThan(44));
+      expect(add.height, lessThan(activeRect.height));
+      expect(add.bottom, closeTo(activeRect.bottom, 1));
+      expect(idleClose.bottom, lessThan(activeRect.bottom + 1));
       controller.dispose();
     });
 

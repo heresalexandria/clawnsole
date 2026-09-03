@@ -10,10 +10,12 @@ import 'hardware.dart';
 /// standing on a hairline rule that runs on to [trailing] (the model plaque)
 /// or, without one, to the edge.
 ///
-/// Tabs are console keys cut as folder tabs: rounded on top, square where
-/// they meet the rule. Idle tabs rest on the line; the tab in front stands a
-/// touch taller, lit plum, and covers the line beneath it, so the open draft
-/// reads as continuous with the composer below.
+/// Tabs are folder tabs: rounded shoulders, square where they meet the rule.
+/// Idle tabs are raised console keys resting on the line; the tab in front
+/// is cut from the composer's own paper, stands a touch taller, wears a
+/// brass lip along its top, and covers the line beneath it, so the open
+/// draft reads as continuous with the composer below rather than as a
+/// button.
 class ComposerTabRail extends StatelessWidget {
   const ComposerTabRail({required this.controller, super.key, this.trailing});
 
@@ -86,26 +88,46 @@ Color railRuleColor(BuildContext context) => context.colors.outlineVariant;
 /// The corner radius of a tab's shoulders.
 const double _tabRadius = 9;
 
+/// Vertical padding of a tab body. Touch platforms get taller tabs so the
+/// tab itself is a comfortable target and the pencil and × inside it can
+/// keep a modest hit area without stretching the key.
+double _tabVerticalPadding({required bool selected}) =>
+    isHardwareTouchPlatform ? (selected ? 9 : 8) : (selected ? 8 : 6);
+
+/// Hit area of the small controls inside a tab: enough to land a finger,
+/// never enough to grow the tab past its neighbours.
+const double _innerControlHit = 22;
+
+/// The height of a tab's content row: the inner controls' hit area on touch
+/// platforms, the × glyph and its padding elsewhere. The "+" tab, which has
+/// no inner control, borrows it so every foot lands on the rule together.
+double _tabRowHeight() => isHardwareTouchPlatform ? _innerControlHit : 17;
+
 /// How close together two taps must land to count as a rename gesture.
 const Duration _renameTapWindow = Duration(milliseconds: 320);
 
-/// The fill of a tab: the console-key gradient (raised when idle, lit plum
-/// in front) cut with rounded shoulders and a flat foot. The outline is
-/// painted separately so the foot can stay open onto the rule.
+/// The fill of a tab, cut with rounded shoulders and a flat foot. Idle tabs
+/// keep the raised console-key gradient; the tab in front takes the same
+/// paper as the composer card beneath it, so it reads as the open draft
+/// rather than a lit button. The outline is painted separately so the foot
+/// can stay open onto the rule.
 BoxDecoration _tabFill(BuildContext context, {required bool selected}) {
-  final key = consoleKeyDecoration(context, selected: selected);
-  return BoxDecoration(
-    gradient: key.gradient,
-    boxShadow: key.boxShadow,
-    borderRadius: const BorderRadius.vertical(top: Radius.circular(_tabRadius)),
-  );
+  const radius = BorderRadius.vertical(top: Radius.circular(_tabRadius));
+  if (selected) {
+    return BoxDecoration(color: context.colors.surface, borderRadius: radius);
+  }
+  final key = consoleKeyDecoration(context, selected: false);
+  return BoxDecoration(gradient: key.gradient, borderRadius: radius);
 }
 
-/// Strokes a tab's shoulders and sides and leaves the foot open.
+/// Strokes a tab's shoulders and sides and leaves the foot open. The tab in
+/// front also gets a brass lip: a short, slightly heavier line along its
+/// top between the shoulders — jewelry, not a fill.
 class _TabOutlinePainter extends CustomPainter {
-  const _TabOutlinePainter({required this.color});
+  const _TabOutlinePainter({required this.color, this.lip});
 
   final Color color;
+  final Color? lip;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -128,11 +150,22 @@ class _TabOutlinePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
+    final accent = lip;
+    if (accent != null) {
+      canvas.drawLine(
+        const Offset(r, 1),
+        Offset(size.width - r, 1),
+        Paint()
+          ..color = accent
+          ..strokeWidth = 2
+          ..strokeCap = StrokeCap.round,
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_TabOutlinePainter oldDelegate) =>
-      oldDelegate.color != color;
+      oldDelegate.color != color || oldDelegate.lip != lip;
 }
 
 /// One draft's tab: an optional rewrite mark, its label, and a close control.
@@ -187,8 +220,8 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
     final selected = widget.selected;
     final closable = widget.closable;
     final foreground = selected
-        ? context.colors.onPrimary
-        : context.colors.onSurface;
+        ? context.colors.onSurface
+        : context.colors.onSurfaceVariant;
     final summary = tab.rewriteSummary?.trim() ?? '';
     return MergeSemantics(
       child: Semantics(
@@ -208,9 +241,8 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
               padding: EdgeInsets.only(bottom: selected ? 0 : 1),
               child: CustomPaint(
                 foregroundPainter: _TabOutlinePainter(
-                  color: selected
-                      ? context.colors.primary
-                      : railRuleColor(context),
+                  color: railRuleColor(context),
+                  lip: selected ? context.tokens.brass : null,
                 ),
                 child: InkWell(
                   onTap: _handleTap,
@@ -222,9 +254,9 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
                     duration: const Duration(milliseconds: 140),
                     padding: EdgeInsets.fromLTRB(
                       11,
-                      selected ? 8 : 6,
+                      _tabVerticalPadding(selected: selected),
                       closable || selected ? 4 : 11,
-                      selected ? 8 : 6,
+                      _tabVerticalPadding(selected: selected),
                     ),
                     decoration: _tabFill(context, selected: selected),
                     child: Row(
@@ -236,9 +268,7 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
                             child: Icon(
                               Icons.auto_awesome,
                               size: 12,
-                              color: selected
-                                  ? context.colors.onPrimary
-                                  : context.tokens.brass,
+                              color: context.tokens.brass,
                             ),
                           ),
                           const SizedBox(width: 5),
@@ -253,7 +283,9 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
                             style: TextStyle(
                               color: foreground,
                               fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
                             ),
                           ),
                         ),
@@ -292,7 +324,8 @@ class _RenameTabButton extends StatelessWidget {
     onTap: () => unawaited(onTap()),
     child: HardwareTouchTarget(
       onTap: () => unawaited(onTap()),
-      minWidth: 32,
+      minWidth: _innerControlHit,
+      minHeight: _innerControlHit,
       child: Tooltip(
         message: 'Rename tab',
         child: InkResponse(
@@ -304,7 +337,7 @@ class _RenameTabButton extends StatelessWidget {
             child: Icon(
               Icons.edit_outlined,
               size: 12,
-              color: context.colors.onPrimary.withValues(alpha: .85),
+              color: context.colors.onSurfaceVariant,
             ),
           ),
         ),
@@ -328,14 +361,14 @@ class _CloseTabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selected = tab.id == controller.activeComposerTabId;
     return Semantics(
       button: true,
       label: 'Close tab ${tab.label}',
       onTap: _close,
       child: HardwareTouchTarget(
         onTap: _close,
-        minWidth: 32,
+        minWidth: _innerControlHit,
+        minHeight: _innerControlHit,
         child: Tooltip(
           message: 'Close tab',
           child: InkResponse(
@@ -347,9 +380,7 @@ class _CloseTabButton extends StatelessWidget {
               child: Icon(
                 Icons.close_rounded,
                 size: 13,
-                color: selected
-                    ? context.colors.onPrimary
-                    : context.colors.onSurfaceVariant,
+                color: context.colors.onSurfaceVariant,
               ),
             ),
           ),
@@ -394,10 +425,16 @@ class _NewComposerTabKey extends StatelessWidget {
                   top: Radius.circular(_tabRadius),
                 ),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
+                  padding: EdgeInsets.symmetric(
                     horizontal: 9,
-                    vertical: 6,
+                    vertical: _tabVerticalPadding(selected: false),
                   ),
+                  constraints: BoxConstraints(
+                    minHeight:
+                        _tabRowHeight() +
+                        2 * _tabVerticalPadding(selected: false),
+                  ),
+                  alignment: Alignment.center,
                   decoration: _tabFill(context, selected: false),
                   child: Icon(
                     Icons.add_rounded,

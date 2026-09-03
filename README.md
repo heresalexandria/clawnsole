@@ -55,6 +55,9 @@ and optional Google Drive sync keep work organized wherever you create.
   revised prompt opens in a new tab with the film's full recipe; a wand on
   the Direction box rewrites a draft in place with Undo. Keys are asked for
   on first use, kept in the encrypted vault, and synced with your other keys
+- Named tabs and rewrite lineage on every card, and a film modal (tap any
+  card) that shows the whole recipe untruncated with an iterations strip to
+  walk back through AI Rewrite versions
 - Nested project folders with a pinned rail, collapsible branches, in-place
   rename, and drag-and-drop filing, plus multi-tag organization and combined
   prompt/tag/folder search

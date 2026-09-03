@@ -286,11 +286,16 @@ below the composer (the old ≥1160 side column is gone).
 **Tabs are workspaces, not modes, and they are the heading.** Create has
 no display headline: a quiet eyebrow names the studio (*Video studio* /
 *Video finishing studio* / *On-device image studio*), and beneath it runs
-the **tab rail** (`ComposerTabRail`) — folder-cut console keys (rounded
-shoulders, flat foot) standing on a hairline rule that runs from the last
-tab to the edge. Idle tabs rest
-on the rule; the tab in front is a touch taller, lit plum, and covers the
-rule beneath it, so the open draft reads as continuous with the composer.
+the **tab rail** (`ComposerTabRail`) — folder tabs (rounded shoulders,
+flat foot) standing on a hairline rule that runs from the last tab to the
+edge. Idle tabs are raised console keys resting on the rule with muted
+labels; the tab in front is **not a lit button**: it is cut from the
+composer card's own paper, stands a touch taller, wears a 2 px brass lip
+along its top, and covers the rule beneath it, so the open draft reads as
+continuous with the composer (owner rejected a plum-filled active tab as
+"looks like a button"). On touch platforms tabs are a little taller
+(~38–40 pt) so the tab itself is the target; the pencil and × inside keep
+modest hit areas and never stretch the tab past its neighbours.
 Each tab is a complete, independent draft — Direction, provider and model,
 every setting, attachments, and the save-to folder — so several films can be
 worked on side by side. A "+" tab opens a blank draft that inherits only the
@@ -395,6 +400,32 @@ select a mode.
 - Status semantics: working = navy chip with spinner; ready = plum;
   needs attention / status unavailable = madder; exact provider charges
   render on plum containers, estimates on navy.
+
+### Provenance and the film modal
+
+Above its prompt, a card says where a film came from when there is
+something to say (`GenerationProvenance`): the **name of the tab** it was
+rendered from (only when the director named that tab — an unnamed tab
+adds no row), and for an AI Rewrite iteration a brass ✦ **"Rewrite of …"
+link** naming the film it was rewritten from; the link opens that film.
+Generations carry `title`, `rewriteOfLocalId`, and `rewriteSummary` for
+this, stamped at submit time from the composer tab.
+
+**Every card body opens the film modal** (`showGenerationDetailModal`):
+the thumbnail keeps click-to-play, the ⋯ menu's *Open film* is the same
+door, and the body (prompt, chips, provenance) is one tap. The modal is
+nearly the full viewport (a full-screen page on phones) so nothing has to
+be truncated: media at true aspect ratio with the inline player on the
+left; on the right the title, the complete selectable prompt with its
+copy control, folder and tag chips, spec chips, inputs with their labels
+written out, the cost readout with its breakdown inline, the action row
+(Save, Reuse/Retry, AI Rewrite, Check status, ⋯), and a collapsed
+*Provider details* accordion holding the request bookkeeping the old
+details dialog showed. When the film has lineage, an **Iterations** strip
+walks the chain both ways — *Rewritten from* → *This film* → *Rewrite*
+cards — and tapping another card swaps the modal to that film with a
+*Back* affordance. Escape closes; the modal follows the controller so a
+film that finishes rendering while open updates in place.
 
 ### AI Rewrite
 
