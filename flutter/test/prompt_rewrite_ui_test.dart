@@ -508,7 +508,7 @@ void main() {
           find.byType(AlertDialog).evaluate().isNotEmpty,
       isTrue,
     );
-    await tester.tap(find.text('Done'));
+    await tester.tap(find.byKey(const ValueKey('detail-close')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 
@@ -535,8 +535,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('generation-open-film-b')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('Done'), findsOneWidget);
-    await tester.tap(find.text('Done'));
+    expect(find.byKey(const ValueKey('detail-close')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('detail-close')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     await _pump(

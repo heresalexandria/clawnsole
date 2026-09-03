@@ -467,6 +467,7 @@ class GenerationActionsMenu extends StatelessWidget {
     this.includeReuse = true,
     this.includeRewrite = true,
     this.includeCheckStatus = true,
+    this.includeDetails = true,
   });
 
   final AppController controller;
@@ -480,6 +481,9 @@ class GenerationActionsMenu extends StatelessWidget {
   final bool includeReuse;
   final bool includeRewrite;
   final bool includeCheckStatus;
+
+  /// The film modal is the "Open film" destination, so it leaves this out.
+  final bool includeDetails;
 
   List<_DenseGenerationAction> get _actions => <_DenseGenerationAction>[
     if (onMove != null) _DenseGenerationAction.move,
@@ -497,7 +501,8 @@ class GenerationActionsMenu extends StatelessWidget {
         !item.isReady &&
         !(item.hasDeliveredMedia && !item.isWorking))
       _DenseGenerationAction.checkStatus,
-    if (item.hasProviderDetails) _DenseGenerationAction.details,
+    if (includeDetails && item.hasProviderDetails)
+      _DenseGenerationAction.details,
     if (onDelete != null) _DenseGenerationAction.delete,
   ];
 
@@ -539,10 +544,10 @@ class GenerationActionsMenu extends StatelessWidget {
               unawaited(controller.checkStatus(item));
             case _DenseGenerationAction.details:
               unawaited(
-                showGenerationDetails(
+                showGenerationDetailModal(
                   context,
-                  item,
-                  progressEstimate: controller.generationProgress(item),
+                  controller: controller,
+                  item: item,
                 ),
               );
             case _DenseGenerationAction.delete:
@@ -613,7 +618,7 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.rewrite => 'AI Rewrite',
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
   _DenseGenerationAction.checkStatus => 'Check status',
-  _DenseGenerationAction.details => 'View details',
+  _DenseGenerationAction.details => 'Open film',
   _DenseGenerationAction.delete => 'Delete history record',
 };
 

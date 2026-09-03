@@ -756,26 +756,7 @@ class _GenerationCardState extends State<GenerationCard> {
   }
 
   Future<void> _remove() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove this record?'),
-        content: const Text(
-          'This removes compact history only. It does not cancel work already submitted to the provider.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep it'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
+    if (await confirmGenerationRecordRemoval(context)) {
       await widget.controller.deleteGeneration(widget.item.localId);
     }
   }
@@ -791,7 +772,7 @@ class _GenerationCardState extends State<GenerationCard> {
       ),
     );
     void tag() => unawaited(
-      _showGenerationTagDialog(
+      showGenerationTagDialog(
         context,
         controller: widget.controller,
         item: item,
@@ -1161,7 +1142,32 @@ class _GenerationCardState extends State<GenerationCard> {
   }
 }
 
-Future<void> _showGenerationTagDialog(
+/// Asks before a history record is dropped. Shared by the card menus and the
+/// film modal so the wording never drifts.
+Future<bool> confirmGenerationRecordRemoval(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Remove this record?'),
+      content: const Text(
+        'This removes compact history only. It does not cancel work already submitted to the provider.',
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Keep it'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}
+
+Future<void> showGenerationTagDialog(
   BuildContext context, {
   required AppController controller,
   required Generation item,

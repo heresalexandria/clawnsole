@@ -415,15 +415,22 @@ this, stamped at submit time from the composer tab.
 the thumbnail keeps click-to-play, the ⋯ menu's *Open film* is the same
 door, and the body (prompt, chips, provenance) is one tap. The modal is
 nearly the full viewport (a full-screen page on phones) so nothing has to
-be truncated: media at true aspect ratio with the inline player on the
-left; on the right the title, the complete selectable prompt with its
-copy control, folder and tag chips, spec chips, inputs with their labels
-written out, the cost readout with its breakdown inline, the action row
-(Save, Reuse/Retry, AI Rewrite, Check status, ⋯), and a collapsed
-*Provider details* accordion holding the request bookkeeping the old
-details dialog showed. When the film has lineage, an **Iterations** strip
-walks the chain both ways — *Rewritten from* → *This film* → *Rewrite*
-cards — and tapping another card swaps the modal to that film with a
+be truncated. The header is the film's name — the tab name when the
+director gave one, else the direction's first words — with favorite and
+close. Two columns from about 900 px of content width (so a 1024-wide
+window still gets both): media at true aspect ratio with the inline
+player on the left; on the right the status and storage badges, the
+complete selectable prompt with its copy control, folder and tag chips
+(tapping one leaves the modal and filters the library), spec chips,
+inputs with their labels written out, the cost readout with its breakdown
+inline, the action row (Save, Reuse/Retry, AI Rewrite, Check status, and
+a ⋯ carrying the card's organize verbs — Move, Tag, Hide, Copy to Drive,
+Delete — but never *Open film*, which is where the ⋯ already led), and a
+collapsed *Provider details* accordion holding the request bookkeeping
+the old details dialog showed. Deleting the record from inside the modal
+closes it. When the film has lineage, an **Iterations** strip walks the
+chain both ways — *Rewritten from* → *This film* → *Rewrite* cards, oldest
+first — and tapping another card swaps the modal to that film with a
 *Back* affordance. Escape closes; the modal follows the controller so a
 film that finishes rendering while open updates in place.
 
