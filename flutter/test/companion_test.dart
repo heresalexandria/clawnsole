@@ -5,6 +5,11 @@ import 'dart:typed_data';
 
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
+import 'package:clawnsole/core/direct_gateway.dart';
+import 'package:clawnsole/core/gateway.dart';
+import 'package:clawnsole/core/krea_api.dart';
+import 'package:clawnsole/core/reference_prompts.dart';
+import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
@@ -22,6 +27,7 @@ import 'package:clawnsole/core/settings_vault_remote.dart';
 import 'package:clawnsole/core/video_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import '../tool/clawnsole_companion.dart';
 
@@ -877,6 +883,118 @@ void main() {
       }
     },
   );
+
+  for (final companion in [false, true]) {
+    test(
+      'video edit prompt reaches Krea through ${companion ? 'companion' : 'native'} gateway',
+      () async {
+        final temporary = await Directory.systemTemp.createTemp(
+          'clawnsole-prompt-request.',
+        );
+        addTearDown(() => temporary.delete(recursive: true));
+        final hybrid = HybridDataStore(
+          local: CompanionStore(File('${temporary.path}/clawnsole.json')),
+        );
+        final store = SettingsVaultDataStore(
+          delegate: hybrid,
+          secureStore: MemorySecureValueStore(),
+        );
+        await store.write(const StoredData(apiKeys: {'krea': 'test-key'}));
+        final sent = <Map<String, dynamic>>[];
+        final router = ProviderApiRouter(
+          krea: KreaApi(
+            client: MockClient((request) async {
+              if (request.method == 'GET') {
+                return http.Response('{"jobs":[]}', 200);
+              }
+              expect(
+                request.url.path,
+                '/generate/video/bytedance/seedance-2-5',
+              );
+              sent.add(jsonDecode(request.body) as Map<String, dynamic>);
+              return http.Response('{"job_id":"test-job"}', 200);
+            }),
+          ),
+        );
+        late AppGateway gateway;
+        if (companion) {
+          final app = CompanionApp.hybrid(
+            store: CompanionHybridStore(hybrid, vault: store),
+            api: BflApi(),
+            providerRouter: router,
+          );
+          final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+          final subscription = server.listen(app.handle);
+          addTearDown(() async {
+            await subscription.cancel();
+            await server.close(force: true);
+          });
+          gateway = WebGateway(
+            baseUrl: Uri.parse('http://127.0.0.1:${server.port}'),
+          );
+        } else {
+          gateway = DirectGateway(store: store, providerRouter: router);
+        }
+        const prompt =
+            'Edit @Street scene: make the taxi red.\nKeep the camera and dialogue unchanged.';
+        final now = DateTime.utc(2026, 9, 5);
+        final result = await gateway.submit(
+          GenerationSubmission(
+            record: Generation(
+              localId: 'prompt-check',
+              provider: 'krea',
+              model: 'bytedance/seedance-2-5',
+              status: 'submitting',
+              prompt: prompt,
+              mode: VideoMode.i2v,
+              config: const GenerationConfig(
+                aspectRatio: '9:16',
+                duration: 20,
+                resolution: 'sd',
+                generateAudio: true,
+                safetyTolerance: 2,
+                draft: false,
+                references: [
+                  MediaReferenceLabel(
+                    label: 'source.mp4',
+                    kind: MediaReferenceKind.video,
+                    promptName: 'Street scene',
+                  ),
+                ],
+              ),
+              createdAt: now,
+              updatedAt: now,
+            ),
+            input: const {
+              'mode': 'i2v',
+              'prompt': prompt,
+              'duration': 20,
+              'resolution': 'sd',
+              'aspect_ratio': '9:16',
+              'generate_audio': true,
+              'reference_videos': ['https://example.com/source.mp4'],
+              referencePromptNamesInputKey: {
+                'video': ['Street scene'],
+              },
+            },
+            autoFixReferenceVideos: false,
+          ),
+        );
+        expect(sent, hasLength(1));
+        expect(
+          sent.single['prompt'],
+          'Edit @video1: make the taxi red.\nKeep the camera and dialogue unchanged.',
+        );
+        expect(sent.single['reference_videos'], [
+          'https://example.com/source.mp4',
+        ]);
+        expect(sent.single, isNot(contains(referencePromptNamesInputKey)));
+        expect(result.requestId, 'test-job');
+        expect(result.prompt, prompt);
+        expect((await store.read()).generations.single.prompt, prompt);
+      },
+    );
+  }
 
   test('companion normalizes image frames without a video profile', () async {
     final temporary = await Directory.systemTemp.createTemp(

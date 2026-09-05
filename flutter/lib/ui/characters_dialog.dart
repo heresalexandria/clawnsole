@@ -40,7 +40,7 @@ class _CharactersDialogState extends State<_CharactersDialog> {
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
                   child: Text(
-                    'Write a character name in your script, or add one below.',
+                    'Characters are detected from screenplay character cues. Add other characters below.',
                   ),
                 ),
               for (final character in characters)

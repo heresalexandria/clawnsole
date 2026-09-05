@@ -317,6 +317,10 @@ class VideoModelDefinition {
       maxVideoReferences > 0 ||
       maxAudioReferences > 0;
 
+  /// Casting maps names to creative image/video references, not pinned frames.
+  bool get supportsCharacterReferences =>
+      maxImageReferences > 0 || maxVideoReferences > 0;
+
   ReferenceVideoCompatibilityProfile? get referenceVideoCompatibilityProfile =>
       maxVideoReferences <= 0
       ? null

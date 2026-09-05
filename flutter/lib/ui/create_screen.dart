@@ -1319,13 +1319,14 @@ class _DirectionToolbar extends StatelessWidget {
               icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
               label: const Text('AI rewrite'),
             ),
-            TextButton.icon(
-              key: const ValueKey('prompt-characters-button'),
-              onPressed: () =>
-                  unawaited(showCharactersDialog(context, controller)),
-              icon: const Icon(Icons.people_outline_rounded, size: 17),
-              label: const Text('Characters'),
-            ),
+            if (controller.selectedModel.supportsCharacterReferences)
+              TextButton.icon(
+                key: const ValueKey('prompt-characters-button'),
+                onPressed: () =>
+                    unawaited(showCharactersDialog(context, controller)),
+                icon: const Icon(Icons.people_outline_rounded, size: 17),
+                label: const Text('Characters'),
+              ),
           ],
         ),
       ),
@@ -2989,7 +2990,8 @@ class _ReferenceTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
         ),
-        if (reference.kind != MediaReferenceKind.audio)
+        if (controller.selectedModel.supportsCharacterReferences &&
+            reference.kind != MediaReferenceKind.audio)
           TextButton.icon(
             key: ValueKey('name-character-${reference.id}'),
             onPressed: () => unawaited(
