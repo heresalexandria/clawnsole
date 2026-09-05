@@ -6,12 +6,327 @@ import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/aesthetic_references.dart';
+import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'aesthetic text, catalog, selection, edits and deletion survive workspace sync',
+    () async {
+      final gateway = _TabsGateway(_snapshot());
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await _settle();
+      addTearDown(controller.dispose);
+      controller.updateForm((form) => form.prompt = 'A forest.');
+      controller.saveAestheticReference(
+        title: 'Golden',
+        text: 'Warm amber light.',
+        icon: 'sun',
+        color: 0xffaf853c,
+      );
+      final id = controller.aestheticReferences.single.id;
+      controller.selectAestheticReference(id);
+      expect(controller.form.prompt, 'A forest.');
+      expect(controller.generationPrompt, 'A forest.\n\nWarm amber light.');
+      expect(
+        controller.buildInputForTesting()['prompt'],
+        'A forest.\n\nWarm amber light.',
+      );
+      expect(controller.form.references, isEmpty);
+      final original = controller.activeComposerTabId;
+      controller.addComposerTab();
+      expect(controller.selectedAestheticReference, isNull);
+      controller.activateComposerTab(original);
+      await _settle();
+      final reopened = AppController(gateway: gateway);
+      await reopened.initialize();
+      await _settle();
+      addTearDown(reopened.dispose);
+      expect(reopened.selectedAestheticReference?.id, id);
+      expect(reopened.generationPrompt, 'A forest.\n\nWarm amber light.');
+      reopened.saveAestheticReference(
+        id: id,
+        title: 'Night',
+        text: 'Cool moonlight.',
+        icon: 'moon',
+        color: 0xff3689bb,
+      );
+      await _settle();
+      await controller.syncComposerWorkspace();
+      expect(controller.generationPrompt, 'A forest.\n\nCool moonlight.');
+      reopened.deleteAestheticReference(id);
+      await _settle();
+      await controller.syncComposerWorkspace();
+      expect(controller.aestheticReferences, isEmpty);
+      expect(controller.generationPrompt, 'A forest.');
+    },
+  );
+
+  test(
+    'a Drive source video opens and hydrates on a device with no cached bytes',
+    () async {
+      final gateway = _TabsGateway(
+        _snapshot(),
+        assets: {
+          'drive-source': Uint8List.fromList([4, 5, 6]),
+        },
+        stored: ComposerTabsState(
+          tabs: [
+            ComposerTabRecord(
+              id: 'continuation',
+              prompt: 'Continue moving forward.',
+              providerId: 'bfl',
+              modelId: 'flux-3-video',
+              mode: 'v2v',
+              mediaConfig: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 8,
+                resolution: 'hd',
+                generateAudio: true,
+                safetyTolerance: 2,
+                draft: false,
+                source: AssetReference(
+                  kind: 'drive',
+                  value: 'drive-source',
+                  label: 'source.mp4',
+                  contentType: 'video/mp4',
+                ),
+              ).toJson(),
+            ),
+          ],
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await _settle();
+      addTearDown(controller.dispose);
+      expect(controller.form.mode, VideoMode.v2v);
+      expect(controller.form.videoAsset?.retained?.value, 'drive-source');
+      expect(controller.form.videoAsset?.bytes, [4, 5, 6]);
+      expect(
+        controller.buildInputForTesting()['start_video'],
+        'data:video/mp4;base64,BAUG',
+      );
+      controller.flushComposerWorkspace();
+      await _settle();
+      expect(controller.currentConfig.source?.value, 'drive-source');
+    },
+  );
+
+  test(
+    'retained attachment layouts reopen without a source generation',
+    () async {
+      const asset = AssetReference(
+        kind: 'local',
+        value: 'frame.png',
+        label: 'Opening frame',
+        contentType: 'image/png',
+      );
+      final gateway = _TabsGateway(
+        _snapshot(),
+        assets: {
+          'frame.png': Uint8List.fromList([1, 2, 3]),
+        },
+      );
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await _settle();
+      addTearDown(controller.dispose);
+      controller.updateForm((form) {
+        form.prompt = 'Opening shot';
+        form.keyframes = [
+          KeyframeDraft(
+            id: 'frame',
+            label: 'Opening frame',
+            role: KeyframeRole.start,
+            seconds: 0,
+            source: '',
+            asset: PickedAsset(
+              name: 'Opening frame',
+              bytes: Uint8List.fromList([1, 2, 3]),
+              mimeType: 'image/png',
+              retained: asset,
+            ),
+          ),
+        ];
+      });
+      controller.flushComposerWorkspace();
+      await _settle();
+      expect(gateway.stored!.tabs.single.mediaConfig, isNotNull);
+      expect(gateway.stored!.tabs.single.sourceGenerationId, isNull);
+      final reopened = AppController(gateway: gateway);
+      await reopened.initialize();
+      await _settle();
+      addTearDown(reopened.dispose);
+      expect(reopened.form.keyframes.single.label, 'Opening frame');
+      expect(
+        reopened.form.keyframes.single.asset?.retained?.value,
+        'frame.png',
+      );
+      expect(reopened.form.prompt, 'Opening shot');
+    },
+  );
+
+  test(
+    'incoming tab edits preserve unrelated local work and shared closes',
+    () async {
+      final gateway = _TabsGateway(
+        _snapshot(),
+        stored: const ComposerTabsState(
+          tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Local draft')],
+          activeTabId: 'desktop',
+        ),
+      );
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await _settle();
+      addTearDown(controller.dispose);
+      controller.updateForm((form) => form.prompt = 'Typing locally');
+      gateway.stored = ComposerTabsState(
+        tabs: [
+          const ComposerTabRecord(id: 'desktop', prompt: 'Old'),
+          ComposerTabRecord(
+            id: 'phone',
+            prompt: 'On the train',
+            updatedAt: DateTime.now().toUtc(),
+          ),
+        ],
+      );
+      await controller.syncComposerWorkspace();
+      expect(controller.form.prompt, 'Typing locally');
+      expect(controller.composerTabs, hasLength(2));
+      controller.activateComposerTab('phone');
+      gateway.stored = const ComposerTabsState(
+        tabs: [ComposerTabRecord(id: 'desktop')],
+        closedTabIds: {'phone'},
+      );
+      await controller.syncComposerWorkspace();
+      expect(controller.composerTabs.map((tab) => tab.id), ['desktop']);
+      expect(controller.form.prompt, 'Typing locally');
+    },
+  );
+
+  testWidgets(
+    'manual appearance overrides a dark system and restores on restart',
+    (tester) async {
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      final gateway = _TabsGateway(_snapshot());
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Appearance: system'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Light'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+        ThemeMode.light,
+      );
+      expect(
+        Theme.of(tester.element(find.byType(CreateScreen))).brightness,
+        Brightness.light,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        ClawnsoleApp(gateway: gateway, checkForUpdates: false),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+        ThemeMode.light,
+      );
+      await tester.tap(find.byTooltip('Appearance: light'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('System'));
+      await tester.pumpAndSettle();
+      expect(
+        Theme.of(tester.element(find.byType(CreateScreen))).brightness,
+        Brightness.dark,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'mobile aesthetic editor creates, selects, edits and deletes text-only references',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final controller = await _controller(settle: false);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: [
+                  AestheticReferenceLibrary(controller: controller),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (_, _) =>
+                        AestheticReferencePicker(controller: controller),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-aesthetic-reference')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('aesthetic-title')),
+        'Silver screen',
+      );
+      await tester.ensureVisible(find.byKey(const ValueKey('aesthetic-text')));
+      await tester.enterText(
+        find.byKey(const ValueKey('aesthetic-text')),
+        'Soft monochrome grain.',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(
+        controller.aestheticReferences.single.text,
+        'Soft monochrome grain.',
+      );
+      await tester.tap(find.byKey(const ValueKey('prompt-aesthetic-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<String>, 'Silver screen'),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.generationPrompt, 'Soft monochrome grain.');
+      await tester.tap(find.byTooltip('Edit Silver screen'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('aesthetic-text')));
+      await tester.enterText(
+        find.byKey(const ValueKey('aesthetic-text')),
+        'High contrast grain.',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(controller.generationPrompt, 'High contrast grain.');
+      await tester.tap(find.byTooltip('Edit Silver screen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(controller.aestheticReferences, isEmpty);
+      expect(controller.form.references, isEmpty);
+      expect(tester.takeException(), isNull);
+      controller.dispose();
+    },
+  );
+
   group('composer tab machinery', () {
     test('opens, switches, and closes drafts without ever emptying', () async {
       final controller = await _controller();

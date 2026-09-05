@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'models.dart';
+import 'composer_tabs.dart';
 
 const googleDriveFileScope = 'https://www.googleapis.com/auth/drive.file';
 const clawnsoleDriveStateFile = 'clawnsole.json';
@@ -16,6 +17,7 @@ StoredData googleDrivePortableData(StoredData data) => StoredData(
   generations: data.generations,
   folders: data.folders,
   savedReferences: data.savedReferences,
+  composerTabs: data.composerTabs,
 );
 
 /// Applies one device's changes to the latest Drive snapshot. This preserves
@@ -54,6 +56,10 @@ StoredData mergeGoogleDriveData({
     generations: generations,
     folders: folders,
     savedReferences: references,
+    composerTabs: mergeComposerWorkspaces(
+      next.composerTabs,
+      remote.composerTabs,
+    ),
   );
 }
 

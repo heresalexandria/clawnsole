@@ -2,10 +2,12 @@
 ///
 /// A tab is one independent draft of the Direction prompt plus every
 /// generation setting. Records stay compact on purpose: they carry text,
-/// scalars, and ids only. Media picked from disk lives in memory for the
-/// session (as it always has); media that came from a generation is
-/// re-hydrated on launch through [ComposerTabRecord.sourceGenerationId].
+/// scalars, and ids only. Retained media is referenced by compact asset/library ids. Older tabs
+/// re-hydrate media through [ComposerTabRecord.sourceGenerationId].
 library;
+
+import 'dart:convert';
+import 'aesthetic_reference.dart';
 
 /// The maximum number of characters a derived tab title keeps.
 const int composerTabTitleLength = 28;
@@ -43,6 +45,9 @@ class ComposerTabRecord {
     this.title,
     this.prompt = '',
     this.screenplayMode = false,
+    this.aestheticReferenceId,
+    this.mediaConfig,
+    this.mode,
     this.screenplayLinkedCharacters = const [],
     this.screenplayReferenceNames = const {},
     this.screenplayCharacterAliases = const {},
@@ -79,6 +84,9 @@ class ComposerTabRecord {
   final String? title;
   final String prompt;
   final bool screenplayMode;
+  final String? aestheticReferenceId;
+  final Map<String, Object?>? mediaConfig;
+  final String? mode;
   final List<String> screenplayLinkedCharacters;
 
   /// Saved reference ids and their authoring names, never media or secrets.
@@ -129,6 +137,10 @@ class ComposerTabRecord {
     bool clearTitle = false,
     String? prompt,
     bool? screenplayMode,
+    String? aestheticReferenceId,
+    Map<String, Object?>? mediaConfig,
+    String? mode,
+    bool clearAestheticReferenceId = false,
     List<String>? screenplayLinkedCharacters,
     Map<String, String>? screenplayReferenceNames,
     Map<String, String>? screenplayCharacterAliases,
@@ -163,9 +175,14 @@ class ComposerTabRecord {
     DateTime? updatedAt,
   }) => ComposerTabRecord(
     id: id ?? this.id,
+    mediaConfig: mediaConfig ?? this.mediaConfig,
+    mode: mode ?? this.mode,
     title: clearTitle ? null : title ?? this.title,
     prompt: prompt ?? this.prompt,
     screenplayMode: screenplayMode ?? this.screenplayMode,
+    aestheticReferenceId: clearAestheticReferenceId
+        ? null
+        : aestheticReferenceId ?? this.aestheticReferenceId,
     screenplayLinkedCharacters:
         screenplayLinkedCharacters ?? this.screenplayLinkedCharacters,
     screenplayReferenceNames:
@@ -208,9 +225,13 @@ class ComposerTabRecord {
 
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
+    if (mediaConfig != null) 'mediaConfig': mediaConfig,
+    if (mode != null) 'mode': mode,
     if (title != null && title!.trim().isNotEmpty) 'title': title,
     'prompt': prompt,
     'screenplayMode': screenplayMode,
+    if (aestheticReferenceId != null)
+      'aestheticReferenceId': aestheticReferenceId,
     if (screenplayLinkedCharacters.isNotEmpty)
       'screenplayLinkedCharacters': screenplayLinkedCharacters,
     if (screenplayReferenceNames.isNotEmpty)
@@ -261,9 +282,14 @@ class ComposerTabRecord {
 
     return ComposerTabRecord(
       id: json['id']?.toString() ?? '',
+      mediaConfig: json['mediaConfig'] is Map
+          ? Map<String, Object?>.from(json['mediaConfig'] as Map)
+          : null,
+      mode: text(json['mode']),
       title: text(json['title']),
       prompt: json['prompt'] is String ? json['prompt']! as String : '',
       screenplayMode: flag(json['screenplayMode'], false),
+      aestheticReferenceId: text(json['aestheticReferenceId']),
       screenplayLinkedCharacters:
           (json['screenplayLinkedCharacters'] is List
                   ? json['screenplayLinkedCharacters']! as List
@@ -321,13 +347,19 @@ class ComposerTabsState {
   const ComposerTabsState({
     this.tabs = const <ComposerTabRecord>[],
     this.activeTabId,
+    this.closedTabIds = const {},
+    this.aestheticReferences = const [],
+    this.deletedAestheticIds = const {},
   });
 
   // Version 1 migrates additively to prose mode with no character links.
-  static const int schemaVersion = 3;
+  static const int schemaVersion = 4;
 
   final List<ComposerTabRecord> tabs;
   final String? activeTabId;
+  final Set<String> closedTabIds;
+  final List<AestheticReference> aestheticReferences;
+  final Set<String> deletedAestheticIds;
 
   bool get isEmpty => tabs.isEmpty;
 
@@ -337,6 +369,11 @@ class ComposerTabsState {
 
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
+    'closedTabIds': closedTabIds.toList()..sort(),
+    'aestheticReferences': aestheticReferences
+        .map((item) => item.toJson())
+        .toList(),
+    'deletedAestheticIds': deletedAestheticIds.toList()..sort(),
     if (activeTabId != null) 'activeTabId': activeTabId,
     'tabs': tabs.map((tab) => tab.toJson()).toList(),
   };
@@ -356,9 +393,104 @@ class ComposerTabsState {
     final active = json['activeTabId'];
     return ComposerTabsState(
       tabs: tabs,
+      closedTabIds: (json['closedTabIds'] as List? ?? [])
+          .whereType<String>()
+          .toSet(),
+      aestheticReferences: (json['aestheticReferences'] as List? ?? [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                AestheticReference.fromJson(Map<String, Object?>.from(item)),
+          )
+          .toList(),
+      deletedAestheticIds: (json['deletedAestheticIds'] as List? ?? [])
+          .whereType<String>()
+          .toSet(),
       activeTabId: active is String && tabs.any((tab) => tab.id == active)
           ? active
           : tabs.firstOrNull?.id,
     );
   }
+}
+
+/// A union of independently edited records. Explicit tombstones keep an offline
+/// device from reopening closed tabs or resurrecting deleted aesthetics.
+ComposerTabsState? mergeComposerWorkspaces(
+  ComposerTabsState? local,
+  ComposerTabsState? remote,
+) {
+  if (local == null) return remote;
+  if (remote == null) return local;
+  final closed = {...local.closedTabIds, ...remote.closedTabIds};
+  final deleted = {...local.deletedAestheticIds, ...remote.deletedAestheticIds};
+  final tabs = <String, ComposerTabRecord>{};
+  for (final tab in [...remote.tabs, ...local.tabs]) {
+    final previous = tabs[tab.id];
+    if (!closed.contains(tab.id) &&
+        (previous == null ||
+            _newer(
+              tab.updatedAt,
+              previous.updatedAt,
+              tab.toJson(),
+              previous.toJson(),
+            ))) {
+      tabs[tab.id] = tab;
+    }
+  }
+  final aesthetics = <String, AestheticReference>{};
+  for (final item in [
+    ...remote.aestheticReferences,
+    ...local.aestheticReferences,
+  ]) {
+    final previous = aesthetics[item.id];
+    if (!deleted.contains(item.id) &&
+        (previous == null ||
+            _newer(
+              item.updatedAt,
+              previous.updatedAt,
+              item.toJson(),
+              previous.toJson(),
+            ))) {
+      aesthetics[item.id] = item;
+    }
+  }
+  final ordered = tabs.values.toList()
+    ..sort((a, b) {
+      final comparison = (a.createdAt ?? DateTime.utc(1970)).compareTo(
+        b.createdAt ?? DateTime.utc(1970),
+      );
+      return comparison == 0 ? a.id.compareTo(b.id) : comparison;
+    });
+  return ComposerTabsState(
+    tabs: ordered,
+    activeTabId: tabs.containsKey(local.activeTabId)
+        ? local.activeTabId
+        : tabs.containsKey(remote.activeTabId)
+        ? remote.activeTabId
+        : ordered.firstOrNull?.id,
+    closedTabIds: closed,
+    aestheticReferences: aesthetics.values.toList()
+      ..sort((a, b) => a.id.compareTo(b.id)),
+    deletedAestheticIds: deleted,
+  );
+}
+
+bool _newer(
+  DateTime? a,
+  DateTime? b,
+  Map<String, Object?> left,
+  Map<String, Object?> right,
+) {
+  final comparison = (a ?? DateTime.utc(1970)).compareTo(
+    b ?? DateTime.utc(1970),
+  );
+  return comparison > 0 ||
+      (comparison == 0 && jsonEncode(left).compareTo(jsonEncode(right)) >= 0);
+}
+
+/// Workspace persistence can complete locally without waiting for Drive or the
+/// encrypted settings vault. Sync failures retry on the next reconciliation.
+abstract interface class ComposerWorkspaceStore {
+  Future<ComposerTabsState?> readComposerWorkspace();
+  Future<void> writeComposerWorkspace(ComposerTabsState state);
 }

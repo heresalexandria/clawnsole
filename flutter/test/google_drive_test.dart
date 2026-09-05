@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
 import 'package:clawnsole/core/direct_gateway.dart';
@@ -13,6 +15,82 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'slow Drive publication never blocks saving newer drafts locally',
+    () async {
+      final local = _MemoryStore(const StoredData());
+      final drive = _SlowWorkspaceDriveStore();
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Studio');
+      final staleLibrary = await hybrid.read();
+      drive.pending = Completer<void>();
+      final first = ComposerTabRecord(
+        id: 'draft',
+        prompt: 'First',
+        updatedAt: DateTime.utc(2026),
+      );
+      await hybrid.writeComposerWorkspace(ComposerTabsState(tabs: [first]));
+      await hybrid.writeComposerWorkspace(
+        ComposerTabsState(
+          tabs: [
+            first.copyWith(
+              prompt: 'Latest keystrokes',
+              updatedAt: DateTime.utc(2026, 2),
+            ),
+          ],
+        ),
+      );
+      await hybrid.write(staleLibrary);
+      expect(
+        (await hybrid.readComposerWorkspace())?.tabs.single.prompt,
+        'Latest keystrokes',
+      );
+      drive.pending!.complete();
+      await hybrid.syncComposerWorkspaceToDrive();
+      expect(drive.data.composerTabs?.tabs.single.prompt, 'Latest keystrokes');
+    },
+  );
+
+  test(
+    'workspace persists offline and merges cloud tabs on reconnect',
+    () async {
+      final local = _MemoryStore(const StoredData());
+      final drive = _MemoryDriveStore(
+        const StoredData(
+          composerTabs: ComposerTabsState(
+            tabs: [ComposerTabRecord(id: 'phone', prompt: 'Phone draft')],
+          ),
+        ),
+      );
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.writeComposerWorkspace(
+        const ComposerTabsState(
+          tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Offline draft')],
+        ),
+      );
+      expect(
+        (await hybrid.readComposerWorkspace())?.tabs.single.prompt,
+        'Offline draft',
+      );
+      await hybrid.connect('test-token', 'Studio');
+      expect(
+        (await hybrid.readComposerWorkspace())?.tabs.map((tab) => tab.id),
+        ['desktop', 'phone'],
+      );
+      expect(drive.data.composerTabs?.tabs.length, 2);
+      final relaunched = HybridDataStore(local: local, drive: drive);
+      expect((await relaunched.readComposerWorkspace())?.tabs.length, 2);
+      await hybrid.writeComposerWorkspace(
+        const ComposerTabsState(
+          tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Offline draft')],
+          closedTabIds: {'phone'},
+        ),
+      );
+      await hybrid.syncComposerWorkspaceToDrive();
+      expect(drive.data.composerTabs?.tabs.map((tab) => tab.id), ['desktop']);
+    },
+  );
+
   test(
     'native reference writes preserve assignments and reject duplicate characters',
     () async {
@@ -1305,4 +1383,14 @@ class _MemoryDriveStore extends GoogleDriveStore {
     bytes: data.encode().length,
     records: records,
   );
+}
+
+class _SlowWorkspaceDriveStore extends _MemoryDriveStore {
+  _SlowWorkspaceDriveStore() : super(const StoredData());
+  Completer<void>? pending;
+  @override
+  Future<void> write(StoredData value) async {
+    await pending?.future;
+    await super.write(value);
+  }
 }

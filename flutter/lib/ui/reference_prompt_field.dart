@@ -766,11 +766,15 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             onPressed: () => _cycleElement(true),
             icon: const Icon(Icons.arrow_back, size: 18),
             label: const Text('Prev'),
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            key: const ValueKey('screenplay-previous-element'),
           ),
           TextButton.icon(
             onPressed: () => _cycleElement(false),
-            icon: const Icon(Icons.keyboard_tab, size: 18),
+            icon: const Icon(Icons.arrow_forward, size: 18),
             label: const Text('Next'),
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            key: const ValueKey('screenplay-next-element'),
           ),
         ],
       ];
@@ -782,7 +786,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                'Enter continues the script · Tab / Shift Tab changes element',
+                MediaQuery.sizeOf(context).width < 620
+                    ? 'Tap the element menu or arrows to change line type. Return continues the script.'
+                    : 'Enter continues the script · Tab / Shift Tab changes element',
                 style: TextStyle(
                   fontSize: 11,
                   color: context.colors.onSurfaceVariant,

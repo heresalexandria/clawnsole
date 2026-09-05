@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,10 +7,11 @@ import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_store.dart';
 import 'models.dart';
+import 'composer_tabs.dart';
 
 /// Presents local and Google Drive records as one library while keeping their
 /// persistence and retained media physically separate.
-class HybridDataStore implements DurableDataStore {
+class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
   HybridDataStore({
     required DurableDataStore local,
     GoogleDriveStore? drive,
@@ -110,6 +112,66 @@ class HybridDataStore implements DurableDataStore {
   }
 
   @override
+  Future<ComposerTabsState?> readComposerWorkspace() async =>
+      (await _local.read()).composerTabs;
+
+  Future<void> _workspaceWrites = Future<void>.value();
+  Future<void>? _workspacePublish;
+  bool _workspaceDirty = false;
+
+  @override
+  Future<void> writeComposerWorkspace(ComposerTabsState state) {
+    final operation = _workspaceWrites.then((_) async {
+      final current = await _local.read();
+      final merged = mergeComposerWorkspaces(state, current.composerTabs)!;
+      await _local.write(current.copyWith(composerTabs: merged));
+      _workspaceDirty = true;
+      unawaited(syncComposerWorkspaceToDrive());
+    });
+    _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
+  }
+
+  /// Publishing runs outside the local write queue: a slow connection must
+  /// never hold newer keystrokes in memory behind an earlier network request.
+  Future<void> syncComposerWorkspaceToDrive() {
+    if (_workspacePublish != null) return _workspacePublish!;
+    if (!isDriveConnected) return Future<void>.value();
+    return _workspacePublish = _publishComposerWorkspace().whenComplete(() {
+      _workspacePublish = null;
+    });
+  }
+
+  Future<void> _publishComposerWorkspace() async {
+    try {
+      while (_workspaceDirty && isDriveConnected) {
+        _workspaceDirty = false;
+        final current = await _local.read();
+        final remote = _drivePartition(current);
+        await _drive.write(remote);
+        _lastRemote = _asDrive(_drive.lastData ?? remote);
+        // Serialize the mirror update with new local drafts as well.
+        final operation = _workspaceWrites.then((_) async {
+          final latest = await _local.read();
+          await _local.write(
+            latest.copyWith(
+              composerTabs: mergeComposerWorkspaces(
+                latest.composerTabs,
+                _lastRemote!.composerTabs,
+              ),
+            ),
+          );
+        });
+        _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
+        await operation;
+      }
+    } on Object {
+      _workspaceDirty = true;
+      // Drafts are on disk. A foreground/periodic pass retries publication.
+    }
+  }
+
+  @override
   Future<void> write(StoredData data) async {
     final local = _localPartition(data);
     final remote = _drivePartition(data);
@@ -131,7 +193,11 @@ class HybridDataStore implements DurableDataStore {
     final mirrored = isDriveConnected && _lastRemote != null
         ? _combine(local, _lastRemote!)
         : data;
-    await _local.write(_localMirror(mirrored));
+    await _persistLocalMirrorIfChanged(
+      await _local.read(),
+      mirrored,
+      forceWrite: true,
+    );
     _lastLocal = local;
   }
 
@@ -683,7 +749,10 @@ class HybridDataStore implements DurableDataStore {
       rejectedIosReviewApiKeyId: local.rejectedIosReviewApiKeyId,
       rejectedIosReviewApiKeyIds: local.rejectedIosReviewApiKeyIds,
       providerCatalogCache: local.providerCatalogCache,
-      composerTabs: local.composerTabs,
+      composerTabs: mergeComposerWorkspaces(
+        local.composerTabs,
+        remote.composerTabs,
+      ),
       preferences: preferences,
       preferencesUpdatedAt: preferencesUpdatedAt,
       driveFolderName: _drive.connection.folderName.isNotEmpty
@@ -723,6 +792,7 @@ class HybridDataStore implements DurableDataStore {
   /// file. This mirror lets every surface open its library immediately while
   /// Drive authorization and polling continue in the background.
   StoredData _asCachedDrive(StoredData data) => StoredData(
+    composerTabs: data.composerTabs,
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
         .map((item) => item.copyWith(storage: LibraryStorage.drive))
@@ -774,6 +844,7 @@ class HybridDataStore implements DurableDataStore {
   );
 
   StoredData _drivePartition(StoredData data) => StoredData(
+    composerTabs: data.composerTabs,
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
         .toList(),
@@ -806,11 +877,27 @@ class HybridDataStore implements DurableDataStore {
 
   Future<void> _persistLocalMirrorIfChanged(
     StoredData persisted,
-    StoredData combined,
-  ) async {
-    final mirror = _localMirror(combined);
-    if (jsonEncode(persisted.toJson()) == jsonEncode(mirror.toJson())) return;
-    await _local.write(mirror);
+    StoredData combined, {
+    bool forceWrite = false,
+  }) async {
+    // Reads and library writes may have started before a newer draft save.
+    // Serialize this merge with local authoring so neither can erase that edit.
+    final operation = _workspaceWrites.then((_) async {
+      final latest = await _local.read();
+      final mirror = _localMirror(combined).copyWith(
+        composerTabs: mergeComposerWorkspaces(
+          latest.composerTabs,
+          combined.composerTabs,
+        ),
+      );
+      if (!forceWrite &&
+          jsonEncode(latest.toJson()) == jsonEncode(mirror.toJson())) {
+        return;
+      }
+      await _local.write(mirror);
+    });
+    _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
+    await operation;
   }
 
   String _encoded(StoredData data) =>
@@ -829,6 +916,7 @@ class HybridDataStore implements DurableDataStore {
   }
 
   bool _hasPortableContent(StoredData data) =>
+      data.composerTabs != null ||
       data.generations.isNotEmpty ||
       data.folders.isNotEmpty ||
       data.savedReferences.isNotEmpty;

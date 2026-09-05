@@ -15,6 +15,7 @@ import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'composer_tab_rail.dart';
 import 'characters_dialog.dart';
+import 'aesthetic_references.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -1275,59 +1276,79 @@ class _DirectionToolbar extends StatelessWidget {
   final VoidCallback onCopy;
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const ValueKey('direction-toolbar'),
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-    decoration: BoxDecoration(
-      color: context.colors.surfaceContainerLow,
-      border: Border.all(color: context.colors.outlineVariant),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: TextButtonTheme(
-      data: TextButtonThemeData(
-        style: (TextButtonTheme.of(context).style ?? const ButtonStyle()).merge(
-          TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            minimumSize: const Size(0, 40),
-            textStyle: Theme.of(context).textTheme.labelMedium,
-          ),
-        ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => Container(
+      key: const ValueKey('direction-toolbar'),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: context.colors.surfaceContainerLow,
+        border: Border.all(color: context.colors.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          spacing: 2,
-          children: [
-            TextButton.icon(
-              key: const ValueKey('prompt-copy-button'),
-              onPressed: onCopy,
-              icon: const Icon(Icons.copy_rounded, size: 17),
-              label: const Text('Copy'),
-            ),
-            TextButton.icon(
-              key: const ValueKey('prompt-rewrite-button'),
-              onPressed: controller.canRewriteDirection
-                  ? () => unawaited(
-                      showPromptRewriteDialog(context, controller: controller),
-                    )
-                  : null,
-              icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
-              label: const Text('AI rewrite'),
-            ),
-            if (controller.selectedModel.supportsCharacterReferences)
-              TextButton.icon(
-                key: const ValueKey('prompt-characters-button'),
-                onPressed: () =>
-                    unawaited(showCharactersDialog(context, controller)),
-                icon: const Icon(Icons.people_outline_rounded, size: 17),
-                label: const Text('Characters'),
+      child: TextButtonTheme(
+        data: TextButtonThemeData(
+          style: (TextButtonTheme.of(context).style ?? const ButtonStyle())
+              .merge(
+                TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  minimumSize: const Size(0, 40),
+                  textStyle: Theme.of(context).textTheme.labelMedium,
+                ),
               ),
-          ],
+        ),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            spacing: 2,
+            children: [
+              Tooltip(
+                message: 'Copy prompt',
+                child: TextButton.icon(
+                  key: const ValueKey('prompt-copy-button'),
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.copy_rounded, size: 17),
+                  label: constraints.maxWidth < 440
+                      ? const SizedBox.shrink()
+                      : const Text('Copy'),
+                ),
+              ),
+              Tooltip(
+                message: 'AI rewrite',
+                child: TextButton.icon(
+                  key: const ValueKey('prompt-rewrite-button'),
+                  onPressed: controller.canRewriteDirection
+                      ? () => unawaited(
+                          showPromptRewriteDialog(
+                            context,
+                            controller: controller,
+                          ),
+                        )
+                      : null,
+                  icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
+                  label: constraints.maxWidth < 440
+                      ? const SizedBox.shrink()
+                      : const Text('AI rewrite'),
+                ),
+              ),
+              if (controller.selectedModel.supportsCharacterReferences)
+                TextButton.icon(
+                  key: const ValueKey('prompt-characters-button'),
+                  onPressed: () =>
+                      unawaited(showCharactersDialog(context, controller)),
+                  icon: const Icon(Icons.people_outline_rounded, size: 17),
+                  label: const Text('Characters'),
+                ),
+              AestheticReferencePicker(
+                controller: controller,
+                compact: constraints.maxWidth < 440,
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -1463,7 +1484,7 @@ class _PromptCharacterCounter extends StatelessWidget {
     builder: (context, _) {
       final model = controller.selectedModel;
       final limit = model.maxPromptCharacters;
-      final typed = controller.form.prompt.length;
+      final typed = controller.generationPrompt.length;
       final nearLimit = limit != null && typed >= limit * .95;
       return Tooltip(
         message: limit == null

@@ -55,6 +55,7 @@ dependencies:
   media_kit_libs_windows_video: ^1.0.11
   reference_video_tools:
     path: packages/reference_video_tools
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:

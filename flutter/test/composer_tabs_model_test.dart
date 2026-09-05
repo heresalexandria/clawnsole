@@ -121,6 +121,56 @@ void main() {
     expect(const ComposerTabsState().activeTab, isNull);
   });
 
+  test(
+    'workspace union retains independent edits and explicit closes across stale devices',
+    () {
+      final first = ComposerTabRecord(
+        id: 'first',
+        prompt: 'old',
+        updatedAt: DateTime.utc(2026),
+      );
+      final second = ComposerTabRecord(
+        id: 'second',
+        prompt: 'phone',
+        updatedAt: DateTime.utc(2026),
+      );
+      final desktop = ComposerTabsState(
+        tabs: [
+          first.copyWith(
+            prompt: 'desktop edit',
+            updatedAt: DateTime.utc(2026, 2),
+          ),
+        ],
+        closedTabIds: {'closed'},
+        activeTabId: 'first',
+      );
+      final phone = ComposerTabsState(
+        tabs: [
+          first,
+          second,
+          const ComposerTabRecord(id: 'closed'),
+        ],
+        activeTabId: 'second',
+      );
+      final merged = mergeComposerWorkspaces(desktop, phone)!;
+      expect(merged.tabs.map((item) => item.id), ['first', 'second']);
+      expect(merged.tabs.first.prompt, 'desktop edit');
+      expect(merged.activeTabId, 'first');
+      final reopened = mergeComposerWorkspaces(
+        phone,
+        ComposerTabsState.fromJson(merged.toJson()),
+      )!;
+      expect(reopened.tabs.any((item) => item.id == 'closed'), isFalse);
+      expect(reopened.tabs.first.prompt, 'desktop edit');
+      final portable = mergeGoogleDriveData(
+        base: const StoredData(),
+        next: StoredData(composerTabs: desktop),
+        remote: StoredData(composerTabs: phone),
+      );
+      expect(portable.composerTabs?.tabs.length, 2);
+    },
+  );
+
   test('derived tab titles come from the first prompt line', () {
     expect(composerTabTitle(null, ''), composerTabUntitled);
     expect(composerTabTitle(' Custom ', 'ignored prompt'), 'Custom');
@@ -145,7 +195,7 @@ void main() {
     );
   });
 
-  test('stored data keeps composer tabs on the device only', () {
+  test('stored data keeps composer tabs locally and in Drive', () {
     final data = StoredData(
       composerTabs: const ComposerTabsState(
         tabs: <ComposerTabRecord>[
@@ -170,8 +220,8 @@ void main() {
     );
     expect(
       googleDrivePortableData(data).toJson().containsKey('composerTabs'),
-      isFalse,
-      reason: 'tabs are drafts, never Drive library data',
+      isTrue,
+      reason: 'drafts travel with the shared Drive workspace',
     );
     expect(
       StoredData.fromJson(<String, Object?>{
