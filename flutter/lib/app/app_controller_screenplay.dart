@@ -10,7 +10,7 @@ extension ScreenplayAuthoring on AppController {
       '';
 
   List<String> get screenplayCharacterNames => {
-    ...screenplayCharacters(form.prompt),
+    if (form.screenplayMode) ...screenplayCharacters(form.prompt),
     ...form.screenplayCharacterAliases.keys,
     for (final reference in savedReferences)
       if (!reference.hidden && reference.characterName?.isNotEmpty == true)
@@ -22,7 +22,7 @@ extension ScreenplayAuthoring on AppController {
 
   /// Script names remain stable when only the footer's casting name is edited.
   List<String> get scriptCharacterNames => {
-    ...screenplayCharacters(form.prompt),
+    if (form.screenplayMode) ...screenplayCharacters(form.prompt),
     ...form.screenplayCharacterAliases.keys,
     ...screenplayMappings(form.prompt).keys.where(
       (name) => !form.screenplayCharacterAliases.values.contains(name),
@@ -44,6 +44,9 @@ extension ScreenplayAuthoring on AppController {
     required List<String> referenceNames,
     bool renameInScript = false,
   }) async {
+    if (!selectedModel.supportsCharacterReferences) {
+      return 'Choose a model that supports image or video references to cast characters.';
+    }
     final tab = activeComposerTab;
     final normalized = normalizeCharacterName(name);
     final problem = screenplayCharacterNameProblem(normalized);
@@ -262,7 +265,9 @@ extension ScreenplayAuthoring on AppController {
   /// Insert once as ordinary editable text. Remembering the character means
   /// deleting or editing a mapping never causes it to spring back on typing.
   void _syncScreenplayReferences() {
-    if (!form.screenplayMode) return;
+    if (!form.screenplayMode || !selectedModel.supportsCharacterReferences) {
+      return;
+    }
     final names = <String, SavedReference?>{
       for (final saved in savedReferences)
         if (!saved.hidden &&

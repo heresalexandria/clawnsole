@@ -333,6 +333,7 @@ class KreaApi {
         images: images.length,
         videos: videos.length,
         audios: audios.length,
+        names: referencePromptNamesFromInput(input),
       ),
       if (frames.isNotEmpty) 'start_image': frames.first,
       if (spec.sendsEndImage && frames.length > 1) 'end_image': frames[1],
@@ -444,12 +445,13 @@ class KreaApi {
     required int images,
     required int videos,
     required int audios,
+    required Map<MediaReferenceKind, List<String>> names,
   }) {
     final mentions = promptReferenceMentions(<MediaReferenceKind>[
       ...List<MediaReferenceKind>.filled(images, MediaReferenceKind.image),
       ...List<MediaReferenceKind>.filled(videos, MediaReferenceKind.video),
       ...List<MediaReferenceKind>.filled(audios, MediaReferenceKind.audio),
-    ]);
+    ], names: names);
     return translateReferencePrompt(
       prompt,
       dialect: model.startsWith('bytedance/seedance')

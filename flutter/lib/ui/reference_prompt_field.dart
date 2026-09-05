@@ -55,6 +55,13 @@ class _ReferencePromptEditingController extends TextEditingController {
       text,
       available: _attachedMentions,
     ).map((match) => (start: match.start, end: match.end)).toList();
+    if (!screenplayMode && mentionRanges.isEmpty) {
+      return super.buildTextSpan(
+        context: context,
+        style: style,
+        withComposing: withComposing,
+      );
+    }
     final composing = value.composing;
     final hasComposing =
         withComposing &&
@@ -164,7 +171,12 @@ class ReferencePromptField extends StatefulWidget {
 class _ReferencePromptFieldState extends State<ReferencePromptField> {
   late final _ReferencePromptEditingController _controller;
   late final FocusNode _focusNode;
+  late TextEditingValue _lastEditingValue;
+  bool _typingReference = false;
   final OverlayPortalController _suggestionsOverlay = OverlayPortalController();
+  // Preserve the portal's attachment to its controller when format controls
+  // or the Expanded wrapper change the editor's position in the widget tree.
+  final GlobalKey _portalKey = GlobalKey();
   final GlobalKey _fieldKey = GlobalKey();
   RenderEditable? _editable;
   _PromptMentionQuery? _query;
@@ -191,7 +203,8 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             mentions: _mentions(widget.references),
           )
           ..screenplayMode = widget.screenplayMode
-          ..addListener(_refreshSuggestions);
+          ..addListener(_editingChanged);
+    _lastEditingValue = _controller.value;
     // Handle menu navigation at the primary focus. A surrounding Focus can
     // lose Enter to EditableText's multiline action before bubbling reaches
     // it, which inserts a newline instead of accepting the highlighted tag.
@@ -231,10 +244,28 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     List<PromptReferenceOption> references,
   ) => references.map((reference) => reference.mention).toList();
 
+  void _editingChanged() {
+    final value = _controller.value;
+    if (value.text != _lastEditingValue.text) {
+      _typingReference = true;
+    } else if (value.selection != _lastEditingValue.selection) {
+      // Moving through an existing tag is text navigation, not a request to
+      // complete it. Only typing should start a reference menu.
+      _typingReference = false;
+    }
+    _lastEditingValue = value;
+    _refreshSuggestions();
+  }
+
   void _refreshSuggestions() {
     _preserveAncestorScrollForSelectAll();
     if (widget.screenplayMode && mounted) setState(() {});
-    final query = _mentionQuery(_controller.value, widget.references);
+    final query =
+        _typingReference &&
+            _focusNode.hasFocus &&
+            _controller.value.composing.isCollapsed
+        ? _mentionQuery(_controller.value, widget.references)
+        : null;
     final suggestions = query == null
         ? const <PromptReferenceOption>[]
         : widget.references.where((reference) {
@@ -378,8 +409,11 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (widget.screenplayMode && _controller.value.composing.isCollapsed) {
+    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) ||
+        !_controller.value.composing.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
+    if (widget.screenplayMode) {
       if (event.logicalKey == LogicalKeyboardKey.tab) {
         _cycleElement(HardwareKeyboard.instance.isShiftPressed);
         return KeyEventResult.handled;
@@ -427,6 +461,28 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     }
     if (_suggestions.isEmpty) {
       return KeyEventResult.ignored;
+    }
+    // Modified arrows belong to the text field (selection, word/paragraph
+    // movement). Only unmodified Up/Down navigate an actively typed @ query.
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isMetaPressed ||
+        keyboard.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    if ({
+      LogicalKeyboardKey.arrowLeft,
+      LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.home,
+      LogicalKeyboardKey.end,
+      LogicalKeyboardKey.escape,
+    }.contains(event.logicalKey)) {
+      _typingReference = false;
+      _refreshSuggestions();
+      return event.logicalKey == LogicalKeyboardKey.escape
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
         event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -611,7 +667,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   @override
   void dispose() {
     _controller
-      ..removeListener(_refreshSuggestions)
+      ..removeListener(_editingChanged)
       ..dispose();
     _focusNode.dispose();
     super.dispose();
@@ -620,9 +676,12 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      _controller.screenplayWidth =
-          (constraints.maxWidth.clamp(0.0, 760.0) - 36).clamp(0.0, 724.0);
+      _controller.screenplayWidth = (constraints.maxWidth - 36).clamp(
+        0.0,
+        double.infinity,
+      );
       final promptField = OverlayPortal(
+        key: _portalKey,
         controller: _suggestionsOverlay,
         overlayChildBuilder: _buildSuggestionsOverlay,
         child: Actions(
@@ -681,15 +740,6 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           ),
         ),
       );
-      final screenplayField = widget.screenplayMode
-          ? Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: promptField,
-              ),
-            )
-          : promptField;
       final screenplayControls = <Widget>[
         if (widget.screenplayMode) ...[
           DropdownButton<ScreenplayElement>(
@@ -740,10 +790,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
               ),
             ),
           ],
-          if (widget.expands)
-            Expanded(child: screenplayField)
-          else
-            screenplayField,
+          if (widget.expands) Expanded(child: promptField) else promptField,
           if (widget.screenplayMode)
             Padding(
               padding: const EdgeInsets.only(top: 8),

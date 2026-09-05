@@ -2,6 +2,7 @@ import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
+import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/reference_prompts.dart';
 import 'package:clawnsole/core/screenplay.dart';
 import 'package:clawnsole/ui/reference_prompt_field.dart';
@@ -43,6 +44,84 @@ AppController director({List<SavedReference> references = const []}) =>
       );
 
 void main() {
+  test('only screenplay cues become detected characters', () {
+    const script =
+        'INT. LIVING ROOM - NIGHT\n\n'
+        'ALICE watches TV. A VHS-style image fills the TV-screen.\n\n'
+        '        ÉLODIE (V.O.)\n      (quietly)\n    Hello.\n\n'
+        'BOB\nHello again.\n\n'
+        'CUT TO:\n\n'
+        'EXTRA: @portrait';
+    expect(screenplayCharacters(script), {'ÉLODIE', 'BOB'});
+    expect(screenplayCompletions(script, 'TV', []), isEmpty);
+    expect(screenplayCharacters('TV VHS USA NASA'), isEmpty);
+  });
+
+  test('plaintext cast is manual and survives format changes', () async {
+    final controller = director();
+    addTearDown(controller.dispose);
+    controller.form.prompt = 'ALICE\nHello.\n\nA TV plays VHS tapes.';
+    expect(controller.scriptCharacterNames, isEmpty);
+    expect(
+      await controller.saveCharacterMapping(
+        scriptName: 'EXTRA',
+        name: 'EXTRA',
+        referenceNames: [],
+      ),
+      isNull,
+    );
+    expect(controller.scriptCharacterNames, ['EXTRA']);
+    controller.setScreenplayMode(true);
+    expect(controller.scriptCharacterNames, ['ALICE', 'EXTRA']);
+    controller.setScreenplayMode(false);
+    expect(controller.scriptCharacterNames, ['EXTRA']);
+  });
+
+  test('casting requires visual references, independent of pinned frames', () {
+    VideoModelDefinition model({int images = 0, int videos = 0}) =>
+        VideoModelDefinition(
+          id: 'test',
+          label: 'Test',
+          description: '',
+          modes: const [VideoMode.t2v],
+          aspectRatios: const ['16:9'],
+          resolutions: const [],
+          minDuration: 1,
+          maxDuration: 1,
+          durationStep: 1,
+          maxKeyframes: 2,
+          maxAudioReferences: 1,
+          maxImageReferences: images,
+          maxVideoReferences: videos,
+          usdPerSecond: 0,
+        );
+    expect(model().supportsMediaReferences, isTrue);
+    expect(model().supportsCharacterReferences, isFalse);
+    expect(model(images: 1).supportsCharacterReferences, isTrue);
+    expect(model(videos: 1).supportsCharacterReferences, isTrue);
+  });
+
+  test('keyframe-only models reject even reference-free cast edits', () async {
+    final controller = director(references: [actor('alx', 'ALEXANDRIA')]);
+    addTearDown(controller.dispose);
+    controller.selectedProviderId = 'bfl';
+    controller.selectedModelId = 'flux-3-video';
+    controller.form.prompt = 'ALEXANDRIA\nHello.';
+    controller.setScreenplayMode(true);
+    final prompt = controller.form.prompt;
+    expect(controller.form.references, isEmpty);
+    expect(
+      await controller.saveCharacterMapping(
+        scriptName: 'EXTRA',
+        name: 'EXTRA',
+        referenceNames: [],
+      ),
+      isNotNull,
+    );
+    expect(controller.form.screenplayCharacterAliases, isEmpty);
+    expect(controller.form.prompt, prompt);
+  });
+
   test(
     'imports scene, cue, dialogue and parenthetical without changing mappings',
     () {
@@ -372,7 +451,8 @@ void main() {
     () async {
       final controller = director(references: [actor('alx', '')]);
       addTearDown(controller.dispose);
-      controller.form.prompt = 'ALICE meets BOB.';
+      controller.form.screenplayMode = true;
+      controller.form.prompt = 'ALICE\nHello.\n\nBOB\nHi.';
       final original = controller.form.prompt;
       expect(
         await controller.saveCharacterMapping(
@@ -396,6 +476,37 @@ void main() {
       expect(controller.form.references, isEmpty);
     },
   );
+
+  for (final supported in [false, true]) {
+    testWidgets('character controls follow model support: $supported', (
+      tester,
+    ) async {
+      final controller = director();
+      addTearDown(controller.dispose);
+      if (!supported) {
+        controller.selectedProviderId = 'bfl';
+        controller.selectedModelId = 'flux-3-video';
+      }
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: CreateScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final characters = find.byKey(const ValueKey('prompt-characters-button'));
+      expect(characters, supported ? findsOneWidget : findsNothing);
+      await tester.tap(find.byKey(const ValueKey('prompt-fullscreen-button')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('prompt-fullscreen-editor')),
+          matching: characters,
+        ),
+        supported ? findsOneWidget : findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets(
     'mobile toolbar stays on one line and screenplay controls follow the editor',
@@ -537,7 +648,8 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = director(references: [actor('alx', '')]);
       addTearDown(controller.dispose);
-      controller.form.prompt = 'ALEXANDRIA enters.';
+      controller.form.screenplayMode = true;
+      controller.form.prompt = '        ALEXANDRIA\n    Hello.';
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -561,7 +673,10 @@ void main() {
       await tester.tap(find.text('@alx.mp4'));
       await tester.tap(find.byKey(const ValueKey('save-character-mapping')));
       await tester.pumpAndSettle();
-      expect(controller.form.prompt, 'ALEXANDRIA enters.\n\nHERO: @alx.mp4');
+      expect(
+        controller.form.prompt,
+        '        ALEXANDRIA\n    Hello.\n\nHERO: @alx.mp4',
+      );
       expect(find.text('HERO'), findsOneWidget);
       await tester.tap(find.text('HERO'));
       await tester.pumpAndSettle();
@@ -569,7 +684,19 @@ void main() {
       await tester.tap(find.text('Remove all'));
       await tester.tap(find.byKey(const ValueKey('save-character-mapping')));
       await tester.pumpAndSettle();
-      expect(controller.form.prompt, 'HERO enters.');
+      expect(controller.form.prompt, '        HERO\n    Hello.');
+      controller.setScreenplayMode(false);
+      await tester.tap(find.text('Add character'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('mapping-character-name')),
+        'EXTRA',
+      );
+      await tester.tap(find.byKey(const ValueKey('save-character-mapping')));
+      await tester.pumpAndSettle();
+      expect(find.text('EXTRA'), findsOneWidget);
+      expect(controller.scriptCharacterNames, ['EXTRA', 'HERO']);
+      expect(controller.form.prompt, '        HERO\n    Hello.');
       expect(tester.takeException(), isNull);
     });
   }

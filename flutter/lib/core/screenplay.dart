@@ -126,19 +126,10 @@ String formatScreenplay(String text) {
   }).join('\n');
 }
 
+/// Use the editor's character cues, never uppercase words in action text.
 Set<String> screenplayCharacters(String text) {
   final result = <String>{};
   for (final line in formatScreenplay(text).split('\n')) {
-    if (screenplayElement(line) == ScreenplayElement.action &&
-        !isScreenplayMapping(line)) {
-      for (final match in RegExp(
-        r"[\p{Lu}][\p{Lu}\p{N}’'_-]+(?: [\p{Lu}][\p{Lu}\p{N}’'_-]+)*",
-        unicode: true,
-      ).allMatches(line)) {
-        final name = match.group(0)!;
-        if (screenplayCharacterNameProblem(name) == null) result.add(name);
-      }
-    }
     if (screenplayElement(line) == ScreenplayElement.character) {
       final name = line.trim().replaceFirst(RegExp(r'\s*\([^)]*\)\s*$'), '');
       if (name.isNotEmpty) result.add(name);
