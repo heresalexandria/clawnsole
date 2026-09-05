@@ -58,13 +58,16 @@ extension AiRewriteController on AppController {
       showNotice('That tab was closed before the rewrite came back.');
       return;
     }
+    final rewritten = tab.form.screenplayMode
+        ? formatScreenplay(result.prompt)
+        : result.prompt;
     _directionRewriteUndo = (
       tabId: tab.id,
       previous: tab.form.prompt,
-      rewritten: result.prompt,
+      rewritten: rewritten,
     );
     _inComposerTab(tab, () {
-      tab.form.prompt = result.prompt;
+      tab.form.prompt = rewritten;
       tab.formRevision += 1;
     });
     _scheduleComposerTabsSave(touched: tab);

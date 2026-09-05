@@ -714,9 +714,11 @@ void main() {
         (bodies.first['output_config']! as Map<String, Object?>).keys,
         containsAll(<String>['format', 'effort']),
       );
-      expect(bodies.last['output_config'], <String, Object?>{
-        'effort': 'high',
-      }, reason: 'the retry drops the format but keeps the effort');
+      expect(
+        bodies.last['output_config'],
+        <String, Object?>{'effort': 'high'},
+        reason: 'the retry drops the format but keeps the effort',
+      );
       expect(result.prompt, 'P');
       expect(result.summary, 'S');
     });

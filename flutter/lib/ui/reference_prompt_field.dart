@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/reference_prompts.dart';
+import '../core/screenplay.dart';
+import 'screenplay_input.dart';
 
 class PromptReferenceOption {
   const PromptReferenceOption({
@@ -28,6 +30,8 @@ class _ReferencePromptEditingController extends TextEditingController {
   }) : _attachedMentions = mentions;
 
   List<PromptReferenceMention> _attachedMentions;
+  bool screenplayMode = false;
+  double screenplayWidth = 720;
 
   void updateMentions(List<PromptReferenceMention> mentions) {
     final current = _attachedMentions
@@ -58,6 +62,13 @@ class _ReferencePromptEditingController extends TextEditingController {
         !composing.isCollapsed &&
         composing.end <= text.length;
     final boundaries = <int>{
+      if (screenplayMode) ...[
+        ...RegExp(r'\n').allMatches(text).map((match) => match.end),
+        ...RegExp(
+          r'^ +',
+          multiLine: true,
+        ).allMatches(text).map((match) => match.end),
+      ],
       0,
       text.length,
       for (final range in mentionRanges) ...<int>[range.start, range.end],
@@ -74,13 +85,41 @@ class _ReferencePromptEditingController extends TextEditingController {
       );
       final isComposing =
           hasComposing && start >= composing.start && end <= composing.end;
+      final lineStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
+      final lineEnd = text.indexOf('\n', start);
+      final element = screenplayMode
+          ? screenplayElement(
+              text.substring(lineStart, lineEnd < 0 ? text.length : lineEnd),
+            )
+          : null;
+      final indent = element?.indent ?? 0;
+      final isIndent =
+          screenplayMode &&
+          indent > 0 &&
+          start == lineStart &&
+          text.substring(start, end).trim().isEmpty;
+      final fraction = switch (element) {
+        ScreenplayElement.character => .34,
+        ScreenplayElement.dialogue => .18,
+        ScreenplayElement.parenthetical => .27,
+        ScreenplayElement.transition => .62,
+        _ => 0.0,
+      };
       children.add(
         TextSpan(
           text: text.substring(start, end),
           style: TextStyle(
+            // Scale only the leading spaces. Document offsets and clipboard
+            // text remain plain text while page margins fit the viewport.
+            letterSpacing: isIndent
+                ? screenplayWidth * fraction / (end - start) -
+                      (style?.fontSize ?? 14) * .6
+                : null,
             color: isMention ? colors.onPrimaryContainer : null,
             backgroundColor: isMention ? colors.primaryContainer : null,
-            fontWeight: isMention ? FontWeight.w700 : null,
+            fontWeight: isMention || element?.uppercase == true
+                ? FontWeight.w700
+                : null,
             decoration: isComposing ? TextDecoration.underline : null,
           ),
         ),
@@ -99,6 +138,10 @@ class ReferencePromptField extends StatefulWidget {
     this.expands = false,
     this.autofocus = false,
     this.maxLength,
+    this.minLines = 4,
+    this.screenplayMode = false,
+    this.characterNames = const [],
+    this.toolbar,
     super.key,
   });
 
@@ -109,6 +152,10 @@ class ReferencePromptField extends StatefulWidget {
   final bool expands;
   final bool autofocus;
   final int? maxLength;
+  final int minLines;
+  final bool screenplayMode;
+  final List<String> characterNames;
+  final Widget? toolbar;
 
   @override
   State<ReferencePromptField> createState() => _ReferencePromptFieldState();
@@ -123,14 +170,28 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   _PromptMentionQuery? _query;
   List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
   int? _highlightedSuggestion;
+  int? _screenplayHighlight;
+  bool _dismissScreenplaySuggestions = false;
+
+  List<String> get _screenplaySuggestions =>
+      !widget.screenplayMode || _dismissScreenplaySuggestions
+      ? const []
+      : screenplayCompletions(
+          _controller.text,
+          screenplayCurrentLine(_controller.value).line,
+          widget.characterNames,
+        );
 
   @override
   void initState() {
     super.initState();
-    _controller = _ReferencePromptEditingController(
-      text: widget.prompt,
-      mentions: _mentions(widget.references),
-    )..addListener(_refreshSuggestions);
+    _controller =
+        _ReferencePromptEditingController(
+            text: widget.prompt,
+            mentions: _mentions(widget.references),
+          )
+          ..screenplayMode = widget.screenplayMode
+          ..addListener(_refreshSuggestions);
     // Handle menu navigation at the primary focus. A surrounding Focus can
     // lose Enter to EditableText's multiline action before bubbling reaches
     // it, which inserts a newline instead of accepting the highlighted tag.
@@ -140,13 +201,26 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   @override
   void didUpdateWidget(covariant ReferencePromptField oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _controller.screenplayMode = widget.screenplayMode;
     _controller.updateMentions(_mentions(widget.references));
     if (oldWidget.formRevision != widget.formRevision ||
         (_controller.text != widget.prompt &&
             oldWidget.prompt != widget.prompt)) {
+      final previous = _controller.value;
       _controller.value = TextEditingValue(
         text: widget.prompt,
-        selection: TextSelection.collapsed(offset: widget.prompt.length),
+        selection:
+            widget.prompt.startsWith(previous.text) &&
+                previous.selection.isValid
+            ? previous.selection
+            : TextSelection.collapsed(
+                offset: previous.selection.isValid
+                    ? previous.selection.extentOffset.clamp(
+                        0,
+                        widget.prompt.length,
+                      )
+                    : widget.prompt.length,
+              ),
       );
     } else {
       _refreshSuggestions();
@@ -159,6 +233,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
 
   void _refreshSuggestions() {
     _preserveAncestorScrollForSelectAll();
+    if (widget.screenplayMode && mounted) setState(() {});
     final query = _mentionQuery(_controller.value, widget.references);
     final suggestions = query == null
         ? const <PromptReferenceOption>[]
@@ -269,8 +344,88 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     return null;
   }
 
+  void _changeElement(ScreenplayElement element) {
+    _controller.value = setScreenplayElement(_controller.value, element);
+    _dismissScreenplaySuggestions = false;
+    widget.onChanged(_controller.text);
+    _focusNode.requestFocus();
+  }
+
+  void _cycleElement(bool reverse) {
+    final current = screenplayElement(
+      screenplayCurrentLine(_controller.value).line,
+    );
+    final next =
+        ScreenplayElement.values[(current.index + (reverse ? -1 : 1)) %
+            ScreenplayElement.values.length];
+    _changeElement(next);
+  }
+
+  void _completeScreenplay(String suggestion) {
+    final current = screenplayCurrentLine(_controller.value);
+    var element = screenplayElement(suggestion);
+    if (element == ScreenplayElement.action) {
+      element = ScreenplayElement.character;
+    }
+    final line = formatScreenplayLine(suggestion, element);
+    _controller.value = TextEditingValue(
+      text: _controller.text.replaceRange(current.start, current.end, line),
+      selection: TextSelection.collapsed(offset: current.start + line.length),
+    );
+    _screenplayHighlight = null;
+    widget.onChanged(_controller.text);
+    _focusNode.requestFocus();
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || _suggestions.isEmpty) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (widget.screenplayMode && _controller.value.composing.isCollapsed) {
+      if (event.logicalKey == LogicalKeyboardKey.tab) {
+        _cycleElement(HardwareKeyboard.instance.isShiftPressed);
+        return KeyEventResult.handled;
+      }
+      final options = _screenplaySuggestions;
+      if (event.logicalKey == LogicalKeyboardKey.escape && options.isNotEmpty) {
+        setState(() => _dismissScreenplaySuggestions = true);
+        return KeyEventResult.handled;
+      }
+      if (_suggestions.isEmpty && options.isNotEmpty) {
+        if (HardwareKeyboard.instance.isAltPressed &&
+            (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+                event.logicalKey == LogicalKeyboardKey.arrowUp)) {
+          setState(
+            () => _screenplayHighlight =
+                ((_screenplayHighlight ??
+                        (event.logicalKey == LogicalKeyboardKey.arrowDown
+                            ? -1
+                            : 0)) +
+                    (event.logicalKey == LogicalKeyboardKey.arrowDown
+                        ? 1
+                        : -1)) %
+                options.length,
+          );
+          return KeyEventResult.handled;
+        }
+        if ((event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+            _screenplayHighlight != null) {
+          _completeScreenplay(
+            options[_screenplayHighlight!.clamp(0, options.length - 1)],
+          );
+          return KeyEventResult.handled;
+        }
+      }
+    }
+    if (!HardwareKeyboard.instance.isAltPressed &&
+        {
+          LogicalKeyboardKey.arrowUp,
+          LogicalKeyboardKey.arrowDown,
+          LogicalKeyboardKey.arrowLeft,
+          LogicalKeyboardKey.arrowRight,
+        }.contains(event.logicalKey)) {
+      _screenplayHighlight = null;
+    }
+    if (_suggestions.isEmpty) {
       return KeyEventResult.ignored;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
@@ -463,56 +618,168 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final promptField = OverlayPortal(
-      controller: _suggestionsOverlay,
-      overlayChildBuilder: _buildSuggestionsOverlay,
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          // EditableText normally asks every ancestor Scrollable to reveal the
-          // selection endpoint after Select All. The prompt has its own
-          // internal scroller, so that request only makes the surrounding
-          // Create screen jump. Preserve the selection behavior without
-          // propagating a reveal.
-          SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
-            onInvoke: _selectAllWithoutRevealing,
-          ),
-        },
-        child: TextFormField(
-          key: _fieldKey,
-          controller: _controller,
-          focusNode: _focusNode,
-          autofocus: widget.autofocus,
-          expands: widget.expands,
-          textAlign: widget.expands ? TextAlign.left : TextAlign.start,
-          textAlignVertical: widget.expands ? TextAlignVertical.top : null,
-          minLines: widget.expands ? null : 4,
-          maxLines: widget.expands ? null : 10,
-          maxLength: widget.maxLength ?? 50000,
-          maxLengthEnforcement: MaxLengthEnforcement.enforced,
-          style: const TextStyle(
-            fontFamily: promptFontFamily,
-            fontSize: 14,
-            height: 1.55,
-          ),
-          onChanged: widget.onChanged,
-          decoration: InputDecoration(
-            hintText: widget.references.isEmpty
-                ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
-                : 'A single continuous shot… type @ to mention an attached reference.',
-            counterText: '',
-            alignLabelWithHint: true,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      _controller.screenplayWidth =
+          (constraints.maxWidth.clamp(0.0, 760.0) - 36).clamp(0.0, 724.0);
+      final promptField = OverlayPortal(
+        controller: _suggestionsOverlay,
+        overlayChildBuilder: _buildSuggestionsOverlay,
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            // EditableText normally asks every ancestor Scrollable to reveal the
+            // selection endpoint after Select All. The prompt has its own
+            // internal scroller, so that request only makes the surrounding
+            // Create screen jump. Preserve the selection behavior without
+            // propagating a reveal.
+            SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+              onInvoke: _selectAllWithoutRevealing,
+            ),
+          },
+          child: TextFormField(
+            key: _fieldKey,
+            controller: _controller,
+            focusNode: _focusNode,
+            autofocus: widget.autofocus,
+            expands: widget.expands,
+            textAlign: widget.expands ? TextAlign.left : TextAlign.start,
+            textAlignVertical: widget.expands ? TextAlignVertical.top : null,
+            minLines: widget.expands ? null : widget.minLines,
+            maxLines: widget.expands ? null : 10,
+            maxLength: widget.maxLength ?? 50000,
+            maxLengthEnforcement: MaxLengthEnforcement.enforced,
+            inputFormatters: widget.screenplayMode
+                ? [
+                    ScreenplayInputFormatter(
+                      characterNames: widget.characterNames,
+                    ),
+                  ]
+                : null,
+            textCapitalization: widget.screenplayMode
+                ? TextCapitalization.none
+                : TextCapitalization.sentences,
+            autocorrect: !widget.screenplayMode,
+            style: TextStyle(
+              fontFamily: promptFontFamily,
+              fontSize: 14,
+              height: 1.55,
+            ),
+            onChanged: (value) {
+              _dismissScreenplaySuggestions = false;
+              _screenplayHighlight = null;
+              widget.onChanged(value);
+            },
+            decoration: InputDecoration(
+              hintText: widget.screenplayMode
+                  ? 'INT. LOCATION - DAY\n\nDescribe the action. Tab to write a character.'
+                  : widget.references.isEmpty
+                  ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
+                  : 'A single continuous shot… type @ to mention an attached reference.',
+              counterText: '',
+              alignLabelWithHint: true,
+            ),
           ),
         ),
-      ),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (widget.expands) Expanded(child: promptField) else promptField,
-      ],
-    );
-  }
+      );
+      final screenplayField = widget.screenplayMode
+          ? Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: promptField,
+              ),
+            )
+          : promptField;
+      final screenplayControls = <Widget>[
+        if (widget.screenplayMode) ...[
+          DropdownButton<ScreenplayElement>(
+            key: const ValueKey('screenplay-element-picker'),
+            isDense: true,
+            style: Theme.of(context).textTheme.labelMedium,
+            value: screenplayElement(
+              screenplayCurrentLine(_controller.value).line,
+            ),
+            underline: const SizedBox.shrink(),
+            items: ScreenplayElement.values
+                .map(
+                  (element) => DropdownMenuItem(
+                    value: element,
+                    child: Text(element.label),
+                  ),
+                )
+                .toList(),
+            onChanged: (element) {
+              if (element != null) _changeElement(element);
+            },
+          ),
+          TextButton.icon(
+            onPressed: () => _cycleElement(true),
+            icon: const Icon(Icons.arrow_back, size: 18),
+            label: const Text('Prev'),
+          ),
+          TextButton.icon(
+            onPressed: () => _cycleElement(false),
+            icon: const Icon(Icons.keyboard_tab, size: 18),
+            label: const Text('Next'),
+          ),
+        ],
+      ];
+      final editor = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (widget.toolbar != null) widget.toolbar!,
+          if (widget.screenplayMode) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Enter continues the script · Tab / Shift Tab changes element',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: context.colors.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+          if (widget.expands)
+            Expanded(child: screenplayField)
+          else
+            screenplayField,
+          if (widget.screenplayMode)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                key: const ValueKey('screenplay-element-toolbar'),
+                spacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: screenplayControls,
+              ),
+            ),
+          if (_screenplaySuggestions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _screenplaySuggestions.indexed
+                      .map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: InputChip(
+                            label: Text(entry.$2),
+                            selected: _screenplayHighlight == entry.$1,
+                            onPressed: () => _completeScreenplay(entry.$2),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ),
+        ],
+      );
+      return editor;
+    },
+  );
 }
 
 class _PromptMentionQuery {
