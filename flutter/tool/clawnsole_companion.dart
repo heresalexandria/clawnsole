@@ -3423,7 +3423,7 @@ class CompanionApp {
               contentRange,
             );
           }
-          return request.response.close();
+          return await request.response.close();
         }
         throw ProviderException(
           'The media download returned HTTP ${upstream.statusCode}.',
