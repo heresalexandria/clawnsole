@@ -23,6 +23,7 @@ const {
 } = require("./lib/runtime.cjs");
 const { installNativeTextContextMenu } = require("./lib/text-context-menu.cjs");
 const { rendererIpcGuard, guardedRendererHandler } = require("./lib/renderer-ipc.cjs");
+const { protectRendererNavigation } = require("./lib/renderer-navigation.cjs");
 const { configureSmokeProfile } = require("./lib/smoke-profile.cjs");
 const {
   companionBootstrapLine,
@@ -565,22 +566,6 @@ function installRendererBridge() {
   });
 }
 
-// The renderer origin can move when the companion restarts on a new port, so
-// every guard reads the live value rather than the one captured at startup.
-function protectNavigation(window) {
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-
-  window.webContents.on("will-navigate", (event, url) => {
-    if (isAllowedAppUrl(url, rendererUrl)) return;
-    event.preventDefault();
-    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
-  });
-
-  window.webContents.on("will-attach-webview", (event) => event.preventDefault());
-}
 
 async function createMainWindow() {
   const window = new BrowserWindow({
@@ -600,7 +585,11 @@ async function createMainWindow() {
     },
   });
 
-  protectNavigation(window);
+  protectRendererNavigation({
+    contents: window.webContents,
+    getRendererUrl: () => rendererUrl,
+    openExternal: (url) => shell.openExternal(url),
+  });
   installRendererRecovery({
     window,
     showMessage,

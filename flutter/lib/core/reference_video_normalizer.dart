@@ -5,10 +5,12 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:http/http.dart' as http;
 
 import 'bfl_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
+import 'public_media_http.dart';
 
 const int _maxReferenceVideoBytes = 512 * 1024 * 1024;
 const int _maxReferenceImageBytes = 128 * 1024 * 1024;
@@ -769,26 +771,25 @@ class ReferenceVideoNormalizer
         hashSink.add(bytes);
       } else {
         final url = validatedProviderUrl(source);
-        final client = HttpClient()
-          ..connectionTimeout = _referenceVideoConnectTimeout;
+        final client = PublicMediaClient(
+          maxBytes: _maxReferenceVideoBytes,
+          connectTimeout: _referenceVideoConnectTimeout,
+          idleTimeout: _referenceVideoIdleTimeout,
+          totalTimeout: _referenceVideoDownloadTimeout,
+        );
         try {
           length = await (() async {
-            final request = await client
-                .getUrl(url)
-                .timeout(_referenceVideoConnectTimeout);
-            final response = await request.close().timeout(
-              _referenceVideoConnectTimeout,
-            );
+            final response = await client.send(http.Request('GET', url));
             if (response.statusCode < 200 || response.statusCode >= 300) {
               throw StateError(
                 'The reference video URL could not be downloaded.',
               );
             }
-            if (response.contentLength > _maxReferenceVideoBytes) {
+            if ((response.contentLength ?? 0) > _maxReferenceVideoBytes) {
               throw StateError('Reference videos must be 512 MB or smaller.');
             }
             var downloaded = 0;
-            await for (final chunk in response.timeout(
+            await for (final chunk in response.stream.timeout(
               _referenceVideoIdleTimeout,
             )) {
               downloaded += chunk.length;
@@ -803,7 +804,7 @@ class ReferenceVideoNormalizer
         } on TimeoutException {
           throw StateError('The reference video download timed out.');
         } finally {
-          client.close(force: true);
+          client.close();
         }
       }
     } finally {
@@ -844,27 +845,26 @@ class ReferenceVideoNormalizer
       }
     } else {
       final url = validatedProviderUrl(source);
-      final client = HttpClient()
-        ..connectionTimeout = _referenceVideoConnectTimeout;
+      final client = PublicMediaClient(
+        maxBytes: _maxReferenceImageBytes,
+        connectTimeout: _referenceVideoConnectTimeout,
+        idleTimeout: _referenceVideoIdleTimeout,
+        totalTimeout: _referenceVideoDownloadTimeout,
+      );
       try {
         bytes = await (() async {
-          final request = await client
-              .getUrl(url)
-              .timeout(_referenceVideoConnectTimeout);
-          final response = await request.close().timeout(
-            _referenceVideoConnectTimeout,
-          );
+          final response = await client.send(http.Request('GET', url));
           if (response.statusCode < 200 || response.statusCode >= 300) {
             throw StateError(
               'The reference image URL could not be downloaded.',
             );
           }
-          if (response.contentLength > _maxReferenceImageBytes) {
+          if ((response.contentLength ?? 0) > _maxReferenceImageBytes) {
             throw StateError('Reference images must be 128 MB or smaller.');
           }
           final output = BytesBuilder(copy: false);
           var downloaded = 0;
-          await for (final chunk in response.timeout(
+          await for (final chunk in response.stream.timeout(
             _referenceVideoIdleTimeout,
           )) {
             downloaded += chunk.length;
@@ -878,7 +878,7 @@ class ReferenceVideoNormalizer
       } on TimeoutException {
         throw StateError('The reference image download timed out.');
       } finally {
-        client.close(force: true);
+        client.close();
       }
     }
     if (bytes.isEmpty) throw StateError('The reference image is empty.');

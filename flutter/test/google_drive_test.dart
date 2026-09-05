@@ -14,6 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'support/memory_asset_streaming.dart';
+
 void main() {
   test(
     'slow Drive publication never blocks saving newer drafts locally',
@@ -1357,7 +1359,7 @@ class _MemoryStore implements DurableDataStore {
   );
 }
 
-class _MemoryDriveStore extends GoogleDriveStore {
+class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
   _MemoryDriveStore(this.data);
 
   StoredData data;

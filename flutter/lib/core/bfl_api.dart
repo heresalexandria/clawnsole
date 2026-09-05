@@ -176,10 +176,15 @@ String providerNamedFailureMessage(
   return message.replaceFirst(RegExp(r'^BFL\b'), providerName);
 }
 
+bool _urlHasUserInfo(String value) =>
+    RegExp(r'^[^:/?#]+://[^/?#]*@').hasMatch(value);
+
 Uri validatedBflUrl(String value) {
   final url = Uri.tryParse(value);
   if (url == null ||
       url.scheme != 'https' ||
+      _urlHasUserInfo(value) ||
+      (url.hasPort && (url.port < 1 || url.port > 65535)) ||
       !(url.host == 'bfl.ai' || url.host.endsWith('.bfl.ai'))) {
     throw const ProviderException(
       'The BFL delivery URL is invalid.',
@@ -204,6 +209,8 @@ Uri validatedProviderUrl(String value) {
   final host = url?.host.toLowerCase() ?? '';
   if (url == null ||
       url.scheme != 'https' ||
+      _urlHasUserInfo(value) ||
+      (url.hasPort && (url.port < 1 || url.port > 65535)) ||
       host.isEmpty ||
       !isPublicProviderHost(host)) {
     throw const ProviderException('The provider URL is invalid.', status: 400);
@@ -211,13 +218,14 @@ Uri validatedProviderUrl(String value) {
   return url;
 }
 
-/// Whether [host] can only name a public endpoint. Provider payloads decide
+/// A lexical precheck; DNS names must also pass PublicMediaClient resolution.
+/// Provider payloads decide
 /// where media is fetched from, and the companion streams the response back,
 /// so anything that could reach loopback, a private network, link-local or
 /// cloud-metadata addresses — including the alternate spellings of loopback
 /// (`127.1`, `2130706433`, `0x7f000001`, `[::ffff:127.0.0.1]`) — is refused.
 bool isPublicProviderHost(String host) {
-  final name = host.toLowerCase().trim();
+  final name = host.toLowerCase().trim().replaceFirst(RegExp(r'\.$'), '');
   if (name.isEmpty) return false;
   if (name == 'localhost' ||
       name.endsWith('.localhost') ||
@@ -237,14 +245,19 @@ bool isPublicProviderHost(String host) {
     if (octets.length != 4) return false;
     final values = <int>[];
     for (final octet in octets) {
-      if (!RegExp(r'^[0-9]{1,3}$').hasMatch(octet)) return false;
+      if (!RegExp(r'^[0-9]{1,3}$').hasMatch(octet) ||
+          (octet.length > 1 && octet.startsWith('0'))) {
+        return false;
+      }
       final parsed = int.parse(octet);
       if (parsed > 255) return false;
       values.add(parsed);
     }
     return _isPublicIpv4(values);
   }
-  return true;
+  return name.contains('.') &&
+      RegExp(r'^[a-z0-9.-]+$').hasMatch(name) &&
+      name.split('.').every((label) => label.isNotEmpty);
 }
 
 bool _isPublicIpv4(List<int> o) {
@@ -253,6 +266,7 @@ bool _isPublicIpv4(List<int> o) {
   if (o[0] == 169 && o[1] == 254) return false;
   if (o[0] == 172 && o[1] >= 16 && o[1] <= 31) return false;
   if (o[0] == 192 && o[1] == 168) return false;
+  if (o[0] == 192 && o[1] == 88 && o[2] == 99) return false;
   if (o[0] == 192 && o[1] == 0 && (o[2] == 0 || o[2] == 2)) return false;
   if (o[0] == 198 && (o[1] == 18 || o[1] == 19)) return false;
   if (o[0] == 198 && o[1] == 51 && o[2] == 100) return false;
@@ -263,23 +277,26 @@ bool _isPublicIpv4(List<int> o) {
 
 bool _isPublicIpv6(String address) {
   final normalized = address.replaceAll('[', '').replaceAll(']', '');
-  if (normalized == '::' || normalized == '::1') return false;
-  final mapped = RegExp(
-    r'^::ffff:(\d+\.\d+\.\d+\.\d+)$',
-  ).firstMatch(normalized);
-  if (mapped != null) return isPublicProviderHost(mapped.group(1)!);
-  if (normalized.startsWith('::ffff:')) return false;
-  final head = normalized.split(':').first;
-  if (head.isEmpty) return false;
-  if (head.startsWith('fc') || head.startsWith('fd')) return false;
-  if (head.startsWith('fe8') ||
-      head.startsWith('fe9') ||
-      head.startsWith('fea') ||
-      head.startsWith('feb') ||
-      head.startsWith('fec')) {
+  if (normalized.contains('%')) return false;
+  List<int> bytes;
+  try {
+    bytes = Uri.parseIPv6Address(normalized);
+  } on FormatException {
     return false;
   }
-  if (head.startsWith('ff')) return false;
+  // Accept only global unicast 2000::/3. This also refuses mapped IPv4,
+  // NAT64, link-local, multicast, and locally assigned transition prefixes.
+  if ((bytes[0] & 0xe0) != 0x20) return false;
+  // Special-purpose 2001::/23, documentation, and 6to4 tunnelling are not
+  // suitable CDN destinations, even if their textual form looks public.
+  if (bytes[0] == 0x20 && bytes[1] == 0x01) {
+    if (bytes[2] < 2) return false;
+    if (bytes[2] == 0x0d && bytes[3] == 0xb8) return false;
+  }
+  if (bytes[0] == 0x20 && bytes[1] == 0x02) return false;
+  if (bytes[0] == 0x3f && bytes[1] == 0xff && (bytes[2] & 0xf0) == 0) {
+    return false;
+  }
   return true;
 }
 

@@ -3,7 +3,8 @@
 This change implements the first reliability cycle from the September 2026
 studio audit, on top of v0.52.0's synced Create workspaces. The larger creative
 feature roadmap and platform/media architecture recommendations remain separate
-work.
+work. The next media delivery cycle is documented in
+[Media delivery reliability](media-delivery-reliability.md).
 
 ## Generation intent
 

@@ -4,13 +4,30 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'bfl_api.dart';
+import 'public_media_http.dart';
 
 /// A result video handed back by the platform's background transfer service.
 class DeliveredResult {
-  const DeliveredResult({required this.bytes, this.contentType});
+  /// Small in-memory results remain useful for embedders and test services.
+  const DeliveredResult({required Uint8List bytes, this.contentType})
+    : _bytes = bytes,
+      path = null,
+      length = null;
 
-  final Uint8List bytes;
+  const DeliveredResult.file({
+    required this.path,
+    required this.length,
+    this.contentType,
+  }) : _bytes = null;
+
+  final Uint8List? _bytes;
+  final String? path;
+  final int? length;
   final String? contentType;
+
+  int get expectedLength => length ?? _bytes!.length;
+  Stream<List<int>> openRead() =>
+      path == null ? Stream<List<int>>.value(_bytes!) : File(path!).openRead();
 }
 
 /// Delegates result downloads to a platform transfer service that keeps
@@ -57,7 +74,7 @@ class MethodChannelBackgroundResultDelivery
   Future<DeliveredResult?> download({required String id, required String url}) {
     if (_unsupported) return Future<DeliveredResult?>.value();
     // Retention retries for the same generation share one transfer and one
-    // in-memory copy of the bytes instead of stacking channel waiters — a
+    // retained file handle instead of stacking channel waiters — a
     // poll abandoned by its caller's timeout leaves the future here for the
     // next retry to join.
     return _inFlight[id] ??= _download(id, url).whenComplete(() {
@@ -66,6 +83,9 @@ class MethodChannelBackgroundResultDelivery
   }
 
   Future<DeliveredResult?> _download(String id, String url) async {
+    // Native URLSession owns the socket after scheduling, so apply the same
+    // initial public-destination policy before crossing the platform boundary.
+    await validatePublicMediaDestination(validatedProviderUrl(url));
     final Map<String, Object?>? value;
     try {
       value = await _channel.invokeMapMethod<String, Object?>(
@@ -132,8 +152,9 @@ class MethodChannelBackgroundResultDelivery
     final file = File(path);
     if (!await file.exists()) return null;
     final contentType = value?['contentType'] as String?;
-    return DeliveredResult(
-      bytes: await file.readAsBytes(),
+    return DeliveredResult.file(
+      path: path,
+      length: await file.length(),
       contentType: contentType?.isNotEmpty == true ? contentType : null,
     );
   }

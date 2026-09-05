@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'durable_data_store.dart';
 import 'models.dart';
 
-class LocalDataStore implements DurableDataStore {
+class LocalDataStore implements DurableDataStore, StreamingAssetStore {
   Future<bool> exists() => throw UnsupportedError(
     'Browser builds use the Clawnsole local companion service.',
   );
@@ -39,6 +39,23 @@ class LocalDataStore implements DurableDataStore {
     required String contentType,
     LibraryStorage storage = LibraryStorage.local,
   }) => throw UnsupportedError('Browser builds use the local companion.');
+
+  @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) => throw UnsupportedError('Browser builds use the local companion.');
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) =>
+      throw UnsupportedError('Browser builds use the local companion.');
 
   @override
   Future<AssetReference?> persistSource(

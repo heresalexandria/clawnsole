@@ -10,6 +10,8 @@ import 'package:clawnsole/core/models.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/memory_asset_streaming.dart';
+
 void main() {
   final now = DateTime.utc(2026, 8, 26, 12);
 
@@ -353,7 +355,7 @@ class _MemoryStore implements DurableDataStore {
       StorageStats(path: 'memory', bytes: 0, records: records);
 }
 
-class _MemoryDriveStore extends GoogleDriveStore {
+class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
   _MemoryDriveStore(this.data);
 
   StoredData data;

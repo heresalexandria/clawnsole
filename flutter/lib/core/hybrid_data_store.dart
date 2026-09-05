@@ -14,7 +14,8 @@ import 'composer_tabs.dart';
 
 /// Presents local and Google Drive records as one library while keeping their
 /// persistence and retained media physically separate.
-class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
+class HybridDataStore
+    implements DurableDataStore, ComposerWorkspaceStore, StreamingAssetStore {
   HybridDataStore({
     required DurableDataStore local,
     GoogleDriveStore? drive,
@@ -258,6 +259,50 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
   }
 
   @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) async {
+    if (storage == LibraryStorage.drive && !isDriveConnected) {
+      await stream.listen(null).cancel();
+      throw StateError('Connect Google Drive before storing this media.');
+    }
+    if (storage != LibraryStorage.drive && !localLibraryAvailable) {
+      await stream.listen(null).cancel();
+      throw StateError('This build stores generated media in Google Drive.');
+    }
+    final stageLocally = storage == LibraryStorage.drive && _stagesDriveUploads;
+    final DurableDataStore target =
+        storage == LibraryStorage.drive && !stageLocally ? _drive : _local;
+    final result = await target.writeAssetStream(
+      stream,
+      label: label,
+      contentType: contentType,
+      storage: stageLocally ? LibraryStorage.local : storage,
+      expectedLength: expectedLength,
+      expectedSha256: expectedSha256,
+      maxBytes: maxBytes,
+      idleTimeout: idleTimeout,
+      totalTimeout: totalTimeout,
+    );
+    if (stageLocally) onDeferredDriveUpload?.call();
+    return result;
+  }
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) =>
+      reference.kind == 'drive'
+      ? _drive.openAssetRead(reference)
+      : _local.openAssetRead(reference);
+
+  @override
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
@@ -276,6 +321,7 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
             label: label,
             contentType: retained.contentType,
             bytes: retained.bytes,
+            sha256: retained.sha256,
           );
         }
         final staged = await _local.persistSource(
@@ -330,17 +376,20 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
     final replacements = <String, AssetReference>{};
     var failures = 0;
     for (final entry in pendingDriveUploads(data).entries) {
-      Uint8List bytes;
+      final Stream<List<int>> source;
       try {
-        bytes = await _local.readAsset(entry.value);
+        source = await _local.openAssetRead(entry.value);
       } on Object {
+        // A staged reference from another device has no local bytes to send.
         continue;
       }
       try {
-        replacements[entry.key] = await _drive.writeAsset(
-          bytes,
+        replacements[entry.key] = await _drive.writeAssetStream(
+          source,
           label: entry.value.label,
           contentType: entry.value.contentType ?? 'application/octet-stream',
+          expectedLength: entry.value.bytes,
+          expectedSha256: entry.value.sha256,
         );
       } on Object {
         failures += 1;
@@ -977,11 +1026,12 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
     if (reference.kind != 'local') return reference;
     final existing = copies?[reference.value];
     if (existing != null) return existing;
-    final bytes = await _local.readAsset(reference);
-    final copied = await _drive.writeAsset(
-      bytes,
+    final copied = await _drive.writeAssetStream(
+      await _local.openAssetRead(reference),
       label: reference.label,
       contentType: reference.contentType ?? 'application/octet-stream',
+      expectedLength: reference.bytes,
+      expectedSha256: reference.sha256,
     );
     copies?[reference.value] = copied;
     return copied;

@@ -6,7 +6,7 @@ const { rendererIpcGuard, guardedRendererHandler } = require("../lib/renderer-ip
 
 test("only the active window's main frame may invoke privileged handlers", () => {
   let origin = "http://127.0.0.1:7357";
-  const frame = { url: `${origin}/studio` };
+  const frame = { url: `${origin}/#/studio` };
   const contents = { mainFrame: frame, isDestroyed: () => false };
   let window = { webContents: contents, isDestroyed: () => false };
   const trusted = rendererIpcGuard({
@@ -30,10 +30,10 @@ test("only the active window's main frame may invoke privileged handlers", () =>
   rejected(undefined);
   frame.url = "https://untrusted.example";
   rejected(valid);
-  frame.url = "http://127.0.0.1:7357/studio";
+  frame.url = "http://127.0.0.1:7357/#/studio";
   origin = "http://127.0.0.1:7358";
   rejected(valid);
-  frame.url = `${origin}/studio`;
+  frame.url = `${origin}/#/studio`;
   assert.equal(handler(valid, "refreshed"), "refreshed");
   window = { webContents: { mainFrame: frame, isDestroyed: () => false }, isDestroyed: () => false };
   rejected(valid);

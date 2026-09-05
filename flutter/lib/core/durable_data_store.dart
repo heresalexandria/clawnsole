@@ -1,6 +1,9 @@
 import 'dart:typed_data';
 
 import 'models.dart';
+import 'asset_stream_base.dart';
+
+export 'asset_stream_base.dart';
 
 /// Durable metadata and media used by a direct-to-provider gateway.
 ///
@@ -35,4 +38,73 @@ abstract interface class DurableDataStore {
   ]);
 
   Future<StorageStats> stats(int records);
+}
+
+/// Optional capability keeps existing small custom stores source-compatible.
+/// All native and companion production stores implement this contract.
+abstract interface class StreamingAssetStore {
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  });
+
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference);
+}
+
+extension DurableAssetStreaming on DurableDataStore {
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) async {
+    final target = this;
+    if (target is StreamingAssetStore) {
+      return (target as StreamingAssetStore).writeAssetStream(
+        stream,
+        label: label,
+        contentType: contentType,
+        storage: storage,
+        expectedLength: expectedLength,
+        expectedSha256: expectedSha256,
+        maxBytes: maxBytes,
+        idleTimeout: idleTimeout,
+        totalTimeout: totalTimeout,
+      );
+    }
+    final bytes = await collectSmallAssetStream(
+      stream,
+      expectedLength: expectedLength,
+      expectedSha256: expectedSha256,
+      maxBytes: maxBytes < 8 * 1024 * 1024 ? maxBytes : 8 * 1024 * 1024,
+      idleTimeout: idleTimeout,
+      totalTimeout: totalTimeout,
+    );
+    return writeAsset(
+      bytes,
+      label: label,
+      contentType: contentType,
+      storage: storage,
+    );
+  }
+
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) async {
+    final target = this;
+    if (target is StreamingAssetStore) {
+      return (target as StreamingAssetStore).openAssetRead(reference);
+    }
+    return Stream<List<int>>.value(await readAsset(reference));
+  }
 }

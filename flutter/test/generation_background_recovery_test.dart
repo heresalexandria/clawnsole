@@ -66,13 +66,17 @@ class _MemoryStore implements DurableDataStore {
   _MemoryStore(this.data);
 
   StoredData data;
+  Duration writeDelay = Duration.zero;
   final List<Uint8List> writtenAssets = <Uint8List>[];
 
   @override
   Future<StoredData> read() async => data;
 
   @override
-  Future<void> write(StoredData data) async => this.data = data;
+  Future<void> write(StoredData data) async {
+    await Future<void>.delayed(writeDelay);
+    this.data = data;
+  }
 
   @override
   Future<void> delete() async => data = const StoredData();
@@ -429,4 +433,122 @@ void main() {
     expect(persisted.resultUrl, freshUrl);
     expect(persisted.resultAsset, isNull);
   });
+
+  test('status-only capture never starts a result download', () async {
+    final pending = _generation(status: 'Pending');
+    final store = _MemoryStore(_dataWith(pending));
+    final api = _PollBflApi(
+      () async => <String, Object?>{
+        'status': 'Ready',
+        'result': <String, Object?>{'sample': _storedResultUrl},
+      },
+    );
+    var downloads = 0;
+    final gateway = _gateway(
+      store: store,
+      api: api,
+      client: MockClient((_) async {
+        downloads += 1;
+        return http.Response.bytes(
+          [1, 2, 3],
+          200,
+          headers: {'content-type': 'video/mp4'},
+        );
+      }),
+    );
+    final ready = await gateway.pollStatus(pending);
+    expect(ready.isReady, isTrue);
+    expect(store.data.generations.single.resultUrl, _storedResultUrl);
+    expect(ready.lastResultRetentionAttemptAt, isNull);
+    expect(downloads, 0);
+    final saved = await gateway.retainResult(ready);
+    expect(saved.resultAsset, isNotNull);
+    expect(downloads, 1);
+    expect(api.pollCalls, 1, reason: 'retention never asks the provider again');
+  });
+
+  test(
+    'status-only failure does not attempt rescue or count a transfer',
+    () async {
+      final ready = _generation(resultUrl: _storedResultUrl);
+      final store = _MemoryStore(_dataWith(ready));
+      final api = _PollBflApi(
+        () async => throw const ProviderException('Unavailable', status: 503),
+      );
+      var downloads = 0;
+      final gateway = _gateway(
+        store: store,
+        api: api,
+        client: MockClient((_) async {
+          downloads += 1;
+          return http.Response.bytes([1, 2, 3], 200);
+        }),
+      );
+      final result = await gateway.pollStatus(ready);
+      expect(result.isReady, isTrue);
+      expect(result.lastResultRetentionAttemptAt, isNull);
+      expect(result.resultRetentionFailures, 0);
+      expect(downloads, 0);
+    },
+  );
+
+  test('concurrent status saves preserve both records', () async {
+    final first = _generation(status: 'Pending');
+    final second = Generation.fromJson({
+      ...first.toJson(),
+      'localId': 'second',
+    });
+    final store = _MemoryStore(
+      StoredData(apiKey: 'secret', generations: [first, second]),
+    )..writeDelay = const Duration(milliseconds: 5);
+    final api = _PollBflApi(() async => <String, Object?>{'status': 'Ready'});
+    final gateway = _gateway(store: store, api: api);
+    await Future.wait([gateway.pollStatus(first), gateway.pollStatus(second)]);
+    expect(store.data.generations.every((film) => film.isReady), isTrue);
+    expect(
+      store.data.generations.every((film) => film.statusCheckCount == 1),
+      isTrue,
+    );
+  });
+
+  test(
+    'one transfer survives a newer receipt and preserves organization',
+    () async {
+      final ready = _generation(resultUrl: _storedResultUrl);
+      final store = _MemoryStore(_dataWith(ready));
+      final response = Completer<http.Response>();
+      final started = Completer<void>();
+      var downloads = 0;
+      final gateway = _gateway(
+        store: store,
+        api: _PollBflApi(() async => <String, Object?>{'status': 'Ready'}),
+        client: MockClient((_) {
+          downloads += 1;
+          started.complete();
+          return response.future;
+        }),
+      );
+      final first = gateway.retainResult(ready);
+      final duplicate = gateway.retainResult(ready);
+      await started.future;
+      store.data = store.data.copyWith(
+        generations: [
+          ready.copyWith(statusCheckCount: 3, favorite: true, tags: ['keep']),
+        ],
+      );
+      response.complete(
+        http.Response.bytes(
+          [1, 2, 3],
+          200,
+          headers: {'content-type': 'video/mp4'},
+        ),
+      );
+      final results = await Future.wait([first, duplicate]);
+      expect(downloads, 1);
+      expect(results.every((film) => film.resultAsset != null), isTrue);
+      expect(store.data.generations.single.statusCheckCount, 4);
+      expect(store.data.generations.single.favorite, isTrue);
+      expect(store.data.generations.single.tags, ['keep']);
+    },
+  );
 }
