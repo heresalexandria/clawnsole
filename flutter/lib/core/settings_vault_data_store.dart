@@ -25,6 +25,7 @@ const _secureStateVersion = 1;
 class SettingsVaultDataStore
     implements
         DurableDataStore,
+        StreamingAssetStore,
         SettingsVaultStatusSource,
         ComposerWorkspaceStore {
   SettingsVaultDataStore({
@@ -800,6 +801,33 @@ class SettingsVaultDataStore
     contentType: contentType,
     storage: storage,
   );
+
+  @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) => _delegate.writeAssetStream(
+    stream,
+    label: label,
+    contentType: contentType,
+    storage: storage,
+    expectedLength: expectedLength,
+    expectedSha256: expectedSha256,
+    maxBytes: maxBytes,
+    idleTimeout: idleTimeout,
+    totalTimeout: totalTimeout,
+  );
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) =>
+      _delegate.openAssetRead(reference);
 
   @override
   Future<AssetReference?> persistSource(

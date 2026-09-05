@@ -41,7 +41,7 @@ void main() {
   );
 
   test(
-    'companion prune keeps active and recoverable draft media only',
+    'companion prune keeps active and recoverable draft media after restart',
     () async {
       Future<AssetReference> asset(int byte) => store.writeAsset(
         Uint8List.fromList([byte]),
@@ -69,7 +69,7 @@ void main() {
           ),
         ),
       );
-      await store.pruneAssets([]);
+      await CompanionStore(store.file).pruneAssets([]);
       expect(await store.readAsset(active), [1]);
       expect(await store.readAsset(closed), [2]);
       expect(() => store.readAsset(orphan), throwsA(isA<StateError>()));

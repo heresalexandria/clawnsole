@@ -32,6 +32,8 @@ import 'package:http/testing.dart';
 
 import '../tool/clawnsole_companion.dart';
 
+import 'support/memory_asset_streaming.dart';
+
 void main() {
   test('companion config accepts an embedded Flutter web root', () {
     final config = CompanionConfig.from(<String>[
@@ -460,10 +462,12 @@ void main() {
         storage: LibraryStorage.drive,
       );
 
+      await store.write(StoredData(generations: [mismatched]));
       await hybrid.pruneAssets(<Generation>[mismatched]);
       expect(await store.readAsset(asset), <int>[1, 2, 3]);
 
       // Once nothing references the asset, pruning removes the typed file.
+      await store.write(const StoredData());
       await hybrid.pruneAssets(const <Generation>[]);
       expect(store.assets.listSync().whereType<File>(), isEmpty);
     } finally {
@@ -1834,7 +1838,7 @@ class _StreamingDriveStore extends _MemoryDriveStore {
   }
 }
 
-class _MemoryDriveStore extends GoogleDriveStore {
+class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
   StoredData data = const StoredData();
   final Map<String, Uint8List> assets = <String, Uint8List>{};
   int _assetCounter = 0;

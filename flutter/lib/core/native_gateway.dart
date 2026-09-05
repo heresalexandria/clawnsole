@@ -275,7 +275,10 @@ class NativeGateway extends DirectGateway
          client: client,
          providerRouter: providerRouter,
          backgroundDelivery:
-             backgroundDelivery ?? MethodChannelBackgroundResultDelivery(),
+             backgroundDelivery ??
+             ((isIos ?? Platform.isIOS)
+                 ? MethodChannelBackgroundResultDelivery()
+                 : null),
          availableProviders: _nativeAvailableProviders(isIos ?? Platform.isIOS),
          referenceVideoNormalizer: referenceVideoNormalizer,
          persistenceDescription:
@@ -731,6 +734,14 @@ class NativeGateway extends DirectGateway
   @override
   Future<Generation> poll(Generation generation) {
     if (generation.provider != 'apple-local') return super.poll(generation);
+    return _pollAppleLocal(generation);
+  }
+
+  @override
+  Future<Generation> pollStatus(Generation generation) {
+    if (generation.provider != 'apple-local') {
+      return super.pollStatus(generation);
+    }
     return _pollAppleLocal(generation);
   }
 

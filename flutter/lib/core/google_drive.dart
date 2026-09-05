@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -451,6 +452,78 @@ class GoogleDriveApi {
       _json(await _expect(response)),
       etag: response.headers['etag'],
     );
+  }
+
+  /// Publishes a verified staging file without constructing a multipart body
+  /// in memory. Cancellation aborts the upload socket as well as its body.
+  Future<GoogleDriveFile> createFileStream({
+    required String parentId,
+    required String name,
+    required Stream<List<int>> bytes,
+    required int length,
+    required String contentType,
+    Map<String, String> appProperties = const <String, String>{},
+    Duration timeout = const Duration(minutes: 8),
+  }) async {
+    final boundary =
+        'clawnsole-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+    final metadata = jsonEncode(<String, Object?>{
+      'name': name,
+      'parents': <String>[parentId],
+      if (appProperties.isNotEmpty) 'appProperties': appProperties,
+    });
+    final prefix = utf8.encode(
+      '--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n--$boundary\r\nContent-Type: $contentType\r\n\r\n',
+    );
+    final suffix = utf8.encode('\r\n--$boundary--\r\n');
+    final abort = Completer<void>();
+    final request =
+        http.AbortableStreamedRequest(
+            'POST',
+            _uploadBase
+                .resolve('files')
+                .replace(
+                  queryParameters: const {
+                    'uploadType': 'multipart',
+                    'fields': 'id,name,mimeType,size,modifiedTime',
+                  },
+                ),
+            abortTrigger: abort.future,
+          )
+          ..headers.addAll({
+            ..._headers,
+            'Content-Type': 'multipart/related; boundary=$boundary',
+          })
+          ..contentLength = prefix.length + length + suffix.length;
+    final timer = Timer(timeout, () {
+      if (!abort.isCompleted) abort.complete();
+    });
+    // Attach error handlers immediately, before producing the request body.
+    final responseFuture = _client.send(request).then(http.Response.fromStream);
+    Future<void> produce() async {
+      try {
+        request.sink.add(prefix);
+        await request.sink.addStream(bytes);
+        request.sink.add(suffix);
+      } finally {
+        await request.sink.close();
+      }
+    }
+
+    try {
+      final results = await Future.wait<Object?>([
+        responseFuture,
+        produce(),
+      ]).timeout(timeout);
+      final response = results.first! as http.Response;
+      return GoogleDriveFile.fromJson(
+        _json(await _expect(response)),
+        etag: response.headers['etag'],
+      );
+    } finally {
+      timer.cancel();
+      if (!abort.isCompleted) abort.complete();
+    }
   }
 
   Future<GoogleDriveFile> updateFile(

@@ -32,6 +32,7 @@ part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
 part 'app_controller_submission.dart';
+part 'app_controller_delivery.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -646,11 +647,14 @@ class AppController extends ChangeNotifier {
   bool _refreshingDriveLibrary = false;
   int _driveRefreshTick = 0;
   bool _reconcilingGenerationWork = false;
+  bool _recoveringBackgroundDeliveries = false;
   LocalSnapshot? _pendingWorkSnapshot;
   bool _pendingWorkCache = false;
   LocalSnapshot? _pendingDriveUploadSnapshot;
   int _pendingDriveUploadCache = 0;
   final Set<String> _statusChecks = <String>{};
+  final Map<String, Generation> _queuedRetentions = <String, Generation>{};
+  final Set<String> _activeRetentions = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
   final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
   final Set<String> _referenceDurationWrites = <String>{};
@@ -1445,8 +1449,11 @@ class AppController extends ChangeNotifier {
       _pendingWorkSnapshot = current;
       _pendingWorkCache = current.generations.any(
         (item) =>
-            (item.isWorking || item.needsResultRetention) &&
-            hasApiKeyFor(item.provider),
+            ((item.isWorking || item.needsResultRetention) &&
+                hasApiKeyFor(item.provider)) ||
+            (gateway is GenerationDeliveryGateway &&
+                item.needsResultRetention &&
+                item.resultUrl != null),
       );
     }
     return _pendingWorkCache;
@@ -1533,7 +1540,10 @@ class AppController extends ChangeNotifier {
   double get spentUsd => generations
       .where(countsTowardSpend)
       .fold(0, (total, item) => total + (recordedRealizedCostUsd(item) ?? 0));
-  bool isCheckingStatus(String localId) => _statusChecks.contains(localId);
+  bool isCheckingStatus(String localId) =>
+      _statusChecks.contains(localId) ||
+      _queuedRetentions.containsKey(localId) ||
+      _activeRetentions.contains(localId);
   bool isCopyingGeneration(String localId) =>
       copyingGenerationIds.contains(localId);
   bool isCopyingReference(String referenceId) =>
@@ -2517,7 +2527,11 @@ class AppController extends ChangeNotifier {
   /// the process was suspended or terminated, then refreshes the snapshot so
   /// the recovered films appear immediately.
   Future<void> _recoverBackgroundDeliveries() async {
-    if (gateway is! BackgroundDeliveryGateway) return;
+    if (gateway is! BackgroundDeliveryGateway ||
+        _recoveringBackgroundDeliveries) {
+      return;
+    }
+    _recoveringBackgroundDeliveries = true;
     try {
       // Bounded like gateway.poll: a Drive-backed import can hang on a
       // socket the platform killed during suspension, and an unbounded wait
@@ -2526,7 +2540,10 @@ class AppController extends ChangeNotifier {
           .recoverBackgroundDeliveries()
           .timeout(const Duration(minutes: 10));
       if (recovered > 0 && !_disposed) {
-        _apply(await gateway.load());
+        final revision = _snapshotRevision;
+        final value = await gateway.load();
+        await _applySnapshotRead(value, startedAtRevision: revision);
+        if (_disposed) return;
         showNotice(
           recovered == 1
               ? 'A film finished downloading in the background and is safely saved.'
@@ -2536,6 +2553,8 @@ class AppController extends ChangeNotifier {
     } on Object {
       // Recovery is best effort; the retention poller still retries from the
       // provider's delivery link.
+    } finally {
+      _recoveringBackgroundDeliveries = false;
     }
   }
 
@@ -2549,9 +2568,9 @@ class AppController extends ChangeNotifier {
     if (_reconcilingGenerationWork) return;
     _reconcilingGenerationWork = true;
     try {
-      // Films the platform transfer service finished while the app was away
-      // import first — they remove records from the working set entirely.
-      await _recoverBackgroundDeliveries();
+      // Import OS-delivered files independently; one slow import must not
+      // postpone status receipts for unrelated films.
+      unawaited(_recoverBackgroundDeliveries());
       // The process may have been suspended for minutes with polls frozen or
       // failed mid-flight, so the return to the foreground checks every
       // working record immediately instead of honoring failure backoff. This
@@ -6356,6 +6375,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pollWorking({bool ignoreSchedule = false}) async {
+    if (gateway is GenerationDeliveryGateway) {
+      return _pollDeliveryStages(ignoreSchedule: ignoreSchedule);
+    }
     if (!hasAnyApiKey) return;
     if (_polling) {
       // A pass blocked behind an in-flight poll must not silently drop a
@@ -6454,19 +6476,36 @@ class AppController extends ChangeNotifier {
       showNotice('This generation has no provider status URL to check.');
       return;
     }
-    if (!_statusChecks.add(item.localId)) return;
+    if (isCheckingStatus(item.localId) || !_statusChecks.add(item.localId)) {
+      return;
+    }
     notifyListeners();
     try {
       // Bounded like pollWorking: a hung poll would otherwise exclude this
       // record from automatic polling for the rest of the process lifetime.
-      final updated = await gateway
-          .poll(item)
-          .timeout(const Duration(minutes: 10));
-      _replaceInMemory(updated);
+      final staged = gateway is GenerationDeliveryGateway;
+      final updated =
+          await (staged
+                  ? (gateway as GenerationDeliveryGateway).pollStatus(item)
+                  : gateway.poll(item))
+              .timeout(
+                staged
+                    ? const Duration(seconds: 90)
+                    : const Duration(minutes: 10),
+              );
+      if (!_applyGenerationWorkUpdate(updated)) return;
       if (await _invalidateRejectedApiKey(
         updated.lastProviderStatusCode,
         showNoticeOnFailure: true,
+        providerId: item.provider,
       )) {
+        return;
+      }
+      if (staged && updated.needsResultRetention) {
+        _queueResultRetention(updated);
+        showNotice(
+          'Checking the result download. Clawnsole will keep retrying until it is saved.',
+        );
         return;
       }
       if (updated.resultRetentionError != null) {
@@ -6493,13 +6532,17 @@ class AppController extends ChangeNotifier {
         );
       }
     } on Object catch (error) {
-      if (await _invalidateRejectedApiKey(error, showNoticeOnFailure: true)) {
+      if (await _invalidateRejectedApiKey(
+        error,
+        showNoticeOnFailure: true,
+        providerId: item.provider,
+      )) {
         return;
       }
       showNotice('Status check failed: ${_message(error)}');
     } finally {
       _statusChecks.remove(item.localId);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -6518,8 +6561,17 @@ class AppController extends ChangeNotifier {
     String? providerId,
   }) async {
     if (!_isApiKeyRejection(error)) return false;
+    if (_disposed) return true;
     final provider = providerId ?? selectedProviderId;
-    _apply(await gateway.load());
+    final revision = _snapshotRevision;
+    final value = await gateway.load();
+    if (_disposed) return true;
+    await _applySnapshotRead(
+      value,
+      startedAtRevision: revision,
+      reloadIfSuperseded: true,
+    );
+    if (_disposed) return true;
     if (selectedProviderId == provider) credits = null;
     if (!hasApiKeyFor(provider)) {
       final message =
@@ -7875,6 +7927,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _queuedRetentions.clear();
     unawaited(_backgroundActivity.setPendingWork(false));
     _providerCatalogClient.close();
     _pollTimer?.cancel();

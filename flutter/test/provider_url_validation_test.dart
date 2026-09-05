@@ -40,8 +40,28 @@ void main() {
       'metadata.google.internal',
       'metadata',
       'printer.local',
+      'printer.local.',
+      'localhost.',
+      '010.0.0.1',
+      '0:0:0:0:0:0:0:1',
+      '0:0:0:0:0:ffff:7f00:1',
+      '2001:db8::1',
+      '2002:7f00:1::1',
+      '64:ff9b::7f00:1',
+      '3fff::1',
     ]) {
       expect(isPublicProviderHost(host), isFalse, reason: host);
+    }
+  });
+
+  test('BFL delivery URLs refuse userinfo and invalid ports', () {
+    for (final url in <String>[
+      'https://user:secret@delivery.bfl.ai/file',
+      'https://@delivery.bfl.ai/file',
+      'https://delivery.bfl.ai:0/file',
+      'https://delivery.bfl.ai:65536/file',
+    ]) {
+      expect(() => validatedBflUrl(url), throwsA(anything), reason: url);
     }
   });
 
@@ -51,6 +71,10 @@ void main() {
       'https://169.254.169.254/latest/meta-data/',
       'https://[::ffff:127.0.0.1]/',
       'https://127.1/',
+      'https://user:secret@delivery.bfl.ai/result.mp4',
+      'https://@delivery.bfl.ai/result.mp4',
+      'https://delivery.bfl.ai:0/result.mp4',
+      'https://delivery.bfl.ai:65536/result.mp4',
       'not a url',
     ]) {
       expect(() => validatedProviderUrl(url), throwsA(anything), reason: url);

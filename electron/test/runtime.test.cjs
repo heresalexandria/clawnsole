@@ -11,9 +11,9 @@ const {
   isAllowedRendererPermission,
 } = require("../lib/runtime.cjs");
 
-test("app navigation stays on the active local renderer origin", () => {
+test("app navigation stays on the active renderer entry document", () => {
   const origin = "http://127.0.0.1:43123";
-  assert.equal(isAllowedAppUrl(`${origin}/settings`, origin), true);
+  assert.equal(isAllowedAppUrl(`${origin}/#/settings`, origin), true);
   assert.equal(isAllowedAppUrl("http://127.0.0.1:43124", origin), false);
   assert.equal(isAllowedAppUrl("https://bfl.ai", origin), false);
   assert.equal(isAllowedAppUrl("not a URL", origin), false);

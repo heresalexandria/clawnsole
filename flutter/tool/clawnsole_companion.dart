@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:clawnsole/core/asset_extensions.dart';
+import 'package:clawnsole/core/asset_stream_io.dart';
 import 'package:clawnsole/core/atomic_file.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
@@ -20,6 +21,8 @@ import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/library_rules.dart';
 import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/media_content_policy.dart';
+import 'package:clawnsole/core/public_media_http.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/core/prompt_rewrite_router.dart';
@@ -32,6 +35,7 @@ import 'package:clawnsole/core/screenplay.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
+import 'package:http/http.dart' as http;
 
 Future<void> main(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
@@ -303,11 +307,13 @@ class CompanionConfig {
   }
 }
 
-class CompanionStore implements DurableDataStore {
+class CompanionStore implements DurableDataStore, StreamingAssetStore {
   CompanionStore(this.file);
 
   final File file;
   Future<void> _queue = Future<void>.value();
+  final Map<String, DateTime> _pendingAssetIds = {};
+  static const _pendingAssetLifetime = Duration(hours: 1);
 
   Directory get assets =>
       Directory('${file.parent.path}${Platform.pathSeparator}assets');
@@ -367,18 +373,79 @@ class CompanionStore implements DurableDataStore {
     LibraryStorage storage = LibraryStorage.local,
   }) async {
     final id = _assetId();
-    await assets.create(recursive: true);
-    await assetFile(
-      id,
-      retainedAssetExtension(contentType, label),
-    ).writeAsBytes(bytes, flush: true);
-    return AssetReference(
-      kind: 'local',
-      value: id,
-      label: label,
-      contentType: contentType.split(';').first,
-      bytes: bytes.length,
+    _pendingAssetIds[id] = DateTime.now().toUtc();
+    try {
+      await assets.create(recursive: true);
+      await assetFile(
+        id,
+        retainedAssetExtension(contentType, label),
+      ).writeAsBytes(bytes, flush: true);
+      return AssetReference(
+        kind: 'local',
+        value: id,
+        label: label,
+        contentType: contentType.split(';').first,
+        bytes: bytes.length,
+      );
+    } on Object {
+      _pendingAssetIds.remove(id);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) async {
+    final staged = await stageAssetStream(
+      stream,
+      directory: assets.path,
+      expectedLength: expectedLength,
+      expectedSha256: expectedSha256,
+      maxBytes: maxBytes,
+      idleTimeout: idleTimeout,
+      totalTimeout: totalTimeout,
     );
+    final id = _assetId();
+    _pendingAssetIds[id] = DateTime.now().toUtc();
+    try {
+      await File(
+        staged.path,
+      ).rename(assetFile(id, retainedAssetExtension(contentType, label)).path);
+      return AssetReference(
+        kind: 'local',
+        value: id,
+        label: label,
+        contentType: contentType.split(';').first,
+        bytes: staged.length,
+        sha256: staged.sha256,
+      );
+    } on Object {
+      _pendingAssetIds.remove(id);
+      rethrow;
+    } finally {
+      await staged.dispose();
+    }
+  }
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) async {
+    if (reference.kind != 'local') {
+      throw StateError('The asset is not stored by the local companion.');
+    }
+    final file = await resolveAssetFile(reference);
+    if (!await file.exists()) {
+      throw StateError(missingLocalAssetMessage(reference.contentType));
+    }
+    return file.openRead();
   }
 
   @override
@@ -452,31 +519,51 @@ class CompanionStore implements DurableDataStore {
     return retained;
   }
 
-  @override
-  Future<void> pruneAssets(
-    List<Generation> generations, [
-    List<SavedReference> savedReferences = const <SavedReference>[],
-  ]) async {
-    if (!await assets.exists()) return;
-    final retained = _references(generations, savedReferences);
-    // Pruning can run inside a queued mutation, so read raw committed state
-    // instead of waiting on the queue that currently owns this operation.
+  Set<String> _storedAssetIds(StoredData data) {
+    final retained = _references(data.generations, data.savedReferences);
     for (final json
-        in (await _readRaw()).composerTabs?.retainedAssetJson ??
+        in data.composerTabs?.retainedAssetJson ??
             const <Map<String, Object?>>[]) {
       final reference = AssetReference.fromJson(json);
       if (reference.kind == 'local') retained.add(reference.value);
     }
-    await for (final entry in assets.list()) {
-      if (entry is! File) continue;
-      final name = entry.uri.pathSegments.last;
-      final dot = name.lastIndexOf('.');
-      final id = dot > 0 ? name.substring(0, dot) : '';
-      if (!retained.contains(id)) await entry.delete();
-    }
+    return retained;
+  }
+
+  @override
+  Future<void> pruneAssets(
+    List<Generation> generations, [
+    List<SavedReference> savedReferences = const <SavedReference>[],
+  ]) {
+    // Only short metadata operations share this queue; asset transfers never
+    // hold it. Read roots while serialized with commits so removing a pending
+    // publication lease cannot expose a newly linked asset to stale cleanup.
+    final operation = _queue.then((_) async {
+      if (!await assets.exists()) return;
+      final retained = _storedAssetIds(await _readRaw())
+        ..addAll(_references(generations, savedReferences));
+      final now = DateTime.now().toUtc();
+      _pendingAssetIds.removeWhere(
+        (_, created) => now.difference(created) > _pendingAssetLifetime,
+      );
+      await for (final entry in assets.list()) {
+        if (entry is! File) continue;
+        final name = entry.uri.pathSegments.last;
+        final dot = name.lastIndexOf('.');
+        final id = dot > 0 ? name.substring(0, dot) : '';
+        // Check pending at deletion time too: a new publication can begin
+        // while filesystem enumeration is awaiting its next batch.
+        if (!retained.contains(id) && !_pendingAssetIds.containsKey(id)) {
+          await entry.delete();
+        }
+      }
+    });
+    _queue = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
   }
 
   Future<void> clearAssets() async {
+    _pendingAssetIds.clear();
     if (await assets.exists()) await assets.delete(recursive: true);
   }
 
@@ -494,8 +581,12 @@ class CompanionStore implements DurableDataStore {
   /// Atomic replace with the previous contents kept as `.bak`, matching the
   /// native store: the file holds every provider receipt, so no write may
   /// ever leave a window in which it does not exist.
-  Future<void> _writeRaw(StoredData data) =>
-      writeLibraryTextAtomically(file, data.encode());
+  Future<void> _writeRaw(StoredData data) async {
+    await writeLibraryTextAtomically(file, data.encode());
+    for (final id in _storedAssetIds(data)) {
+      _pendingAssetIds.remove(id);
+    }
+  }
 
   @override
   Future<StoredData> read() async {
@@ -683,6 +774,20 @@ class CompanionHybridStore {
     storage: storage,
   );
 
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+  }) => _dataStore.writeAssetStream(
+    stream,
+    label: label,
+    contentType: contentType,
+    storage: storage,
+    expectedLength: expectedLength,
+  );
+
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
@@ -697,6 +802,11 @@ class CompanionHybridStore {
 
   Future<Uint8List> readAsset(AssetReference reference) =>
       _dataStore.readAsset(reference);
+
+  Future<File> localAssetFile(AssetReference reference) async {
+    if (reference.kind != 'local') throw StateError('The asset is not local.');
+    return File.fromUri(await _dataStore.assetUri(reference));
+  }
 
   Future<GoogleDriveByteStream> readDriveAssetStream(
     AssetReference reference,
@@ -771,6 +881,7 @@ class CompanionApp {
     Directory? webRoot,
     String requestToken = '',
     String allowedOrigin = '',
+    http.Client Function()? mediaClientFactory,
     VideoCache? videoCache,
     VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
@@ -784,6 +895,7 @@ class CompanionApp {
     webRoot: webRoot,
     requestToken: requestToken,
     allowedOrigin: allowedOrigin,
+    mediaClientFactory: mediaClientFactory,
     videoCache: videoCache,
     thumbnailCache: thumbnailCache,
     referenceVideoNormalizer: referenceVideoNormalizer,
@@ -798,6 +910,7 @@ class CompanionApp {
     Directory? webRoot,
     String requestToken = '',
     String allowedOrigin = '',
+    http.Client Function()? mediaClientFactory,
     VideoCache? videoCache,
     VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
@@ -809,6 +922,7 @@ class CompanionApp {
        _webRoot = webRoot,
        _requestToken = requestToken,
        _allowedOrigin = allowedOrigin,
+       _mediaClientFactory = mediaClientFactory ?? PublicMediaClient.new,
        _videoCache = videoCache,
        _thumbnailCache = thumbnailCache,
        _referenceVideoNormalizer = referenceVideoNormalizer;
@@ -820,6 +934,7 @@ class CompanionApp {
   final Directory? _webRoot;
   final String _requestToken;
   final String _allowedOrigin;
+  final http.Client Function() _mediaClientFactory;
   final VideoCache? _videoCache;
   final VideoCache? _thumbnailCache;
   final ReferenceVideoNormalizationService _referenceVideoNormalizer;
@@ -828,6 +943,7 @@ class CompanionApp {
       ? _referenceVideoNormalizer as ReferenceVideoEditingService
       : null;
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
+  final Map<String, Future<Generation>> _resultRetentions = {};
 
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
@@ -848,6 +964,9 @@ class CompanionApp {
     }
     try {
       final path = request.uri.path;
+      if (const <String>{'/media', '/assets', '/asset-cache'}.contains(path)) {
+        _protectMediaResponse(request.response);
+      }
       if (request.method == 'GET' && path == '/health') {
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
@@ -1053,6 +1172,12 @@ class CompanionApp {
           'generation': generation.toJson(),
         });
       }
+      if (request.method == 'POST' && path == '/generations/retain') {
+        final generation = await _retainGeneration(await _bodyMap(request));
+        return await _json(request.response, 200, <String, Object?>{
+          'generation': generation.toJson(),
+        });
+      }
       if (request.method == 'DELETE' && path == '/generations') {
         final localId = request.uri.queryParameters['id'];
         if (localId == null || localId.isEmpty) {
@@ -1171,10 +1296,37 @@ class CompanionApp {
       'Content-Type, Range, X-Clawnsole-Session',
     );
     response.headers.set(HttpHeaders.cacheControlHeader, 'private, no-store');
+    response.headers.set('X-Content-Type-Options', 'nosniff');
   }
 
   Future<Map<String, Object?>> _bodyMap(HttpRequest request) async {
-    final source = await utf8.decoder.bind(request).join();
+    // Legacy upload-bearing RPCs still carry data URIs. Keep their existing
+    // 512 MiB reference workflow possible while bounding ordinary metadata
+    // requests tightly; binary upload streaming is a separate protocol change.
+    final uploadBody = const <String>{
+      '/state',
+      '/generations',
+      '/composer-tabs',
+    }.contains(request.uri.path);
+    final limit = uploadBody ? 768 * 1024 * 1024 : 2 * 1024 * 1024;
+    if (request.contentLength > limit) {
+      throw const ProviderException(
+        'The companion request is too large.',
+        status: 413,
+      );
+    }
+    var received = 0;
+    final bounded = request.timeout(const Duration(seconds: 30)).map((chunk) {
+      received += chunk.length;
+      if (received > limit) {
+        throw const ProviderException(
+          'The companion request is too large.',
+          status: 413,
+        );
+      }
+      return chunk;
+    });
+    final source = await utf8.decoder.bind(bounded).join();
     if (source.isEmpty) return <String, Object?>{};
     final decoded = jsonDecode(source);
     if (decoded is! Map<Object?, Object?>) {
@@ -1858,31 +2010,20 @@ class CompanionApp {
       throw StateError('The reference video is not available for trimming.');
     }
     const maximumBytes = 512 * 1024 * 1024;
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20);
+    final client = _mediaClientFactory();
     try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
+      final response = await client.send(http.Request('GET', uri));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('The reference video could not be downloaded.');
       }
-      if (response.contentLength > maximumBytes) {
-        throw StateError('Reference videos must be 512 MB or smaller.');
-      }
-      final bytes = BytesBuilder(copy: false);
-      var length = 0;
-      await for (final chunk in response) {
-        length += chunk.length;
-        if (length > maximumBytes) {
-          throw StateError('Reference videos must be 512 MB or smaller.');
-        }
-        bytes.add(chunk);
-      }
-      final value = bytes.takeBytes();
-      if (value.isEmpty) throw StateError('The reference video is empty.');
-      return value;
+      passiveMediaContentType(response.headers['content-type']);
+      return await collectSmallAssetStream(
+        await validatedPassiveMediaStream(response.stream),
+        expectedLength: response.contentLength,
+        maxBytes: maximumBytes,
+      );
     } finally {
-      client.close(force: true);
+      client.close();
     }
   }
 
@@ -2173,34 +2314,31 @@ class CompanionApp {
     LibraryStorage storage,
   ) async {
     final target = validatedProviderUrl(source);
-    final client = HttpClient();
+    final client = _mediaClientFactory();
     try {
-      final request = await client.getUrl(target);
-      final upstream = await request.close().timeout(
-        const Duration(seconds: 30),
-      );
+      final upstream = await client.send(http.Request('GET', target));
       if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
         throw ProviderException(
           'The provider result download returned HTTP ${upstream.statusCode}.',
           status: upstream.statusCode,
         );
       }
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in upstream.timeout(const Duration(seconds: 30))) {
-        builder.add(chunk);
-      }
-      return await _store.writeAsset(
-        builder.takeBytes(),
+      final contentType = passiveMediaContentType(
+        upstream.headers['content-type'],
+      );
+      return await _store.writeAssetStream(
+        await validatedPassiveMediaStream(upstream.stream),
         label: label,
-        contentType: upstream.headers.contentType?.mimeType ?? 'video/mp4',
+        contentType: contentType,
         storage: storage,
+        expectedLength: upstream.contentLength,
       );
     } on TimeoutException {
       throw const ProviderException(
         'The provider result download stalled. Clawnsole will retry it.',
       );
     } finally {
-      client.close(force: true);
+      client.close();
     }
   }
 
@@ -2255,7 +2393,23 @@ class CompanionApp {
       if (existing.statusCheckCount != expected.statusCheckCount) {
         return StoreChange<Generation?>(current, null);
       }
-      final persisted = next.copyWith(
+      // A separate result transfer can finish while a status request is in
+      // flight. Keep that newer delivery outcome while applying provider fields.
+      final deliveryChanged =
+          existing.resultAsset != expected.resultAsset ||
+          existing.lastResultRetentionAttemptAt !=
+              expected.lastResultRetentionAttemptAt;
+      final merged = deliveryChanged
+          ? next.copyWith(
+              resultAsset: existing.resultAsset,
+              lastResultRetentionAttemptAt:
+                  existing.lastResultRetentionAttemptAt,
+              resultRetentionFailures: existing.resultRetentionFailures,
+              resultRetentionError: existing.resultRetentionError,
+              clearResultRetentionError: existing.resultRetentionError == null,
+            )
+          : next;
+      final persisted = merged.copyWith(
         folderId: existing.folderId,
         clearFolder: existing.folderId == null,
         tags: existing.tags,
@@ -2474,7 +2628,98 @@ class CompanionApp {
     }
   }
 
+  Future<Generation> _retainGeneration(Map<String, Object?> body) {
+    final id = body['localId']?.toString() ?? '';
+    if (id.isEmpty) {
+      throw const ProviderException(
+        'A generation id is required.',
+        status: 400,
+      );
+    }
+    final existing = _resultRetentions[id];
+    if (existing != null) return existing;
+    late final Future<Generation> operation;
+    operation = _performResultRetention(id).whenComplete(() {
+      if (identical(_resultRetentions[id], operation)) {
+        _resultRetentions.remove(id);
+      }
+    });
+    _resultRetentions[id] = operation;
+    return operation;
+  }
+
+  Future<Generation> _performResultRetention(String id) async {
+    final data = await _store.read();
+    final current = data.generations
+        .where((item) => item.localId == id)
+        .firstOrNull;
+    if (current == null) {
+      throw const ProviderException(
+        'The generation was not found.',
+        status: 404,
+      );
+    }
+    if (!current.isReady || current.resultAsset != null) return current;
+    final attemptedAt = DateTime.now().toUtc();
+    AssetReference? retained;
+    String? failure;
+    try {
+      final source = current.resultUrl;
+      if (source == null || source.isEmpty) {
+        throw const ProviderException(
+          'The provider has not supplied a downloadable result yet.',
+        );
+      }
+      retained = await _retainResult(
+        source,
+        'clawnsole-$id.mp4',
+        current.storage,
+      );
+    } on Object catch (error) {
+      failure = generationExceptionMessage(error);
+    }
+    // Downloading never holds the library mutation queue. Merge only delivery
+    // fields into the latest metadata after the bounded transfer finishes.
+    return _store.mutate<Generation>((latest) {
+      final generations = List<Generation>.from(latest.generations);
+      final index = generations.indexWhere((item) => item.localId == id);
+      if (index < 0) {
+        throw const ProviderException(
+          'The generation was deleted.',
+          status: 404,
+        );
+      }
+      final existing = generations[index];
+      if (existing.resultAsset != null ||
+          existing.storage != current.storage ||
+          existing.provider != current.provider ||
+          existing.requestId != current.requestId ||
+          !existing.isReady ||
+          (retained == null &&
+              existing.statusCheckCount != current.statusCheckCount)) {
+        return StoreChange<Generation>(latest, existing);
+      }
+      final updated = existing.copyWith(
+        resultAsset: retained,
+        statusCheckCount: existing.statusCheckCount + 1,
+        lastResultRetentionAttemptAt: attemptedAt,
+        resultRetentionFailures: retained != null
+            ? 0
+            : existing.resultRetentionFailures + 1,
+        resultRetentionError: failure,
+        clearResultRetentionError: retained != null,
+        updatedAt: DateTime.now().toUtc(),
+      );
+      generations[index] = updated;
+      return StoreChange<Generation>(
+        latest.copyWith(generations: generations),
+        updated,
+      );
+    });
+  }
+
   Future<Generation> _poll(Map<String, Object?> body) async {
+    final statusOnly = body['statusOnly'] == true;
     final localId = body['localId']?.toString();
     final pollingUrl = body['pollingUrl']?.toString();
     if (localId == null || pollingUrl == null) {
@@ -2573,12 +2818,15 @@ class CompanionApp {
           return await _storedOrInput(current);
         }
       }
-      if (status == 'Ready' && resultAsset == null && downloadUrl == null) {
+      if (!statusOnly &&
+          status == 'Ready' &&
+          resultAsset == null &&
+          downloadUrl == null) {
         attemptedRetention = true;
         retentionFailures += 1;
         retentionError =
             '${providerById(current.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
-      } else if (downloadUrl != null && resultAsset == null) {
+      } else if (!statusOnly && downloadUrl != null && resultAsset == null) {
         attemptedRetention = true;
         try {
           resultAsset = await _retainResult(
@@ -2627,7 +2875,10 @@ class CompanionApp {
         resultRetentionFailures: resultAsset != null ? 0 : retentionFailures,
         resultRetentionError: retentionError,
         clearResultRetentionError:
-            resultAsset != null || status != 'Ready' || retentionError == null,
+            !statusOnly &&
+            (resultAsset != null ||
+                status != 'Ready' ||
+                retentionError == null),
         error: failureMessage,
         clearError: !failed,
         cost: realized.providerUnits,
@@ -2644,7 +2895,9 @@ class CompanionApp {
         updatedAt: checkedAt,
       );
     } on Object catch (error) {
-      final rescue = await _downloadRetainedResult(current);
+      final rescue = statusOnly
+          ? (asset: null, stalled: false)
+          : await _downloadRetainedResult(current);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
       if (rescue.asset != null) {
@@ -2679,10 +2932,9 @@ class CompanionApp {
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
-          lastResultRetentionAttemptAt: current.needsResultRetention
-              ? checkedAt
-              : null,
-          resultRetentionFailures: current.needsResultRetention
+          lastResultRetentionAttemptAt:
+              !statusOnly && current.needsResultRetention ? checkedAt : null,
+          resultRetentionFailures: !statusOnly && current.needsResultRetention
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
           lastProviderStatusCode: providerHttpStatus(error),
@@ -2714,13 +2966,12 @@ class CompanionApp {
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: current.needsResultRetention
-              ? checkedAt
-              : null,
-          resultRetentionFailures: current.needsResultRetention
+          lastResultRetentionAttemptAt:
+              !statusOnly && current.needsResultRetention ? checkedAt : null,
+          resultRetentionFailures: !statusOnly && current.needsResultRetention
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
-          resultRetentionError: current.needsResultRetention
+          resultRetentionError: !statusOnly && current.needsResultRetention
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),
@@ -2828,6 +3079,7 @@ class CompanionApp {
         status: 404,
       );
     }
+    passiveMediaContentType(reference.contentType);
     // Retained asset ids are immutable: replacing content always mints a new
     // id, so the browser may privately reuse a delivered film for a day
     // instead of refetching it on every playback. `private` keeps user media
@@ -2837,6 +3089,13 @@ class CompanionApp {
       'private, max-age=86400, immutable',
     );
     try {
+      if (reference.kind == 'local') {
+        return await _serveAssetFile(
+          request,
+          reference,
+          await _store.localAssetFile(reference),
+        );
+      }
       if (reference.kind == 'drive' && _isVideoAsset(reference)) {
         final cache = await _syncedVideoCache(data);
         if (cache != null && cache.enabled) {
@@ -2874,10 +3133,10 @@ class CompanionApp {
       );
     }
     if (reference.kind != 'drive') {
-      return _serveAssetBytes(
+      return _serveAssetFile(
         request,
         reference,
-        await _store.readAsset(reference),
+        await _store.localAssetFile(reference),
       );
     }
     final cache = _isVideoAsset(reference)
@@ -2931,7 +3190,7 @@ class CompanionApp {
         );
       request.response.headers
         ..contentType = ContentType.parse(
-          reference.contentType ?? 'application/octet-stream',
+          passiveMediaContentType(reference.contentType),
         )
         ..set(HttpHeaders.acceptRangesHeader, 'bytes')
         ..contentLength = bytes.length;
@@ -3015,6 +3274,12 @@ class CompanionApp {
     File file,
   ) async {
     final size = await file.length();
+    final type = passiveMediaContentType(reference.contentType);
+    final prefix = await file
+        .openRead(0, min(size, passiveMediaSniffBytes))
+        .expand((chunk) => chunk)
+        .toList();
+    validatePassiveMediaPrefix(prefix);
     final range = _parseByteRange(request);
     final resolved = _resolveByteRange(range, size);
     if (resolved == null) return _rangeNotSatisfiable(request, size);
@@ -3027,15 +3292,13 @@ class CompanionApp {
         );
     }
     request.response.headers
-      ..contentType = ContentType.parse(
-        reference.contentType ?? 'application/octet-stream',
-      )
+      ..contentType = ContentType.parse(type)
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
       ..contentLength = resolved.end - resolved.start + 1;
-    await request.response.addStream(
+    return _deliverMediaStream(
+      request.response,
       file.openRead(resolved.start, resolved.end + 1),
     );
-    return request.response.close();
   }
 
   Future<void> _serveAssetBytes(
@@ -3043,6 +3306,8 @@ class CompanionApp {
     AssetReference reference,
     Uint8List bytes,
   ) async {
+    final type = passiveMediaContentType(reference.contentType);
+    validatePassiveMediaPrefix(bytes);
     final size = bytes.length;
     final range = _parseByteRange(request);
     final resolved = _resolveByteRange(range, size);
@@ -3056,9 +3321,7 @@ class CompanionApp {
         );
     }
     request.response.headers
-      ..contentType = ContentType.parse(
-        reference.contentType ?? 'application/octet-stream',
-      )
+      ..contentType = ContentType.parse(type)
       ..set(HttpHeaders.acceptRangesHeader, 'bytes')
       ..contentLength = resolved.end - resolved.start + 1;
     request.response.add(bytes.sublist(resolved.start, resolved.end + 1));
@@ -3111,29 +3374,86 @@ class CompanionApp {
     return _serveRemoteMedia(request, source);
   }
 
+  Future<void> _deliverMediaStream(
+    HttpResponse response,
+    Stream<List<int>> stream,
+  ) async {
+    try {
+      await response.addStream(stream);
+      await response.close();
+    } on Object {
+      // Headers may already be on the wire. End this failed transfer instead
+      // of attempting a second JSON response and throwing "headers sent".
+      try {
+        await response.close();
+      } on Object {
+        /* The peer may be gone. */
+      }
+    }
+  }
+
+  void _protectMediaResponse(HttpResponse response) {
+    response.headers
+      ..set('X-Content-Type-Options', 'nosniff')
+      ..set(
+        'Content-Security-Policy',
+        "sandbox; default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      )
+      ..set('Referrer-Policy', 'no-referrer');
+  }
+
   Future<void> _serveRemoteMedia(HttpRequest request, String source) async {
     final target = validatedProviderUrl(source);
-    final client = HttpClient();
+    final client = _mediaClientFactory();
     try {
-      final upstreamRequest = await client.getUrl(target);
+      final upstreamRequest = http.Request('GET', target);
       final range = request.headers.value(HttpHeaders.rangeHeader);
       if (range != null) {
-        upstreamRequest.headers.set(HttpHeaders.rangeHeader, range);
+        upstreamRequest.headers[HttpHeaders.rangeHeader] = range;
       }
-      final upstream = await upstreamRequest.close();
+      final upstream = await client.send(upstreamRequest);
+      if (upstream.statusCode != HttpStatus.ok &&
+          upstream.statusCode != HttpStatus.partialContent) {
+        if (upstream.statusCode == HttpStatus.requestedRangeNotSatisfiable) {
+          request.response.statusCode = upstream.statusCode;
+          final contentRange = upstream.headers[HttpHeaders.contentRangeHeader];
+          if (contentRange != null) {
+            request.response.headers.set(
+              HttpHeaders.contentRangeHeader,
+              contentRange,
+            );
+          }
+          return await request.response.close();
+        }
+        throw ProviderException(
+          'The media download returned HTTP ${upstream.statusCode}.',
+          status: upstream.statusCode >= 400 ? upstream.statusCode : 502,
+        );
+      }
+      final type = passiveMediaContentType(upstream.headers['content-type']);
+      final contentRange = upstream.headers[HttpHeaders.contentRangeHeader];
+      // Only a response beginning at offset zero contains a file signature.
+      // Nonzero ranges still retain MIME, nosniff, sandbox and navigation guards.
+      final atStart =
+          upstream.statusCode == HttpStatus.ok ||
+          contentRange?.startsWith('bytes 0-') == true;
+      final stream = atStart
+          ? await validatedPassiveMediaStream(upstream.stream)
+          : upstream.stream;
       request.response.statusCode = upstream.statusCode;
+      request.response.headers.contentType = ContentType.parse(type);
       for (final name in <String>[
-        HttpHeaders.contentTypeHeader,
         HttpHeaders.contentLengthHeader,
         HttpHeaders.contentRangeHeader,
         HttpHeaders.acceptRangesHeader,
       ]) {
-        final value = upstream.headers.value(name);
+        final value = upstream.headers[name];
         if (value != null) request.response.headers.set(name, value);
       }
-      await upstream.pipe(request.response);
+      // Never forward provider cookies, redirects, disposition or active headers.
+      await _deliverMediaStream(request.response, stream);
     } finally {
-      client.close(force: true);
+      client.close();
     }
   }
 

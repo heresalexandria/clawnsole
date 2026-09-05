@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import 'asset_extensions.dart';
+import 'asset_stream.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_asset_presenter.dart';
@@ -15,7 +17,7 @@ typedef GoogleDriveApiFactory = GoogleDriveApi Function(String accessToken);
 ///
 /// Authentication and local data are owned by the surface-specific gateway and
 /// [HybridDataStore]. This class only owns app-created Drive files.
-class GoogleDriveStore implements DurableDataStore {
+class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   GoogleDriveStore({
     http.Client? client,
     GoogleDriveApiFactory? apiFactory,
@@ -295,6 +297,93 @@ class GoogleDriveStore implements DurableDataStore {
   }
 
   @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.drive,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) async {
+    if (!_connection.isConnected) {
+      await stream.listen(null).cancel();
+      _requireConnected();
+    }
+    final watch = Stopwatch()..start();
+    Duration remaining() {
+      final value = totalTimeout - watch.elapsed;
+      if (value <= Duration.zero) {
+        throw TimeoutException(
+          'The media transfer exceeded its total deadline.',
+        );
+      }
+      return value;
+    }
+
+    final staged = await stageAssetStream(
+      stream,
+      expectedLength: expectedLength,
+      expectedSha256: expectedSha256,
+      maxBytes: maxBytes,
+      idleTimeout: idleTimeout,
+      totalTimeout: remaining(),
+    );
+    try {
+      final unique = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+      final file = await _api!.createFileStream(
+        parentId: _assetsFolderId,
+        name: '$unique-${_cleanFileName(label)}',
+        bytes: staged.openRead(),
+        length: staged.length,
+        contentType: contentType,
+        appProperties: {'clawnsoleAsset': 'true', 'sha256': staged.sha256},
+        timeout: remaining(),
+      );
+      if (file.size != staged.length) {
+        throw const AssetTransferException(
+          'Google Drive retained an unexpected media size.',
+        );
+      }
+      final reference = AssetReference(
+        kind: 'drive',
+        value: file.id,
+        label: label,
+        contentType: contentType,
+        bytes: staged.length,
+        sha256: staged.sha256,
+      );
+      _pendingAssetIds[file.id] = _now();
+      _invalidateStatsListing();
+      if (_isLocallyCacheable(reference)) {
+        try {
+          await _presenter
+              .present(
+                reference,
+                staged.openRead(),
+                expectedLength: staged.length,
+              )
+              .timeout(remaining());
+        } on Object {
+          /* A cache failure does not undo a durable upload. */
+        }
+      }
+      return reference;
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error);
+      rethrow;
+    } finally {
+      await staged.dispose();
+    }
+  }
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) async =>
+      (await readAssetStream(reference)).stream;
+
+  @override
   Future<AssetReference?> persistSource(
     String source, {
     required String label,
@@ -308,6 +397,7 @@ class GoogleDriveStore implements DurableDataStore {
         label: label,
         contentType: retained.contentType,
         bytes: retained.bytes,
+        sha256: retained.sha256,
       );
     }
     if (source.startsWith('data:')) {

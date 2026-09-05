@@ -8883,6 +8883,27 @@ class _RetentionMemoryStore extends _MemoryLocalDataStore {
   _RetentionMemoryStore(super.data);
 
   @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = 2 * 1024 * 1024 * 1024,
+    Duration idleTimeout = const Duration(seconds: 30),
+    Duration totalTimeout = const Duration(minutes: 8),
+  }) async {
+    final chunks = await stream.toList();
+    return writeAsset(
+      Uint8List.fromList(chunks.expand((chunk) => chunk).toList()),
+      label: label,
+      contentType: contentType,
+      storage: storage,
+    );
+  }
+
+  @override
   Future<AssetReference> writeAsset(
     Uint8List bytes, {
     required String label,

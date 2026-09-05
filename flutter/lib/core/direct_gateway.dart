@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'background_delivery.dart';
+import 'public_media_http.dart';
+import 'media_content_policy.dart';
 import 'bfl_api.dart';
 import 'composer_tabs.dart';
 import 'durable_data_store.dart';
@@ -34,6 +36,7 @@ class ActiveApiKey {
 class DirectGateway
     implements
         AppGateway,
+        GenerationDeliveryGateway,
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
@@ -61,7 +64,7 @@ class DirectGateway
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _rewrite = rewriteRouter ?? PromptRewriteRouter(client: client),
-       _client = client ?? http.Client(),
+       _client = client ?? PublicMediaClient(),
        _backgroundDelivery = backgroundDelivery,
        _referenceVideoNormalizer = referenceVideoNormalizer,
        _referenceVideoEditingService =
@@ -79,6 +82,10 @@ class DirectGateway
   @override
   final String persistenceDescription;
   final Set<String> availableProviders;
+
+  Future<void> _pollWriteTail = Future<void>.value();
+  final Map<String, Future<Generation>> _retainingResults =
+      <String, Future<Generation>>{};
 
   ActiveApiKey? activeApiKey(String provider, StoredData data) {
     final saved = data.apiKeyFor(provider).trim();
@@ -1321,11 +1328,14 @@ class DirectGateway
           )
           .timeout(const Duration(minutes: 8));
       if (delivered != null) {
-        return _store.writeAsset(
-          delivered.bytes,
+        return _store.writeAssetStream(
+          await validatedPassiveMediaStream(delivered.openRead()),
           label: 'clawnsole-${generation.localId}.mp4',
-          contentType: delivered.contentType ?? 'video/mp4',
+          contentType: passiveMediaContentType(
+            delivered.contentType ?? 'video/mp4',
+          ),
           storage: generation.storage,
+          expectedLength: delivered.expectedLength,
         );
       }
     }
@@ -1334,22 +1344,27 @@ class DirectGateway
         .send(request)
         .timeout(const Duration(seconds: 30));
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.listen(null).cancel();
       throw ProviderException(
         'The provider result download returned HTTP ${response.statusCode}.',
         status: response.statusCode,
       );
     }
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in response.stream.timeout(
-      const Duration(seconds: 30),
-    )) {
-      bytes.add(chunk);
+    final String contentType;
+    try {
+      contentType = passiveMediaContentType(
+        response.headers['content-type'] ?? 'video/mp4',
+      );
+    } on Object {
+      await response.stream.listen(null).cancel();
+      rethrow;
     }
-    return _store.writeAsset(
-      bytes.takeBytes(),
+    return _store.writeAssetStream(
+      await validatedPassiveMediaStream(response.stream),
       label: 'clawnsole-${generation.localId}.mp4',
-      contentType: response.headers['content-type'] ?? 'video/mp4',
+      contentType: contentType,
       storage: generation.storage,
+      expectedLength: response.contentLength,
     );
   }
 
@@ -1387,6 +1402,17 @@ class DirectGateway
   /// asset — or resurrect a deleted record. Every persisted poll outcome
   /// advances statusCheckCount, so it serves as the write version.
   Future<Generation?> _persistPollUpdate(
+    Generation next, {
+    required Generation expected,
+  }) {
+    final result = _pollWriteTail.then(
+      (_) => _writePollUpdate(next, expected: expected),
+    );
+    _pollWriteTail = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
+  }
+
+  Future<Generation?> _writePollUpdate(
     Generation next, {
     required Generation expected,
   }) async {
@@ -1447,11 +1473,14 @@ class DirectGateway
         continue;
       }
       try {
-        final asset = await _store.writeAsset(
-          result.bytes,
+        final asset = await _store.writeAssetStream(
+          await validatedPassiveMediaStream(result.openRead()),
           label: 'clawnsole-$id.mp4',
-          contentType: result.contentType ?? 'video/mp4',
+          contentType: passiveMediaContentType(
+            result.contentType ?? 'video/mp4',
+          ),
           storage: generation.storage,
+          expectedLength: result.expectedLength,
         );
         final now = DateTime.now().toUtc();
         // The film itself arrived, so a record the retention machinery gave
@@ -1498,7 +1527,99 @@ class DirectGateway
   }
 
   @override
-  Future<Generation> poll(Generation generation) async {
+  Future<Generation> poll(Generation generation) => _poll(generation);
+
+  @override
+  Future<Generation> pollStatus(Generation generation) =>
+      _poll(generation, retainMedia: false);
+
+  @override
+  Future<Generation> retainResult(Generation generation) {
+    return _retainingResults[generation.localId] ??= _retainResult(generation)
+        .whenComplete(() {
+          _retainingResults.remove(generation.localId);
+        });
+  }
+
+  Future<Generation> _retainResult(Generation input) async {
+    final data = await _store.read();
+    final generation = data.generations
+        .where((item) => item.localId == input.localId)
+        .firstOrNull;
+    if (generation == null || !generation.needsResultRetention) {
+      return generation ?? input;
+    }
+    final attemptedAt = DateTime.now().toUtc();
+    AssetReference? asset;
+    String? failure;
+    try {
+      final url = generation.resultUrl;
+      if (url == null || url.isEmpty) {
+        throw StateError(
+          'The provider has not supplied a downloadable result yet. Clawnsole will keep checking.',
+        );
+      }
+      asset = await _fetchResultAsset(url, generation);
+    } on TimeoutException {
+      failure = 'The result download stalled. Clawnsole will retry it.';
+    } on Object catch (error) {
+      failure = generationExceptionMessage(error);
+    }
+    if (asset != null) {
+      final result = _pollWriteTail.then((_) async {
+        final latest = await _store.read();
+        final items = List<Generation>.from(latest.generations);
+        final index = items.indexWhere(
+          (item) => item.localId == generation.localId,
+        );
+        if (index < 0) return generation;
+        final current = items[index];
+        if (current.resultAsset != null ||
+            !current.isReady ||
+            current.provider != generation.provider ||
+            current.requestId != generation.requestId ||
+            current.storage != generation.storage) {
+          return current;
+        }
+        // A newer status receipt cannot discard media that actually arrived.
+        // Merge the asset into that receipt while retaining current metadata.
+        final saved = current.copyWith(
+          status: 'Ready',
+          resultAsset: asset,
+          clearError: true,
+          deliveryExpired: false,
+          lastResultRetentionAttemptAt: attemptedAt,
+          resultRetentionFailures: 0,
+          clearResultRetentionError: true,
+          statusCheckCount: current.statusCheckCount + 1,
+          updatedAt: DateTime.now().toUtc(),
+        );
+        items[index] = saved;
+        await _store.write(latest.copyWith(generations: items));
+        return saved;
+      });
+      _pollWriteTail = result.then<void>((_) {}, onError: (Object _) {});
+      return result;
+    }
+    final next = generation.copyWith(
+      resultAsset: asset,
+      lastResultRetentionAttemptAt: attemptedAt,
+      resultRetentionFailures: asset == null
+          ? generation.resultRetentionFailures + 1
+          : 0,
+      resultRetentionError: failure,
+      clearResultRetentionError: asset != null,
+      statusCheckCount: generation.statusCheckCount + 1,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    return await _persistPollUpdate(next, expected: generation) ??
+        await _storedOrInput(generation);
+  }
+
+  Future<Generation> _poll(
+    Generation generation, {
+    bool retainMedia = true,
+  }) async {
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
     ActiveApiKey? credential;
@@ -1554,7 +1675,10 @@ class DirectGateway
           : resultUrl;
       final provider = providerById(generation.provider);
       final deliveryAvailability = provider.resultDelivery.availability;
-      if (status == 'Ready' && resultAsset == null && resultUrl != null) {
+      if (retainMedia &&
+          status == 'Ready' &&
+          resultAsset == null &&
+          resultUrl != null) {
         // The ready status and its delivery link are an irreplaceable receipt:
         // they must survive a suspension or crash during the download attempt
         // below, so they are persisted now rather than only at poll end.
@@ -1585,12 +1709,15 @@ class DirectGateway
           return await _storedOrInput(generation);
         }
       }
-      if (status == 'Ready' && resultAsset == null && downloadUrl == null) {
+      if (retainMedia &&
+          status == 'Ready' &&
+          resultAsset == null &&
+          downloadUrl == null) {
         attemptedRetention = true;
         retentionFailures += 1;
         retentionError =
             '${providerById(generation.provider).name} reports that the generation is ready, but has not supplied a downloadable result yet. Clawnsole will keep retrying.';
-      } else if (downloadUrl != null && resultAsset == null) {
+      } else if (retainMedia && downloadUrl != null && resultAsset == null) {
         attemptedRetention = true;
         try {
           resultAsset = await _fetchResultAsset(downloadUrl, generation);
@@ -1642,7 +1769,9 @@ class DirectGateway
         resultRetentionFailures: resultAsset != null ? 0 : retentionFailures,
         resultRetentionError: retentionError,
         clearResultRetentionError:
-            resultAsset != null || status != 'Ready' || retentionError == null,
+            resultAsset != null ||
+            status != 'Ready' ||
+            (retainMedia && retentionError == null),
         error: failureMessage,
         clearError: !failed,
         cost: realized.providerUnits,
@@ -1664,7 +1793,9 @@ class DirectGateway
               providerHttpStatus(error) == 403)) {
         await invalidateCredential(generation.provider, credential);
       }
-      final rescue = await _downloadRetainedResult(generation);
+      final rescue = retainMedia
+          ? await _downloadRetainedResult(generation)
+          : (asset: null, stalled: false);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
       if (rescue.asset != null) {
@@ -1696,10 +1827,12 @@ class DirectGateway
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
-          lastResultRetentionAttemptAt: generation.needsResultRetention
+          lastResultRetentionAttemptAt:
+              (retainMedia && generation.needsResultRetention)
               ? checkedAt
               : null,
-          resultRetentionFailures: generation.needsResultRetention
+          resultRetentionFailures:
+              (retainMedia && generation.needsResultRetention)
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
           lastProviderStatusCode: providerHttpStatus(error),
@@ -1737,13 +1870,15 @@ class DirectGateway
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
           lastCheckError: generationExceptionMessage(error),
-          lastResultRetentionAttemptAt: generation.needsResultRetention
+          lastResultRetentionAttemptAt:
+              (retainMedia && generation.needsResultRetention)
               ? checkedAt
               : null,
-          resultRetentionFailures: generation.needsResultRetention
+          resultRetentionFailures:
+              (retainMedia && generation.needsResultRetention)
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
-          resultRetentionError: generation.needsResultRetention
+          resultRetentionError: (retainMedia && generation.needsResultRetention)
               ? generationExceptionMessage(error)
               : null,
           lastProviderStatusCode: providerHttpStatus(error),

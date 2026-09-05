@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -7,12 +8,13 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 
 import 'asset_extensions.dart';
+import 'asset_stream.dart';
 import 'atomic_file.dart';
 import 'durable_data_store.dart';
 import 'library_file_io.dart';
 import 'models.dart';
 
-class LocalDataStore implements DurableDataStore {
+class LocalDataStore implements DurableDataStore, StreamingAssetStore {
   LocalDataStore({Directory? documentsDirectory})
     : _documentsOverride = documentsDirectory;
 
@@ -23,6 +25,28 @@ class LocalDataStore implements DurableDataStore {
 
   final Directory? _documentsOverride;
   File? _cachedFile;
+  Future<void> _metadataTail = Future<void>.value();
+  final Map<String, DateTime> _pendingAssetIds = {};
+
+  Future<T> _serializeMetadata<T>(Future<T> Function() operation) {
+    final result = _metadataTail.then((_) => operation());
+    _metadataTail = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return result;
+  }
+
+  Set<String> _committedAssets(StoredData data) {
+    final ids = _referencedAssets(data.generations, data.savedReferences);
+    for (final json
+        in data.composerTabs?.retainedAssetJson ??
+            const <Map<String, Object?>>[]) {
+      final asset = AssetReference.fromJson(json);
+      if (asset.kind == 'local') ids.add(asset.value);
+    }
+    return ids;
+  }
 
   Future<Directory> _defaultRoot() async {
     final separator = Platform.pathSeparator;
@@ -229,7 +253,13 @@ class LocalDataStore implements DurableDataStore {
     final assets = await _assets();
     await assets.create(recursive: true);
     final extension = retainedAssetExtension(contentType, label);
-    await (await _assetFile(id, extension)).writeAsBytes(bytes, flush: true);
+    _pendingAssetIds[id] = DateTime.now();
+    try {
+      await (await _assetFile(id, extension)).writeAsBytes(bytes, flush: true);
+    } on Object {
+      _pendingAssetIds.remove(id);
+      rethrow;
+    }
     return AssetReference(
       kind: 'local',
       value: id,
@@ -237,6 +267,66 @@ class LocalDataStore implements DurableDataStore {
       contentType: contentType,
       bytes: bytes.length,
     );
+  }
+
+  @override
+  Future<AssetReference> writeAssetStream(
+    Stream<List<int>> stream, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.local,
+    int? expectedLength,
+    String? expectedSha256,
+    int maxBytes = maxRetainedAssetBytes,
+    Duration idleTimeout = assetStreamIdleTimeout,
+    Duration totalTimeout = assetStreamTotalTimeout,
+  }) async {
+    final assets = await _assets();
+    final staged = await stageAssetStream(
+      stream,
+      directory: assets.path,
+      expectedLength: expectedLength,
+      expectedSha256: expectedSha256,
+      maxBytes: maxBytes,
+      idleTimeout: idleTimeout,
+      totalTimeout: totalTimeout,
+    );
+    try {
+      final id = _assetId();
+      final target = await _assetFile(
+        id,
+        retainedAssetExtension(contentType, label),
+      );
+      _pendingAssetIds[id] = DateTime.now();
+      try {
+        await File(staged.path).rename(target.path);
+      } on Object {
+        _pendingAssetIds.remove(id);
+        rethrow;
+      }
+      return AssetReference(
+        kind: 'local',
+        value: id,
+        label: label,
+        contentType: contentType,
+        bytes: staged.length,
+        sha256: staged.sha256,
+      );
+    } finally {
+      await staged.dispose();
+    }
+  }
+
+  @override
+  Future<Stream<List<int>>> openAssetRead(AssetReference reference) async {
+    if (reference.kind != 'local') {
+      throw StateError('The asset is not stored locally.');
+    }
+    final file = await _resolveAssetFile(reference);
+    if (!await file.exists()) {
+      throw StateError(missingLocalAssetMessage(reference.contentType));
+    }
+    return file.openRead();
   }
 
   @override
@@ -255,6 +345,7 @@ class LocalDataStore implements DurableDataStore {
           label: label,
           contentType: retained.contentType,
           bytes: await file.length(),
+          sha256: retained.sha256,
         );
       }
     }
@@ -337,28 +428,32 @@ class LocalDataStore implements DurableDataStore {
   Future<void> pruneAssets(
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
-  ]) async {
+  ]) => _serializeMetadata(() async {
     final assets = await _assets();
     if (!await assets.exists()) return;
-    final retained = _referencedAssets(generations, savedReferences);
-    for (final json
-        in (await read()).composerTabs?.retainedAssetJson ??
-            const <Map<String, Object?>>[]) {
-      final reference = AssetReference.fromJson(json);
-      if (reference.kind == 'local') retained.add(reference.value);
-    }
+    final retained = _referencedAssets(generations, savedReferences)
+      ..addAll(_committedAssets(await read()));
+    final cutoff = DateTime.now().subtract(const Duration(hours: 1));
+    _pendingAssetIds.removeWhere((_, created) => created.isBefore(cutoff));
+    retained.addAll(_pendingAssetIds.keys);
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
       final dot = name.lastIndexOf('.');
       final id = dot > 0 ? name.substring(0, dot) : '';
-      if (!retained.contains(id)) await entry.delete();
+      // A transfer may publish during this short pass, after the snapshot.
+      if (!retained.contains(id) && !_pendingAssetIds.containsKey(id)) {
+        await entry.delete();
+      }
     }
-  }
+  });
 
-  Future<void> clearAssets() async {
+  Future<void> clearAssets() => _serializeMetadata(_clearAssets);
+
+  Future<void> _clearAssets() async {
     final assets = await _assets();
     if (await assets.exists()) await assets.delete(recursive: true);
+    _pendingAssetIds.clear();
   }
 
   @override
@@ -378,16 +473,18 @@ class LocalDataStore implements DurableDataStore {
   /// it is replaced atomically with the previous contents kept beside it;
   /// a crash mid-write can no longer leave the library looking empty.
   @override
-  Future<void> write(StoredData data) async {
+  Future<void> write(StoredData data) => _serializeMetadata(() async {
     await writeLibraryTextAtomically(await _file(), data.encode());
-  }
+    final committed = _committedAssets(data);
+    _pendingAssetIds.removeWhere((id, _) => committed.contains(id));
+  });
 
   @override
-  Future<void> delete() async {
+  Future<void> delete() => _serializeMetadata(() async {
     final file = await _file();
     await deleteTextWithRecovery(file);
-    await clearAssets();
-  }
+    await _clearAssets();
+  });
 
   @override
   Future<StorageStats> stats(int records) async {

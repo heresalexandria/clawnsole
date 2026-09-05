@@ -34,6 +34,16 @@ abstract interface class AppGateway {
   );
 }
 
+/// Independently scheduled provider status and durable media delivery.
+///
+/// A status check persists the provider receipt without waiting for media.
+/// Retention consumes that saved receipt and never submits a new paid job.
+/// Lightweight gateways may retain the combined [AppGateway.poll] contract.
+abstract interface class GenerationDeliveryGateway {
+  Future<Generation> pollStatus(Generation generation);
+  Future<Generation> retainResult(Generation generation);
+}
+
 /// Provider-aware operations implemented by the production gateways. Keeping
 /// this separate preserves compatibility with lightweight BFL-only test and
 /// embedder gateways while the app can route LTX, ArtCraft, and Atlas Cloud

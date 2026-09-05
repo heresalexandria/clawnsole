@@ -33,7 +33,12 @@ function parseUrl(value) {
 function isAllowedAppUrl(value, rendererOrigin) {
   const candidate = parseUrl(value);
   const origin = parseUrl(rendererOrigin);
-  return Boolean(candidate && origin && candidate.origin === origin.origin);
+  // Flutter uses fragment routes. Only its entry document owns the preload
+  // bridge; media/API endpoints on the same companion origin never do.
+  return Boolean(candidate && origin
+    && candidate.origin === origin.origin
+    && !candidate.username && !candidate.password
+    && ["/", "/index.html"].includes(candidate.pathname));
 }
 
 function isAllowedRendererPermission(permission, requestingUrl, rendererOrigin) {

@@ -213,6 +213,7 @@ class AssetReference {
     required this.label,
     this.contentType,
     this.bytes,
+    this.sha256,
   });
 
   final String kind;
@@ -220,6 +221,7 @@ class AssetReference {
   final String label;
   final String? contentType;
   final int? bytes;
+  final String? sha256;
 
   /// The asset is retained by the active Clawnsole data store rather than a
   /// short-lived provider URL. Google Drive assets use the `drive` kind.
@@ -231,6 +233,7 @@ class AssetReference {
     'label': label,
     if (contentType != null) 'contentType': contentType,
     if (bytes != null) 'bytes': bytes,
+    if (sha256 != null) 'sha256': sha256,
   };
 
   factory AssetReference.fromJson(Map<String, Object?> json) => AssetReference(
@@ -243,6 +246,7 @@ class AssetReference {
     label: json['label'] as String? ?? 'Clawnsole asset',
     contentType: json['contentType'] as String?,
     bytes: (json['bytes'] as num?)?.toInt(),
+    sha256: json['sha256'] as String?,
   );
 }
 

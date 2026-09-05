@@ -29,6 +29,7 @@ Uri _configuredBaseUrl(Uri? override) {
 class WebGateway
     implements
         AppGateway,
+        GenerationDeliveryGateway,
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
@@ -725,7 +726,16 @@ class WebGateway
   }
 
   @override
-  Future<Generation> poll(Generation generation) async {
+  Future<Generation> poll(Generation generation) => _poll(generation);
+
+  @override
+  Future<Generation> pollStatus(Generation generation) =>
+      _poll(generation, statusOnly: true);
+
+  Future<Generation> _poll(
+    Generation generation, {
+    bool statusOnly = false,
+  }) async {
     final payload = _map(
       await _read(
         await _client.post(
@@ -735,6 +745,7 @@ class WebGateway
             'provider': generation.provider,
             'localId': generation.localId,
             'pollingUrl': generation.pollingUrl,
+            if (statusOnly) 'statusOnly': true,
           }),
         ),
       ),
@@ -745,6 +756,20 @@ class WebGateway
       await clearProviderApiKey(generation.provider);
     }
     return updated;
+  }
+
+  @override
+  Future<Generation> retainResult(Generation generation) async {
+    final payload = _map(
+      await _read(
+        await _client.post(
+          _url('/generations/retain'),
+          headers: const <String, String>{'Content-Type': 'application/json'},
+          body: jsonEncode(<String, Object?>{'localId': generation.localId}),
+        ),
+      ),
+    );
+    return Generation.fromJson(_map(payload['generation']));
   }
 
   @override

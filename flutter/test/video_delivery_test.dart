@@ -794,6 +794,23 @@ class _UploadDriveApi extends GoogleDriveApi {
       : null;
 
   @override
+  Future<GoogleDriveFile> createFileStream({
+    required String parentId,
+    required String name,
+    required Stream<List<int>> bytes,
+    required int length,
+    required String contentType,
+    Map<String, String> appProperties = const <String, String>{},
+    Duration timeout = const Duration(minutes: 8),
+  }) async => createFile(
+    parentId: parentId,
+    name: name,
+    bytes: await collectSmallAssetStream(bytes, expectedLength: length),
+    contentType: contentType,
+    appProperties: appProperties,
+  );
+
+  @override
   Future<GoogleDriveFile> createFile({
     required String parentId,
     required String name,
