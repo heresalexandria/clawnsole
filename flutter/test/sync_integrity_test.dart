@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -21,6 +22,176 @@ LibraryFolder folder(String id, String name) => LibraryFolder(
   storage: LibraryStorage.drive,
 );
 void main() {
+  test(
+    'rejected metadata never publishes its ETag over the valid cache',
+    () async {
+      final api = FakeApi(const StoredData());
+      final drive = GoogleDriveStore(apiFactory: (_) => api);
+      await drive.connect('token', 'Studio');
+      api.pendingRead = Completer<GoogleDriveContent?>()
+        ..complete(
+          GoogleDriveContent(
+            Uint8List.fromList(utf8.encode('{"schemaVersion":999}')),
+            etag: 'future-schema',
+          ),
+        );
+
+      await expectLater(drive.read(), throwsUnsupportedError);
+      await expectLater(drive.read(), throwsUnsupportedError);
+
+      expect(api.validators.last, 'rev-1');
+      expect(drive.lastData, isNotNull);
+      expect(drive.connection.isConnected, isTrue);
+    },
+  );
+  for (final renewed in [false, true]) {
+    test(
+      'late successful read cannot publish after ${renewed ? 'renewal' : 'disconnect'}',
+      () async {
+        final oldData = StoredData(folders: [folder('old', 'Old work')]);
+        final freshData = StoredData(folders: [folder('fresh', 'Fresh work')]);
+        final oldApi = FakeApi(oldData);
+        final renewedApi = FakeApi(freshData);
+        final drive = GoogleDriveStore(
+          apiFactory: (token) => token == 'old' ? oldApi : renewedApi,
+        );
+        await drive.connect('old', 'Old studio');
+        oldApi.pendingRead = Completer<GoogleDriveContent?>();
+        final oldRead = drive.read();
+        final rejected = expectLater(oldRead, throwsStateError);
+        if (renewed) {
+          await drive.connect('new', 'New studio');
+        } else {
+          await drive.disconnect();
+        }
+        oldApi.pendingRead!.complete(
+          GoogleDriveContent(
+            Uint8List.fromList(utf8.encode(oldData.encode())),
+            etag: 'stale-response',
+          ),
+        );
+        await rejected;
+
+        expect(drive.connection.isConnected, renewed);
+        expect(drive.lastData?.folders.single.id, renewed ? 'fresh' : null);
+        if (renewed) {
+          expect((await drive.read()).folders.single.id, 'fresh');
+        }
+      },
+    );
+  }
+
+  for (final renewed in [false, true]) {
+    test(
+      'late connection cannot replace ${renewed ? 'a newer connection' : 'signout'}',
+      () async {
+        final oldApi = FakeApi(const StoredData())
+          ..pendingRoot = Completer<GoogleDriveFile?>();
+        final renewedApi = FakeApi(const StoredData());
+        final drive = GoogleDriveStore(
+          apiFactory: (token) => token == 'old' ? oldApi : renewedApi,
+        );
+        final oldConnect = drive.connect('old', 'Old studio');
+        final rejected = expectLater(oldConnect, throwsStateError);
+        if (renewed) {
+          await drive.connect('new', 'New studio');
+        } else {
+          await drive.disconnect();
+        }
+        oldApi.pendingRoot!.complete(oldApi.f('old-root'));
+        await rejected;
+
+        expect(drive.connection.isConnected, renewed);
+        expect(
+          drive.connection.folderName,
+          renewed ? 'New studio' : 'Old studio',
+        );
+        expect(oldApi.childQueries, 0);
+      },
+    );
+  }
+
+  test(
+    'late metadata write cannot overwrite a renewed session cache',
+    () async {
+      final oldApi = FakeApi(const StoredData());
+      final renewedApi = FakeApi(
+        StoredData(folders: [folder('fresh', 'Fresh work')]),
+      );
+      final drive = GoogleDriveStore(
+        apiFactory: (token) => token == 'old' ? oldApi : renewedApi,
+      );
+      await drive.connect('old', 'Old studio');
+      oldApi.pendingUpdate = Completer<GoogleDriveFile>();
+      oldApi.updateStarted = Completer<void>();
+      final oldWrite = drive.write(
+        StoredData(folders: [folder('old', 'Old work')]),
+      );
+      final rejected = expectLater(oldWrite, throwsStateError);
+      await oldApi.updateStarted!.future;
+
+      await drive.connect('new', 'New studio');
+      oldApi.pendingUpdate!.complete(oldApi.f('old-state'));
+      await rejected;
+
+      expect(drive.connection.isConnected, isTrue);
+      expect(drive.connection.folderName, 'New studio');
+      expect(drive.lastData!.folders.single.id, 'fresh');
+      expect((await drive.read()).folders.single.id, 'fresh');
+    },
+  );
+  test(
+    'an old token failure cannot disconnect a renewed Drive session',
+    () async {
+      final oldApi = FakeApi(const StoredData());
+      final renewedApi = FakeApi(const StoredData());
+      final drive = GoogleDriveStore(
+        apiFactory: (token) => token == 'old' ? oldApi : renewedApi,
+      );
+      await drive.connect('old', 'Studio');
+      oldApi.pendingRead = Completer<GoogleDriveContent?>();
+      final oldRead = drive.read();
+      final failure = expectLater(
+        oldRead,
+        throwsA(isA<GoogleDriveException>()),
+      );
+
+      await drive.connect('renewed', 'Studio');
+      oldApi.pendingRead!.completeError(
+        const GoogleDriveException('Old token expired', status: 401),
+      );
+      await failure;
+
+      expect(drive.connection.isConnected, isTrue);
+      await drive.read();
+    },
+  );
+  for (final status in [401, 403]) {
+    test(
+      'Drive HTTP $status preserves the local library and remote mirror',
+      () async {
+        final local = MemoryStore(const StoredData());
+        final api = FakeApi(
+          StoredData(folders: [folder('saved', 'Saved work')]),
+        );
+        final hybrid = HybridDataStore(
+          local: local,
+          drive: GoogleDriveStore(apiFactory: (_) => api),
+        );
+        await hybrid.connect('fake-token', 'Studio');
+        final persistedBefore = local.data.encode();
+        api.readError = GoogleDriveException('Expired fixture', status: status);
+
+        final cached = await hybrid.read();
+
+        expect(cached.folders.single.id, 'saved');
+        expect(hybrid.connection.isConnected, isFalse);
+        expect(local.data.encode(), persistedBefore);
+        expect((await hybrid.read()).folders.single.id, 'saved');
+        expect(api.deleted, isEmpty);
+      },
+    );
+  }
   test(
     'moving identical generations preserves both runs and rewrite lineage',
     () async {
@@ -384,6 +555,13 @@ class FakeApi extends GoogleDriveApi {
   StoredData data;
   int revision = 1;
   bool offline = false;
+  GoogleDriveException? readError;
+  Completer<GoogleDriveContent?>? pendingRead;
+  Completer<GoogleDriveFile?>? pendingRoot;
+  Completer<GoogleDriveFile>? pendingUpdate;
+  Completer<void>? updateStarted;
+  int childQueries = 0;
+  final validators = <String?>[];
   List<GoogleDriveFile> files = [];
   final List<String> deleted = [];
   void externalWrite(StoredData next) {
@@ -398,14 +576,19 @@ class FakeApi extends GoogleDriveApi {
     etag: 'rev-$revision',
   );
   @override
-  Future<GoogleDriveFile?> findRootFolder(String name) async => f('root');
+  Future<GoogleDriveFile?> findRootFolder(String name) async =>
+      pendingRoot == null ? f('root') : await pendingRoot!.future;
   @override
   Future<GoogleDriveFile?> findChild(
     String parentId,
     String name, {
     String? appPropertyKey,
     String? appPropertyValue,
-  }) async => f(name == 'assets' ? 'assets' : 'state');
+  }) async {
+    childQueries++;
+    return f(name == 'assets' ? 'assets' : 'state');
+  }
+
   @override
   Future<List<GoogleDriveFile>> listChildren(
     String parentId, {
@@ -419,6 +602,9 @@ class FakeApi extends GoogleDriveApi {
 
   @override
   Future<GoogleDriveContent?> readFile(String id, {String? ifNoneMatch}) async {
+    validators.add(ifNoneMatch);
+    if (pendingRead != null) return pendingRead!.future;
+    if (readError != null) throw readError!;
     if (offline) throw SocketException('Audit simulated offline');
     if (ifNoneMatch == 'rev-$revision') return null;
     return GoogleDriveContent(
@@ -434,6 +620,8 @@ class FakeApi extends GoogleDriveApi {
     required String contentType,
     String? etag,
   }) async {
+    updateStarted?.complete();
+    if (pendingUpdate != null) return pendingUpdate!.future;
     if (etag != 'rev-$revision') {
       throw GoogleDriveException('Conflict', status: 412);
     }

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'asset_stream.dart';
+
 /// Reports byte progress for one cached download. [total] is null when the
 /// source did not announce a length.
 typedef VideoCacheProgressListener =
@@ -20,12 +22,18 @@ class VideoCache {
   VideoCache({
     required Future<Directory> Function() directory,
     int maxBytes = defaultVideoCacheBytes,
+    this.transferMaxBytes = maxRetainedAssetBytes,
+    this.idleTimeout = assetStreamIdleTimeout,
+    this.totalTimeout = assetStreamTotalTimeout,
   }) : _directoryProvider = directory,
        _maxBytes = maxBytes;
 
   static const int defaultVideoCacheBytes = 100 * 1024 * 1024;
 
   final Future<Directory> Function() _directoryProvider;
+  final int transferMaxBytes;
+  final Duration idleTimeout;
+  final Duration totalTimeout;
   final Map<String, Future<File>> _inFlight = <String, Future<File>>{};
   final Map<String, List<VideoCacheProgressListener>> _listeners =
       <String, List<VideoCacheProgressListener>>{};
@@ -86,13 +94,24 @@ class VideoCache {
       throw ArgumentError.value(key, 'key', 'is not a valid cache key');
     }
     final pending = _inFlight[key];
-    if (pending != null) return pending;
+    if (pending != null) {
+      unawaited(_cancelUnused(bytes));
+      return pending;
+    }
     late final Future<File> operation;
     operation = _write(key, extension, bytes, expectedLength).whenComplete(() {
       if (identical(_inFlight[key], operation)) _inFlight.remove(key);
     });
     _inFlight[key] = operation;
     return operation;
+  }
+
+  Future<void> _cancelUnused(Stream<List<int>> bytes) async {
+    try {
+      await bytes.listen(null).cancel();
+    } on Object {
+      // Closing an unused duplicate response cannot fail the shared download.
+    }
   }
 
   bool isDownloading(String key) => _inFlight.containsKey(key);
@@ -172,31 +191,47 @@ class VideoCache {
     Stream<List<int>> bytes,
     int? expectedLength,
   ) async {
-    final directory = await _cacheDirectory();
-    final separator = Platform.pathSeparator;
-    final file = File('${directory.path}$separator$key$extension');
-    final partial = File('${file.path}$partialSuffix');
-    final sink = partial.openWrite();
     var received = 0;
+    StagedAsset? staged;
+    var consumed = false;
     try {
-      await for (final chunk in bytes) {
-        sink.add(chunk);
+      final directory = await _cacheDirectory();
+      final separator = Platform.pathSeparator;
+      final file = File('${directory.path}$separator$key$extension');
+      final progress = bytes.map((chunk) {
         received += chunk.length;
         _notify(key, received, expectedLength, false);
-      }
-      await sink.flush();
-      await sink.close();
+        return chunk;
+      });
+
+      consumed = true;
+      // Use the same bounded, backpressured writer as retained originals.
+      // IOSink.add can queue a whole fast download while the disk is slow,
+      // and EOF alone does not establish that a response was complete.
+      staged = await stageAssetStream(
+        progress,
+        directory: directory.path,
+        expectedLength: expectedLength,
+        maxBytes: transferMaxBytes,
+        idleTimeout: idleTimeout,
+        totalTimeout: totalTimeout,
+      );
       final stale = await _find(key);
+      await File(staged.path).rename(file.path);
       if (stale != null && stale.path != file.path) await _delete(stale);
-      await partial.rename(file.path);
       _notify(key, received, expectedLength ?? received, true);
       await _sweep(<String>{key});
       return file;
     } on Object {
-      await sink.close();
-      await _delete(partial);
       _notify(key, received, expectedLength, true);
       rethrow;
+    } finally {
+      if (!consumed) await bytes.listen(null).cancel();
+      try {
+        await staged?.dispose();
+      } on FileSystemException {
+        // Cleanup failure must not hide the download outcome.
+      }
     }
   }
 
@@ -204,7 +239,11 @@ class VideoCache {
     final listeners = _listeners[key];
     if (listeners == null) return;
     for (final listener in List<VideoCacheProgressListener>.of(listeners)) {
-      listener(received, total, done);
+      try {
+        listener(received, total, done);
+      } on Object {
+        // A disposed preview's optional progress callback cannot fail a film.
+      }
     }
   }
 

@@ -12,12 +12,116 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory root;
+  final agedDirectories = <String>{};
   setUp(() async {
     root = await Directory.systemTemp.createTemp('retention-test-');
   });
   tearDown(() async {
     await root.delete(recursive: true);
   });
+
+  Future<Directory> oldStage(
+    String name, {
+    String fileName = 'media.part',
+  }) async {
+    final directory = await Directory('${root.path}/$name').create();
+    final file = File('${directory.path}/$fileName');
+    await file.writeAsString('keep');
+    final old = DateTime.now().subtract(const Duration(days: 2));
+    await file.setLastModified(old);
+    agedDirectories.add(directory.path);
+    return directory;
+  }
+
+  test('staging sweep removes only old owned inactive directories', () async {
+    final abandoned = await oldStage('.clawnsole-retain-ABANDONED');
+    final freshFile = await oldStage('.clawnsole-retain-FRESHFILE');
+    await File('${freshFile.path}/media.part').writeAsString('fresh');
+    final freshDirectory = await oldStage('.clawnsole-retain-FRESHDIR');
+    agedDirectories.remove(freshDirectory.path);
+    final foreign = await oldStage('unrelated');
+    final unexpected = await oldStage(
+      '.clawnsole-retain-FOREIGN',
+      fileName: 'user-file.txt',
+    );
+    final liveProcess = await oldStage('.clawnsole-retain-$pid-ACTIVE');
+    final unlocked = await oldStage('.clawnsole-retain-UNLOCKED');
+    await File('${unlocked.path}/preserve-unlocked-stage').writeAsString('1');
+    agedDirectories.add(unlocked.path);
+
+    final staged = await IOOverrides.runWithIOOverrides(
+      () => stageAssetStream(Stream.value([1, 2, 3]), directory: root.path),
+      _AgedDirectoryStats(agedDirectories),
+    );
+
+    expect(await abandoned.exists(), isFalse);
+    for (final retained in [
+      freshFile,
+      freshDirectory,
+      foreign,
+      unexpected,
+      liveProcess,
+      unlocked,
+    ]) {
+      expect(await retained.exists(), isTrue, reason: retained.path);
+    }
+    expect(await staged.openRead().expand((bytes) => bytes).toList(), [
+      1,
+      2,
+      3,
+    ]);
+    await staged.dispose();
+    // Housekeeping is throttled; newly appearing old directories wait for the
+    // next process instead of adding a directory scan to every media write.
+    final later = await oldStage('.clawnsole-retain-LATER');
+    final next = await stageAssetStream(
+      Stream.value([4]),
+      directory: root.path,
+    );
+    expect(await later.exists(), isTrue);
+    await next.dispose();
+  });
+
+  test('staging sweep never follows or removes links', () async {
+    final foreign = await oldStage('foreign-target');
+    final rootLink = await Link(
+      '${root.path}/.clawnsole-retain-LINK',
+    ).create(foreign.path);
+    final childLink = await oldStage('.clawnsole-retain-CHILDLINK');
+    await File('${childLink.path}/media.part').delete();
+    final link = await Link(
+      '${childLink.path}/media.part',
+    ).create('${foreign.path}/media.part');
+    agedDirectories.add(childLink.path);
+
+    final staged = await IOOverrides.runWithIOOverrides(
+      () => stageAssetStream(Stream.value([1]), directory: root.path),
+      _AgedDirectoryStats(agedDirectories),
+    );
+    expect(await rootLink.exists(), isTrue);
+    expect(await link.exists(), isTrue);
+    expect(await File('${foreign.path}/media.part').readAsString(), 'keep');
+    await staged.dispose();
+  }, skip: Platform.isWindows);
+
+  test(
+    'unsupported staging locks preserve normal transfer functionality',
+    () async {
+      final staged = await IOOverrides.runWithIOOverrides(
+        () => stageAssetStream(Stream.value([1, 2]), directory: root.path),
+        _UnsupportedStagingLock(),
+      );
+      expect(await staged.openRead().expand((bytes) => bytes).toList(), [1, 2]);
+      expect(
+        await File(
+          '${File(staged.path).parent.path}/preserve-unlocked-stage',
+        ).exists(),
+        isTrue,
+      );
+      await staged.dispose();
+      expect(await root.list().isEmpty, isTrue);
+    },
+  );
 
   test(
     'local stream publishes complete bytes and digest only after EOF',
@@ -200,6 +304,27 @@ void main() {
   });
 
   test(
+    'deadline exhausted during file setup cancels an unread source',
+    () async {
+      var cancelled = false;
+      final source = StreamController<List<int>>(
+        onCancel: () => cancelled = true,
+      );
+      await expectLater(
+        stageAssetStream(
+          source.stream,
+          directory: root.path,
+          totalTimeout: Duration.zero,
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(cancelled, isTrue);
+      expect(await root.list().isEmpty, isTrue);
+      await source.close();
+    },
+  );
+
+  test(
     'sink write failure cancels producer without consuming trailing chunks',
     () async {
       var produced = 0;
@@ -297,4 +422,62 @@ void main() {
       expect(await original.exists(), isTrue);
     },
   );
+}
+
+class _UnsupportedStagingLock extends IOOverrides {
+  @override
+  File createFile(String path) {
+    final file = super.createFile(path);
+    return path.endsWith('${Platform.pathSeparator}stage.lock')
+        ? _UnsupportedLeaseFile(file)
+        : file;
+  }
+}
+
+class _AgedDirectoryStats extends IOOverrides {
+  _AgedDirectoryStats(this.paths);
+  final Set<String> paths;
+
+  @override
+  Future<FileStat> stat(String path) async {
+    final value = await super.stat(path);
+    return paths.contains(path) ? _OldDirectoryStat(value) : value;
+  }
+
+  @override
+  Future<FileSystemEntityType> fseGetType(String path, bool followLinks) async {
+    if (!followLinks) {
+      try {
+        await super.createLink(path).target();
+        return FileSystemEntityType.link;
+      } on FileSystemException {
+        // This real fixture entry is not a link.
+      }
+    }
+    return (await super.stat(path)).type;
+  }
+}
+
+class _OldDirectoryStat implements FileStat {
+  _OldDirectoryStat(this.delegate);
+  final FileStat delegate;
+
+  @override
+  DateTime get modified => DateTime.utc(2020);
+  @override
+  FileSystemEntityType get type => delegate.type;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _UnsupportedLeaseFile implements File {
+  _UnsupportedLeaseFile(this.delegate);
+  final File delegate;
+
+  @override
+  Future<RandomAccessFile> open({FileMode mode = FileMode.read}) async =>
+      throw const FileSystemException('Advisory leases unsupported');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

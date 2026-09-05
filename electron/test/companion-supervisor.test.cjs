@@ -296,3 +296,152 @@ test("the health cadence matches the documented contract", () => {
   assert.equal(HEALTH_INTERVAL_MS, 30_000);
   assert.equal(HEALTH_FAILURES_BEFORE_RESTART, 3);
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+test("a missing executable rejects startup without an uncaught child error", async (t) => {
+  const { spawn } = require("node:child_process");
+  const { supervisor } = build(t, {
+    overrides: {
+      executable: "/this-clawnsole-companion-does-not-exist",
+      cwd: process.cwd(),
+      spawn,
+      waitForServer: () => new Promise(() => {}),
+    },
+  });
+  await assert.rejects(supervisor.start(), /could not start|secure storage/);
+  assert.equal(supervisor.running, false);
+});
+
+test("concurrent starts share one process and bootstrap", async (t) => {
+  const ready = deferred();
+  const { supervisor, spawned } = build(t, {
+    overrides: { waitForServer: () => ready.promise },
+  });
+  const first = supervisor.start();
+  const second = supervisor.start();
+  ready.resolve();
+  assert.equal(await first, await second);
+  assert.equal(spawned.length, 1);
+});
+
+test("stop during port allocation cancels startup and cannot spawn later", async (t) => {
+  const port = deferred();
+  const { supervisor, spawned, restarted } = build(t, {
+    overrides: { findOpenPort: () => port.promise },
+  });
+  const starting = supervisor.start();
+  supervisor.stop();
+  await assert.rejects(starting, /cancelled/);
+  port.resolve(43123);
+  await settle();
+  assert.equal(spawned.length, 0);
+  assert.deepEqual(restarted, []);
+  await assert.rejects(supervisor.start(), /stopped/);
+});
+
+test("failed readiness stops the child instead of leaving an orphan", async (t) => {
+  const { supervisor, spawned } = build(t, {
+    overrides: { waitForServer: async () => { throw new Error("readiness timeout"); } },
+  });
+  await assert.rejects(supervisor.start(), /readiness timeout/);
+  assert.equal(supervisor.running, false);
+  assert.deepEqual(spawned[0].child.signals, ["SIGTERM"]);
+});
+
+test("stop during readiness cannot announce a late successful launch", async (t) => {
+  const ready = deferred();
+  const { supervisor, spawned, restarted } = build(t, {
+    overrides: { waitForServer: () => ready.promise },
+  });
+  const starting = supervisor.start();
+  await settle(1);
+  supervisor.stop();
+  await assert.rejects(starting, /cancelled/);
+  ready.resolve();
+  await settle();
+  assert.equal(supervisor.url, null);
+  assert.deepEqual(spawned[0].child.signals, ["SIGTERM"]);
+  assert.deepEqual(restarted, []);
+});
+
+test("exit during bootstrap promptly rejects even without a stdin callback", async (t) => {
+  const child = new FakeChild();
+  child.stdin.end = () => queueMicrotask(() => child.exit(1));
+  const { supervisor } = build(t, { overrides: { spawn: () => child } });
+  await assert.rejects(supervisor.start(), /exited before/);
+  assert.equal(supervisor.running, false);
+});
+
+test("late bootstrap pipe errors are consumed after startup and shutdown", async (t) => {
+  const { supervisor, spawned } = build(t);
+  await supervisor.start();
+  assert.doesNotThrow(() => spawned[0].child.stdin.emit("error", new Error("EPIPE")));
+  supervisor.stop();
+  assert.doesNotThrow(() => spawned[0].child.stdin.emit("error", new Error("EPIPE")));
+});
+
+test("recovery callback rejection is contained without another restart", async (t) => {
+  const { supervisor, spawned, log } = build(t, {
+    overrides: { onRestarted: async () => { throw new Error("window closed"); } },
+  });
+  await supervisor.start();
+  spawned[0].child.exit(1);
+  await settle();
+  assert.equal(spawned.length, 2);
+  assert.equal(supervisor.running, true);
+  assert.ok(log.entries.some((entry) => entry.includes("callback-failed")));
+});
+
+test("health checks never overlap for the same companion", async (t) => {
+  const ping = deferred();
+  let checks = 0;
+  const { supervisor } = build(t, {
+    overrides: {
+      healthIntervalMs: 2,
+      fetchImpl: () => { checks += 1; return ping.promise; },
+    },
+  });
+  await supervisor.start();
+  await settle(12);
+  assert.equal(checks, 1);
+  supervisor.stop();
+  ping.resolve({ ok: true });
+});
+
+test("a real child exiting during startup promptly rejects readiness", async (t) => {
+  const { spawn } = require("node:child_process");
+  let child;
+  const { supervisor } = build(t, {
+    overrides: {
+      executable: process.execPath,
+      cwd: process.cwd(),
+      argumentsFor: () => ["-e", "process.stdin.resume(); process.stdin.on('end', () => process.exit(17));"],
+      spawn: (...args) => { child = spawn(...args); return child; },
+      waitForServer: () => new Promise(() => {}),
+    },
+  });
+  await assert.rejects(supervisor.start(), /exited before/);
+  assert.equal(child.exitCode, 17);
+  assert.equal(supervisor.running, false);
+});
+
+test("broken logging cannot prevent companion startup or recovery", async (t) => {
+  const { supervisor, spawned, restarted } = build(t, {
+    overrides: {
+      log: {
+        attach: () => { throw new Error("log unavailable"); },
+        write: () => { throw new Error("log unavailable"); },
+      },
+    },
+  });
+  await supervisor.start();
+  spawned[0].child.exit(1);
+  await settle();
+  assert.equal(restarted.length, 1);
+  assert.equal(supervisor.running, true);
+});

@@ -15,6 +15,7 @@ import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
 import '../core/google_drive.dart';
+import '../core/google_drive_session.dart';
 import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
@@ -462,6 +463,7 @@ class AppController extends ChangeNotifier {
     FilePickerInvocation? filePicker,
     ProviderCatalogClient? providerCatalogClient,
     BackgroundActivityCoordinator? backgroundActivity,
+    GoogleDriveSessionSchedule? driveSessionSchedule,
     bool mobileTestBuild = clawnsoleMobileTestBuild,
   }) : gateway = gateway ?? createGateway(),
        _filePicker = filePicker ?? _pickFiles,
@@ -469,6 +471,8 @@ class AppController extends ChangeNotifier {
            providerCatalogClient ?? ProviderCatalogClient(),
        _backgroundActivity =
            backgroundActivity ?? MethodChannelBackgroundActivity(),
+       _driveSessionSchedule =
+           driveSessionSchedule ?? GoogleDriveSessionSchedule(),
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
@@ -485,6 +489,7 @@ class AppController extends ChangeNotifier {
   final FilePickerInvocation _filePicker;
   final ProviderCatalogClient _providerCatalogClient;
   final BackgroundActivityCoordinator _backgroundActivity;
+  final GoogleDriveSessionSchedule _driveSessionSchedule;
   final bool _mobileTestBuild;
 
   final List<ComposerTab> _composerTabs = <ComposerTab>[];
@@ -6356,14 +6361,27 @@ class AppController extends ChangeNotifier {
   /// generations this device can then pick up and poll. Runs faster while
   /// staged uploads are draining so the sync indicators stay current.
   Future<void> _refreshDriveLibraryIfDue() async {
-    if (_disposed || _refreshingDriveLibrary || loading || submitting) return;
-    if (!googleDriveConnected) return;
-    _driveRefreshTick += 1;
-    final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
-    if (_driveRefreshTick % everyTicks != 0) return;
+    if (_disposed ||
+        _refreshingDriveLibrary ||
+        loading ||
+        submitting ||
+        googleDriveBusy ||
+        !supportsGoogleDrive) {
+      return;
+    }
     _refreshingDriveLibrary = true;
-    final snapshotRevision = _snapshotRevision;
     try {
+      if (_driveSessionSchedule.isDue(
+        connected: googleDriveConnected,
+        configured: googleDriveConnection.isConfigured,
+      )) {
+        await resumeGoogleDrive(force: true);
+      }
+      if (_disposed || !googleDriveConnected) return;
+      _driveRefreshTick += 1;
+      final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
+      if (_driveRefreshTick % everyTicks != 0) return;
+      final snapshotRevision = _snapshotRevision;
       final value = await gateway.load();
       await _applySnapshotRead(value, startedAtRevision: snapshotRevision);
       await syncComposerWorkspace();
@@ -6997,6 +7015,7 @@ class AppController extends ChangeNotifier {
         await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
         restorePreferences: true,
       );
+      _driveSessionSchedule.renewed();
       await syncComposerWorkspace();
       showNotice('Google Drive connected and synced.');
     } on Object catch (error) {
@@ -7009,6 +7028,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> disconnectGoogleDrive() async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
+    _driveSessionSchedule.suspend();
     googleDriveBusy = true;
     notifyListeners();
     try {
@@ -7034,7 +7054,12 @@ class AppController extends ChangeNotifier {
     bool restorePreferences = false,
     int? expectedPreferenceRevision,
   }) async {
-    if (gateway is! GoogleDriveGateway || googleDriveBusy) return false;
+    if (_disposed ||
+        gateway is! GoogleDriveGateway ||
+        googleDriveBusy ||
+        _driveSessionSchedule.isSuspended) {
+      return false;
+    }
     if ((!force && googleDriveConnected) ||
         !googleDriveConnection.isConfigured) {
       return false;
@@ -7046,8 +7071,12 @@ class AppController extends ChangeNotifier {
       final value = await (gateway as GoogleDriveGateway).resumeGoogleDrive(
         force: force,
       );
-      if (value == null) return false;
+      if (value == null) {
+        _driveSessionSchedule.failed(connected: googleDriveConnected);
+        return false;
+      }
       if (_disposed) return false;
+      _driveSessionSchedule.renewed();
       return await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
@@ -7060,6 +7089,7 @@ class AppController extends ChangeNotifier {
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
       // an unexpected error without surfacing a notice.
+      _driveSessionSchedule.failed(connected: googleDriveConnected);
       return false;
     } finally {
       googleDriveBusy = false;
@@ -7074,6 +7104,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
+      _driveSessionSchedule.renewed();
       await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,

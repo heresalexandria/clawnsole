@@ -112,9 +112,11 @@ class HybridDataStore
     try {
       remote = _asDrive(await _drive.read());
     } on Exception catch (error) {
-      if (!_isTransientDriveReadError(error)) rethrow;
+      if (!_canReadDriveMirrorAfter(error)) rethrow;
       // An active authorization is not a network guarantee. Keep device-local
-      // work usable against the last durable mirror during a transport outage.
+      // work usable against the last durable mirror during a transport outage
+      // or token expiry. The Drive store still marks authorization failures
+      // disconnected so the owner can silently renew the session.
       _lastRemote = cachedRemote;
       return _combine(local, cachedRemote);
     }
@@ -551,7 +553,7 @@ class HybridDataStore
             (_lastRemote?.savedReferences.length ?? 0),
       );
     } on Exception catch (error) {
-      if (!_isTransientDriveReadError(error)) rethrow;
+      if (!_canReadDriveMirrorAfter(error)) rethrow;
       return StorageStats(
         path: '${local.path} (Drive storage totals temporarily unavailable)',
         bytes: local.bytes,
@@ -1210,10 +1212,13 @@ class HybridDataStore
   String _encoded(StoredData data) =>
       jsonEncode(googleDrivePortableData(data).toJson());
 
-  bool _isTransientDriveReadError(Exception error) {
+  bool _canReadDriveMirrorAfter(Exception error) {
     if (error is FormatException) return false;
     if (error is GoogleDriveException) {
-      return error.isRateLimited || (error.status ?? 0) >= 500;
+      return error.status == 401 ||
+          error.status == 403 ||
+          error.isRateLimited ||
+          (error.status ?? 0) >= 500;
     }
     // http.ClientException, SocketException and TimeoutException are transport
     // failures. Schema/programming errors extend Error and never land here.

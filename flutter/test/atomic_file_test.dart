@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:clawnsole/core/atomic_file.dart';
 import 'package:clawnsole/core/local_data_store_io.dart';
+import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -178,4 +179,127 @@ void main() {
       0,
     );
   });
+
+  test(
+    'unchanged library saves preserve the prior different revision',
+    () async {
+      const older = StoredData(
+        preferences: AppPreferences(themeMode: AppThemeMode.dark),
+      );
+      const newer = StoredData();
+      await writeLibraryTextAtomically(target(), older.encode());
+      await writeLibraryTextAtomically(target(), newer.encode());
+      final stamp = DateTime.utc(2020);
+      await target().setLastModified(stamp);
+      await File(backupPath(target())).setLastModified(stamp);
+
+      for (var index = 0; index < 100; index++) {
+        await writeLibraryTextAtomically(target(), newer.encode());
+      }
+
+      expect((await target().lastModified()).toUtc(), stamp);
+      expect((await File(backupPath(target())).lastModified()).toUtc(), stamp);
+      expect(await File(backupPath(target())).readAsString(), older.encode());
+      // An external edit must be detected, even after an unchanged save.
+      await target().writeAsString(older.encode());
+      await writeLibraryTextAtomically(target(), newer.encode());
+      expect(await target().readAsString(), newer.encode());
+    },
+  );
+
+  test(
+    'unchanged library saves still sanitize existing recovery copies',
+    () async {
+      const data = StoredData();
+      await writeLibraryTextAtomically(target(), data.encode());
+      await File(backupPath(target())).writeAsString(
+        jsonEncode({...data.toJson(), 'apiKey': 'legacy-secret'}),
+      );
+
+      await writeLibraryTextAtomically(target(), data.encode());
+
+      expect(
+        await File(backupPath(target())).readAsString(),
+        isNot(contains('legacy-secret')),
+      );
+    },
+  );
+
+  test(
+    'a failure before replacement preserves the original and removes staging',
+    () async {
+      await writeTextAtomically(target(), 'original');
+      await expectLater(
+        writeTextAtomically(
+          target(),
+          'replacement',
+          prepareBackup: (_) => throw StateError('injected failure'),
+        ),
+        throwsStateError,
+      );
+      expect(await target().readAsString(), 'original');
+      expect(
+        root.listSync().where((entry) => entry.path.endsWith('.tmp')),
+        isEmpty,
+      );
+      await writeTextAtomically(target(), 'retry');
+      expect(await target().readAsString(), 'retry');
+    },
+  );
+
+  test('failed atomic rename never deletes the only canonical copy', () async {
+    await writeTextAtomically(target(), 'original');
+    await expectLater(
+      IOOverrides.runWithIOOverrides(
+        () => writeTextAtomically(target(), 'replacement', keepBackup: false),
+        _RenameFailureOverrides(),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(await target().readAsString(), 'original');
+    expect(
+      root.listSync().where((entry) => entry.path.endsWith('.tmp')),
+      isEmpty,
+    );
+    await writeTextAtomically(target(), 'retry');
+    expect(await target().readAsString(), 'retry');
+  });
+}
+
+class _RenameFailureOverrides extends IOOverrides {
+  @override
+  File createFile(String path) {
+    final file = super.createFile(path);
+    return path.endsWith('.tmp') ? _RenameFailureFile(file) : file;
+  }
+}
+
+class _RenameFailureFile implements File {
+  _RenameFailureFile(this.delegate);
+  final File delegate;
+
+  @override
+  String get path => delegate.path;
+  @override
+  Future<bool> exists() => delegate.exists();
+  @override
+  Future<File> writeAsString(
+    String contents, {
+    FileMode mode = FileMode.write,
+    Encoding encoding = utf8,
+    bool flush = false,
+  }) => delegate.writeAsString(
+    contents,
+    mode: mode,
+    encoding: encoding,
+    flush: flush,
+  );
+  @override
+  Future<File> rename(String newPath) async =>
+      throw const FileSystemException('injected sharing lock');
+  @override
+  Future<FileSystemEntity> delete({bool recursive = false}) =>
+      delegate.delete(recursive: recursive);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

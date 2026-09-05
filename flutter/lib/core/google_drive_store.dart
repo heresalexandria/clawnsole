@@ -38,6 +38,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   final Duration metadataReadTimeout;
 
   GoogleDriveApi? _api;
+  int _sessionRevision = 0;
   GoogleDriveFile? _stateFile;
   String _assetsFolderId = '';
   StoredData? _lastData;
@@ -68,41 +69,51 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
         'Choose a Drive folder name between 1 and 120 characters.',
       );
     }
+    final sessionRevision = ++_sessionRevision;
+    _api = null;
+    _stateFile = null;
+    _assetsFolderId = '';
+    _lastData = null;
     _connection = GoogleDriveConnection(
       state: GoogleDriveConnectionState.connecting,
       folderName: name,
     );
     _invalidateStatsListing();
     try {
-      _api =
+      final api =
           _apiFactory?.call(token) ??
           GoogleDriveApi(accessToken: token, client: _client);
-      final root =
-          await _api!.findRootFolder(name) ??
-          await _api!.createFolder(
-            name,
-            appProperties: const <String, String>{
-              'clawnsoleRoot': 'true',
-              'schema': '2',
-            },
-          );
-      final assets =
-          await _api!.findChild(
-            root.id,
-            clawnsoleDriveAssetsFolder,
-            appPropertyKey: 'clawnsoleAssets',
-          ) ??
-          await _api!.createFolder(
-            clawnsoleDriveAssetsFolder,
-            parentId: root.id,
-            appProperties: const <String, String>{'clawnsoleAssets': 'true'},
-          );
-      _assetsFolderId = assets.id;
-      _stateFile = await _api!.findChild(
+      var root = await api.findRootFolder(name);
+      _requireCurrentSession(sessionRevision);
+      root ??= await api.createFolder(
+        name,
+        appProperties: const <String, String>{
+          'clawnsoleRoot': 'true',
+          'schema': '2',
+        },
+      );
+      _requireCurrentSession(sessionRevision);
+      var assets = await api.findChild(
+        root.id,
+        clawnsoleDriveAssetsFolder,
+        appPropertyKey: 'clawnsoleAssets',
+      );
+      _requireCurrentSession(sessionRevision);
+      assets ??= await api.createFolder(
+        clawnsoleDriveAssetsFolder,
+        parentId: root.id,
+        appProperties: const <String, String>{'clawnsoleAssets': 'true'},
+      );
+      _requireCurrentSession(sessionRevision);
+      final stateFile = await api.findChild(
         root.id,
         clawnsoleDriveStateFile,
         appPropertyKey: 'clawnsoleState',
       );
+      _requireCurrentSession(sessionRevision);
+      _api = api;
+      _assetsFolderId = assets.id;
+      _stateFile = stateFile;
       _connection = GoogleDriveConnection(
         state: GoogleDriveConnectionState.connected,
         folderName: name,
@@ -112,11 +123,13 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       if (_stateFile == null) {
         const initial = StoredData();
         await _writeRemote(initial);
+        _requireCurrentSession(sessionRevision);
         _lastData = initial;
         return initial;
       }
       return await read();
     } on Object catch (error) {
+      if (sessionRevision != _sessionRevision) rethrow;
       _api = null;
       _connection = GoogleDriveConnection(
         state: GoogleDriveConnectionState.disconnected,
@@ -128,6 +141,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   }
 
   Future<void> disconnect() async {
+    _sessionRevision++;
     _api = null;
     _stateFile = null;
     _assetsFolderId = '';
@@ -151,6 +165,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   @override
   Future<StoredData> read() async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     if (_stateFile == null) return const StoredData();
     try {
       final current = _stateFile!;
@@ -164,7 +179,12 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
             ifNoneMatch: cached == null ? null : current.etag,
           )
           .timeout(metadataReadTimeout);
+      _requireCurrentSession(sessionRevision);
       if (content == null) return cached!.copyWith(driveSyncBase: cached);
+      // Accept the validator only with a fully decoded snapshot. Otherwise a
+      // later 304 could pair the rejected document's ETag with older data and
+      // allow a stale write to overwrite an unsupported schema.
+      final data = StoredData.decode(utf8.decode(content.bytes));
       _stateFile = GoogleDriveFile(
         id: current.id,
         name: current.name,
@@ -173,11 +193,10 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
         modifiedTime: current.modifiedTime,
         etag: content.etag,
       );
-      final data = StoredData.decode(utf8.decode(content.bytes));
       _lastData = data;
       return data.copyWith(driveSyncBase: data);
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -185,15 +204,19 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   @override
   Future<void> write(StoredData data) async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       if (_stateFile == null) {
         await _writeRemote(data);
+        _requireCurrentSession(sessionRevision);
         _lastData = data;
         _acknowledgePublishedAssets(data);
         return;
       }
       final base = data.driveSyncBase ?? _lastData ?? await read();
+      _requireCurrentSession(sessionRevision);
       var remote = await read();
+      _requireCurrentSession(sessionRevision);
       var merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
       // A 412 means another device published between our read and write.
       // Re-merge onto the newer remote and try again; three attempts matches
@@ -201,28 +224,34 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       // whole poll cycle's outcome on the first collision.
       for (var attempt = 1; ; attempt += 1) {
         try {
+          _requireCurrentSession(sessionRevision);
           await _writeRemote(merged);
           break;
         } on GoogleDriveException catch (error) {
           if (error.status != 412 || attempt >= 3) rethrow;
+          _requireCurrentSession(sessionRevision);
           remote = await read();
+          _requireCurrentSession(sessionRevision);
           merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
         }
       }
+      _requireCurrentSession(sessionRevision);
       _lastData = merged;
       _acknowledgePublishedAssets(merged);
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
 
   Future<void> _writeRemote(StoredData data) async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     final portable = googleDrivePortableData(data);
     final bytes = Uint8List.fromList(utf8.encode(portable.encode()));
+    final GoogleDriveFile updated;
     if (_stateFile == null) {
-      _stateFile = await _api!.createFile(
+      updated = await _api!.createFile(
         parentId: connection.folderId,
         name: clawnsoleDriveStateFile,
         bytes: bytes,
@@ -233,13 +262,15 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
         },
       );
     } else {
-      _stateFile = await _api!.updateFile(
+      updated = await _api!.updateFile(
         _stateFile!.id,
         bytes,
         contentType: 'application/json',
         etag: _stateFile!.etag,
       );
     }
+    _requireCurrentSession(sessionRevision);
+    _stateFile = updated;
   }
 
   @override
@@ -250,6 +281,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     LibraryStorage storage = LibraryStorage.drive,
   }) async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     final cleanLabel = _cleanFileName(label);
     final unique = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
     try {
@@ -291,7 +323,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       }
       return reference;
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -312,6 +344,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       await stream.listen(null).cancel();
       _requireConnected();
     }
+    final sessionRevision = _sessionRevision;
     final watch = Stopwatch()..start();
     Duration remaining() {
       final value = totalTimeout - watch.elapsed;
@@ -332,6 +365,8 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       totalTimeout: remaining(),
     );
     try {
+      _requireCurrentSession(sessionRevision);
+      _requireConnected();
       final unique = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
       final file = await _api!.createFileStream(
         parentId: _assetsFolderId,
@@ -372,7 +407,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       }
       return reference;
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     } finally {
       await staged.dispose();
@@ -428,6 +463,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     final cached = await _presenter.read(reference);
     if (cached != null) return cached;
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       final bytes = await _api!.downloadFile(reference.value);
       if (_isLocallyCacheable(reference)) {
@@ -444,7 +480,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       }
       return bytes;
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -458,10 +494,11 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       throw StateError('The asset is not stored in Google Drive.');
     }
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       return await _api!.readFileStream(reference.value);
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -476,10 +513,11 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       throw StateError('The asset is not stored in Google Drive.');
     }
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       return await _api!.readFileRange(reference.value, start, end);
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -500,6 +538,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   /// existing reference until that source device reconnects.
   Future<StoredData> repairMissingCachedAssets(StoredData data) async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       final liveIds = (await _driveAssets()).map((file) => file.id).toSet();
       final referenced = _referencedAssetReferences(
@@ -508,15 +547,18 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       );
       final replacements = <String, AssetReference>{};
       for (final entry in referenced.entries) {
+        _requireCurrentSession(sessionRevision);
         if (liveIds.contains(entry.key)) continue;
         final bytes = await _presenter.read(entry.value);
         if (bytes == null || bytes.isEmpty) continue;
+        _requireCurrentSession(sessionRevision);
         replacements[entry.key] = await writeAsset(
           bytes,
           label: entry.value.label,
           contentType: entry.value.contentType ?? 'application/octet-stream',
         );
       }
+      _requireCurrentSession(sessionRevision);
       if (replacements.isEmpty) return data;
       final repaired = data.copyWith(
         generations: data.generations
@@ -529,7 +571,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
       await write(repaired);
       return _lastData ?? repaired;
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -541,6 +583,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     final cached = await _presenter.lookup(reference);
     if (cached != null) return cached;
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     try {
       final download = await _api!.readFileStream(reference.value);
       return await _presenter.present(
@@ -549,7 +592,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
         expectedLength: download.contentLength ?? reference.bytes,
       );
     } on GoogleDriveException catch (error) {
-      _handleDriveError(error);
+      _handleDriveError(error, sessionRevision);
       rethrow;
     }
   }
@@ -560,6 +603,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     List<SavedReference> savedReferences = const <SavedReference>[],
   ]) async {
     if (_api == null || _assetsFolderId.isEmpty) return;
+    final sessionRevision = _sessionRevision;
     final retained = _referencedAssetIds(generations, savedReferences);
     final canonical = _lastData;
     if (canonical != null) {
@@ -578,6 +622,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     retained.addAll(_pendingAssetIds.keys);
     var deleted = false;
     for (final file in await _driveAssets()) {
+      _requireCurrentSession(sessionRevision);
       final recentlyUploaded =
           file.modifiedTime != null && !file.modifiedTime!.isBefore(cutoff);
       if (!retained.contains(file.id) && !recentlyUploaded) {
@@ -585,16 +630,21 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
         deleted = true;
       }
     }
+    _requireCurrentSession(sessionRevision);
     if (deleted) _invalidateStatsListing();
   }
 
   @override
   Future<void> delete() async {
     _requireConnected();
+    final sessionRevision = _sessionRevision;
     for (final file in await _driveAssets()) {
+      _requireCurrentSession(sessionRevision);
       await _api!.deleteFile(file.id);
     }
+    _requireCurrentSession(sessionRevision);
     if (_stateFile != null) await _api!.deleteFile(_stateFile!.id);
+    _requireCurrentSession(sessionRevision);
     _stateFile = null;
     _lastData = const StoredData();
     _invalidateStatsListing();
@@ -623,10 +673,13 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   }
 
   Future<List<GoogleDriveFile>> _driveAssets() async {
+    _requireConnected();
+    final sessionRevision = _sessionRevision;
     final files = await _api!.listChildren(
       _assetsFolderId,
       appPropertyKey: 'clawnsoleAsset',
     );
+    _requireCurrentSession(sessionRevision);
     _statsAssetListing = files;
     _statsAssetListingAt = _now();
     return files;
@@ -714,12 +767,22 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     }
   }
 
-  void _handleDriveError(GoogleDriveException error) {
+  void _requireCurrentSession(int revision) {
+    if (revision != _sessionRevision) {
+      throw StateError('The Drive session changed. Try the operation again.');
+    }
+  }
+
+  void _handleDriveError(GoogleDriveException error, int sessionRevision) {
+    // A response from the old token must not disconnect the replacement
+    // session that silent renewal established while this request was pending.
+    if (sessionRevision != _sessionRevision) return;
     // A quota burst also answers 403, and treating it as an expired grant
     // would flap the connection into a reconnect loop that burns yet more
     // quota. Only genuine authorization failures forget the session.
     if (error.isRateLimited) return;
     if (error.status == 401 || error.status == 403) {
+      _sessionRevision++;
       _api = null;
       _connection = GoogleDriveConnection(
         state: GoogleDriveConnectionState.disconnected,
