@@ -266,7 +266,7 @@ void main() {
   });
 }
 
-class _RenameFailureOverrides extends IOOverrides {
+final class _RenameFailureOverrides extends IOOverrides {
   @override
   File createFile(String path) {
     final file = super.createFile(path);

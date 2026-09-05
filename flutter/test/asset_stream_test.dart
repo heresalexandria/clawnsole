@@ -424,7 +424,7 @@ void main() {
   );
 }
 
-class _UnsupportedStagingLock extends IOOverrides {
+final class _UnsupportedStagingLock extends IOOverrides {
   @override
   File createFile(String path) {
     final file = super.createFile(path);
@@ -434,7 +434,7 @@ class _UnsupportedStagingLock extends IOOverrides {
   }
 }
 
-class _AgedDirectoryStats extends IOOverrides {
+final class _AgedDirectoryStats extends IOOverrides {
   _AgedDirectoryStats(this.paths);
   final Set<String> paths;
 
