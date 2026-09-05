@@ -27,8 +27,9 @@ function clipboardContainsText(clipboard) {
   });
 }
 
-function installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain }) {
+function installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain, isTrustedEvent }) {
   ipcMain.on(TEXT_CONTEXT_MENU_CHANNEL, (event, state = {}) => {
+    if (!isTrustedEvent(event)) return;
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window) return;
     const menu = Menu.buildFromTemplate(

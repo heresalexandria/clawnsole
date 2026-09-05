@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'asset_extensions.dart';
 import 'atomic_file.dart';
 import 'durable_data_store.dart';
+import 'library_file_io.dart';
 import 'models.dart';
 
 class LocalDataStore implements DurableDataStore {
@@ -340,6 +341,12 @@ class LocalDataStore implements DurableDataStore {
     final assets = await _assets();
     if (!await assets.exists()) return;
     final retained = _referencedAssets(generations, savedReferences);
+    for (final json
+        in (await read()).composerTabs?.retainedAssetJson ??
+            const <Map<String, Object?>>[]) {
+      final reference = AssetReference.fromJson(json);
+      if (reference.kind == 'local') retained.add(reference.value);
+    }
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
@@ -372,13 +379,13 @@ class LocalDataStore implements DurableDataStore {
   /// a crash mid-write can no longer leave the library looking empty.
   @override
   Future<void> write(StoredData data) async {
-    await writeTextAtomically(await _file(), data.encode());
+    await writeLibraryTextAtomically(await _file(), data.encode());
   }
 
   @override
   Future<void> delete() async {
     final file = await _file();
-    if (await file.exists()) await file.delete();
+    await deleteTextWithRecovery(file);
     await clearAssets();
   }
 

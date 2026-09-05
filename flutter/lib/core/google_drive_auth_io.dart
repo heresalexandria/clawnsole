@@ -26,7 +26,7 @@ const _refreshTokenKey = 'clawnsole.googleDrive.refreshToken.v1';
 
 GoogleDriveAuthorizer createPlatformGoogleDriveAuthorizer() =>
     Platform.isWindows
-    ? _DesktopGoogleDriveAuthorizer()
+    ? DesktopGoogleDriveAuthorizer()
     : (Platform.isAndroid || Platform.isIOS)
     ? _MobileGoogleDriveAuthorizer()
     : const _UnavailableIoGoogleDriveAuthorizer();
@@ -97,18 +97,24 @@ class _MobileGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
   }
 }
 
-class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
-  _DesktopGoogleDriveAuthorizer({
+class DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
+  DesktopGoogleDriveAuthorizer({
     FlutterSecureStorage? secureStorage,
     http.Client? client,
+    String clientId = _desktopClientId,
+    String clientSecret = _desktopClientSecret,
   }) : _secureStorage = secureStorage ?? const FlutterSecureStorage(),
-       _client = client ?? http.Client();
+       _client = client ?? http.Client(),
+       _clientId = clientId,
+       _clientSecret = clientSecret;
 
   final FlutterSecureStorage _secureStorage;
   final http.Client _client;
+  final String _clientId;
+  final String _clientSecret;
 
   @override
-  bool get isAvailable => _desktopClientId.isNotEmpty;
+  bool get isAvailable => _clientId.isNotEmpty;
 
   @override
   String get unavailableMessage =>
@@ -121,7 +127,8 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
     if (refreshToken?.isNotEmpty == true) {
       try {
         return await _refresh(refreshToken!);
-      } on Object {
+      } on _GoogleTokenException catch (error) {
+        if (!error.refreshTokenRejected) rethrow;
         await _secureStorage.delete(key: _refreshTokenKey);
       }
     }
@@ -136,8 +143,10 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
       if (refreshToken?.isNotEmpty != true) return null;
       try {
         return await _refresh(refreshToken!);
-      } on Object {
-        await _secureStorage.delete(key: _refreshTokenKey);
+      } on _GoogleTokenException catch (error) {
+        if (error.refreshTokenRejected) {
+          await _secureStorage.delete(key: _refreshTokenKey);
+        }
         return null;
       }
     } on Object {
@@ -155,7 +164,7 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
         .replaceAll('=', '');
     final authorization =
         Uri.https('accounts.google.com', '/o/oauth2/v2/auth', <String, String>{
-          'client_id': _desktopClientId,
+          'client_id': _clientId,
           'redirect_uri': redirect,
           'response_type': 'code',
           'scope': googleDriveFileScope,
@@ -181,9 +190,8 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: <String, String>{
-          'client_id': _desktopClientId,
-          if (_desktopClientSecret.isNotEmpty)
-            'client_secret': _desktopClientSecret,
+          'client_id': _clientId,
+          if (_clientSecret.isNotEmpty) 'client_secret': _clientSecret,
           'code': code,
           'code_verifier': verifier,
           'grant_type': 'authorization_code',
@@ -223,19 +231,20 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
   }
 
   Future<String> _refresh(String refreshToken) async {
-    final response = await _client.post(
-      Uri.parse('https://oauth2.googleapis.com/token'),
-      headers: const <String, String>{
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: <String, String>{
-        'client_id': _desktopClientId,
-        if (_desktopClientSecret.isNotEmpty)
-          'client_secret': _desktopClientSecret,
-        'refresh_token': refreshToken,
-        'grant_type': 'refresh_token',
-      },
-    );
+    final response = await _client
+        .post(
+          Uri.parse('https://oauth2.googleapis.com/token'),
+          headers: const <String, String>{
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: <String, String>{
+            'client_id': _clientId,
+            if (_clientSecret.isNotEmpty) 'client_secret': _clientSecret,
+            'refresh_token': refreshToken,
+            'grant_type': 'refresh_token',
+          },
+        )
+        .timeout(const Duration(seconds: 30));
     return _tokenPayload(response)['access_token']?.toString() ?? '';
   }
 
@@ -246,9 +255,9 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
     }
     final payload = value.map((key, child) => MapEntry(key.toString(), child));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        payload['error_description']?.toString() ??
-            'Google authorization failed with HTTP ${response.statusCode}.',
+      throw _GoogleTokenException(
+        response.statusCode,
+        payload['error']?.toString(),
       );
     }
     final token = payload['access_token']?.toString() ?? '';
@@ -282,6 +291,19 @@ class _DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
         .encode(List<int>.generate(bytes, (_) => random.nextInt(256)))
         .replaceAll('=', '');
   }
+}
+
+class _GoogleTokenException implements Exception {
+  const _GoogleTokenException(this.status, this.oauthError);
+
+  final int status;
+  final String? oauthError;
+
+  bool get refreshTokenRejected =>
+      status == 400 && oauthError == 'invalid_grant';
+
+  @override
+  String toString() => 'Google authorization failed with HTTP $status.';
 }
 
 class _UnavailableIoGoogleDriveAuthorizer implements GoogleDriveAuthorizer {

@@ -11,6 +11,17 @@ const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const REVOCATION_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 
+class GoogleTokenError extends Error {
+  constructor(response, payload) {
+    super(`Google authorization failed with HTTP ${response.status}.`);
+    // Only Google's explicit invalid_grant response establishes that the
+    // stored refresh credential cannot be reused. Network/server failures,
+    // malformed responses and OAuth client configuration errors do not.
+    this.refreshTokenRejected = response.status === 400
+      && payload?.error === "invalid_grant";
+  }
+}
+
 function base64Url(value) {
   return Buffer.from(value).toString("base64url");
 }
@@ -61,7 +72,10 @@ class GoogleDriveAuth {
     if (refreshToken) {
       try {
         return await this.#refresh(refreshToken);
-      } catch {
+      } catch (error) {
+        if (!(error instanceof GoogleTokenError) || !error.refreshTokenRejected) {
+          throw error;
+        }
         await this.#deleteRefreshToken();
       }
     }
@@ -74,8 +88,10 @@ class GoogleDriveAuth {
     if (!refreshToken) return "";
     try {
       return await this.#refresh(refreshToken);
-    } catch {
-      await this.#deleteRefreshToken();
+    } catch (error) {
+      if (error instanceof GoogleTokenError && error.refreshTokenRejected) {
+        await this.#deleteRefreshToken();
+      }
       return "";
     }
   }
@@ -193,12 +209,11 @@ class GoogleDriveAuth {
         ...(this.clientSecret ? { client_secret: this.clientSecret } : {}),
         ...values,
       }),
+      signal: AbortSignal.timeout(30_000),
     });
     const payload = await response.json();
-    if (!response.ok || !payload.access_token) {
-      throw new Error(
-        payload.error_description || `Google authorization failed with HTTP ${response.status}.`,
-      );
+    if (!response.ok || typeof payload?.access_token !== "string" || !payload.access_token) {
+      throw new GoogleTokenError(response, payload);
     }
     return payload;
   }

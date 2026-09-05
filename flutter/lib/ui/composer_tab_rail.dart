@@ -62,6 +62,17 @@ class ComposerTabRail extends StatelessWidget {
                     const SizedBox(width: 4),
                   ],
                   _NewComposerTabKey(controller: controller),
+                  if (controller.canReopenComposerTab)
+                    PopupMenuButton<String>(
+                      tooltip: 'Recover closed draft',
+                      onSelected: (id) =>
+                          unawaited(controller.reopenComposerTab(id)),
+                      itemBuilder: (context) => [
+                        for (final tab in controller.recoverableComposerTabs)
+                          PopupMenuItem(value: tab.id, child: Text(tab.label)),
+                      ],
+                      icon: const Icon(Icons.restore, size: 19),
+                    ),
                 ],
               ),
             ),
@@ -70,11 +81,53 @@ class ComposerTabRail extends StatelessWidget {
       ),
     );
     final end = trailing;
-    if (end == null) return rail;
+    final statusRail = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        rail,
+        if (controller.sessionOnlyComposerAttachmentCount > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '${controller.sessionOnlyComposerAttachmentCount} unsaved '
+              '${controller.sessionOnlyComposerAttachmentCount == 1 ? 'attachment is' : 'attachments are'} '
+              'available only while this app stays open. Save reusable media in References.',
+              style: TextStyle(
+                fontSize: 12,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ),
+        if (controller.composerTabsSaveError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Semantics(
+              liveRegion: true,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      controller.composerTabsSaveError!,
+                      style: TextStyle(color: context.colors.error),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        unawaited(controller.retryComposerTabsSave()),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+    if (end == null) return statusRail;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
-        Expanded(child: rail),
+        Expanded(child: statusRail),
         const SizedBox(width: 18),
         end,
       ],
@@ -223,7 +276,8 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
         ? context.colors.onSurface
         : context.colors.onSurfaceVariant;
     final summary = tab.rewriteSummary?.trim() ?? '';
-    return MergeSemantics(
+    return Semantics(
+      explicitChildNodes: true,
       child: Semantics(
         container: true,
         button: true,
@@ -231,11 +285,13 @@ class _ComposerTabKeyState extends State<_ComposerTabKey> {
         selected: selected,
         label: 'Tab ${widget.position} of ${widget.total}, ${tab.label}',
         hint: 'Long press to rename',
+        onLongPress: () => unawaited(_rename()),
         onTap: _handleTap,
         child: HardwareTouchTarget(
           onTap: _handleTap,
           alignment: Alignment.bottomCenter,
-          child: ExcludeSemantics(
+          child: Semantics(
+            explicitChildNodes: true,
             child: Padding(
               // Idle tabs rest on the rule; the front tab covers it.
               padding: EdgeInsets.only(bottom: selected ? 0 : 1),

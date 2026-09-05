@@ -573,10 +573,10 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return null;
     final realizedUsd = recordedRealizedCostUsd(item);
-    // A failed generation only carries a realized charge when the terminal
-    // poll confirmed it; a submit-time observation stays estimate wording.
-    final unconfirmedFailure = item.isFailed && !countsTowardSpend(item);
-    final exact = realizedUsd != null && !unconfirmedFailure;
+    final accountObservation = isAccountBalanceCostSource(
+      item.realizedCostSource,
+    );
+    final exact = realizedUsd != null && countsTowardSpend(item);
     final usesUsd = item.billingUnit == 'usd';
     final amount = usesUsd
         ? formatUsdAmountRange(minimum, maximum)
@@ -613,7 +613,11 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
               ),
               const SizedBox(width: 7),
               Text(
-                '${exact ? 'Realized' : 'Estimated'} $amount',
+                '${exact
+                    ? 'Realized'
+                    : accountObservation
+                    ? 'Account activity'
+                    : 'Estimated'} $amount',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
@@ -631,7 +635,9 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
         const SizedBox(height: 8),
         Text(
           usesUsd
-              ? 'Billed by ${providerNameForHistory(item.provider)} in US dollars.'
+              ? exact
+                    ? 'Billed by ${providerNameForHistory(item.provider)} in US dollars.'
+                    : 'Amounts shown in US dollars for ${providerNameForHistory(item.provider)}.'
               : 'About ${formatUsdRange(minimum, maximum)} at the published credit rate.',
           style: detailStyle,
         ),
@@ -651,9 +657,15 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
             '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
             style: detailStyle,
           ),
-        if (unconfirmedFailure && realizedUsd != null)
+        if (accountObservation)
           Text(
-            'No confirmed charge · submit-time estimate '
+            'This balance change can include other jobs, deposits, or refunds. '
+            'Task charge unconfirmed.',
+            style: detailStyle,
+          )
+        else if (!exact && realizedUsd != null)
+          Text(
+            'Task charge unconfirmed · estimate '
             '${formatUsdAmount(realizedUsd)}',
             style: detailStyle,
           ),

@@ -5,7 +5,9 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/composer_tab_rail.dart';
 import 'package:clawnsole/ui/aesthetic_references.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:flutter/foundation.dart'
@@ -327,6 +329,211 @@ void main() {
     },
   );
 
+  testWidgets('tab rename and close expose independent semantic controls', (
+    tester,
+  ) async {
+    final controller = AppController(gateway: _PlainGateway(_snapshot()));
+    addTearDown(controller.dispose);
+    controller.addComposerTab();
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ComposerTabRail(controller: controller)),
+      ),
+    );
+    expect(find.bySemanticsLabel(RegExp(r'^Close tab ')), findsWidgets);
+    expect(find.bySemanticsLabel(RegExp(r'^Rename tab ')), findsWidgets);
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'captured Undo works after notice timer and ignores replaced notices',
+    (tester) async {
+      final controller = AppController(gateway: _PlainGateway(_snapshot()));
+      controller.updateForm((form) => form.prompt = 'Original direction.');
+      controller.applyRewrittenDirection(
+        const PromptRewriteResult(
+          prompt: 'Rewritten direction.',
+          summary: 'Revised.',
+          providerId: 'openai',
+          modelId: 'test',
+        ),
+        tabId: controller.activeComposerTabId,
+      );
+      final action = controller.noticeAction;
+      final sequence = controller.noticeSequence;
+      await tester.pump(const Duration(seconds: 5));
+      expect(controller.noticeAction, isNull);
+      await controller.performNoticeAction(action: action, sequence: sequence);
+      expect(controller.form.prompt, 'Original direction.');
+      controller.applyRewrittenDirection(
+        const PromptRewriteResult(
+          prompt: 'Another rewrite.',
+          summary: 'Revised.',
+          providerId: 'openai',
+          modelId: 'test',
+        ),
+        tabId: controller.activeComposerTabId,
+      );
+      final oldSequence = controller.noticeSequence;
+      controller.showNotice('A newer notification.');
+      await controller.performNoticeAction(
+        action: AppNoticeAction.undoDirectionRewrite,
+        sequence: oldSequence,
+      );
+      expect(controller.form.prompt, 'Another rewrite.');
+      controller.dispose();
+    },
+  );
+
+  test('reuse preserves source-only and settings-only drafts', () async {
+    final controller = await _controller();
+    addTearDown(controller.dispose);
+    final source = controller.activeComposerTab;
+    controller.updateForm(
+      (form) => form.videoUrl = 'https://example.com/new-source.mp4',
+    );
+    await controller.reuse(_delivered());
+    expect(source.form.videoUrl, 'https://example.com/new-source.mp4');
+    expect(controller.composerTabs, hasLength(2));
+    final settings = controller.addComposerTab();
+    controller.setDurationSeconds(5);
+    await controller.reuse(_delivered());
+    expect(settings.form.durationSeconds, 5);
+    expect(settings.form.prompt, isEmpty);
+    expect(controller.composerTabs, hasLength(4));
+  });
+
+  test('removed reused references remain removed after restart', () async {
+    final item = _delivered();
+    final gateway = _TabsGateway(
+      _snapshot(generations: [item]),
+      assets: {
+        'retained/reference.png': Uint8List.fromList([7, 7, 7]),
+      },
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await _settle();
+    await controller.reuse(item);
+    final id = controller.activeComposerTab.id;
+    expect(controller.form.references, hasLength(1));
+    controller.updateForm((form) => form.references.clear());
+    controller.addComposerTab();
+    await _settle();
+    controller.dispose();
+    final restored = AppController(gateway: gateway);
+    addTearDown(restored.dispose);
+    await restored.initialize();
+    await _settle();
+    restored.activateComposerTab(id);
+    expect(restored.form.references, isEmpty);
+  });
+
+  test(
+    'closed drafts recover after restart under a fresh non-tombstoned id',
+    () async {
+      final gateway = _TabsGateway(_snapshot());
+      final controller = AppController(gateway: gateway);
+      await controller.initialize();
+      await _settle();
+      controller.updateForm((form) {
+        form.prompt = 'A film worth keeping.';
+        form.videoUrl = 'https://example.com/source.mp4';
+      });
+      final closed = controller.activeComposerTabId;
+      controller.closeComposerTab(closed);
+      await _settle();
+      expect(gateway.stored!.closedTabs.single.prompt, 'A film worth keeping.');
+      controller.dispose();
+      final restored = AppController(gateway: gateway);
+      addTearDown(restored.dispose);
+      await restored.initialize();
+      await _settle();
+      expect(restored.canReopenComposerTab, isTrue);
+      await restored.reopenLastComposerTab();
+      expect(restored.activeComposerTabId, isNot(closed));
+      expect(restored.form.prompt, 'A film worth keeping.');
+      expect(restored.form.videoUrl, 'https://example.com/source.mp4');
+      await _settle();
+      expect(gateway.stored!.closedTabIds, contains(closed));
+      expect(
+        gateway.stored!.closedTabIds,
+        isNot(contains(restored.activeComposerTabId)),
+      );
+    },
+  );
+
+  test(
+    'recovery keeps unretained session media while app remains open',
+    () async {
+      final controller = await _controller();
+      addTearDown(controller.dispose);
+      final source = PickedAsset(
+        name: 'source.mp4',
+        bytes: Uint8List.fromList([1, 2, 3]),
+        mimeType: 'video/mp4',
+      );
+      controller.updateForm((form) => form.videoAsset = source);
+      controller.closeComposerTab(controller.activeComposerTabId);
+      await controller.reopenLastComposerTab();
+      expect(controller.form.videoAsset, same(source));
+    },
+  );
+
+  test(
+    'draft write failure remains visible until a successful retry',
+    () async {
+      final gateway = _TabsGateway(_snapshot());
+      final controller = AppController(gateway: gateway);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await _settle();
+      gateway.saveThrows = true;
+      controller.updateForm((form) => form.prompt = 'Keep this work.');
+      controller.addComposerTab();
+      await _settle();
+      expect(controller.composerTabsSaveError, contains('could not be saved'));
+      gateway.saveThrows = false;
+      await controller.retryComposerTabsSave();
+      expect(controller.composerTabsSaveError, isNull);
+      expect(
+        gateway.stored!.tabs.any((tab) => tab.prompt == 'Keep this work.'),
+        isTrue,
+      );
+    },
+  );
+
+  test('unreadable saved workspace cannot be silently overwritten', () async {
+    final gateway = _TabsGateway(
+      _snapshot(),
+      loadThrows: true,
+      stored: const ComposerTabsState(
+        tabs: [ComposerTabRecord(id: 'saved', prompt: 'Older work.')],
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await _settle();
+    controller.updateForm((form) => form.prompt = 'New work.');
+    controller.addComposerTab();
+    await _settle();
+    expect(gateway.saves, isEmpty);
+    expect(controller.composerTabsSaveError, contains('could not be opened'));
+    gateway.loadThrows = false;
+    await controller.retryComposerTabsSave();
+    expect(controller.composerTabsSaveError, isNull);
+    expect(
+      gateway.stored!.tabs.any((tab) => tab.prompt == 'Older work.'),
+      isTrue,
+    );
+    expect(
+      gateway.stored!.tabs.any((tab) => tab.prompt == 'New work.'),
+      isTrue,
+    );
+  });
+
   group('composer tab machinery', () {
     test('opens, switches, and closes drafts without ever emptying', () async {
       final controller = await _controller();
@@ -416,7 +623,7 @@ void main() {
 
     test('reuse fills a blank tab and opens a new one otherwise', () async {
       final item = _delivered();
-      final controller = await _controller(generations: <Generation>[item]);
+      final controller = await _controller();
       addTearDown(controller.dispose);
       final first = controller.activeComposerTab;
 
@@ -1156,7 +1363,8 @@ class _TabsGateway extends _PlainGateway implements ComposerTabsGateway {
   });
 
   ComposerTabsState? stored;
-  final bool loadThrows;
+  bool loadThrows;
+  bool saveThrows = false;
   final List<ComposerTabsState> saves = <ComposerTabsState>[];
 
   @override
@@ -1167,6 +1375,7 @@ class _TabsGateway extends _PlainGateway implements ComposerTabsGateway {
 
   @override
   Future<void> saveComposerTabs(ComposerTabsState state) async {
+    if (saveThrows) throw StateError('disk full');
     stored = state;
     saves.add(state);
   }

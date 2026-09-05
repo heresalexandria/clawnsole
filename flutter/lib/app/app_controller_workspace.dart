@@ -55,16 +55,99 @@ extension AppControllerWorkspace on AppController {
     tabs: _composerTabs.map(_composerTabRecord).toList(),
     activeTabId: _activeComposerTabId,
     closedTabIds: Set.of(_closedComposerTabIds),
+    closedTabs: List.of(_recoverableComposerTabs),
     aestheticReferences: List.of(_aestheticReferences),
     deletedAestheticIds: Set.of(_deletedAestheticIds),
   );
 
   void _applyWorkspaceCatalog(ComposerTabsState state) {
     _closedComposerTabIds.addAll(state.closedTabIds);
+    _recoverableComposerTabs
+      ..clear()
+      ..addAll(state.closedTabs.take(10));
+    final retainedClosedIds = _recoverableComposerTabs
+        .map((tab) => tab.id)
+        .toSet();
+    _closedComposerDrafts.removeWhere(
+      (id, _) => !retainedClosedIds.contains(id),
+    );
     _deletedAestheticIds.addAll(state.deletedAestheticIds);
     _aestheticReferences
       ..clear()
       ..addAll(state.aestheticReferences);
+  }
+
+  int get sessionOnlyComposerAttachmentCount =>
+      form.keyframes
+          .where(
+            (item) =>
+                item.asset != null &&
+                item.asset!.retained == null &&
+                item.retained == null,
+          )
+          .length +
+      [...form.references, ...activeComposerTab.disabledReferences]
+          .where(
+            (item) =>
+                item.asset != null &&
+                item.asset!.retained == null &&
+                item.retained == null,
+          )
+          .length +
+      (form.videoAsset != null && form.videoAsset!.retained == null ? 1 : 0) +
+      (form.draftAsset != null && form.draftAsset!.retained == null ? 1 : 0);
+
+  bool get canReopenComposerTab => _recoverableComposerTabs.isNotEmpty;
+  List<ComposerTabRecord> get recoverableComposerTabs =>
+      List.unmodifiable(_recoverableComposerTabs);
+
+  /// The original id remains tombstoned. A recovered draft is a new workspace,
+  /// preserving session-only media in memory when the original is still here.
+  Future<void> reopenLastComposerTab() async {
+    if (_recoverableComposerTabs.isNotEmpty) {
+      await reopenComposerTab(_recoverableComposerTabs.first.id);
+    }
+  }
+
+  Future<void> reopenComposerTab(String id) async {
+    final record = _recoverableComposerTabs
+        .where((tab) => tab.id == id)
+        .firstOrNull;
+    if (record == null) return;
+    final memory = _closedComposerDrafts.remove(record.id);
+    final restored = record.copyWith(
+      id: _uid(),
+      updatedAt: DateTime.now().toUtc(),
+    );
+    final tab = ComposerTab(
+      id: restored.id,
+      providerId: restored.providerId ?? activeComposerTab.providerId,
+      modelId: restored.modelId ?? activeComposerTab.modelId,
+      form: memory?.form,
+      createdAt: restored.createdAt,
+      updatedAt: restored.updatedAt,
+    );
+    if (memory == null) {
+      final source = _composerMediaGeneration(restored);
+      if (source != null) {
+        await _restoreGenerationSettings(
+          source,
+          cacheOnly: true,
+          persistDraft: false,
+          tab: tab,
+        );
+      }
+    } else {
+      tab.disabledReferences.addAll(memory.disabledReferences);
+    }
+    if (_disposed) return;
+    _inComposerTab(tab, () => _applyComposerTabRecord(tab, restored));
+    _composerTabs.add(tab);
+    _activeComposerTabId = tab.id;
+    _invalidateProviderEstimate();
+    _flushComposerTabsSave();
+    unawaited(_hydrateComposerMedia(tab));
+    notifyListeners();
   }
 
   void flushComposerWorkspace() => _flushComposerTabsSave(onlyIfPending: true);
@@ -82,6 +165,8 @@ extension AppControllerWorkspace on AppController {
     try {
       final remote = await (gateway as ComposerTabsGateway).loadComposerTabs();
       if (_disposed) return;
+      _composerTabsLoadFailed = false;
+      _composerWorkspaceSyncFailed = false;
       final merged = mergeComposerWorkspaces(_composerWorkspace, remote)!;
       _applyWorkspaceCatalog(merged);
       for (final record in merged.tabs) {
@@ -145,7 +230,10 @@ extension AppControllerWorkspace on AppController {
       // Also publishes offline edits after reconnect, even without a new edit.
       await _saveComposerTabs();
     } on Object {
-      // Local drafts remain available and the next reconciliation retries.
+      _composerWorkspaceSyncFailed = true;
+      composerTabsSaveError =
+          'Draft sync could not finish. Your open drafts are still available; retry to sync.';
+      if (!_disposed) notifyListeners();
     } finally {
       _syncingComposerWorkspace = false;
     }

@@ -5,8 +5,10 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
+import 'pricing.dart';
 import 'provider_catalog.dart';
 import 'reference_prompts.dart';
 
@@ -154,17 +156,23 @@ class ArtCraftApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+    String? operationId,
+  }) async {
     final payload = await _generationPayload(key, model, input);
     final quote = await _quote(payload);
-    payload['idempotency_token'] = _uuid();
+    payload['idempotency_token'] = operationId == null
+        ? _uuid()
+        : submissionIdempotencyToken(operationId);
+    final encodedPayload = jsonEncode(payload);
+    await beforeSend?.call();
     final body = await _read(
       await _request(
         _client.post(
           _baseUrl.resolve('/v1/omni_api/generate/video'),
           headers: _headers(key, json: true),
-          body: jsonEncode(payload),
+          body: encodedPayload,
         ),
         'submit the generation',
         timeout: const Duration(minutes: 4),
@@ -178,13 +186,15 @@ class ArtCraftApi {
       );
     }
     final id = body['inference_job_token']! as String;
+    final useQuote = quote != null && providerCostFromPayload(body) == null;
     return <String, Object?>{
       ...body,
       'id': id,
       'polling_url': _baseUrl
           .resolve('/v1/omni_api/job_status/job/$id')
           .toString(),
-      if (quote != null) 'cost': quote.credits,
+      if (useQuote) 'cost': quote.credits,
+      if (useQuote) 'cost_source': 'provider-quote',
     };
   }
 

@@ -940,6 +940,8 @@ class Generation {
   }
 
   bool get isFailed => isGenerationFailureStatus(status);
+  bool get isSubmissionUnknown =>
+      normalizeGenerationStatus(status) == submissionUnknownStatus;
 
   /// The media actually arrived (a stored asset or a playable delivery URL).
   /// Delivered media is ground truth: a late poll or a cross-device merge may
@@ -995,9 +997,9 @@ class Generation {
       return this;
     }
     return copyWith(
-      status: 'Error',
+      status: submissionUnknownStatus,
       error:
-          'Clawnsole was interrupted before it received a provider status URL. Check the provider console before submitting again.',
+          'Clawnsole was interrupted before it could confirm the provider receipt. $submissionUnknownMessage',
       updatedAt: now,
     );
   }
@@ -1162,7 +1164,7 @@ class Generation {
     if (resultRetentionFailures > 0)
       'resultRetentionFailures': resultRetentionFailures,
     if (resultRetentionError != null)
-      'resultRetentionError': resultRetentionError,
+      'resultRetentionError': compactProviderResponse(resultRetentionError),
     if (estimatedCreditsMin != null) 'estimatedCreditsMin': estimatedCreditsMin,
     if (estimatedCreditsMax != null) 'estimatedCreditsMax': estimatedCreditsMax,
     if (estimateBasis != null) 'estimateBasis': estimateBasis,
@@ -1173,17 +1175,18 @@ class Generation {
     if (quotedCostUsdMax != null) 'quotedCostUsdMax': quotedCostUsdMax,
     if (realizedCostUsd != null) 'realizedCostUsd': realizedCostUsd,
     if (realizedCostSource != null) 'realizedCostSource': realizedCostSource,
-    if (error != null) 'error': error,
+    if (error != null) 'error': compactProviderResponse(error),
     if (lastCheckedAt != null)
       'lastCheckedAt': lastCheckedAt!.toUtc().toIso8601String(),
     if (statusCheckCount > 0) 'statusCheckCount': statusCheckCount,
     if (consecutiveCheckFailures > 0)
       'consecutiveCheckFailures': consecutiveCheckFailures,
-    if (lastCheckError != null) 'lastCheckError': lastCheckError,
+    if (lastCheckError != null)
+      'lastCheckError': compactProviderResponse(lastCheckError),
     if (lastProviderStatusCode != null)
       'lastProviderStatusCode': lastProviderStatusCode,
     if (lastProviderResponse != null)
-      'lastProviderResponse': lastProviderResponse,
+      'lastProviderResponse': compactProviderResponse(lastProviderResponse),
     if (lastProviderResponseAt != null)
       'lastProviderResponseAt': lastProviderResponseAt!
           .toUtc()
@@ -1264,7 +1267,9 @@ class Generation {
     ),
     resultRetentionFailures:
         (json['resultRetentionFailures'] as num?)?.toInt() ?? 0,
-    resultRetentionError: json['resultRetentionError'] as String?,
+    resultRetentionError: json['resultRetentionError'] == null
+        ? null
+        : compactProviderResponse(json['resultRetentionError']),
     estimatedCreditsMin: (json['estimatedCreditsMin'] as num?)?.toDouble(),
     estimatedCreditsMax: (json['estimatedCreditsMax'] as num?)?.toDouble(),
     estimateBasis: json['estimateBasis'] as String?,
@@ -1275,14 +1280,20 @@ class Generation {
     quotedCostUsdMax: (json['quotedCostUsdMax'] as num?)?.toDouble(),
     realizedCostUsd: (json['realizedCostUsd'] as num?)?.toDouble(),
     realizedCostSource: json['realizedCostSource'] as String?,
-    error: _presentableFailureText(json['error'] as String?),
+    error: _presentableFailureText(
+      json['error'] == null ? null : compactProviderResponse(json['error']),
+    ),
     lastCheckedAt: DateTime.tryParse(json['lastCheckedAt'] as String? ?? ''),
     statusCheckCount: (json['statusCheckCount'] as num?)?.toInt() ?? 0,
     consecutiveCheckFailures:
         (json['consecutiveCheckFailures'] as num?)?.toInt() ?? 0,
-    lastCheckError: json['lastCheckError'] as String?,
+    lastCheckError: json['lastCheckError'] == null
+        ? null
+        : compactProviderResponse(json['lastCheckError']),
     lastProviderStatusCode: (json['lastProviderStatusCode'] as num?)?.toInt(),
-    lastProviderResponse: json['lastProviderResponse'] as String?,
+    lastProviderResponse: json['lastProviderResponse'] == null
+        ? null
+        : compactProviderResponse(json['lastProviderResponse']),
     lastProviderResponseAt: DateTime.tryParse(
       json['lastProviderResponseAt'] as String? ?? '',
     ),
@@ -1634,6 +1645,8 @@ Map<String, String> _sortedStringMap(Map<String, String> value) =>
     );
 
 class StoredData {
+  static const currentSchemaVersion = 26;
+
   const StoredData({
     this.apiKey = '',
     this.apiKeys = const <String, String>{},
@@ -1648,6 +1661,7 @@ class StoredData {
     this.driveFolderId = '',
     this.providerCatalogCache,
     this.composerTabs,
+    this.driveSyncBase,
   });
 
   final String apiKey;
@@ -1668,6 +1682,11 @@ class StoredData {
   /// Portable composer workspaces, mirrored locally for offline authoring.
   final ComposerTabsState? composerTabs;
 
+  /// The portable snapshot on which this read was based. This travels with
+  /// edits through [copyWith], but is never serialized or sent to a renderer.
+  /// Another read must not change the baseline of an already-started edit.
+  final StoredData? driveSyncBase;
+
   StoredData copyWith({
     String? apiKey,
     Map<String, String>? apiKeys,
@@ -1685,6 +1704,7 @@ class StoredData {
     bool clearProviderCatalogCache = false,
     ComposerTabsState? composerTabs,
     bool clearComposerTabs = false,
+    StoredData? driveSyncBase,
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
@@ -1705,6 +1725,7 @@ class StoredData {
         ? null
         : providerCatalogCache ?? this.providerCatalogCache,
     composerTabs: clearComposerTabs ? null : composerTabs ?? this.composerTabs,
+    driveSyncBase: driveSyncBase ?? this.driveSyncBase,
   );
 
   String apiKeyFor(String provider) =>
@@ -1769,7 +1790,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 26,
+    'schemaVersion': currentSchemaVersion,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1793,6 +1814,25 @@ class StoredData {
       '${const JsonEncoder.withIndent('  ').convert(toJson())}\n';
 
   factory StoredData.fromJson(Map<String, Object?> json) {
+    final schema = json['schemaVersion'];
+    if (schema != null && (schema is! int || schema < 0)) {
+      throw const FormatException('The library schema version is invalid.');
+    }
+    if (schema is int && schema > currentSchemaVersion) {
+      // This must not be a FormatException: fallback to an older backup would
+      // permit this older build to replace a valid, newer library.
+      throw UnsupportedError(
+        'This library needs a newer Clawnsole version (schema $schema).',
+      );
+    }
+    for (final key in <String>['generations', 'folders', 'savedReferences']) {
+      final value = json[key];
+      if (value != null &&
+          (value is! List<Object?> ||
+              value.any((item) => item is! Map<Object?, Object?>))) {
+        throw FormatException('The library $key must contain JSON objects.');
+      }
+    }
     final apiKeys = (json['apiKeys'] as Map<Object?, Object?>? ?? const {}).map(
       (key, value) => MapEntry(key.toString(), value),
     );
@@ -1939,10 +1979,16 @@ class StoredData {
 
   factory StoredData.decode(String source) {
     final decoded = jsonDecode(source);
-    if (decoded is! Map<Object?, Object?>) return const StoredData();
-    return StoredData.fromJson(
-      decoded.map((key, value) => MapEntry(key.toString(), value)),
-    );
+    if (decoded is! Map<Object?, Object?>) {
+      throw const FormatException('The library must be a JSON object.');
+    }
+    try {
+      return StoredData.fromJson(
+        decoded.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    } on TypeError {
+      throw const FormatException('The library contains an invalid field.');
+    }
   }
 }
 

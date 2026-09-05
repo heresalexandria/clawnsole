@@ -921,6 +921,47 @@ void main() {
   );
 
   test(
+    'move verifies remote bytes before deleting any local originals',
+    () async {
+      final local = _migrationLocalStore();
+      final drive = _CorruptingMemoryDriveStore();
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Shared Studio');
+
+      await expectLater(hybrid.moveLocalToDrive(), throwsStateError);
+
+      expect(local.data.generations.single.storage, LibraryStorage.local);
+      expect(local.data.savedReferences.single.storage, LibraryStorage.local);
+      expect(local.assets, hasLength(2));
+    },
+  );
+
+  test(
+    'move keeps source revisions changed during upload verification',
+    () async {
+      final local = _migrationLocalStore();
+      final drive = _EditingMemoryDriveStore(() {
+        local.data = local.data.copyWith(
+          savedReferences: <SavedReference>[
+            local.data.savedReferences.single.copyWith(
+              name: 'Edited while moving',
+            ),
+          ],
+        );
+      });
+      final hybrid = HybridDataStore(local: local, drive: drive);
+      await hybrid.connect('token', 'Shared Studio');
+
+      await expectLater(hybrid.moveLocalToDrive(), throwsStateError);
+
+      expect(local.data.savedReferences.single.name, 'Edited while moving');
+      expect(local.data.generations.single.storage, LibraryStorage.local);
+      expect(local.assets, hasLength(2));
+      expect(drive.data.generations, hasLength(1));
+    },
+  );
+
+  test(
     'Drive state reads revalidate with an ETag instead of re-downloading',
     () async {
       var mediaDownloads = 0;
@@ -1378,6 +1419,13 @@ class _MemoryDriveStore extends GoogleDriveStore {
       assets[reference.value] ?? Uint8List(0);
 
   @override
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async => GoogleDriveByteStream(
+    Stream<List<int>>.value(await readAsset(reference)),
+  );
+
+  @override
   Future<StorageStats> stats(int records) async => StorageStats(
     path: 'drive',
     bytes: data.encode().length,
@@ -1392,5 +1440,27 @@ class _SlowWorkspaceDriveStore extends _MemoryDriveStore {
   Future<void> write(StoredData value) async {
     await pending?.future;
     await super.write(value);
+  }
+}
+
+class _CorruptingMemoryDriveStore extends _MemoryDriveStore {
+  _CorruptingMemoryDriveStore() : super(const StoredData());
+
+  @override
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async => GoogleDriveByteStream(Stream<List<int>>.value(<int>[99]));
+}
+
+class _EditingMemoryDriveStore extends _MemoryDriveStore {
+  _EditingMemoryDriveStore(this.onVerification) : super(const StoredData());
+  final void Function() onVerification;
+
+  @override
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async {
+    onVerification();
+    return super.readAssetStream(reference);
   }
 }

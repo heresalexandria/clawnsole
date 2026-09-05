@@ -1,5 +1,11 @@
 import 'dart:convert';
 
+const submissionUnknownStatus = 'Submission unknown';
+const submissionUnknownMessage =
+    'The provider may have accepted this generation, but Clawnsole could not '
+    'confirm its receipt. Check your provider account before making another '
+    'generation to avoid a duplicate charge. Clawnsole will not resend it automatically.';
+
 const Set<String> generationFailureStatuses = <String>{
   'Task not found',
   'Error',
@@ -13,6 +19,7 @@ String normalizeGenerationStatus(Object? value) {
   final status = value?.toString().trim() ?? '';
   return switch (status.toLowerCase()) {
     'submitting' => 'submitting',
+    'submission unknown' => submissionUnknownStatus,
     'pending' ||
     'queued' ||
     'throttled' ||
@@ -36,6 +43,7 @@ bool isGenerationFailureStatus(String status) =>
 bool isGenerationWorkingStatus(String status, {required bool canPoll}) {
   final normalized = normalizeGenerationStatus(status);
   if (normalized == 'submitting' || normalized == 'Pending') return true;
+  if (normalized == submissionUnknownStatus) return false;
   if (normalized == 'Ready' || isGenerationFailureStatus(normalized)) {
     return false;
   }
@@ -145,22 +153,177 @@ String providerFailureMessage(Object? payload, {required String fallback}) {
   };
 }
 
+/// A persisted diagnostic, never a copy of the provider's request or media.
+///
+/// This also accepts legacy JSON strings so loading or reserializing old
+/// history applies the same policy as a new native/companion response.
 String compactProviderResponse(Object? payload, {int maxCharacters = 12000}) {
   String rendered;
   if (payload == null) {
     rendered = 'No response body was returned.';
-  } else if (payload is String) {
-    rendered = payload.trim().isEmpty ? '(empty response)' : payload.trim();
   } else {
+    Object? decoded = payload;
+    String? originalJson;
+    if (payload is String) {
+      final text = payload.trim();
+      if (text.startsWith('{') ||
+          (text.startsWith('[') && !text.startsWith('[redacted '))) {
+        try {
+          decoded = jsonDecode(text);
+          originalJson = text;
+        } on FormatException {
+          // A previously truncated JSON response cannot be safely filtered by
+          // field. Do not fall back to retaining its unparsed private input.
+          decoded = 'Provider response omitted: malformed diagnostic JSON.';
+        }
+      }
+    }
     try {
-      rendered = const JsonEncoder.withIndent('  ').convert(payload);
+      final sanitized = sanitizeProviderDiagnosticValue(decoded);
+      rendered = sanitized is String
+          ? sanitized
+          : originalJson != null && jsonEncode(sanitized) == jsonEncode(decoded)
+          ? originalJson
+          : const JsonEncoder.withIndent('  ').convert(sanitized);
     } on Object {
-      rendered = payload.toString();
+      rendered = 'Provider response omitted: unsupported diagnostic value.';
     }
   }
+  if (maxCharacters < 1) return '';
   if (rendered.length <= maxCharacters) return rendered;
   return '${rendered.substring(0, maxCharacters)}\n\n'
       '… response truncated to $maxCharacters characters by Clawnsole';
+}
+
+/// Filters structured diagnostics before they cross the companion boundary.
+/// Operational provider responses still use their original data internally.
+Object? sanitizeProviderDiagnosticValue(Object? value) =>
+    _ProviderDiagnosticSanitizer().sanitize(value);
+
+class _ProviderDiagnosticSanitizer {
+  // Keep the provider spelling for compatibility with timing/status readers.
+  // Unknown fields are omitted without visiting their values: providers may
+  // echo entire uploads or credentials under newly introduced payload fields.
+  static const _fields = <String>{
+    'id',
+    'requestid',
+    'taskid',
+    'generationid',
+    'status',
+    'state',
+    'stage',
+    'type',
+    'code',
+    'statuscode',
+    'httpstatus',
+    'error',
+    'errors',
+    'message',
+    'detail',
+    'details',
+    'reason',
+    'retryable',
+    'retryafter',
+    'progress',
+    'progresspercentage',
+    'progresspercent',
+    'percentage',
+    'percent',
+    'createdat',
+    'startedat',
+    'completedat',
+    'finishedat',
+    'updatedat',
+    'maybefirststartedat',
+    'maybesuccessfullycompletedat',
+    'mayberesult',
+    'data',
+    'result',
+    'billing',
+    'usage',
+    'actualcost',
+    'realizedcost',
+    'chargedamount',
+    'costincredits',
+    'creditsused',
+    'cost',
+    'costsource',
+    'costunit',
+    'price',
+    'currency',
+    'unit',
+    'duration',
+    'durationseconds',
+    'queueposition',
+    'omittedfields',
+  };
+  int _remaining = 256;
+
+  Object? sanitize(Object? value, [int depth = 0]) {
+    if (_remaining-- <= 0 || depth > 8) return '[omitted]';
+    if (value is Map<Object?, Object?>) {
+      final safe = <String, Object?>{};
+      var omitted = 0;
+      for (final entry in value.entries) {
+        final key = entry.key.toString();
+        final normalized = key.toLowerCase().replaceAll(RegExp('[^a-z]'), '');
+        if (!_fields.contains(normalized) || safe.length >= 64) {
+          omitted += 1;
+          continue;
+        }
+        safe[key] = sanitize(entry.value, depth + 1);
+      }
+      if (omitted > 0) safe['omitted_fields'] = omitted;
+      return safe;
+    }
+    if (value is List<Object?>) {
+      return value.take(32).map((item) => sanitize(item, depth + 1)).toList();
+    }
+    if (value is String) return _text(value);
+    if (value == null || value is bool) return value;
+    if (value is num && value.isFinite) return value;
+    return '[omitted]';
+  }
+
+  String _text(String value) {
+    var text = value.trim();
+    if (text.isEmpty) return '(empty response)';
+    if (text.length > 4096) text = '${text.substring(0, 4096)}…';
+    // A diagnostic message can itself contain a JSON-encoded request. Treat
+    // it as structured data as well, including older truncated responses.
+    if (text.startsWith('{') || text.startsWith('[{')) {
+      try {
+        return jsonEncode(sanitize(jsonDecode(text)));
+      } on FormatException {
+        return 'Provider response omitted: malformed diagnostic JSON.';
+      }
+    }
+    text = text.replaceAll(
+      RegExp(r'''data:[^\s"'<>]+''', caseSensitive: false),
+      '[redacted media]',
+    );
+    text = text.replaceAll(
+      RegExp(r'''https?://[^\s"'<>]+''', caseSensitive: false),
+      '[redacted URL]',
+    );
+    text = text.replaceAll(
+      RegExp(r'''\b(?:Bearer|Basic)\s+[^\s,"'<>]+''', caseSensitive: false),
+      '[redacted credential]',
+    );
+    text = text.replaceAll(
+      RegExp(
+        r'''\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|client[_-]?secret|secret|signature|token)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)''',
+        caseSensitive: false,
+      ),
+      '[redacted credential]',
+    );
+    // Inline binary without a data-URI header and long opaque credentials are
+    // not useful support text. Keep ordinary prose and provider task IDs.
+    return text.replaceAll(
+      RegExp(r'[A-Za-z0-9+/_=-]{80,}'),
+      '[redacted payload]',
+    );
+  }
 }
 
 String generationExceptionMessage(Object error) => error

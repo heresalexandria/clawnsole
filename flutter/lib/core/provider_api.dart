@@ -1,3 +1,4 @@
+import 'provider_submission.dart';
 import 'artcraft_api.dart';
 import 'atlas_cloud_api.dart';
 import 'bfl_api.dart';
@@ -58,14 +59,22 @@ class ProviderApiRouter {
     String provider,
     String key,
     String model,
-    Map<String, Object?> input,
-  ) => switch (_adapter(provider)) {
-    'ltx' => ltx.submit(key, model, input),
-    'artcraft' => artcraft.submit(key, model, input),
-    'atlas' => atlas.submit(key, model, input),
-    'runway' => runway.submit(key, model, input),
-    'krea' => krea.submit(key, model, input),
-    'bfl' => bfl.submit(key, input, model: model),
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+    String? operationId,
+  }) => switch (_adapter(provider)) {
+    'ltx' => ltx.submit(key, model, input, beforeSend: beforeSend),
+    'artcraft' => artcraft.submit(
+      key,
+      model,
+      input,
+      beforeSend: beforeSend,
+      operationId: operationId,
+    ),
+    'atlas' => atlas.submit(key, model, input, beforeSend: beforeSend),
+    'runway' => runway.submit(key, model, input, beforeSend: beforeSend),
+    'krea' => krea.submit(key, model, input, beforeSend: beforeSend),
+    'bfl' => bfl.submit(key, input, model: model, beforeSend: beforeSend),
     final adapter => throw ProviderException(
       'Provider adapter "$adapter" is not supported by this build.',
     ),

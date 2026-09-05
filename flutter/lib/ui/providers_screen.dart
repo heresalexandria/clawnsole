@@ -358,6 +358,9 @@ class _ProviderCard extends StatelessWidget {
                     ? 'Connected — paste a replacement'
                     : 'Paste key',
                 suffixIcon: IconButton(
+                  tooltip: keyVisible
+                      ? 'Hide ${provider.name} API key'
+                      : 'Show ${provider.name} API key',
                   onPressed: onToggleKey,
                   icon: Icon(
                     keyVisible

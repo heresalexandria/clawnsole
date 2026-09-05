@@ -67,7 +67,13 @@ test("an IPC request opens a native menu for its BrowserWindow", () => {
     },
   };
   const clipboard = { availableFormats: () => ["text/plain"] };
-  installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain });
+  installNativeTextContextMenu({
+    BrowserWindow, Menu, clipboard, ipcMain,
+    isTrustedEvent: (event) => event.sender === sender,
+  });
+
+  ipcMain.emit(TEXT_CONTEXT_MENU_CHANNEL, { sender: {} });
+  assert.equal(seen.popup, null);
 
   ipcMain.emit(TEXT_CONTEXT_MENU_CHANNEL, { sender }, {
     hasSelection: false,

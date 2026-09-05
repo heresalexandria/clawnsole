@@ -6,6 +6,7 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
+import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/generation_detail_modal.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/library_screen.dart';
@@ -14,6 +15,84 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final accountObservation in [true, false]) {
+    testWidgets(
+      accountObservation
+          ? 'account observations are never labeled task estimates or billed costs'
+          : 'provider quotes remain estimates in the card and detail modal',
+      (tester) async {
+        await _sized(tester, const Size(1440, 900));
+        for (final source
+            in accountObservation
+                ? [
+                    'balance-delta',
+                    'terminal-balance-delta',
+                    'account-balance-observation',
+                  ]
+                : ['provider-quote']) {
+          for (final status in ['Ready', 'Error']) {
+            final item = Generation.fromJson({
+              ..._film(resultUrl: null).toJson(),
+              'status': status,
+              'billingUnit': 'usd',
+              'cost': 30,
+              'realizedCostUsd': 30,
+              'realizedCostSource': source,
+            });
+            await _pump(tester, GenerationCostChip(item: item));
+            expect(
+              find.byTooltip(
+                accountObservation
+                    ? 'Account activity; task charge unconfirmed — tap for details'
+                    : 'Estimated cost — tap for details',
+              ),
+              findsOneWidget,
+            );
+            await _tap(
+              tester,
+              find.byKey(const ValueKey('generation-cost-toggle')),
+            );
+            expect(find.textContaining('Realized cost'), findsNothing);
+            if (accountObservation) {
+              expect(
+                find.textContaining(
+                  'Account activity; task charge unconfirmed',
+                ),
+                findsOneWidget,
+              );
+              expect(find.textContaining('estimate'), findsNothing);
+            } else {
+              expect(find.textContaining('Estimated ·'), findsOneWidget);
+            }
+            expect(
+              find.textContaining('Task charge unconfirmed'),
+              findsWidgets,
+            );
+
+            final controller = _controller([item]);
+            await _open(tester, controller, item);
+            expect(
+              find.textContaining(
+                accountObservation ? r'Account activity $30' : r'Estimated $30',
+              ),
+              findsOneWidget,
+            );
+            expect(find.textContaining('Billed by'), findsNothing);
+            expect(
+              find.textContaining('Task charge unconfirmed'),
+              findsOneWidget,
+            );
+            if (accountObservation) {
+              expect(find.textContaining('estimate'), findsNothing);
+            }
+            await _close(tester);
+            controller.dispose();
+          }
+        }
+      },
+    );
+  }
+
   testWidgets('a full card body opens the modal and Escape closes it', (
     tester,
   ) async {

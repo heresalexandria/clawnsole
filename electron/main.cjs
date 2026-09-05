@@ -22,6 +22,8 @@ const {
   waitForServer,
 } = require("./lib/runtime.cjs");
 const { installNativeTextContextMenu } = require("./lib/text-context-menu.cjs");
+const { rendererIpcGuard, guardedRendererHandler } = require("./lib/renderer-ipc.cjs");
+const { configureSmokeProfile } = require("./lib/smoke-profile.cjs");
 const {
   companionBootstrapLine,
   installCompanionSessionHeader,
@@ -82,6 +84,8 @@ let googleDriveAuth = null;
 let companionToken = "";
 
 app.setName(APP_NAME);
+const smokeProfile = configureSmokeProfile(app, { smoke: IS_SMOKE_TEST });
+if (smokeProfile) console.log(`Clawnsole smoke profile: ${smokeProfile}`);
 
 function companionLogger() {
   if (!companionLog) {
@@ -490,14 +494,19 @@ async function verifyRendererBridge(timeoutMs = 40_000) {
 }
 
 function installRendererBridge() {
-  installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain });
-  ipcMain.handle("clawnsole:update:check", async (_event, force = false) =>
+  const isTrustedEvent = rendererIpcGuard({
+    getWindow: () => mainWindow,
+    getRendererUrl: () => rendererUrl,
+  });
+  const handle = guardedRendererHandler(ipcMain, isTrustedEvent);
+  installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain, isTrustedEvent });
+  handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
-  ipcMain.handle("clawnsole:update:start", () => startUpdateFromRenderer());
-  ipcMain.handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
-  ipcMain.handle("clawnsole:drive:authorizeSilent", () => googleDriveAuth.authorizeSilently());
-  ipcMain.handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
-  ipcMain.handle(
+  handle("clawnsole:update:start", () => startUpdateFromRenderer());
+  handle("clawnsole:drive:authorize", () => googleDriveAuth.authorize());
+  handle("clawnsole:drive:authorizeSilent", () => googleDriveAuth.authorizeSilently());
+  handle("clawnsole:drive:disconnect", () => googleDriveAuth.disconnect());
+  handle(
     "clawnsole:vault:settings",
     (event, action, value) => {
       if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
@@ -511,13 +520,13 @@ function installRendererBridge() {
       });
     },
   );
-  ipcMain.handle("clawnsole:external:open", async (event, url, purpose) => {
+  handle("clawnsole:external:open", async (event, url, purpose) => {
     if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
     if (!isAllowedExplicitExternalUrl(url, purpose)) return false;
     await shell.openExternal(url);
     return true;
   });
-  ipcMain.handle("clawnsole:data:reveal", async (event) => {
+  handle("clawnsole:data:reveal", async (event) => {
     if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
       return { ok: false, error: "The data-folder request was rejected." };
     }
@@ -526,7 +535,7 @@ function installRendererBridge() {
     );
     return failure ? { ok: false, error: failure } : { ok: true };
   });
-  ipcMain.handle("clawnsole:data:choose", (event) => {
+  handle("clawnsole:data:choose", (event) => {
     if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) {
       return { ok: false, error: "The data-folder request was rejected." };
     }
@@ -534,7 +543,7 @@ function installRendererBridge() {
   });
   // Resolves to true only when a banner was actually posted, which is what
   // the Flutter side awaits before deciding whether to show its own toast.
-  ipcMain.handle(NOTIFY_CHANNEL, (event, payload) => {
+  handle(NOTIFY_CHANNEL, (event, payload) => {
     if (!isAllowedAppUrl(event.senderFrame?.url, rendererUrl)) return false;
     const notification = sanitizeNotification(payload);
     if (!notification) return false;
