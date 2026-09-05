@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
@@ -296,8 +297,9 @@ class KreaApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+  }) async {
     final spec = _kreaRouteSpecs[model];
     if (spec == null) {
       throw ProviderException(
@@ -363,12 +365,14 @@ class KreaApi {
       payload['height'] = height;
     }
 
+    final encodedPayload = jsonEncode(payload);
+    await beforeSend?.call();
     final body = await _read(
       await _request(
         _client.post(
           _baseUrl.resolve('/generate/video/$model'),
           headers: _headers(key, json: true),
-          body: jsonEncode(payload),
+          body: encodedPayload,
         ),
         'submit the generation',
       ),

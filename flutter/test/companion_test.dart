@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:clawnsole/core/provider_submission.dart';
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/direct_gateway.dart';
@@ -1249,7 +1250,7 @@ void main() {
       'clawnsole-migrate-test.',
     );
     final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
-    final drive = _MemoryDriveStore();
+    final drive = _StreamingDriveStore();
     final store = CompanionHybridStore(
       HybridDataStore(local: local, drive: drive),
     );
@@ -1302,6 +1303,7 @@ void main() {
       expect(generations.single['localId'], 'drive-generation-one');
       expect(generations.single['storage'], 'drive');
       expect(drive.assets.values.single, <int>[1, 2, 3]);
+      expect(drive.streamDownloads, 1);
 
       // The local file keeps a Drive metadata mirror and linkage while the
       // now-unreferenced local media bytes are pruned from disk.
@@ -2011,8 +2013,11 @@ class _CapturingArtCraftApi extends ArtCraftApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+    String? operationId,
+  }) async {
+    await beforeSend?.call();
     this.input = input;
     return <String, Object?>{
       'id': 'seedance-job',

@@ -176,7 +176,7 @@ test("silent authorization forgets a refresh token Google rejects", async () => 
     fetchImpl: async () => ({
       ok: false,
       status: 400,
-      json: async () => ({ error_description: "Token has been revoked." }),
+      json: async () => ({ error: "invalid_grant", error_description: "Token has been revoked." }),
     }),
     createServer: () => {
       serversStarted += 1;
@@ -192,6 +192,49 @@ test("silent authorization forgets a refresh token Google rejects", async () => 
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+for (const [label, failure] of [
+  ["offline", async () => { throw new TypeError("fetch failed: offline"); }],
+  ["timeout", async () => { throw new DOMException("timed out", "TimeoutError"); }],
+  ["server error", async () => ({ ok: false, status: 503, json: async () => ({ error: "temporarily_unavailable" }) })],
+  ["rate limit", async () => ({ ok: false, status: 429, json: async () => ({ error: "rate_limit_exceeded" }) })],
+  ["client configuration", async () => ({ ok: false, status: 400, json: async () => ({ error: "invalid_client" }) })],
+  ["malformed JSON", async () => ({ ok: false, status: 502, json: async () => { throw new SyntaxError("bad JSON"); } })],
+  ["invalid-grant body on a server failure", async () => ({ ok: false, status: 503, json: async () => ({ error: "invalid_grant" }) })],
+]) {
+  for (const method of ["authorizeSilently", "authorize"]) {
+    test(`${method} preserves a refresh token after ${label} and retries it`, async (t) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-auth."));
+      t.after(() => fs.rm(directory, { recursive: true, force: true }));
+      const tokenFile = path.join(directory, "google-drive-auth.json");
+      const stored = JSON.stringify({ encrypted: Buffer.from("encrypted:fake-refresh").toString("base64") });
+      await fs.writeFile(tokenFile, stored);
+      let recovered = false;
+      const auth = new GoogleDriveAuth({
+        clientId: "desktop-client",
+        userData: directory,
+        safeStorage: {
+          isEncryptionAvailable: () => true,
+          decryptString: (value) => value.toString().replace(/^encrypted:/, ""),
+        },
+        openExternal: async () => { throw new Error("transient failure must not open a browser"); },
+        createServer: () => { throw new Error("transient failure must not start interactive authorization"); },
+        fetchImpl: async (_url, options) => {
+          assert.equal(options.body.get("refresh_token"), "fake-refresh");
+          assert.ok(options.signal instanceof AbortSignal);
+          return recovered
+            ? { ok: true, status: 200, json: async () => ({ access_token: "recovered-access" }) }
+            : failure();
+        },
+      });
+      if (method === "authorizeSilently") assert.equal(await auth[method](), "");
+      else await assert.rejects(auth[method]());
+      assert.equal(await fs.readFile(tokenFile, "utf8"), stored);
+      recovered = true;
+      assert.equal(await auth[method](), "recovered-access");
+    });
+  }
+}
 
 test("silent authorization returns nothing when no token is stored", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "clawnsole-drive-auth."));

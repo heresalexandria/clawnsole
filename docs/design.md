@@ -302,18 +302,27 @@ worked on side by side. A "+" tab opens a blank draft that inherits only the
 active tab's provider, model, and folder; the × on a tab closes it (the last
 tab is replaced by a blank one); long-press or double-tap renames. Labels
 derive from the first words of the prompt until renamed. Reuse and Enhance
-fill the active tab when it is still blank and otherwise open a new tab, so
-no draft is ever clobbered. A tab born from AI Rewrite wears a small brass
+fill the active tab when it is still pristine and otherwise open a new tab.
+Attachments, pending picks, a name, aesthetic selection, and settings edits
+make a draft occupied even before any direction is typed. A tab born from AI Rewrite wears a small brass
 `auto_awesome` mark whose tooltip is the model's one-line summary of what
 changed. The model plaque is not in the heading at all: it sits in the
 composer footer directly before Generate (see item 8), inside the draft it
 belongs to. Phones drop the eyebrow and keep just the rail; the first-run
-bring-your-own-key line sits under the rail when no provider is set up. Tabs persist on the device
-(`StoredData.composerTabs`, never in Drive data): the prompt, settings, and
-ids survive a restart, and media that came from a generation is re-hydrated
-from that generation's record; media picked from disk stays session-only, as
-it always has. The generation-mode rule above still stands — tabs never
-select a mode.
+bring-your-own-key line sits under the rail when no provider is set up.
+Tabs persist locally and sync with the Drive workspace when connected;
+the active tab selection stays local. Each saved draft keeps its own compact
+media recipe so removing an input stays removed on relaunch. Legacy drafts
+can still restore from their source generation. Unretained uploads are
+session-only: the rail identifies them before the app closes. Save failures
+stay visible beneath the rail with a Retry action; an unreadable workspace
+is not overwritten by a new session.
+
+Closing a tab keeps the ten most recent recovery snapshots. The restore
+control beside the new-tab key opens a named list of closed drafts. Recovery
+opens a new tab id, preserving the original close tombstone across devices.
+Open and recoverable draft assets stay protected during cleanup. The
+generation-mode rule above still stands — tabs never select a mode.
 
 ## 8. Library & recent work
 
@@ -503,7 +512,9 @@ exclamation points, no jargon-as-drama.
   weight).
 - Every icon-only control has a tooltip; frame thumbs describe role and
   timing.
-- Keyboard: dialogs close on Escape; the video player focuses itself and
+- Keyboard: screenplay mode uses Tab / Shift Tab for element cycling;
+  Escape followed by Tab / Shift Tab returns to ordinary focus traversal.
+  Dialogs close on Escape; the video player focuses itself and
   keeps Space (play/pause), ←/→ (seek), and Escape bindings; interactive
   rows are real `InkWell`s with focus states.
 - Test both modes at 375 px and ≥ 1440 px before shipping UI changes;

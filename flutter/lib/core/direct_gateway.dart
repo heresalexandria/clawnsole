@@ -17,6 +17,7 @@ import 'prompt_rewrite.dart';
 import 'prompt_rewrite_router.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
+import 'provider_submission.dart';
 import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
 import 'screenplay.dart';
@@ -1073,6 +1074,13 @@ class DirectGateway
     var input = submission.input;
     final data = await _readFresh();
     final provider = record.provider;
+    final existing = data.generations
+        .where((item) => item.localId == record.localId)
+        .firstOrNull;
+    if (existing != null &&
+        (existing.canCheckStatus || existing.isSubmissionUnknown)) {
+      return existing;
+    }
     final providerDefinition = providerByIdOrNull(provider);
     final modelDefinition = providerDefinition?.models
         .where((model) => model.id == record.model)
@@ -1154,6 +1162,7 @@ class DirectGateway
     );
     await _replaceGeneration(record);
 
+    var mayHaveBeenSent = false;
     try {
       final creditsBefore = await _balanceSafely(provider, key);
       if (creditsBefore != null) {
@@ -1165,10 +1174,25 @@ class DirectGateway
         key,
         record.model,
         input,
+        operationId: record.localId,
+        beforeSend: () async {
+          final uncertain = record.copyWith(
+            status: submissionUnknownStatus,
+            error: submissionUnknownMessage,
+            clearProgress: true,
+            updatedAt: DateTime.now().toUtc(),
+          );
+          // Await the durable write before the adapter starts its POST.
+          record = await _replaceGeneration(uncertain);
+          mayHaveBeenSent = true;
+        },
       );
       final requestId = response['id'];
       final pollingUrl = response['polling_url'];
-      if (requestId is! String || pollingUrl is! String) {
+      if (requestId is! String ||
+          requestId.trim().isEmpty ||
+          pollingUrl is! String ||
+          pollingUrl.trim().isEmpty) {
         throw const ProviderException(
           'The provider returned an invalid generation receipt.',
           status: 502,
@@ -1181,6 +1205,7 @@ class DirectGateway
         requestId: requestId,
         pollingUrl: pollingUrl,
         status: 'Pending',
+        clearError: true,
         clearProgress: true,
         providerAcceptedAt: acceptedAt,
         estimatedCreditsMax: receiptEstimate,
@@ -1229,15 +1254,20 @@ class DirectGateway
         // task into a terminal local error.
         return record;
       }
+      final acceptanceUnknown =
+          mayHaveBeenSent && !isDefinitiveSubmissionRejection(error);
       record = record.copyWith(
-        status: 'Error',
-        error: generationExceptionMessage(error),
+        status: acceptanceUnknown ? submissionUnknownStatus : 'Error',
+        error: acceptanceUnknown
+            ? submissionUnknownMessage
+            : generationExceptionMessage(error),
         lastProviderStatusCode: providerHttpStatus(error),
         lastProviderResponse: providerErrorResponse(error),
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       await _replaceGeneration(record);
+      if (acceptanceUnknown) return record;
       if (credential != null &&
           (providerHttpStatus(error) == 401 ||
               providerHttpStatus(error) == 403)) {

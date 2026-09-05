@@ -31,6 +31,7 @@ import '../core/video_cache_gateway.dart';
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
+part 'app_controller_submission.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -379,9 +380,11 @@ class ComposerTab {
     this.rewriteSummary,
     this.localFolderId,
     this.driveFolderId,
+    GenerationFormState? form,
     DateTime? createdAt,
     DateTime? updatedAt,
-  }) : createdAt = createdAt ?? DateTime.now().toUtc(),
+  }) : form = form ?? GenerationFormState(),
+       createdAt = createdAt ?? DateTime.now().toUtc(),
        updatedAt = updatedAt ?? createdAt ?? DateTime.now().toUtc();
 
   final String id;
@@ -389,7 +392,8 @@ class ComposerTab {
   /// A name typed by the director; null derives the label from the prompt.
   String? title;
 
-  final GenerationFormState form = GenerationFormState();
+  final GenerationFormState form;
+  bool hasUserEdits = false;
   String providerId;
   String modelId;
 
@@ -427,7 +431,22 @@ class ComposerTab {
 
   /// Nothing has been directed here yet, so seeding it in place clobbers no
   /// work of the director's.
-  bool get isBlank => form.prompt.trim().isEmpty;
+  bool get isBlank =>
+      !hasUserEdits &&
+      (title?.trim().isEmpty ?? true) &&
+      form.prompt.trim().isEmpty &&
+      !form.screenplayMode &&
+      form.aestheticReferenceId == null &&
+      form.keyframes.isEmpty &&
+      form.references.isEmpty &&
+      disabledReferences.isEmpty &&
+      form.videoAsset == null &&
+      form.videoUrl.trim().isEmpty &&
+      form.draftAsset == null &&
+      form.draftUrl.trim().isEmpty &&
+      pendingPickerReferenceAdds == 0 &&
+      pendingDropReferenceAdds == 0 &&
+      pendingFrameAdds == 0;
 }
 
 /// A starred model resolved against the live catalog.
@@ -603,7 +622,7 @@ class AppController extends ChangeNotifier {
 
   bool _notificationsRequested = false;
   int _preferenceRevision = 0;
-  Future<bool>? _creditRefreshFuture;
+  final Map<String, Future<bool>> _creditRefreshFutures = {};
   Timer? _estimateTimer;
   String? _estimateSignature;
   int _estimateRevision = 0;
@@ -767,6 +786,14 @@ class AppController extends ChangeNotifier {
     if (index < 0) return;
     final closed = _composerTabs.removeAt(index);
     _closedComposerTabIds.add(id);
+    closed.updatedAt = DateTime.now().toUtc();
+    _closedComposerDrafts[id] = closed;
+    _recoverableComposerTabs.removeWhere((tab) => tab.id == id);
+    _recoverableComposerTabs.insert(0, _composerTabRecord(closed));
+    if (_recoverableComposerTabs.length > 10) {
+      final removed = _recoverableComposerTabs.removeLast();
+      _closedComposerDrafts.remove(removed.id);
+    }
     final wasActive = closed.id == _activeComposerTabId;
     if (_composerTabs.isEmpty) {
       final replacement = ComposerTab(
@@ -820,6 +847,13 @@ class AppController extends ChangeNotifier {
       _composerTabsRestored && gateway is ComposerTabsGateway;
 
   final Set<String> _closedComposerTabIds = {};
+  final List<ComposerTabRecord> _recoverableComposerTabs = [];
+  final Map<String, ComposerTab> _closedComposerDrafts = {};
+  String? composerTabsSaveError;
+  bool _composerTabsLoadFailed = false;
+  bool _composerWorkspaceSyncFailed = false;
+  int _composerSaveFailures = 0;
+  Timer? _composerSaveRetry;
   final Set<String> _deletedAestheticIds = {};
   final List<AestheticReference> _aestheticReferences = [];
   bool _syncingComposerWorkspace = false;
@@ -870,8 +904,18 @@ class AppController extends ChangeNotifier {
   /// Notes that [touched] (the tab being drafted in, by default) changed and
   /// arms the debounced write.
   void _scheduleComposerTabsSave({ComposerTab? touched}) {
-    if (_disposed || _restoringComposerTabs || !_persistsComposerTabs) return;
-    (touched ?? _draftTab).updatedAt = DateTime.now().toUtc();
+    if (_disposed || _restoringComposerTabs) return;
+    final tab = touched ?? _draftTab;
+    tab
+      ..hasUserEdits = true
+      ..updatedAt = DateTime.now().toUtc();
+    final closedIndex = _recoverableComposerTabs.indexWhere(
+      (record) => record.id == tab.id,
+    );
+    if (closedIndex >= 0) {
+      _recoverableComposerTabs[closedIndex] = _composerTabRecord(tab);
+    }
+    if (!_persistsComposerTabs) return;
     _composerTabsSaveTimer?.cancel();
     _composerTabsSaveTimer = Timer(
       composerTabsSaveDebounce,
@@ -891,18 +935,39 @@ class AppController extends ChangeNotifier {
     unawaited(_saveComposerTabs());
   }
 
+  Future<void> retryComposerTabsSave() async {
+    _composerSaveRetry?.cancel();
+    _composerSaveFailures = 0;
+    if (_composerTabsLoadFailed || _composerWorkspaceSyncFailed) {
+      await syncComposerWorkspace();
+    } else {
+      await _saveComposerTabs();
+    }
+  }
+
   Future<void> _saveComposerTabs() async {
-    if (_disposed) return;
+    if (_disposed || _composerTabsLoadFailed) return;
     if (gateway case final ComposerTabsGateway tabsGateway) {
       final state = _composerWorkspace;
-      // Serialized like the preference writes so two quick changes cannot
-      // land out of order, and silent: a draft never raises a notice.
       _composerTabWrites = _composerTabWrites.then((_) async {
         try {
           await tabsGateway.saveComposerTabs(state);
+          if (!_composerWorkspaceSyncFailed) composerTabsSaveError = null;
+          _composerSaveFailures = 0;
+          _composerSaveRetry?.cancel();
         } on Object {
-          // The next change writes the whole strip again.
+          composerTabsSaveError =
+              'Drafts could not be saved. Keep this app open and retry.';
+          _composerSaveFailures += 1;
+          if (_composerSaveFailures <= 3 && !_disposed) {
+            _composerSaveRetry?.cancel();
+            _composerSaveRetry = Timer(
+              Duration(seconds: 2 * _composerSaveFailures),
+              () => unawaited(_saveComposerTabs()),
+            );
+          }
         }
+        if (!_disposed) notifyListeners();
       });
       await _composerTabWrites;
     }
@@ -916,7 +981,11 @@ class AppController extends ChangeNotifier {
       ComposerTabsState? stored;
       try {
         stored = await tabsGateway.loadComposerTabs();
+        _composerTabsLoadFailed = false;
       } on Object {
+        _composerTabsLoadFailed = true;
+        composerTabsSaveError =
+            'Saved drafts could not be opened. New work stays in memory until you retry.';
         return false;
       }
       if (_disposed || stored == null) return false;
@@ -1006,6 +1075,7 @@ class AppController extends ChangeNotifier {
   /// generation seeded: the record is what the director last had on screen.
   void _applyComposerTabRecord(ComposerTab tab, ComposerTabRecord record) {
     tab.updatedAt = record.updatedAt ?? tab.updatedAt;
+    tab.hasUserEdits = true;
     tab.form.screenplayLinkedCharacters.clear();
     tab.form.screenplayCharacterAliases.clear();
     tab.form.screenplayLinkedCharacters.addAll(
@@ -2666,9 +2736,16 @@ class AppController extends ChangeNotifier {
     null => null,
   };
 
-  Future<void> performNoticeAction() async {
-    final action = noticeAction;
-    if (action == null || submitting) return;
+  Future<void> performNoticeAction({
+    AppNoticeAction? action,
+    int? sequence,
+  }) async {
+    action ??= noticeAction;
+    if (action == null ||
+        submitting ||
+        (sequence != null && sequence != noticeSequence)) {
+      return;
+    }
     noticeAction = null;
     notifyListeners();
     switch (action) {
@@ -6212,186 +6289,10 @@ class AppController extends ChangeNotifier {
   String _uid() =>
       '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-${(_idCounter++).toRadixString(16)}';
 
-  Future<void> submit({bool providerRetentionRiskAcknowledged = false}) async {
-    final tab = activeComposerTab;
-    if (!await _hydrateComposerMedia(tab)) {
-      if (!_disposed) {
-        showNotice(
-          'Some draft media is unavailable. Connect Drive or restore the original media before generating.',
-        );
-      }
-      return;
-    }
-    if (_disposed || activeComposerTabId != tab.id) return;
-    final problem = validate();
-    if (problem != null) {
-      showNotice(problem);
-      if (selectedProvider.requiresApiKey && !hasApiKey) {
-        unawaited(navigate(AppSection.providers));
-      }
-      return;
-    }
-    if (requiresProviderRetentionAcknowledgement &&
-        !providerRetentionRiskAcknowledged) {
-      showNotice(
-        'Review and accept the ${selectedProvider.name} result-retention warning before generating.',
+  Future<void> submit({bool providerRetentionRiskAcknowledged = false}) =>
+      _submitCaptured(
+        providerRetentionRiskAcknowledged: providerRetentionRiskAcknowledged,
       );
-      return;
-    }
-    if (!canUseDefaultStorage) {
-      showNotice(
-        'Connect Google Drive before generating to your Drive library.',
-      );
-      unawaited(navigate(AppSection.settings));
-      return;
-    }
-    if (selectedProvider.requiresApiKey && !await refreshCredits()) return;
-    // Whatever is being generated is worth having on disk before the render
-    // starts, however it goes.
-    _flushComposerTabsSave(onlyIfPending: true);
-    // The first real submission is the moment a "your film is ready" alert
-    // starts to matter; asking earlier would be noise on a fresh install.
-    unawaited(_requestNotificationsOnce());
-    await refreshProviderEstimate();
-    final now = DateTime.now().toUtc();
-    final estimate = currentEstimate;
-    final referenceThumbnailBytes = form.references
-        .map((item) => item.thumbnailBytes ?? item.asset?.thumbnailBytes)
-        .toList(growable: false);
-    final sourceThumbnailBytes =
-        form.videoAsset?.thumbnailBytes ?? form.videoThumbnailBytes;
-    var pending = Generation(
-      localId: _uid(),
-      provider: selectedProviderId,
-      model: selectedModel.id,
-      canonicalModelId: selectedModel.canonicalId,
-      billingUnit: selectedProvider.isLocal
-          ? 'local'
-          : selectedProviderId == 'bfl' ||
-                selectedProviderId == 'artcraft' ||
-                selectedProviderId == 'runway'
-          ? 'credits'
-          : 'usd',
-      outputKind: selectedModel.outputKind,
-      status: 'submitting',
-      progress: 0,
-      prompt: form.mode == VideoMode.draftEnhance
-          ? 'Enhance saved FLUX 3 draft'
-          : generationPrompt,
-      mode: form.mode,
-      config: currentConfig,
-      createdAt: now,
-      updatedAt: now,
-      estimatedCreditsMin: estimate.providerUnitsMinimum ?? estimate.minimumUsd,
-      estimatedCreditsMax: estimate.providerUnitsMaximum ?? estimate.maximumUsd,
-      estimateBasis: estimate.basis,
-      quotedCostUsdMin: estimate.minimumUsd,
-      quotedCostUsdMax: estimate.maximumUsd,
-      folderId: selectedGenerationFolderId,
-      // The tab's own name and its rewrite lineage travel with the record,
-      // so cards can say which draft made the film and what it iterates on.
-      title: activeComposerTab.title,
-      rewriteOfLocalId: activeComposerTab.rewriteSummary == null
-          ? null
-          : activeComposerTab.sourceGenerationId,
-      rewriteSummary: activeComposerTab.rewriteSummary,
-      storage: effectiveStorage,
-    );
-    final current = snapshot;
-    if (current != null) {
-      snapshot = LocalSnapshot(
-        generations: <Generation>[pending, ...current.generations],
-        preferences: current.preferences,
-        hasApiKey: current.hasApiKey,
-        connectedProviders: current.connectedProviders,
-        connectedRewriteProviders: current.connectedRewriteProviders,
-        availableProviders: current.availableProviders,
-        providerRetentionAcknowledgements:
-            current.providerRetentionAcknowledgements,
-        folders: current.folders,
-        savedReferences: current.savedReferences,
-        storage: current.storage,
-        settingsVault: current.settingsVault,
-      );
-    }
-    submitting = true;
-    notifyListeners();
-    final checksVisualReferences =
-        autoFixReferenceVideos &&
-        (form.keyframes.isNotEmpty ||
-            form.referenceCount(MediaReferenceKind.image) > 0 ||
-            (selectedModel.referenceVideoCompatibilityProfile != null &&
-                form.referenceCount(MediaReferenceKind.video) > 0));
-    showNotice(
-      checksVisualReferences
-          ? 'Checking visual reference compatibility before sending…'
-          : form.mode == VideoMode.upscale
-          ? 'Submitting upscale…'
-          : 'Submitting generation…',
-    );
-    try {
-      pending = await gateway.submit(
-        GenerationSubmission(
-          record: pending,
-          input: _buildInput(),
-          autoFixReferenceVideos: autoFixReferenceVideos,
-        ),
-      );
-      _replaceInMemory(pending);
-      final delivery = providerById(pending.provider).resultDelivery;
-      showNotice(
-        delivery.keepOpenRecommended
-            ? '${providerNameForHistory(pending.provider)} accepted the generation. Keep Clawnsole open and online until the result is saved; Clawnsole will retry retrieval if the connection drops.'
-            : 'Generation submitted. Clawnsole will keep checking it across the app.',
-      );
-      final retainedReferences =
-          pending.config.references ?? const <MediaReferenceLabel>[];
-      for (
-        var index = 0;
-        index < retainedReferences.length &&
-            index < referenceThumbnailBytes.length;
-        index += 1
-      ) {
-        final source = retainedReferences[index].source;
-        final thumbnail = referenceThumbnailBytes[index];
-        if (source != null && thumbnail != null) {
-          await cacheGenerationInputPreview(pending, source, thumbnail);
-        }
-      }
-      if (pending.config.source != null && sourceThumbnailBytes != null) {
-        await cacheGenerationInputPreview(
-          pending,
-          pending.config.source!,
-          sourceThumbnailBytes,
-        );
-      }
-      if (pending.creditsAfter != null) credits = pending.creditsAfter;
-    } on Object catch (error) {
-      await _invalidateRejectedApiKey(error, showNoticeOnFailure: true);
-      final message = _message(error);
-      try {
-        _apply(await gateway.load());
-      } on Object {
-        pending = pending.copyWith(
-          status: 'Error',
-          error: message,
-          updatedAt: DateTime.now().toUtc(),
-        );
-        _replaceInMemory(pending);
-      }
-      if (_isVisualReferenceCompatibilityError(message)) {
-        showNotice(
-          '$message Turn on Normalize visual references and try again.',
-          action: AppNoticeAction.retryWithVisualNormalization,
-        );
-      } else {
-        showNotice(message);
-      }
-    } finally {
-      submitting = false;
-      notifyListeners();
-    }
-  }
 
   void _replaceInMemory(Generation generation) {
     final current = snapshot;
@@ -6614,74 +6515,82 @@ class AppController extends ChangeNotifier {
   Future<bool> _invalidateRejectedApiKey(
     Object? error, {
     required bool showNoticeOnFailure,
+    String? providerId,
   }) async {
     if (!_isApiKeyRejection(error)) return false;
+    final provider = providerId ?? selectedProviderId;
     _apply(await gateway.load());
-    credits = null;
-    if (!hasApiKey) {
-      creditError =
-          '${selectedProvider.name} rejected the active API key. Add another key.';
+    if (selectedProviderId == provider) credits = null;
+    if (!hasApiKeyFor(provider)) {
+      final message =
+          '${providerById(provider).name} rejected the active API key. Add another key.';
+      if (selectedProviderId == provider) creditError = message;
       if (showNoticeOnFailure) {
-        showNotice(creditError!);
+        showNotice(message);
         unawaited(navigate(AppSection.providers));
       }
     }
     return true;
   }
 
-  Future<bool> refreshCredits() {
-    final running = _creditRefreshFuture;
+  Future<bool> refreshCredits({String? providerId}) {
+    final provider = providerId ?? selectedProviderId;
+    final running = _creditRefreshFutures[provider];
     if (running != null) return running;
     late Future<bool> tracked;
-    tracked = _refreshCredits().whenComplete(() {
-      if (identical(_creditRefreshFuture, tracked)) {
-        _creditRefreshFuture = null;
+    tracked = _refreshCredits(provider).whenComplete(() {
+      if (identical(_creditRefreshFutures[provider], tracked)) {
+        _creditRefreshFutures.remove(provider);
       }
+      refreshingCredits = _creditRefreshFutures.isNotEmpty;
+      if (!_disposed) notifyListeners();
     });
-    _creditRefreshFuture = tracked;
+    _creditRefreshFutures[provider] = tracked;
     return tracked;
   }
 
-  Future<bool> _refreshCredits() async {
-    if (!selectedProvider.requiresApiKey) return true;
-    if (!hasApiKey) return false;
+  Future<bool> _refreshCredits(String provider) async {
+    if (!providerById(provider).requiresApiKey) return true;
+    if (!hasApiKeyFor(provider)) return false;
     refreshingCredits = true;
-    creditError = null;
+    if (selectedProviderId == provider) creditError = null;
     notifyListeners();
-    try {
-      for (var attempt = 0; attempt < 2 && hasApiKey; attempt += 1) {
-        try {
-          final providerGateway = gateway is ProviderGateway
-              ? gateway as ProviderGateway
-              : null;
-          final account = providerGateway == null
-              ? ProviderAccountStatus(
-                  provider: 'bfl',
-                  balance: await gateway.getCredits(),
-                  currency: 'credits',
-                )
-              : await providerGateway.getProviderAccount(selectedProviderId);
-          providerAccounts[selectedProviderId] = account;
+    for (var attempt = 0; attempt < 2 && hasApiKeyFor(provider); attempt += 1) {
+      try {
+        final providerGateway = gateway is ProviderGateway
+            ? gateway as ProviderGateway
+            : null;
+        final account = providerGateway == null
+            ? ProviderAccountStatus(
+                provider: 'bfl',
+                balance: await gateway.getCredits(),
+                currency: 'credits',
+              )
+            : await providerGateway.getProviderAccount(provider);
+        providerAccounts[provider] = account;
+        if (selectedProviderId == provider) {
           credits = account.balance;
           creditError = null;
-          return true;
-        } on Object catch (error) {
-          if (!_isApiKeyRejection(error)) {
-            creditError = _message(error);
-            return true;
-          }
-          await _invalidateRejectedApiKey(error, showNoticeOnFailure: false);
         }
+        return true;
+      } on Object catch (error) {
+        if (!_isApiKeyRejection(error)) {
+          if (selectedProviderId == provider) creditError = _message(error);
+          return true;
+        }
+        await _invalidateRejectedApiKey(
+          error,
+          showNoticeOnFailure: false,
+          providerId: provider,
+        );
       }
-      creditError =
-          '${selectedProvider.name} rejected the active API key. Add another key.';
-      showNotice(creditError!);
-      unawaited(navigate(AppSection.providers));
-      return false;
-    } finally {
-      refreshingCredits = false;
-      notifyListeners();
     }
+    final message =
+        '${providerById(provider).name} rejected the active API key. Add another key.';
+    if (selectedProviderId == provider) creditError = message;
+    showNotice(message);
+    unawaited(navigate(AppSection.providers));
+    return false;
   }
 
   Future<double> verifyKey(String candidate) async {
@@ -6843,43 +6752,45 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  Map<String, Object?> _providerEstimateInput() => <String, Object?>{
+    'prompt': generationPrompt,
+    'aspect_ratio': form.aspectRatio,
+    'duration': form.duration,
+    'resolution': form.resolution,
+    'generate_audio': form.generateAudio,
+    'safety_tolerance': form.safetyTolerance,
+    'mode': form.mode.wireValue,
+    'draft': form.draft,
+    'exact_timing': form.exactTiming,
+    'frame_rate': form.frameRate,
+    'reference_task': form.referenceTask.name,
+    'reference_count': form.references.length,
+    'reference_types': form.references
+        .map((reference) => reference.kind.name)
+        .toList(),
+    'keyframe_count': form.keyframes.length,
+    'keyframes': form.keyframes
+        .map(
+          (frame) => <String, Object?>{
+            'role': frame.role.name,
+            if (form.usesTimedKeyframes) 'seconds': frame.seconds,
+          },
+        )
+        .toList(),
+    'upscale_factor': form.upscaleFactor,
+    'creativity': form.upscaleCreativity,
+    if (form.videoMetadata != null) ...<String, Object?>{
+      'source_width': form.videoMetadata!.width,
+      'source_height': form.videoMetadata!.height,
+      'source_duration': form.videoMetadata!.durationSeconds,
+    },
+  };
+
   Future<void> refreshProviderEstimate() async {
     _estimateTimer?.cancel();
     if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
     final revision = _estimateRevision;
-    final input = <String, Object?>{
-      'prompt': generationPrompt,
-      'aspect_ratio': form.aspectRatio,
-      'duration': form.duration,
-      'resolution': form.resolution,
-      'generate_audio': form.generateAudio,
-      'safety_tolerance': form.safetyTolerance,
-      'mode': form.mode.wireValue,
-      'draft': form.draft,
-      'exact_timing': form.exactTiming,
-      'frame_rate': form.frameRate,
-      'reference_task': form.referenceTask.name,
-      'reference_count': form.references.length,
-      'reference_types': form.references
-          .map((reference) => reference.kind.name)
-          .toList(),
-      'keyframe_count': form.keyframes.length,
-      'keyframes': form.keyframes
-          .map(
-            (frame) => <String, Object?>{
-              'role': frame.role.name,
-              if (form.usesTimedKeyframes) 'seconds': frame.seconds,
-            },
-          )
-          .toList(),
-      'upscale_factor': form.upscaleFactor,
-      'creativity': form.upscaleCreativity,
-      if (form.videoMetadata != null) ...<String, Object?>{
-        'source_width': form.videoMetadata!.width,
-        'source_height': form.videoMetadata!.height,
-        'source_duration': form.videoMetadata!.durationSeconds,
-      },
-    };
+    final input = _providerEstimateInput();
     try {
       final estimate = await (gateway as ProviderGateway).quoteProviderCost(
         selectedProviderId,
@@ -7696,6 +7607,7 @@ class AppController extends ChangeNotifier {
       _scheduleComposerTabsSave(touched: tab);
     } on Object catch (error) {
       showNotice(_message(error));
+      return;
     }
     await navigate(AppSection.create);
     showNotice('Prompt, settings, and retained references copied.');
@@ -7971,6 +7883,7 @@ class AppController extends ChangeNotifier {
     _noticeTimer?.cancel();
     _prefetchDebounce?.cancel();
     _composerTabsSaveTimer?.cancel();
+    _composerSaveRetry?.cancel();
     super.dispose();
   }
 }

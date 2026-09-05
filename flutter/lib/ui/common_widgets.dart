@@ -705,7 +705,10 @@ class StatusBadge extends StatelessWidget {
     if (!shouldShow(item)) {
       return const SizedBox.shrink();
     }
-    final (background, foreground) = item.isStatusUnavailable
+    final (
+      background,
+      foreground,
+    ) = item.isStatusUnavailable || item.isSubmissionUnknown
         ? (context.colors.errorContainer, context.colors.onErrorContainer)
         : item.isWorking
         ? (
@@ -731,6 +734,9 @@ class StatusBadge extends StatelessWidget {
         children: <Widget>[
           if (item.isStatusUnavailable) ...<Widget>[
             Icon(Icons.cloud_off_rounded, size: 12, color: foreground),
+            const SizedBox(width: 5),
+          ] else if (item.isSubmissionUnknown) ...<Widget>[
+            Icon(Icons.help_outline_rounded, size: 12, color: foreground),
             const SizedBox(width: 5),
           ] else if (item.isWorking) ...<Widget>[
             SizedBox.square(
@@ -2797,10 +2803,10 @@ class _GenerationCostChipState extends State<GenerationCostChip> {
     final maximum = item.cost ?? item.estimatedCreditsMax;
     if (minimum == null || maximum == null) return const SizedBox.shrink();
     final realizedUsd = recordedRealizedCostUsd(item);
-    // A failed generation only carries a realized charge when the terminal
-    // poll confirmed it; a submit-time observation stays estimate wording.
-    final unconfirmedFailure = item.isFailed && !countsTowardSpend(item);
-    final exact = realizedUsd != null && !unconfirmedFailure;
+    final accountObservation = isAccountBalanceCostSource(
+      item.realizedCostSource,
+    );
+    final exact = realizedUsd != null && countsTowardSpend(item);
     final usesUsd = item.billingUnit == 'usd';
     final background = exact
         ? context.colors.primaryContainer
@@ -2815,7 +2821,11 @@ class _GenerationCostChipState extends State<GenerationCostChip> {
     );
     final details = <Widget>[
       Text(
-        '${exact ? 'Realized cost' : 'Estimated'} · '
+        '${exact
+            ? 'Realized cost'
+            : accountObservation
+            ? 'Account activity; task charge unconfirmed'
+            : 'Estimated'} · '
         '${usesUsd ? formatUsdAmountRange(minimum, maximum) : '${formatCreditRange(minimum, maximum)} cr'}'
         ' · ${usesUsd ? providerNameForHistory(item.provider) : formatUsdRange(minimum, maximum)}',
         style: TextStyle(
@@ -2840,9 +2850,15 @@ class _GenerationCostChipState extends State<GenerationCostChip> {
           '${item.realizedCostSource == null ? '' : ' · ${item.realizedCostSource!.replaceAll('-', ' ')}'}',
           style: detailStyle,
         ),
-      if (unconfirmedFailure && realizedUsd != null)
+      if (accountObservation)
         Text(
-          'No confirmed charge · submit-time estimate '
+          'This balance change can include other jobs, deposits, or refunds. '
+          'Task charge unconfirmed.',
+          style: detailStyle,
+        )
+      else if (!exact && realizedUsd != null)
+        Text(
+          'Task charge unconfirmed · estimate '
           '${formatUsdAmount(realizedUsd)}',
           style: detailStyle,
         ),
@@ -2883,6 +2899,8 @@ class _GenerationCostChipState extends State<GenerationCostChip> {
       builder: (context, menu, _) => Tooltip(
         message: exact
             ? 'Realized cost — tap for details'
+            : accountObservation
+            ? 'Account activity; task charge unconfirmed — tap for details'
             : 'Estimated cost — tap for details',
         child: Material(
           color: background,

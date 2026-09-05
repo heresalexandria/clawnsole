@@ -28,6 +28,36 @@ const references = [
 ];
 
 void main() {
+  testWidgets('Escape then Tab lets a screenplay editor release focus', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              ReferencePromptField(
+                prompt: 'INT. STUDIO - DAY',
+                formRevision: 0,
+                references: const [],
+                screenplayMode: true,
+                onChanged: (_) {},
+              ),
+              TextButton(onPressed: () {}, child: const Text('Next control')),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(TextFormField));
+    final editor = tester.widget<EditableText>(find.byType(EditableText));
+    expect(editor.focusNode.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(editor.focusNode.hasFocus, isFalse);
+  });
+
   testWidgets(
     'plaintext wrapped-line navigation matches a stock text field after screenplay',
     (tester) async {

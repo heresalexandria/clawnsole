@@ -103,8 +103,12 @@ class SettingsVaultDataStore
 
   @override
   Future<void> write(StoredData data) => _serialized(() async {
-    final current = await _delegate.read();
-    final state = await _ensureState(current);
+    // A read already hydrated secure state for ordinary read/edit/write calls.
+    // Do not turn a local save into another network read, or replace the
+    // caller's library baseline while preparing its credentials.
+    final state = _stateLoaded && _state != null
+        ? _state
+        : await _ensureState(await _delegate.read());
     if (state == null) {
       if (_containsCredentials(data)) {
         throw StateError('Secure device storage is unavailable.');

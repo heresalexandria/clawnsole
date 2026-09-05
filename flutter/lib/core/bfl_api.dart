@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'generation_status.dart';
 
 class ProviderException implements Exception {
@@ -65,6 +66,7 @@ class BflApi {
     String apiKey,
     Map<String, Object?> input, {
     String model = 'flux-3-video',
+    BeforeGenerationSend? beforeSend,
   }) async {
     final upscale = model == 'flux-tools-video-upscale-v1';
     final requestInput = Map<String, Object?>.from(input);
@@ -81,6 +83,8 @@ class BflApi {
         requestInput['input_video'] = video.substring(separator + 1);
       }
     }
+    final encodedPayload = jsonEncode(requestInput);
+    await beforeSend?.call();
     final payload = await _read(
       await _request(
         _client.post(
@@ -88,7 +92,7 @@ class BflApi {
             upscale ? '/v1/flux-tools/video-upscale-v1' : '/v1/flux-3-video',
           ),
           headers: _headers(apiKey, json: true),
-          body: jsonEncode(requestInput),
+          body: encodedPayload,
         ),
         upscale ? 'submit the video upscale' : 'submit the generation',
       ),

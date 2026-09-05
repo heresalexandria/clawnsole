@@ -22,6 +22,7 @@ class GoogleDriveStore implements DurableDataStore {
     GoogleDriveAssetPresenter? presenter,
     DateTime Function()? clock,
     this.pruneGracePeriod = const Duration(hours: 1),
+    this.metadataReadTimeout = const Duration(seconds: 30),
   }) : _client = client ?? http.Client(),
        _apiFactory = apiFactory,
        _presenter = presenter ?? createGoogleDriveAssetPresenter(),
@@ -32,6 +33,7 @@ class GoogleDriveStore implements DurableDataStore {
   final GoogleDriveAssetPresenter _presenter;
   final DateTime Function() _clock;
   final Duration pruneGracePeriod;
+  final Duration metadataReadTimeout;
 
   GoogleDriveApi? _api;
   GoogleDriveFile? _stateFile;
@@ -154,11 +156,13 @@ class GoogleDriveStore implements DurableDataStore {
       // Reads dominate this store's Drive traffic (every write also reads to
       // merge). Once one full read has landed, later reads validate the held
       // copy with If-None-Match instead of re-downloading the whole file.
-      final content = await _api!.readFile(
-        current.id,
-        ifNoneMatch: cached == null ? null : current.etag,
-      );
-      if (content == null) return cached!;
+      final content = await _api!
+          .readFile(
+            current.id,
+            ifNoneMatch: cached == null ? null : current.etag,
+          )
+          .timeout(metadataReadTimeout);
+      if (content == null) return cached!.copyWith(driveSyncBase: cached);
       _stateFile = GoogleDriveFile(
         id: current.id,
         name: current.name,
@@ -169,7 +173,7 @@ class GoogleDriveStore implements DurableDataStore {
       );
       final data = StoredData.decode(utf8.decode(content.bytes));
       _lastData = data;
-      return data;
+      return data.copyWith(driveSyncBase: data);
     } on GoogleDriveException catch (error) {
       _handleDriveError(error);
       rethrow;
@@ -186,7 +190,7 @@ class GoogleDriveStore implements DurableDataStore {
         _acknowledgePublishedAssets(data);
         return;
       }
-      final base = _lastData ?? await read();
+      final base = data.driveSyncBase ?? _lastData ?? await read();
       var remote = await read();
       var merged = mergeGoogleDriveData(base: base, next: data, remote: remote);
       // A 412 means another device published between our read and write.
@@ -472,6 +476,12 @@ class GoogleDriveStore implements DurableDataStore {
       retained.addAll(
         _referencedAssetIds(canonical.generations, canonical.savedReferences),
       );
+      for (final json
+          in canonical.composerTabs?.retainedAssetJson ??
+              const <Map<String, Object?>>[]) {
+        final reference = AssetReference.fromJson(json);
+        if (reference.kind == 'drive') retained.add(reference.value);
+      }
     }
     final cutoff = _now().subtract(pruneGracePeriod);
     _pendingAssetIds.removeWhere((_, createdAt) => createdAt.isBefore(cutoff));
@@ -505,7 +515,7 @@ class GoogleDriveStore implements DurableDataStore {
     var assetBytes = 0;
     var assets = 0;
     if (_api != null && _assetsFolderId.isNotEmpty) {
-      final files = await _statsAssets();
+      final files = await _statsAssets().timeout(metadataReadTimeout);
       assetBytes = files.fold(0, (sum, file) => sum + file.size);
       assets = files.length;
     }

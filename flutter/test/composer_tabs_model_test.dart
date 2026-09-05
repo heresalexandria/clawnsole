@@ -6,6 +6,57 @@ import 'package:clawnsole/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('future workspace schemas cannot silently discard draft fields', () {
+    expect(
+      () => ComposerTabsState.fromJson({'schemaVersion': 6}),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => ComposerTabsState.fromJson({'schemaVersion': 'five'}),
+      throwsFormatException,
+    );
+    expect(ComposerTabsState.fromJson({}).tabs, isEmpty);
+  });
+
+  test(
+    'closed draft recipes round-trip and retain media across workspace merge',
+    () {
+      const closed = ComposerTabRecord(
+        id: 'closed',
+        prompt: 'Keep me',
+        mediaConfig: {
+          'references': [
+            {
+              'source': {
+                'kind': 'local',
+                'value': 'assets/keep.png',
+                'label': 'Keep',
+              },
+            },
+          ],
+        },
+      );
+      final workspace = ComposerTabsState.fromJson(
+        jsonDecode(
+              jsonEncode(
+                const ComposerTabsState(
+                  closedTabs: [closed],
+                  closedTabIds: {'closed'},
+                ).toJson(),
+              ),
+            )
+            as Map<String, Object?>,
+      );
+      final merged = mergeComposerWorkspaces(
+        workspace,
+        const ComposerTabsState(tabs: [closed]),
+      )!;
+      expect(merged.tabs, isEmpty);
+      expect(merged.closedTabs.single.prompt, 'Keep me');
+      expect(merged.retainedAssetJson.single['value'], 'assets/keep.png');
+    },
+  );
+
   test('composer tab records round-trip through JSON', () {
     final record = ComposerTabRecord(
       id: 'tab-1',

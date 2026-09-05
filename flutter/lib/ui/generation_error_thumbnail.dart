@@ -24,7 +24,8 @@ class GenerationErrorThumbnail extends StatelessWidget {
   /// media is ground truth: a late failure status on a playable record must
   /// not replace its media with test bars.
   static bool shouldShow(Generation item) =>
-      !item.hasDeliveredMedia && (item.isFailed || item.error != null);
+      !item.hasDeliveredMedia &&
+      (item.isFailed || item.isSubmissionUnknown || item.error != null);
 
   /// The most specific problem the record carries. Identifier-shaped values
   /// (a bare task id stored by older builds) are never shown; an expired
@@ -42,12 +43,14 @@ class GenerationErrorThumbnail extends StatelessWidget {
     if (isExpiryShapedStatus(item.status) || item.deliveryExpired) {
       return expiredGenerationMessage;
     }
+    if (item.isSubmissionUnknown) return submissionUnknownMessage;
     return 'This generation failed.';
   }
 
   @override
   Widget build(BuildContext context) => Semantics(
-    label: 'Generation failed: ${message(item)}',
+    label:
+        '${item.isSubmissionUnknown ? 'Submission unknown' : 'Generation failed'}: ${message(item)}',
     child: Stack(
       fit: StackFit.expand,
       children: <Widget>[

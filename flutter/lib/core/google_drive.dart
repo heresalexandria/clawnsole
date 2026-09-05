@@ -103,6 +103,12 @@ List<T> _mergeById<T>({
     if (previous == null ||
         jsonEncode(json(previous)) != jsonEncode(json(item))) {
       final remoteItem = merged[key];
+      if (previous != null && remoteItem == null) {
+        // The operation began with this record, so its absence in the latest
+        // remote snapshot is a deletion. A stale metadata edit or status poll
+        // must not recreate it. New records still have no previous value.
+        continue;
+      }
       final remoteAlsoChanged =
           previous != null &&
           remoteItem != null &&

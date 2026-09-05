@@ -3,8 +3,10 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
+import 'pricing.dart';
 import 'provider_catalog.dart';
 import 'reference_prompts.dart';
 
@@ -253,8 +255,9 @@ class AtlasCloudApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+  }) async {
     final payload = generationPayload(
       model,
       await _uploadBinaryReferences(key, input),
@@ -265,12 +268,14 @@ class AtlasCloudApi {
     } on Object {
       // Pricing is advisory; a temporary quote failure must not block a render.
     }
+    final encodedPayload = jsonEncode(payload);
+    await beforeSend?.call();
     final body = await _read(
       await _request(
         _client.post(
           _baseUrl.resolve('/api/v1/model/generateVideo'),
           headers: _headers(key, json: true),
-          body: jsonEncode(payload),
+          body: encodedPayload,
         ),
         'submit the generation',
       ),
@@ -284,11 +289,13 @@ class AtlasCloudApi {
         status: 502,
       );
     }
+    final useQuote = cost != null && providerCostFromPayload(data) == null;
     return <String, Object?>{
       ...data,
       'id': id,
-      if (cost != null) 'cost': cost,
-      if (cost != null) 'cost_unit': 'usd',
+      if (useQuote) 'cost': cost,
+      if (useQuote) 'cost_unit': 'usd',
+      if (useQuote) 'cost_source': 'provider-quote',
       'polling_url': _baseUrl
           .resolve('/api/v1/model/prediction/$id')
           .toString(),

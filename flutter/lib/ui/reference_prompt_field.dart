@@ -183,6 +183,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
   int? _highlightedSuggestion;
   int? _screenplayHighlight;
+  bool _allowFocusTraversal = false;
   bool _dismissScreenplaySuggestions = false;
 
   List<String> get _screenplaySuggestions =>
@@ -414,15 +415,23 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       return KeyEventResult.ignored;
     }
     if (widget.screenplayMode) {
-      if (event.logicalKey == LogicalKeyboardKey.tab) {
-        _cycleElement(HardwareKeyboard.instance.isShiftPressed);
-        return KeyEventResult.handled;
-      }
-      final options = _screenplaySuggestions;
-      if (event.logicalKey == LogicalKeyboardKey.escape && options.isNotEmpty) {
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        _allowFocusTraversal = true;
         setState(() => _dismissScreenplaySuggestions = true);
         return KeyEventResult.handled;
       }
+      if (event.logicalKey == LogicalKeyboardKey.tab &&
+          !_allowFocusTraversal &&
+          !HardwareKeyboard.instance.isControlPressed &&
+          !HardwareKeyboard.instance.isMetaPressed &&
+          !HardwareKeyboard.instance.isAltPressed) {
+        _cycleElement(HardwareKeyboard.instance.isShiftPressed);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey != LogicalKeyboardKey.tab) {
+        _allowFocusTraversal = false;
+      }
+      final options = _screenplaySuggestions;
       if (_suggestions.isEmpty && options.isNotEmpty) {
         if (HardwareKeyboard.instance.isAltPressed &&
             (event.logicalKey == LogicalKeyboardKey.arrowDown ||
@@ -788,7 +797,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
               child: Text(
                 MediaQuery.sizeOf(context).width < 620
                     ? 'Tap the element menu or arrows to change line type. Return continues the script.'
-                    : 'Enter continues the script · Tab / Shift Tab changes element',
+                    : 'Enter continues the script · Tab / Shift Tab changes element · Esc then Tab leaves the editor',
                 style: TextStyle(
                   fontSize: 11,
                   color: context.colors.onSurfaceVariant,

@@ -18,12 +18,14 @@ import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/library_rules.dart';
+import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/pricing.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/core/prompt_rewrite_router.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/provider_submission.dart';
 import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/screenplay.dart';
@@ -457,6 +459,14 @@ class CompanionStore implements DurableDataStore {
   ]) async {
     if (!await assets.exists()) return;
     final retained = _references(generations, savedReferences);
+    // Pruning can run inside a queued mutation, so read raw committed state
+    // instead of waiting on the queue that currently owns this operation.
+    for (final json
+        in (await _readRaw()).composerTabs?.retainedAssetJson ??
+            const <Map<String, Object?>>[]) {
+      final reference = AssetReference.fromJson(json);
+      if (reference.kind == 'local') retained.add(reference.value);
+    }
     await for (final entry in assets.list()) {
       if (entry is! File) continue;
       final name = entry.uri.pathSegments.last;
@@ -485,7 +495,7 @@ class CompanionStore implements DurableDataStore {
   /// native store: the file holds every provider receipt, so no write may
   /// ever leave a window in which it does not exist.
   Future<void> _writeRaw(StoredData data) =>
-      writeTextAtomically(file, data.encode());
+      writeLibraryTextAtomically(file, data.encode());
 
   @override
   Future<StoredData> read() async {
@@ -515,7 +525,7 @@ class CompanionStore implements DurableDataStore {
   @override
   Future<void> delete() {
     final operation = _queue.then((_) async {
-      if (await file.exists()) await file.delete();
+      await deleteTextWithRecovery(file);
       await clearAssets();
     });
     _queue = operation.then<void>((_) {}, onError: (_) {});
@@ -1110,15 +1120,17 @@ class CompanionApp {
       });
     } on ProviderException catch (error) {
       return _json(request.response, error.status ?? 500, <String, Object?>{
-        'error': error.message,
-        if (error.details != null) 'details': error.details,
+        'error': compactProviderResponse(error.message),
+        if (error.details != null)
+          'details': sanitizeProviderDiagnosticValue(error.details),
       });
     } on Object catch (error, stack) {
-      stderr.writeln(error);
+      final message = compactProviderResponse(
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+      stderr.writeln(message);
       stderr.writeln(stack);
-      return _json(request.response, 500, <String, Object?>{
-        'error': error.toString().replaceFirst('Bad state: ', ''),
-      });
+      return _json(request.response, 500, <String, Object?>{'error': message});
     }
   }
 
@@ -2283,6 +2295,13 @@ class CompanionApp {
     var generation = Generation.fromJson(
       rawRecord.map((key, value) => MapEntry(key.toString(), value)),
     );
+    final existing = data.generations
+        .where((item) => item.localId == generation.localId)
+        .firstOrNull;
+    if (existing != null &&
+        (existing.canCheckStatus || existing.isSubmissionUnknown)) {
+      return existing;
+    }
     var cleanInput = input.map((key, value) => MapEntry(key.toString(), value));
     final provider = generation.provider;
     if (provider == 'apple-local') {
@@ -2352,6 +2371,7 @@ class CompanionApp {
       updatedAt: DateTime.now().toUtc(),
     );
     generation = await _upsert(generation);
+    var mayHaveBeenSent = false;
     try {
       final creditsBefore = await _balanceSafely(provider, key);
       if (creditsBefore != null) {
@@ -2363,10 +2383,25 @@ class CompanionApp {
         key,
         generation.model,
         cleanInput,
+        operationId: generation.localId,
+        beforeSend: () async {
+          generation = await _upsert(
+            generation.copyWith(
+              status: submissionUnknownStatus,
+              error: submissionUnknownMessage,
+              clearProgress: true,
+              updatedAt: DateTime.now().toUtc(),
+            ),
+          );
+          mayHaveBeenSent = true;
+        },
       );
       final requestId = receipt['id'];
       final pollingUrl = receipt['polling_url'];
-      if (requestId is! String || pollingUrl is! String) {
+      if (requestId is! String ||
+          requestId.trim().isEmpty ||
+          pollingUrl is! String ||
+          pollingUrl.trim().isEmpty) {
         throw const ProviderException(
           'The provider returned an invalid generation receipt.',
           status: 502,
@@ -2379,6 +2414,7 @@ class CompanionApp {
         requestId: requestId,
         pollingUrl: pollingUrl,
         status: 'Pending',
+        clearError: true,
         clearProgress: true,
         providerAcceptedAt: acceptedAt,
         estimatedCreditsMax: receiptEstimate,
@@ -2420,15 +2456,20 @@ class CompanionApp {
       return generation;
     } on Object catch (error) {
       if (generation.canCheckStatus) return generation;
+      final acceptanceUnknown =
+          mayHaveBeenSent && !isDefinitiveSubmissionRejection(error);
       generation = generation.copyWith(
-        status: 'Error',
-        error: generationExceptionMessage(error),
+        status: acceptanceUnknown ? submissionUnknownStatus : 'Error',
+        error: acceptanceUnknown
+            ? submissionUnknownMessage
+            : generationExceptionMessage(error),
         lastProviderStatusCode: providerHttpStatus(error),
         lastProviderResponse: providerErrorResponse(error),
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
       generation = await _upsert(generation);
+      if (acceptanceUnknown) return generation;
       rethrow;
     }
   }

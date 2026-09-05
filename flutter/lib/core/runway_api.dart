@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
@@ -101,8 +102,9 @@ class RunwayApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+  }) async {
     final mode = input['mode']?.toString() ?? 't2v';
     final frames = await _prepareFrames(key, input['keyframes']);
     final images = await _prepareSources(key, input['reference_images']);
@@ -273,12 +275,14 @@ class RunwayApi {
       );
     }
 
+    final encodedPayload = jsonEncode(payload);
+    await beforeSend?.call();
     final body = await _read(
       await _request(
         _client.post(
           _baseUrl.resolve(endpoint),
           headers: _headers(key, json: true),
-          body: jsonEncode(payload),
+          body: encodedPayload,
         ),
         'submit the generation',
       ),

@@ -2276,7 +2276,7 @@ void main() {
     expect(countsTowardSpend(build(status: 'submitting')), isFalse);
     expect(countsTowardSpend(build(status: 'Unknown')), isFalse);
 
-    // Delivered generations always count, whatever recorded the cost.
+    // Account observations remain unconfirmed even after delivery.
     expect(
       countsTowardSpend(
         build(
@@ -2285,7 +2285,7 @@ void main() {
           realizedCostSource: 'balance-delta',
         ),
       ),
-      isTrue,
+      isFalse,
     );
     expect(countsTowardSpend(build(status: 'Ready', cost: 1.2)), isTrue);
 
@@ -2337,7 +2337,7 @@ void main() {
           cost: 1.2,
         ),
       ),
-      isTrue,
+      isFalse,
     );
   });
 
@@ -2381,7 +2381,7 @@ void main() {
       terminal: true,
     );
     expect(measured.usd, 1.5);
-    expect(measured.source, terminalBalanceDeltaCostSource);
+    expect(measured.source, accountBalanceObservationCostSource);
 
     // A refunded failure leaves only the submit-time observation, which the
     // spend accounting then excludes.
@@ -2392,12 +2392,12 @@ void main() {
       terminal: true,
     );
     expect(refunded.usd, 1.5);
-    expect(refunded.source, 'balance-delta');
+    expect(refunded.source, accountBalanceObservationCostSource);
 
     // Non-terminal polls keep the submit-time source untouched.
     final pending = resolveProviderCost(submitted, <String, Object?>{
       'status': 'Pending',
     });
-    expect(pending.source, 'balance-delta');
+    expect(pending.source, accountBalanceObservationCostSource);
   });
 }

@@ -13,6 +13,7 @@ Future<void> writeTextAtomically(
   File file,
   String contents, {
   bool keepBackup = true,
+  String Function(String contents)? prepareBackup,
 }) async {
   await file.parent.create(recursive: true);
   final temporary = File(
@@ -21,7 +22,15 @@ Future<void> writeTextAtomically(
   await temporary.writeAsString(contents, flush: true);
   if (keepBackup && await file.exists()) {
     try {
-      await file.copy(backupPath(file));
+      if (prepareBackup == null) {
+        await file.copy(backupPath(file));
+      } else {
+        await writeTextAtomically(
+          File(backupPath(file)),
+          prepareBackup(await file.readAsString()),
+          keepBackup: false,
+        );
+      }
     } on FileSystemException {
       // A backup is insurance, never a reason to fail the write itself.
     }
@@ -40,6 +49,25 @@ Future<void> writeTextAtomically(
 
 /// The sibling file holding the previous contents of [file].
 String backupPath(File file) => '${file.path}.bak';
+
+/// Removes a library and only its owned recovery siblings. Recovery copies
+/// are removed before the primary, so an interrupted/failed deletion cannot
+/// make a missing primary silently revive a backup on the next launch.
+Future<void> deleteTextWithRecovery(File file) async {
+  if (await file.parent.exists()) {
+    final name = file.uri.pathSegments.last;
+    await for (final entry in file.parent.list()) {
+      if (entry is! File) continue;
+      final sibling = entry.uri.pathSegments.last;
+      if (sibling == '$name.bak' ||
+          sibling.startsWith('$name.corrupt-') ||
+          (sibling.startsWith('$name.') && sibling.endsWith('.tmp'))) {
+        await entry.delete();
+      }
+    }
+  }
+  if (await file.exists()) await file.delete();
+}
 
 /// Reads [file], falling back to its backup when the canonical copy is
 /// missing or fails [decode]. A malformed canonical file is preserved as a

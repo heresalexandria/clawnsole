@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:clawnsole/core/provider_submission.dart';
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
@@ -509,7 +510,7 @@ void main() {
     );
 
     final recovered = interrupted.recoverInterruptedSubmission(now);
-    expect(recovered.status, 'Error');
+    expect(recovered.status, 'Submission unknown');
     expect(recovered.isWorking, isFalse);
     expect(recovered.error, contains('interrupted'));
   });
@@ -8920,10 +8921,14 @@ class _ReceiptOrderingApi extends BflApi {
     String apiKey,
     Map<String, Object?> input, {
     String model = 'flux-3-video',
-  }) async => <String, Object?>{
-    'id': 'provider-receipt',
-    'polling_url': 'https://api.bfl.ai/v1/get_result?id=provider-receipt',
-  };
+    BeforeGenerationSend? beforeSend,
+  }) async {
+    await beforeSend?.call();
+    return <String, Object?>{
+      'id': 'provider-receipt',
+      'polling_url': 'https://api.bfl.ai/v1/get_result?id=provider-receipt',
+    };
+  }
 }
 
 class _ReadyResultApi extends BflApi {

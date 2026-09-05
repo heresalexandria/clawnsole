@@ -1232,7 +1232,7 @@ Future<bool> confirmGenerationRecordRemoval(BuildContext context) async {
     builder: (context) => AlertDialog(
       title: const Text('Remove this record?'),
       content: const Text(
-        'This removes compact history only. It does not cancel work already submitted to the provider.',
+        'This removes the generation record and its unshared retained media. Media still used elsewhere is kept. It does not cancel work already submitted to the provider.',
       ),
       actions: <Widget>[
         TextButton(

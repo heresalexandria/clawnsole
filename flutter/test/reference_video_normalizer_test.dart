@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:clawnsole/core/provider_submission.dart';
 import 'package:clawnsole/core/artcraft_api.dart';
 import 'package:clawnsole/core/direct_gateway.dart';
 import 'package:clawnsole/core/durable_data_store.dart';
@@ -1436,8 +1437,11 @@ class _CapturingArtCraftApi extends ArtCraftApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+    String? operationId,
+  }) async {
+    await beforeSend?.call();
     this.input = input;
     return <String, Object?>{
       'id': 'job',

@@ -141,30 +141,36 @@ double? recordedRealizedCostUsd(Generation generation) {
       : providerUnitsToUsd(generation.billingUnit, legacy);
 }
 
-/// Sources recorded only when a terminal poll confirmed the charge — either
-/// the provider reported it in the terminal payload or the balance stayed
-/// down after the run ended. Submit-time observations keep the legacy source
-/// names ('provider-reported', 'balance-delta', …), so persisted records from
-/// before this distinction parse unchanged and read as submit-time estimates.
+/// A task-specific amount returned with terminal provider status.
 const String terminalReportedCostSource = 'terminal-provider-reported';
+
+/// Historical account-delta labels remain readable, but are never evidence of
+/// a task charge: other jobs, devices, refunds and deposits share the balance.
 const String terminalBalanceDeltaCostSource = 'terminal-balance-delta';
+const String accountBalanceObservationCostSource =
+    'account-balance-observation';
+
+const String providerQuoteCostSource = 'provider-quote';
+
+bool isAccountBalanceCostSource(String? source) =>
+    source == 'balance-delta' ||
+    source == terminalBalanceDeltaCostSource ||
+    source == accountBalanceObservationCostSource;
 
 bool isTerminalRealizedCostSource(String? source) =>
-    source == terminalReportedCostSource ||
-    source == terminalBalanceDeltaCostSource;
+    source == terminalReportedCostSource;
 
-/// Whether [generation]'s recorded cost reflects money actually spent.
-///
-/// Ready generations count. In-flight work is not settled yet. Failed
-/// generations count only when a terminal poll confirmed the charge —
-/// submit-time observations are estimates that providers commonly refund
-/// when a generation fails.
+/// Historical inferred amounts stay visible as observations, but are excluded
+/// from spend and route calibration. A fixed published price is still a quote.
 bool countsTowardSpend(Generation generation) {
-  if (generation.isReady) return true;
-  if (generation.isFailed) {
-    return isTerminalRealizedCostSource(generation.realizedCostSource);
+  if (isAccountBalanceCostSource(generation.realizedCostSource) ||
+      generation.realizedCostSource == 'deterministic-route-price' ||
+      generation.realizedCostSource == providerQuoteCostSource) {
+    return false;
   }
-  return false;
+  if (generation.isReady) return true;
+  return generation.isFailed &&
+      isTerminalRealizedCostSource(generation.realizedCostSource);
 }
 
 class ResolvedProviderCost {
@@ -183,41 +189,30 @@ ResolvedProviderCost resolveProviderCost(
   bool terminal = false,
 }) {
   final reported = providerCostFromPayload(payload);
-  final before = generation.creditsBefore;
-  final balanceDelta = before != null && balanceAfter != null
-      ? before - balanceAfter
-      : null;
-  final measured = balanceDelta != null && balanceDelta > .0000001
-      ? balanceDelta
-      : null;
-  if (terminal && (reported != null || measured != null)) {
-    // Fresh terminal evidence supersedes the submit-time observation: it is
-    // what the provider actually settled, and its source marks the record as
-    // a confirmed charge even when the generation failed.
-    final units = reported ?? measured!;
+  // balanceAfter is intentionally account-level context only. Never attribute
+  // its delta to this job, including when the job is terminal.
+  if (reported != null) {
     return ResolvedProviderCost(
-      providerUnits: units,
-      usd: providerUnitsToUsd(generation.billingUnit, units),
-      source: reported != null
+      providerUnits: reported,
+      usd: providerUnitsToUsd(generation.billingUnit, reported),
+      source:
+          payload is Map && payload['cost_source'] == providerQuoteCostSource
+          ? providerQuoteCostSource
+          : terminal
           ? terminalReportedCostSource
-          : terminalBalanceDeltaCostSource,
+          : 'provider-reported',
     );
   }
-  final providerUnits = reported ?? measured ?? generation.cost;
   final existingUsd = generation.realizedCostUsd;
-  if (providerUnits != null) {
+  if (generation.cost != null || existingUsd != null) {
     return ResolvedProviderCost(
-      providerUnits: providerUnits,
+      providerUnits: generation.cost,
       usd:
           existingUsd ??
-          providerUnitsToUsd(generation.billingUnit, providerUnits),
-      source:
-          generation.realizedCostSource ??
-          (reported != null
-              ? 'provider-reported'
-              : measured != null
-              ? 'balance-delta'
-              : 'legacy-provider-charge'),
+          providerUnitsToUsd(generation.billingUnit, generation.cost!),
+      source: isAccountBalanceCostSource(generation.realizedCostSource)
+          ? accountBalanceObservationCostSource
+          : generation.realizedCostSource ?? 'legacy-provider-charge',
     );
   }
   final minimum = generation.quotedCostUsdMin;
@@ -232,11 +227,7 @@ ResolvedProviderCost resolveProviderCost(
       source: 'deterministic-route-price',
     );
   }
-  return ResolvedProviderCost(
-    providerUnits: generation.cost,
-    usd: existingUsd,
-    source: generation.realizedCostSource,
-  );
+  return const ResolvedProviderCost();
 }
 
 class RouteCostObservation {
@@ -244,15 +235,17 @@ class RouteCostObservation {
     required this.realizedUsd,
     required this.sampleCount,
     this.quotedUsd,
+    this.pairedSampleCount = 0,
+    this.medianVariancePercent,
   });
 
   final double realizedUsd;
   final double? quotedUsd;
   final int sampleCount;
+  final int pairedSampleCount;
+  final double? medianVariancePercent;
 
-  double? get variancePercent => quotedUsd == null || quotedUsd == 0
-      ? null
-      : (realizedUsd - quotedUsd!) / quotedUsd! * 100;
+  double? get variancePercent => medianVariancePercent;
 }
 
 RouteCostObservation? routeCostObservation(
@@ -260,6 +253,11 @@ RouteCostObservation? routeCostObservation(
   Iterable<Generation> history,
 ) {
   final matching = history.where((generation) {
+    if (!countsTowardSpend(generation) ||
+        recordedRealizedCostUsd(generation) == null ||
+        !route.modes.contains(generation.mode)) {
+      return false;
+    }
     if (generation.provider != route.provider) return false;
     if (generation.model == route.model) return true;
     if (!route.model.startsWith('${generation.model}:')) return false;
@@ -283,16 +281,28 @@ RouteCostObservation? routeCostObservation(
       .whereType<double>()
       .toList();
   if (realized.isEmpty) return null;
-  final quotes = matching.expand((generation) {
+  final pairedRealized = <double>[];
+  final quotes = <double>[];
+  final variances = <double>[];
+  for (final generation in matching) {
     final minimum = generation.quotedCostUsdMin;
     final maximum = generation.quotedCostUsdMax;
-    if (minimum == null || maximum == null) return const <double>[];
-    return <double>[(minimum + maximum) / 2];
-  }).toList();
+    final actual = recordedRealizedCostUsd(generation)!;
+    if (minimum == null || maximum == null || !actual.isFinite) continue;
+    final quote = (minimum + maximum) / 2;
+    if (!quote.isFinite || quote <= 0) continue;
+    pairedRealized.add(actual);
+    quotes.add(quote);
+    // Compare each film with its own quote before summarizing. Duration and
+    // configuration cannot mismatch the actual and expected amount.
+    variances.add((actual - quote) / quote * 100);
+  }
   return RouteCostObservation(
-    realizedUsd: _median(realized),
+    realizedUsd: _median(quotes.isEmpty ? realized : pairedRealized),
     quotedUsd: quotes.isEmpty ? null : _median(quotes),
-    sampleCount: realized.length,
+    sampleCount: quotes.isEmpty ? realized.length : pairedRealized.length,
+    pairedSampleCount: quotes.length,
+    medianVariancePercent: variances.isEmpty ? null : _median(variances),
   );
 }
 

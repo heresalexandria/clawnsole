@@ -348,16 +348,44 @@ class ComposerTabsState {
     this.tabs = const <ComposerTabRecord>[],
     this.activeTabId,
     this.closedTabIds = const {},
+    this.closedTabs = const [],
     this.aestheticReferences = const [],
     this.deletedAestheticIds = const {},
   });
 
   // Version 1 migrates additively to prose mode with no character links.
-  static const int schemaVersion = 4;
+  static const int schemaVersion = 5;
 
   final List<ComposerTabRecord> tabs;
   final String? activeTabId;
   final Set<String> closedTabIds;
+
+  /// Bounded recovery snapshots. Reopening creates a new id so a tombstone
+  /// still wins against stale copies of the original tab on another device.
+  final List<ComposerTabRecord> closedTabs;
+
+  Iterable<Map<String, Object?>> get retainedAssetJson sync* {
+    Iterable<Map<String, Object?>> visit(Object? value) sync* {
+      if (value is Map) {
+        if (value['kind'] is String && value['value'] is String) {
+          yield Map<String, Object?>.from(value);
+        } else {
+          for (final child in value.values) {
+            yield* visit(child);
+          }
+        }
+      } else if (value is List) {
+        for (final child in value) {
+          yield* visit(child);
+        }
+      }
+    }
+
+    for (final tab in [...tabs, ...closedTabs]) {
+      yield* visit(tab.mediaConfig);
+    }
+  }
+
   final List<AestheticReference> aestheticReferences;
   final Set<String> deletedAestheticIds;
 
@@ -370,6 +398,8 @@ class ComposerTabsState {
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
     'closedTabIds': closedTabIds.toList()..sort(),
+    if (closedTabs.isNotEmpty)
+      'closedTabs': closedTabs.map((tab) => tab.toJson()).toList(),
     'aestheticReferences': aestheticReferences
         .map((item) => item.toJson())
         .toList(),
@@ -380,6 +410,15 @@ class ComposerTabsState {
 
   /// Drops records without an id and later duplicates of the same id.
   factory ComposerTabsState.fromJson(Map<String, Object?> json) {
+    final version = json['schemaVersion'];
+    if (version != null && (version is! int || version < 1)) {
+      throw const FormatException('Invalid composer workspace schema version.');
+    }
+    if (version is int && version > schemaVersion) {
+      throw UnsupportedError(
+        'This workspace needs a newer version of Clawnsole (schema $version).',
+      );
+    }
     final seen = <String>{};
     final tabs = (json['tabs'] as List<Object?>? ?? const <Object?>[])
         .whereType<Map<Object?, Object?>>()
@@ -393,6 +432,15 @@ class ComposerTabsState {
     final active = json['activeTabId'];
     return ComposerTabsState(
       tabs: tabs,
+      closedTabs: (json['closedTabs'] as List? ?? [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                ComposerTabRecord.fromJson(Map<String, Object?>.from(item)),
+          )
+          .where((tab) => tab.id.isNotEmpty)
+          .take(10)
+          .toList(),
       closedTabIds: (json['closedTabIds'] as List? ?? [])
           .whereType<String>()
           .toSet(),
@@ -437,6 +485,25 @@ ComposerTabsState? mergeComposerWorkspaces(
       tabs[tab.id] = tab;
     }
   }
+  final recoverable = <String, ComposerTabRecord>{};
+  for (final tab in [...remote.closedTabs, ...local.closedTabs]) {
+    final previous = recoverable[tab.id];
+    if (previous == null ||
+        _newer(
+          tab.updatedAt,
+          previous.updatedAt,
+          tab.toJson(),
+          previous.toJson(),
+        )) {
+      recoverable[tab.id] = tab;
+    }
+  }
+  final closedTabs = recoverable.values.toList()
+    ..sort(
+      (a, b) => (b.updatedAt ?? DateTime.utc(1970)).compareTo(
+        a.updatedAt ?? DateTime.utc(1970),
+      ),
+    );
   final aesthetics = <String, AestheticReference>{};
   for (final item in [
     ...remote.aestheticReferences,
@@ -469,6 +536,7 @@ ComposerTabsState? mergeComposerWorkspaces(
         ? remote.activeTabId
         : ordered.firstOrNull?.id,
     closedTabIds: closed,
+    closedTabs: closedTabs.take(10).toList(),
     aestheticReferences: aesthetics.values.toList()
       ..sort((a, b) => a.id.compareTo(b.id)),
     deletedAestheticIds: deleted,

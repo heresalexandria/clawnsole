@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
 import 'reference_prompts.dart';
@@ -47,8 +48,9 @@ class LtxApi {
   Future<Map<String, Object?>> submit(
     String key,
     String model,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    BeforeGenerationSend? beforeSend,
+  }) async {
     final mode = input['mode']?.toString();
     final frames = (input['keyframes'] as List<Object?>? ?? const <Object?>[])
         .map(_frameSource)
@@ -102,12 +104,14 @@ class LtxApi {
       if (endpoint != 'text-to-video' && frames.length > 1)
         'last_frame_uri': frames.last,
     };
+    final encodedPayload = jsonEncode(payload);
+    await beforeSend?.call();
     final body = await _read(
       await _request(
         _client.post(
           _baseUrl.resolve('/v2/$endpoint'),
           headers: _headers(key, json: true),
-          body: jsonEncode(payload),
+          body: encodedPayload,
         ),
         'submit the generation',
       ),

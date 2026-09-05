@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 
 import 'asset_extensions.dart';
 import 'durable_data_store.dart';
@@ -104,7 +107,16 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
       _lastRemote = cachedRemote;
       return _combine(local, cachedRemote);
     }
-    final remote = _asDrive(await _drive.read());
+    StoredData remote;
+    try {
+      remote = _asDrive(await _drive.read());
+    } on Exception catch (error) {
+      if (!_isTransientDriveReadError(error)) rethrow;
+      // An active authorization is not a network guarantee. Keep device-local
+      // work usable against the last durable mirror during a transport outage.
+      _lastRemote = cachedRemote;
+      return _combine(local, cachedRemote);
+    }
     _lastRemote = remote;
     final combined = _combine(local, remote);
     await _persistLocalMirrorIfChanged(persisted, combined);
@@ -147,7 +159,9 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
       while (_workspaceDirty && isDriveConnected) {
         _workspaceDirty = false;
         final current = await _local.read();
-        final remote = _drivePartition(current);
+        final remote = _drivePartition(
+          current,
+        ).copyWith(driveSyncBase: _asCachedDrive(current));
         await _drive.write(remote);
         _lastRemote = _asDrive(_drive.lastData ?? remote);
         // Serialize the mirror update with new local drafts as well.
@@ -175,9 +189,10 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
   Future<void> write(StoredData data) async {
     final local = _localPartition(data);
     final remote = _drivePartition(data);
-    final remoteChanged = _lastRemote == null
+    final base = data.driveSyncBase ?? _lastRemote;
+    final remoteChanged = base == null
         ? _hasPortableContent(remote)
-        : _encoded(_lastRemote!) != _encoded(remote);
+        : _encoded(base) != _encoded(remote);
     if (remoteChanged) {
       if (!isDriveConnected) {
         if (_remoteRecordsChanged(remote)) {
@@ -480,10 +495,23 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
           (_lastLocal?.savedReferences.length ?? 0),
     );
     if (!isDriveConnected) return local;
-    final remote = await _drive.stats(
-      (_lastRemote?.generations.length ?? 0) +
-          (_lastRemote?.savedReferences.length ?? 0),
-    );
+    StorageStats remote;
+    try {
+      remote = await _drive.stats(
+        (_lastRemote?.generations.length ?? 0) +
+            (_lastRemote?.savedReferences.length ?? 0),
+      );
+    } on Exception catch (error) {
+      if (!_isTransientDriveReadError(error)) rethrow;
+      return StorageStats(
+        path: '${local.path} (Drive storage totals temporarily unavailable)',
+        bytes: local.bytes,
+        records: records,
+        assetBytes: local.assetBytes,
+        assets: local.assets,
+        lastUpdated: local.lastUpdated,
+      );
+    }
     return StorageStats(
       path: '${local.path} + ${remote.path}',
       bytes: local.bytes + remote.bytes,
@@ -621,48 +649,265 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
     );
   }
 
-  /// Copies everything local into Drive and, only after verifying that every
-  /// local record now has a Drive counterpart, removes the local originals.
-  /// The Drive folder linkage in the local file survives so the connection
-  /// resumes on the next launch. A partial copy aborts before any deletion.
+  /// Publishes the current local revision, verifies its metadata and uploaded
+  /// bytes, then removes only unchanged source records. An earlier copy is an
+  /// independent revision: keep it and publish a new id instead of overwriting
+  /// remote edits or mistaking its identity for proof that the source is safe.
   Future<GoogleDriveCopyCounts> moveLocalToDrive() async {
-    final copied = await copyLocalToDrive();
-    final current = await read();
-    final driveGenerationIds = current.generations
-        .where((item) => item.storage == LibraryStorage.drive)
-        .map((item) => item.localId)
+    if (!isDriveConnected) {
+      throw StateError('Connect Google Drive before moving local items.');
+    }
+    final source = _asLocal(await _local.read());
+    final remote = _asDrive(await _drive.read());
+    final remoteNames = remote.savedReferences
+        .map((item) => item.characterName?.trim().toUpperCase() ?? '')
+        .where((name) => name.isNotEmpty)
         .toSet();
-    final driveReferenceIds = current.savedReferences
-        .where((item) => item.storage == LibraryStorage.drive)
-        .map((item) => item.id)
-        .toSet();
-    final unverified =
-        current.generations.any(
-          (item) =>
-              item.storage == LibraryStorage.local &&
-              !driveGenerationIds.contains('drive-${item.localId}'),
-        ) ||
-        current.savedReferences.any(
-          (item) =>
-              item.storage == LibraryStorage.local &&
-              !driveReferenceIds.contains('drive-${item.id}'),
+    for (final item in source.savedReferences) {
+      final name = item.characterName?.trim().toUpperCase() ?? '';
+      if (name.isNotEmpty && remoteNames.contains(name)) {
+        throw StateError(
+          'Google Drive already has a reference assigned to $name. '
+          'Resolve that casting assignment before moving this library.',
         );
-    if (unverified) {
-      throw StateError(
-        'Some local items were not confirmed in Google Drive, so the local '
-        'library was kept.',
+      }
+    }
+    final random = Random.secure();
+    final moveId = List<int>.generate(
+      16,
+      (_) => random.nextInt(256),
+    ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
+    Map<String, String> ids(Iterable<String> local, Iterable<String> remote) {
+      final occupied = remote.toSet();
+      return <String, String>{
+        for (final id in local)
+          id: occupied.contains('drive-$id')
+              ? 'drive-$id-move-$moveId'
+              : 'drive-$id',
+      };
+    }
+
+    final folderIds = ids(
+      source.folders.map((item) => item.id),
+      remote.folders.map((item) => item.id),
+    );
+    final referenceIds = ids(
+      source.savedReferences.map((item) => item.id),
+      remote.savedReferences.map((item) => item.id),
+    );
+    final generationIds = ids(
+      source.generations.map((item) => item.localId),
+      remote.generations.map((item) => item.localId),
+    );
+    final assetCopies = <String, AssetReference>{};
+    final generations = <Generation>[];
+    for (final item in source.generations) {
+      generations.add(
+        await _copyGeneration(
+          item,
+          id: generationIds[item.localId]!,
+          referenceIdMap: referenceIds,
+          generationIdMap: generationIds,
+          folderId: folderIds[item.folderId],
+          assetCopies: assetCopies,
+        ),
       );
     }
-    await deleteLocalLibrary();
-    return copied;
+    final references = <SavedReference>[];
+    for (final item in source.savedReferences) {
+      references.add(
+        SavedReference.fromJson(<String, Object?>{
+          ...item.toJson(),
+          'id': referenceIds[item.id]!,
+          'storage': LibraryStorage.drive.name,
+          'folderId': folderIds[item.folderId],
+          'asset': (await _copyAsset(
+            item.asset,
+            copies: assetCopies,
+          ))!.toJson(),
+          if (item.thumbnailAsset != null)
+            'thumbnailAsset': (await _copyAsset(
+              item.thumbnailAsset,
+              copies: assetCopies,
+            ))!.toJson(),
+        }),
+      );
+    }
+    final folders = source.folders
+        .map(
+          (item) => item
+              .copyWith(
+                storage: LibraryStorage.drive,
+                parentId: folderIds[item.parentId],
+                clearParent: item.parentId == null,
+              )
+              .withId(folderIds[item.id]!),
+        )
+        .toList();
+
+    // Verify uploaded originals through an uncached Drive stream. A local
+    // upload cache or an existing record id is not proof of cloud durability.
+    final sourceAssets = <String, AssetReference>{};
+    for (final item in source.generations) {
+      for (final asset in generationAssetReferences(item)) {
+        if (asset.kind == 'local') sourceAssets[asset.value] = asset;
+      }
+    }
+    for (final item in source.savedReferences) {
+      for (final asset in savedReferenceAssetReferences(item)) {
+        if (asset.kind == 'local') sourceAssets[asset.value] = asset;
+      }
+    }
+    for (final entry in sourceAssets.entries) {
+      final published = assetCopies[entry.key];
+      if (published == null) {
+        throw StateError(
+          'A local asset was not copied. The local library was kept.',
+        );
+      }
+      final expected = sha256.convert(await _local.readAsset(entry.value));
+      final download = await _drive.readAssetStream(published);
+      final actual = await sha256.bind(download.stream).first;
+      if (actual != expected) {
+        throw StateError(
+          'A Drive asset failed verification. The local library was kept.',
+        );
+      }
+    }
+
+    final latestRemote = _asDrive(await _drive.read());
+    if (latestRemote.generations.any(
+          (item) => generationIds.values.contains(item.localId),
+        ) ||
+        latestRemote.savedReferences.any(
+          (item) => referenceIds.values.contains(item.id),
+        ) ||
+        latestRemote.folders.any(
+          (item) => folderIds.values.contains(item.id),
+        )) {
+      throw StateError(
+        'Google Drive changed while the library was copied. '
+        'No local originals were removed. Try moving again.',
+      );
+    }
+    await _drive.write(
+      latestRemote.copyWith(
+        driveSyncBase: googleDrivePortableData(latestRemote),
+        generations: <Generation>[...latestRemote.generations, ...generations],
+        savedReferences: <SavedReference>[
+          ...latestRemote.savedReferences,
+          ...references,
+        ],
+        folders: <LibraryFolder>[...latestRemote.folders, ...folders],
+      ),
+    );
+    final verified = _asDrive(await _drive.read());
+    bool containsEvery<T>(
+      Iterable<T> expected,
+      Iterable<T> actual,
+      String Function(T) id,
+      Map<String, Object?> Function(T) json,
+    ) {
+      final actualById = <String, T>{for (final item in actual) id(item): item};
+      return expected.every(
+        (item) =>
+            actualById.containsKey(id(item)) &&
+            jsonEncode(json(item)) ==
+                jsonEncode(json(actualById[id(item)] as T)),
+      );
+    }
+
+    bool matches(StoredData expected, StoredData actual) =>
+        containsEvery(
+          expected.generations,
+          actual.generations,
+          (item) => item.localId,
+          (item) => item.toJson(),
+        ) &&
+        containsEvery(
+          expected.savedReferences,
+          actual.savedReferences,
+          (item) => item.id,
+          (item) => item.toJson(),
+        ) &&
+        containsEvery(
+          expected.folders,
+          actual.folders,
+          (item) => item.id,
+          (item) => item.toJson(),
+        );
+    if (!matches(
+      StoredData(
+        generations: generations,
+        savedReferences: references,
+        folders: folders,
+      ),
+      verified,
+    )) {
+      throw StateError(
+        'Some Drive copies failed verification. The local library was kept.',
+      );
+    }
+    final operation = _workspaceWrites.then((_) async {
+      final current = await _local.read();
+      final currentLocal = _asLocal(current);
+      if (!matches(source, currentLocal) ||
+          source.generations.length != currentLocal.generations.length ||
+          source.savedReferences.length !=
+              currentLocal.savedReferences.length ||
+          source.folders.length != currentLocal.folders.length) {
+        throw StateError(
+          'The local library changed while it was copied. Drive copies were '
+          'kept, and no local originals were removed. Try moving again.',
+        );
+      }
+      final kept = _asLocal(current).copyWith(
+        generations: current.generations
+            .where(
+              (item) =>
+                  item.storage == LibraryStorage.local &&
+                  !generationIds.containsKey(item.localId),
+            )
+            .toList(),
+        savedReferences: current.savedReferences
+            .where(
+              (item) =>
+                  item.storage == LibraryStorage.local &&
+                  !referenceIds.containsKey(item.id),
+            )
+            .toList(),
+        folders: current.folders
+            .where(
+              (item) =>
+                  item.storage == LibraryStorage.local &&
+                  !folderIds.containsKey(item.id),
+            )
+            .toList(),
+      );
+      final combined = _combine(kept, verified);
+      await _local.write(_localMirror(combined));
+      await _local.pruneAssets(combined.generations, combined.savedReferences);
+      _lastLocal = kept;
+      _lastRemote = verified;
+    });
+    _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
+    await operation;
+    return GoogleDriveCopyCounts(
+      generations: generations.length,
+      references: references.length,
+    );
   }
 
   Future<Generation> _copyGeneration(
     Generation source, {
     required String id,
     Map<String, String> referenceIdMap = const <String, String>{},
+    Map<String, String> generationIdMap = const <String, String>{},
     String? folderId,
+    Map<String, AssetReference>? assetCopies,
   }) async {
+    Future<AssetReference?> copyAsset(AssetReference? reference) =>
+        _copyAsset(reference, copies: assetCopies);
     final keyframes = <KeyframeLabel>[];
     for (final frame in source.config.keyframes ?? const <KeyframeLabel>[]) {
       keyframes.add(
@@ -673,7 +918,7 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
           referenceId: frame.referenceId == null
               ? null
               : referenceIdMap[frame.referenceId] ?? frame.referenceId,
-          source: await _copyAsset(frame.source),
+          source: await copyAsset(frame.source),
         ),
       );
     }
@@ -684,11 +929,13 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
         MediaReferenceLabel(
           label: item.label,
           kind: item.kind,
+          promptName: item.promptName,
+          durationSeconds: item.durationSeconds,
           referenceId: item.referenceId == null
               ? null
               : referenceIdMap[item.referenceId] ?? item.referenceId,
-          source: await _copyAsset(item.source),
-          thumbnailAsset: await _copyAsset(item.thumbnailAsset),
+          source: await copyAsset(item.source),
+          thumbnailAsset: await copyAsset(item.thumbnailAsset),
         ),
       );
     }
@@ -699,37 +946,45 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
           ? null
           : referenceIdMap[source.config.sourceReferenceId] ??
                 source.config.sourceReferenceId,
-      source: await _copyAsset(source.config.source),
-      sourceThumbnailAsset: await _copyAsset(
-        source.config.sourceThumbnailAsset,
-      ),
+      source: await copyAsset(source.config.source),
+      sourceThumbnailAsset: await copyAsset(source.config.sourceThumbnailAsset),
     );
     return Generation.fromJson(<String, Object?>{
       ...source.toJson(),
       'localId': id,
       'storage': LibraryStorage.drive.name,
       'config': config.toJson(),
+      if (source.rewriteOfLocalId != null)
+        'rewriteOfLocalId':
+            generationIdMap[source.rewriteOfLocalId] ?? source.rewriteOfLocalId,
       if (folderId != null) 'folderId': folderId else 'folderId': null,
       if (source.resultAsset != null)
-        'resultAsset': (await _copyAsset(source.resultAsset))?.toJson(),
+        'resultAsset': (await copyAsset(source.resultAsset))?.toJson(),
       if (source.thumbnailAsset != null)
-        'thumbnailAsset': (await _copyAsset(source.thumbnailAsset))?.toJson(),
+        'thumbnailAsset': (await copyAsset(source.thumbnailAsset))?.toJson(),
       if (source.timelineThumbnailAsset != null)
-        'timelineThumbnailAsset': (await _copyAsset(
+        'timelineThumbnailAsset': (await copyAsset(
           source.timelineThumbnailAsset,
         ))?.toJson(),
     });
   }
 
-  Future<AssetReference?> _copyAsset(AssetReference? reference) async {
+  Future<AssetReference?> _copyAsset(
+    AssetReference? reference, {
+    Map<String, AssetReference>? copies,
+  }) async {
     if (reference == null || reference.kind == 'drive') return reference;
     if (reference.kind != 'local') return reference;
+    final existing = copies?[reference.value];
+    if (existing != null) return existing;
     final bytes = await _local.readAsset(reference);
-    return _drive.writeAsset(
+    final copied = await _drive.writeAsset(
       bytes,
       label: reference.label,
       contentType: reference.contentType ?? 'application/octet-stream',
     );
+    copies?[reference.value] = copied;
+    return copied;
   }
 
   StoredData _combine(StoredData local, StoredData remote) {
@@ -753,6 +1008,7 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
         local.composerTabs,
         remote.composerTabs,
       ),
+      driveSyncBase: googleDrivePortableData(remote),
       preferences: preferences,
       preferencesUpdatedAt: preferencesUpdatedAt,
       driveFolderName: _drive.connection.folderName.isNotEmpty
@@ -844,6 +1100,7 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
   );
 
   StoredData _drivePartition(StoredData data) => StoredData(
+    driveSyncBase: data.driveSyncBase,
     composerTabs: data.composerTabs,
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
@@ -902,6 +1159,16 @@ class HybridDataStore implements DurableDataStore, ComposerWorkspaceStore {
 
   String _encoded(StoredData data) =>
       jsonEncode(googleDrivePortableData(data).toJson());
+
+  bool _isTransientDriveReadError(Exception error) {
+    if (error is FormatException) return false;
+    if (error is GoogleDriveException) {
+      return error.isRateLimited || (error.status ?? 0) >= 500;
+    }
+    // http.ClientException, SocketException and TimeoutException are transport
+    // failures. Schema/programming errors extend Error and never land here.
+    return true;
+  }
 
   Future<StoredData> _repairCachedDriveAssets(StoredData data) async {
     try {
