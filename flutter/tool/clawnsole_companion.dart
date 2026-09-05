@@ -1282,7 +1282,10 @@ class CompanionApp {
             ? value.map((key, child) => MapEntry(key.toString(), child))
             : <String, Object?>{};
         next = current.copyWith(
-          preferences: AppPreferences.fromJson(map),
+          preferences: AppPreferences.fromJson(map).copyWith(
+            providerRetentionAcknowledgements:
+                current.providerRetentionAcknowledgements,
+          ),
           preferencesUpdatedAt: DateTime.now().toUtc(),
         );
       } else if (action == 'saveLibraryFolder') {
@@ -1949,6 +1952,12 @@ class CompanionApp {
           .where((provider) => _activeKey(data, provider).isNotEmpty)
           .toSet(),
       availableProviders: remoteProviderIds,
+      providerRetentionAcknowledgements: connected.where((provider) {
+        final credential = _activeKey(data, provider);
+        return credential.isNotEmpty &&
+            data.providerRetentionAcknowledgements[provider] ==
+                providerCredentialAcknowledgementId(provider, credential);
+      }).toSet(),
       settingsVault:
           _store.vault?.settingsVaultStatus ??
           const SettingsVaultStatus.unavailable(),

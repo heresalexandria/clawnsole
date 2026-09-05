@@ -100,6 +100,16 @@ void main() {
     await first.read();
     await first.connectRemote('token', 'folder');
     final recovery = await first.setup('a correct horse battery staple');
+    final acknowledgement = providerCredentialAcknowledgementId(
+      'bfl',
+      'shared-bfl',
+    );
+    await first.write(
+      (await first.read()).withProviderRetentionAcknowledged(
+        'bfl',
+        acknowledgement,
+      ),
+    );
 
     expect(recovery, hasLength(43));
     expect(first.settingsVaultStatus.state, SettingsVaultState.ready);
@@ -123,6 +133,10 @@ void main() {
     final synced = await second.read();
     expect(synced.apiKeyFor('bfl'), 'shared-bfl');
     expect(synced.preferences.provider, 'ltx');
+    expect(
+      synced.preferences.providerRetentionAcknowledgements['bfl'],
+      acknowledgement,
+    );
     expect(second.settingsVaultStatus.state, SettingsVaultState.ready);
   });
 

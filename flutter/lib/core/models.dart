@@ -1340,6 +1340,7 @@ class AppPreferences {
     this.rewriteEfforts = const <String, String>{},
     this.favoriteModels = const <String>[],
     this.favoriteProviders = const <String>[],
+    this.providerRetentionAcknowledgements = const <String, String>{},
   });
 
   static const int defaultLocalVideoCacheMb = 100;
@@ -1396,6 +1397,9 @@ class AppPreferences {
   /// picker and the provider desk.
   final List<String> favoriteProviders;
 
+  /// Credential-bound warning choices, cached locally and synced with settings.
+  final Map<String, String> providerRetentionAcknowledgements;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1423,6 +1427,7 @@ class AppPreferences {
     Map<String, String>? rewriteEfforts,
     List<String>? favoriteModels,
     List<String>? favoriteProviders,
+    Map<String, String>? providerRetentionAcknowledgements,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1457,6 +1462,9 @@ class AppPreferences {
     rewriteEfforts: rewriteEfforts ?? this.rewriteEfforts,
     favoriteModels: favoriteModels ?? this.favoriteModels,
     favoriteProviders: favoriteProviders ?? this.favoriteProviders,
+    providerRetentionAcknowledgements:
+        providerRetentionAcknowledgements ??
+        this.providerRetentionAcknowledgements,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1488,6 +1496,10 @@ class AppPreferences {
     // their previous shape byte for byte.
     if (favoriteModels.isNotEmpty) 'favoriteModels': favoriteModels,
     if (favoriteProviders.isNotEmpty) 'favoriteProviders': favoriteProviders,
+    if (providerRetentionAcknowledgements.isNotEmpty)
+      'providerRetentionAcknowledgements': _sortedStringMap(
+        providerRetentionAcknowledgements,
+      ),
   };
 
   /// Reads a favorites list, dropping non-strings, blanks, and repeats while
@@ -1570,6 +1582,9 @@ class AppPreferences {
       rewriteEfforts: _stringMap(json['rewriteEfforts']),
       favoriteModels: _favoriteList(json['favoriteModels']),
       favoriteProviders: _favoriteList(json['favoriteProviders']),
+      providerRetentionAcknowledgements: _stringMap(
+        json['providerRetentionAcknowledgements'],
+      ),
     );
   }
 }
@@ -1595,7 +1610,6 @@ class StoredData {
   const StoredData({
     this.apiKey = '',
     this.apiKeys = const <String, String>{},
-    this.providerRetentionAcknowledgements = const <String, String>{},
     this.rejectedIosReviewApiKeyId = '',
     this.rejectedIosReviewApiKeyIds = const <String, String>{},
     this.preferences = const AppPreferences(),
@@ -1611,7 +1625,8 @@ class StoredData {
 
   final String apiKey;
   final Map<String, String> apiKeys;
-  final Map<String, String> providerRetentionAcknowledgements;
+  Map<String, String> get providerRetentionAcknowledgements =>
+      preferences.providerRetentionAcknowledgements;
   final String rejectedIosReviewApiKeyId;
   final Map<String, String> rejectedIosReviewApiKeyIds;
   final AppPreferences preferences;
@@ -1629,7 +1644,6 @@ class StoredData {
   StoredData copyWith({
     String? apiKey,
     Map<String, String>? apiKeys,
-    Map<String, String>? providerRetentionAcknowledgements,
     String? rejectedIosReviewApiKeyId,
     Map<String, String>? rejectedIosReviewApiKeyIds,
     AppPreferences? preferences,
@@ -1647,9 +1661,6 @@ class StoredData {
   }) => StoredData(
     apiKey: apiKey ?? this.apiKey,
     apiKeys: apiKeys ?? this.apiKeys,
-    providerRetentionAcknowledgements:
-        providerRetentionAcknowledgements ??
-        this.providerRetentionAcknowledgements,
     rejectedIosReviewApiKeyId:
         rejectedIosReviewApiKeyId ?? this.rejectedIosReviewApiKeyId,
     rejectedIosReviewApiKeyIds:
@@ -1692,7 +1703,13 @@ class StoredData {
     return copyWith(
       apiKey: provider == 'bfl' ? clean : apiKey,
       apiKeys: next,
-      providerRetentionAcknowledgements: acknowledgements,
+      preferences: preferences.copyWith(
+        providerRetentionAcknowledgements: acknowledgements,
+      ),
+      preferencesUpdatedAt:
+          changed && providerRetentionAcknowledgements.containsKey(provider)
+          ? DateTime.now().toUtc()
+          : preferencesUpdatedAt,
     );
   }
 
@@ -1700,10 +1717,13 @@ class StoredData {
     String provider,
     String credentialId,
   ) => copyWith(
-    providerRetentionAcknowledgements: <String, String>{
-      ...providerRetentionAcknowledgements,
-      provider: credentialId,
-    },
+    preferences: preferences.copyWith(
+      providerRetentionAcknowledgements: <String, String>{
+        ...providerRetentionAcknowledgements,
+        provider: credentialId,
+      },
+    ),
+    preferencesUpdatedAt: DateTime.now().toUtc(),
   );
 
   StoredData withRejectedReviewKeyId(String provider, String value) {
@@ -1722,12 +1742,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 24,
-    if (providerRetentionAcknowledgements.isNotEmpty)
-      'providerRetentionAcknowledgements': Map<String, String>.fromEntries(
-        providerRetentionAcknowledgements.entries.toList()
-          ..sort((left, right) => left.key.compareTo(right.key)),
-      ),
+    'schemaVersion': 25,
     if (rejectedIosReviewApiKeyId.isNotEmpty)
       'rejectedIosReviewApiKeyId': rejectedIosReviewApiKeyId,
     if (rejectedIosReviewApiKeyIds.isNotEmpty)
@@ -1758,6 +1773,16 @@ class StoredData {
         (json['preferences'] as Map<Object?, Object?>? ?? const {}).map(
           (key, value) => MapEntry(key.toString(), value),
         );
+    final legacyAcknowledgements = _stringMap(
+      json['providerRetentionAcknowledgements'],
+    );
+    final migrateAcknowledgements =
+        (json['schemaVersion'] as num? ?? 0) < 25 &&
+        !preferences.containsKey('providerRetentionAcknowledgements') &&
+        legacyAcknowledgements.isNotEmpty;
+    if (migrateAcknowledgements) {
+      preferences['providerRetentionAcknowledgements'] = legacyAcknowledgements;
+    }
     final rejectedIds =
         (json['rejectedIosReviewApiKeyIds'] as Map<Object?, Object?>? ??
                 const {})
@@ -1848,25 +1873,15 @@ class StoredData {
       apiKeys: apiKeys.map(
         (key, value) => MapEntry(key, value is String ? value : ''),
       )..removeWhere((key, value) => value.isEmpty),
-      providerRetentionAcknowledgements:
-          (json['providerRetentionAcknowledgements']
-                      as Map<Object?, Object?>? ??
-                  const <Object?, Object?>{})
-              .map(
-                (provider, credentialId) =>
-                    MapEntry(provider.toString(), credentialId.toString()),
-              )
-            ..removeWhere(
-              (provider, credentialId) =>
-                  provider.trim().isEmpty || credentialId.trim().isEmpty,
-            ),
       rejectedIosReviewApiKeyId:
           json['rejectedIosReviewApiKeyId'] as String? ?? '',
       rejectedIosReviewApiKeyIds: rejectedIds,
       preferences: AppPreferences.fromJson(preferences),
-      preferencesUpdatedAt: DateTime.tryParse(
-        json['preferencesUpdatedAt'] as String? ?? '',
-      ),
+      // Promote the legacy local choice to a settings edit so the vault's
+      // older preferences record cannot erase it during reconciliation.
+      preferencesUpdatedAt: migrateAcknowledgements
+          ? DateTime.now().toUtc()
+          : DateTime.tryParse(json['preferencesUpdatedAt'] as String? ?? ''),
       driveFolderName: json['driveFolderName'] as String? ?? '',
       driveFolderId: json['driveFolderId'] as String? ?? '',
       providerCatalogCache: switch (json['providerCatalogCache']) {

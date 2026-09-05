@@ -155,6 +155,10 @@ only after every copy is verified in Drive.
   resume regardless of the visible screen.
 - Provider delivery links may be temporary; completed videos are retained
   locally first, and interrupted result downloads remain durably retryable.
+- “Don’t show this warning again” choices are cached in local preferences and
+  sync with the encrypted settings vault. They survive relaunch and other
+  settings changes; replacing that provider’s key or resetting preferences
+  asks for acknowledgement again. Existing saved choices migrate automatically.
 - User-supplied provider keys live in OS-secure storage, never in
   `clawnsole.json`, and are uploaded only inside the passphrase-encrypted
   settings vault. They are never returned to the Electron renderer. An optional temporary iOS App
