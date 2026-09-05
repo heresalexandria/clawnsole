@@ -2485,7 +2485,10 @@ class AppController extends ChangeNotifier {
             generations: value.generations,
             folders: value.folders,
             savedReferences: value.savedReferences,
-            preferences: _preferences(),
+            preferences: _preferences().copyWith(
+              providerRetentionAcknowledgements:
+                  value.preferences.providerRetentionAcknowledgements,
+            ),
             hasApiKey: value.hasApiKey,
             connectedProviders: value.connectedProviders,
             connectedRewriteProviders: value.connectedRewriteProviders,
@@ -4617,6 +4620,9 @@ class AppController extends ChangeNotifier {
     rewriteEfforts: Map<String, String>.of(rewriteEfforts),
     favoriteModels: favoriteModels ?? favoriteModelKeys,
     favoriteProviders: favoriteProviders ?? favoriteProviderIds,
+    providerRetentionAcknowledgements:
+        snapshot?.preferences.providerRetentionAcknowledgements ??
+        const <String, String>{},
   );
 
   int _validDuration(int value) {
@@ -6710,6 +6716,7 @@ class AppController extends ChangeNotifier {
       await (gateway as ProviderRetentionAcknowledgementGateway)
           .acknowledgeProviderRetentionRisk(provider.id),
     );
+    await _retryPendingSettingsVaultSync();
   }
 
   Future<void> removeKey() async {

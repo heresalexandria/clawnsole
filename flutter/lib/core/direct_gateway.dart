@@ -389,8 +389,14 @@ class DirectGateway
 
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
-    final next = (await _store.read()).copyWith(
-      preferences: preferences,
+    final current = await _store.read();
+    final next = current.copyWith(
+      // Warning choices are changed through their dedicated acknowledgement
+      // operation. A queued UI preference save may predate that operation.
+      preferences: preferences.copyWith(
+        providerRetentionAcknowledgements:
+            current.providerRetentionAcknowledgements,
+      ),
       preferencesUpdatedAt: DateTime.now().toUtc(),
     );
     await _store.write(next);

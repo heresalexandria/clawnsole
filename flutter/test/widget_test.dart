@@ -867,7 +867,29 @@ void main() {
         contains('bfl'),
       );
       expect(controller.requiresProviderRetentionAcknowledgement, isFalse);
-      await controller.submit();
+      expect(
+        controller.snapshot!.preferences.providerRetentionAcknowledgements,
+        contains('bfl'),
+      );
+      await controller.setThemeMode(AppThemeMode.dark);
+      expect(
+        gateway.snapshot.preferences.providerRetentionAcknowledgements,
+        contains('bfl'),
+      );
+      expect(controller.requiresProviderRetentionAcknowledgement, isFalse);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(AlertDialog), findsNothing);
+      await tester.ensureVisible(generate);
+      await tester.tap(generate);
+      for (
+        var attempt = 0;
+        attempt < 20 && gateway.submitCalls < 3;
+        attempt += 1
+      ) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.byType(AlertDialog), findsNothing);
       expect(gateway.submitCalls, 3);
       controller.dispose();
       await tester.pumpWidget(const SizedBox.shrink());
@@ -2440,7 +2462,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 25);
+    expect(decoded.toJson()['schemaVersion'], 26);
   });
 
   test(
@@ -2636,7 +2658,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 25);
+      expect(decoded.toJson()['schemaVersion'], 26);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -8496,6 +8518,12 @@ class _MemoryGateway
     String provider,
   ) async {
     snapshot = snapshot.copyWith(
+      preferences: snapshot.preferences.copyWith(
+        providerRetentionAcknowledgements: <String, String>{
+          ...snapshot.preferences.providerRetentionAcknowledgements,
+          provider: providerCredentialAcknowledgementId(provider, 'test-key'),
+        },
+      ),
       providerRetentionAcknowledgements: <String>{
         ...snapshot.providerRetentionAcknowledgements,
         provider,
