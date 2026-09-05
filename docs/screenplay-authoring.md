@@ -14,7 +14,8 @@ Windows, iOS/Android, and the macOS Electron renderer.
 The format is saved per draft. It formats scene headings, character cues,
 action, dialogue, parentheticals, and transitions using the bundled Courier
 Prime font. Tab and Shift Tab cycle elements; the element menu and Prev /
-Next controls do the same on touch devices. Enter advances a character cue or
+Next arrow controls do the same on touch devices, with 48-pixel minimum touch
+targets. The mobile hint describes these touch controls. Enter advances a character cue or
 parenthetical to dialogue, dialogue to action, and a transition to a scene.
 Enter on an empty indented line returns to action. Scene and character elements
 capitalize while typing. Completions include scene prefixes, previous scene
@@ -87,9 +88,10 @@ renderer calls, or inline media.
 
 Stored-data schema 25 adds optional reference character names and generation
 screenplay mode; older records retain their media and default to unassigned,
-prose-mode records. Composer schema 3 stores the mode, handled character names, character aliases,
+prose-mode records. Composer schema 4 also syncs tabs and aesthetic selections through Drive,
+retaining compact attachment layouts. Composer schema 3 introduced the mode, handled character names, character aliases,
 and saved reference ids with their prompt names. These saved references restore
-into their own tabs, including inactive tabs. Unsaved URL references remain
-session-only, as before; save them to References to retain their assignments.
+into their own tabs, including inactive tabs. Retained assets and HTTPS references reopen with the draft. Local assets
+require their original device unless copied to Drive.
 Copied library media starts unassigned so it can be cast without duplicating
 the original reference's character.

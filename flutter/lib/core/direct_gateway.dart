@@ -261,12 +261,22 @@ class DirectGateway
 
   @override
   Future<ComposerTabsState?> loadComposerTabs() async =>
-      (await _store.read()).composerTabs;
+      _store is ComposerWorkspaceStore
+      ? await (_store as ComposerWorkspaceStore).readComposerWorkspace()
+      : (await _store.read()).composerTabs;
 
   @override
   Future<void> saveComposerTabs(ComposerTabsState state) async {
+    if (_store is ComposerWorkspaceStore) {
+      await (_store as ComposerWorkspaceStore).writeComposerWorkspace(state);
+      return;
+    }
     final current = await _store.read();
-    await _store.write(current.copyWith(composerTabs: state));
+    await _store.write(
+      current.copyWith(
+        composerTabs: mergeComposerWorkspaces(state, current.composerTabs),
+      ),
+    );
   }
 
   @override

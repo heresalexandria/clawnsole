@@ -8,6 +8,7 @@ import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
+import 'aesthetic_references.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
@@ -130,7 +131,13 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
             videoPreviewLoader: _loadReferenceVideoPreview,
           ),
           child: FolderRailLayout(
-            heading: _ReferencesHeading(controller: controller),
+            heading: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ReferencesHeading(controller: controller),
+                AestheticReferenceLibrary(controller: controller),
+              ],
+            ),
             rail: FolderRail(scope: scope),
             narrowRail: FolderDropdownBar(scope: scope),
             results: _ReferenceResults(

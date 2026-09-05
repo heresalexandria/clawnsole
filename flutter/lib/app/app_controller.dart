@@ -10,6 +10,7 @@ import '../core/asset_extensions.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/composer_tabs.dart';
+import '../core/aesthetic_reference.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
@@ -29,6 +30,7 @@ import '../core/video_cache_gateway.dart';
 
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
+part 'app_controller_workspace.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -175,6 +177,7 @@ class KeyframeDraft {
 
   KeyframeDraft copyWith({
     String? label,
+    PickedAsset? asset,
     String? source,
     double? seconds,
     String? savedReferenceId,
@@ -185,7 +188,7 @@ class KeyframeDraft {
     role: role,
     source: source ?? this.source,
     seconds: seconds ?? this.seconds,
-    asset: asset,
+    asset: asset ?? this.asset,
     retained: source == null ? retained : null,
     savedReferenceId: clearSavedReferenceId
         ? null
@@ -224,6 +227,7 @@ class MediaReferenceDraft {
 
   MediaReferenceDraft copyWith({
     String? label,
+    PickedAsset? asset,
     String? promptName,
     String? source,
     AssetReference? thumbnailAsset,
@@ -240,7 +244,7 @@ class MediaReferenceDraft {
     kind: kind,
     source: source ?? this.source,
     promptName: promptName ?? this.promptName,
-    asset: asset,
+    asset: asset ?? this.asset,
     retained: source == null ? retained : null,
     thumbnailAsset: clearThumbnailAsset
         ? null
@@ -288,6 +292,7 @@ class ReferenceCandidate {
 class GenerationFormState {
   String prompt = '';
   bool screenplayMode = false;
+  String? aestheticReferenceId;
   final Set<String> screenplayLinkedCharacters = {};
   final Map<String, String> screenplayCharacterAliases = {};
   final Map<String, String> draftCharacterNames = {};
@@ -749,6 +754,7 @@ class AppController extends ChangeNotifier {
     _activeComposerTabId = tab.id;
     _invalidateProviderEstimate();
     _ensureProviderModelsLoaded(tab.providerId);
+    unawaited(_hydrateComposerMedia(tab));
     _flushComposerTabsSave();
     notifyListeners();
   }
@@ -760,6 +766,7 @@ class AppController extends ChangeNotifier {
     final index = _composerTabs.indexWhere((tab) => tab.id == id);
     if (index < 0) return;
     final closed = _composerTabs.removeAt(index);
+    _closedComposerTabIds.add(id);
     final wasActive = closed.id == _activeComposerTabId;
     if (_composerTabs.isEmpty) {
       final replacement = ComposerTab(
@@ -812,11 +819,21 @@ class AppController extends ChangeNotifier {
   bool get _persistsComposerTabs =>
       _composerTabsRestored && gateway is ComposerTabsGateway;
 
+  final Set<String> _closedComposerTabIds = {};
+  final Set<String> _deletedAestheticIds = {};
+  final List<AestheticReference> _aestheticReferences = [];
+  bool _syncingComposerWorkspace = false;
+  Future<void> _composerStartupRestore = Future<void>.value();
+  final Map<ComposerTab, Future<bool>> _composerMediaLoads = {};
+
   ComposerTabRecord _composerTabRecord(ComposerTab tab) => ComposerTabRecord(
     id: tab.id,
+    mediaConfig: _inComposerTab(tab, () => currentConfig.toJson()),
+    mode: tab.form.mode.wireValue,
     title: tab.title,
     prompt: tab.form.prompt,
     screenplayMode: tab.form.screenplayMode,
+    aestheticReferenceId: tab.form.aestheticReferenceId,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
     screenplayReferenceNames: {
@@ -877,10 +894,7 @@ class AppController extends ChangeNotifier {
   Future<void> _saveComposerTabs() async {
     if (_disposed) return;
     if (gateway case final ComposerTabsGateway tabsGateway) {
-      final state = ComposerTabsState(
-        tabs: _composerTabs.map(_composerTabRecord).toList(growable: false),
-        activeTabId: _activeComposerTabId,
-      );
+      final state = _composerWorkspace;
       // Serialized like the preference writes so two quick changes cannot
       // land out of order, and silent: a draft never raises a notice.
       _composerTabWrites = _composerTabWrites.then((_) async {
@@ -905,7 +919,9 @@ class AppController extends ChangeNotifier {
       } on Object {
         return false;
       }
-      if (_disposed || stored == null || stored.tabs.isEmpty) return false;
+      if (_disposed || stored == null) return false;
+      _applyWorkspaceCatalog(stored);
+      if (stored.tabs.isEmpty) return false;
       final known = <String, Generation>{
         for (final item in generations) item.localId: item,
       };
@@ -928,7 +944,9 @@ class AppController extends ChangeNotifier {
         for (var index = 0; index < stored.tabs.length; index += 1) {
           final record = stored.tabs[index];
           final tab = rebuilt[index];
-          final source = known[record.sourceGenerationId];
+          final source =
+              _composerMediaGeneration(record) ??
+              known[record.sourceGenerationId];
           if (source != null) {
             try {
               // Keyframes, references, and the source clip come back from the
@@ -974,6 +992,9 @@ class AppController extends ChangeNotifier {
       } finally {
         _restoringComposerTabs = false;
       }
+      for (final tab in rebuilt) {
+        unawaited(_hydrateComposerMedia(tab));
+      }
       _invalidateProviderEstimate();
       notifyListeners();
       return true;
@@ -984,6 +1005,9 @@ class AppController extends ChangeNotifier {
   /// Lays a saved record over [tab], overruling anything the source
   /// generation seeded: the record is what the director last had on screen.
   void _applyComposerTabRecord(ComposerTab tab, ComposerTabRecord record) {
+    tab.updatedAt = record.updatedAt ?? tab.updatedAt;
+    tab.form.screenplayLinkedCharacters.clear();
+    tab.form.screenplayCharacterAliases.clear();
     tab.form.screenplayLinkedCharacters.addAll(
       record.screenplayLinkedCharacters,
     );
@@ -1009,6 +1033,7 @@ class AppController extends ChangeNotifier {
     tab.form
       ..prompt = record.prompt
       ..screenplayMode = record.screenplayMode
+      ..aestheticReferenceId = record.aestheticReferenceId
       ..aspectRatio = record.aspectRatio
       ..autoDuration = record.autoDuration
       ..durationSeconds = record.durationSeconds
@@ -2194,7 +2219,7 @@ class AppController extends ChangeNotifier {
       // splash-screen critical path. The local snapshot is authoritative for
       // first paint; cache restoration and remote reconciliation fold in
       // asynchronously after the studio is interactive.
-      unawaited(_restoreLocalStartupPresentation());
+      _composerStartupRestore = _restoreLocalStartupPresentation();
       unawaited(_reconcileDriveAfterStartup(preferenceRevision));
     }
     _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -2402,12 +2427,17 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _reconcileDriveAfterStartup(int preferenceRevision) async {
+    if (_disposed) return;
     await resumeGoogleDrive(
       restorePreferences: true,
       expectedPreferenceRevision: preferenceRevision,
     );
     if (_disposed) return;
     await _restoreCachedFirstPage();
+    if (_disposed) return;
+    await _composerStartupRestore;
+    if (_disposed) return;
+    if (googleDriveConnected) await syncComposerWorkspace();
     if (_disposed) return;
     _scheduleListingPrefetch();
     notifyListeners();
@@ -2464,6 +2494,7 @@ class AppController extends ChangeNotifier {
       // suspension; a bounded wait keeps this reconcile hook responsive for
       // the next foreground return.
       await resumeGoogleDrive().timeout(const Duration(seconds: 30));
+      await syncComposerWorkspace();
     } on Object {
       // Foreground reconciliation is best effort. The global poll timer keeps
       // retrying, and individual records retain their last provider failure.
@@ -5822,7 +5853,7 @@ class AppController extends ChangeNotifier {
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
     }
-    final prompt = form.prompt.trim();
+    final prompt = generationPrompt;
     if (form.mode != VideoMode.draftEnhance &&
         form.mode != VideoMode.upscale &&
         prompt.isEmpty &&
@@ -6073,7 +6104,7 @@ class AppController extends ChangeNotifier {
 
   Map<String, Object?> _buildInput() {
     if (form.mode == VideoMode.upscale) {
-      final prompt = form.prompt.trim();
+      final prompt = generationPrompt;
       return <String, Object?>{
         if (selectedModel.upscaleUsesResolutionTargets) 'mode': 'upscale',
         'input_video': form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
@@ -6094,7 +6125,7 @@ class AppController extends ChangeNotifier {
       };
     }
     final common = <String, Object?>{
-      'prompt': form.prompt.trim(),
+      'prompt': generationPrompt,
       'aspect_ratio': form.aspectRatio,
       'duration': form.duration,
       'resolution': form.resolution,
@@ -6182,6 +6213,16 @@ class AppController extends ChangeNotifier {
       '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-${(_idCounter++).toRadixString(16)}';
 
   Future<void> submit({bool providerRetentionRiskAcknowledged = false}) async {
+    final tab = activeComposerTab;
+    if (!await _hydrateComposerMedia(tab)) {
+      if (!_disposed) {
+        showNotice(
+          'Some draft media is unavailable. Connect Drive or restore the original media before generating.',
+        );
+      }
+      return;
+    }
+    if (_disposed || activeComposerTabId != tab.id) return;
     final problem = validate();
     if (problem != null) {
       showNotice(problem);
@@ -6236,7 +6277,7 @@ class AppController extends ChangeNotifier {
       progress: 0,
       prompt: form.mode == VideoMode.draftEnhance
           ? 'Enhance saved FLUX 3 draft'
-          : form.prompt.trim(),
+          : generationPrompt,
       mode: form.mode,
       config: currentConfig,
       createdAt: now,
@@ -6405,6 +6446,7 @@ class AppController extends ChangeNotifier {
     try {
       final value = await gateway.load();
       await _applySnapshotRead(value, startedAtRevision: snapshotRevision);
+      await syncComposerWorkspace();
     } on Object {
       // Periodic reconciliation is best-effort; the next tick retries.
     } finally {
@@ -6761,7 +6803,7 @@ class AppController extends ChangeNotifier {
       'provider': selectedProviderId,
       'model': selectedModel.id,
       'mode': form.mode.wireValue,
-      'prompt': form.prompt.trim(),
+      'prompt': generationPrompt,
       'aspectRatio': form.aspectRatio,
       'duration': form.duration,
       'resolution': form.resolution,
@@ -6806,7 +6848,7 @@ class AppController extends ChangeNotifier {
     if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
     final revision = _estimateRevision;
     final input = <String, Object?>{
-      'prompt': form.prompt.trim(),
+      'prompt': generationPrompt,
       'aspect_ratio': form.aspectRatio,
       'duration': form.duration,
       'resolution': form.resolution,
@@ -6992,6 +7034,7 @@ class AppController extends ChangeNotifier {
         await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
         restorePreferences: true,
       );
+      await syncComposerWorkspace();
       showNotice('Google Drive connected and synced.');
     } on Object catch (error) {
       showNotice(_message(error));
@@ -7074,6 +7117,7 @@ class AppController extends ChangeNotifier {
         reloadIfSuperseded: true,
         restorePreferences: true,
       );
+      await syncComposerWorkspace();
       showNotice('Google Drive data refreshed.');
     } on Object catch (error) {
       showNotice(_message(error));
@@ -7357,6 +7401,7 @@ class AppController extends ChangeNotifier {
     Generation item, {
     bool includePrompt = false,
     bool cacheOnly = false,
+    bool persistDraft = true,
     ComposerTab? tab,
   }) async {
     final target = tab ?? activeComposerTab;
@@ -7375,7 +7420,7 @@ class AppController extends ChangeNotifier {
         kind: MediaReferenceKind.image,
         asset: storedReference,
       );
-      final reference = storedReference ?? saved?.asset;
+      final reference = saved?.asset ?? storedReference;
       PickedAsset? asset;
       if (reference?.isLocal == true) {
         try {
@@ -7421,7 +7466,7 @@ class AppController extends ChangeNotifier {
         kind: media.kind,
         asset: storedReference,
       );
-      final reference = storedReference ?? saved?.asset;
+      final reference = saved?.asset ?? storedReference;
       PickedAsset? asset;
       Uint8List? thumbnailBytes;
       if (media.thumbnailAsset != null) {
@@ -7467,7 +7512,7 @@ class AppController extends ChangeNotifier {
       kind: MediaReferenceKind.video,
       asset: item.config.source,
     );
-    final durableSource = item.config.source ?? savedSource?.asset;
+    final durableSource = savedSource?.asset ?? item.config.source;
     if ((item.mode == VideoMode.v2v ||
             item.mode == VideoMode.draftEnhance ||
             item.mode == VideoMode.upscale) &&
@@ -7479,6 +7524,16 @@ class AppController extends ChangeNotifier {
           cacheOnly: cacheOnly,
         );
       } on Object {
+        // Keep the source slot and durable pointer while its bytes load.
+        if (cacheOnly) {
+          retainedSource = PickedAsset(
+            name: durableSource!.label,
+            bytes: Uint8List(0),
+            mimeType: durableSource.contentType ?? 'video/mp4',
+            retained: durableSource,
+            thumbnailAsset: item.config.sourceThumbnailAsset,
+          );
+        }
         // Preserve the rest of the last-used settings when an asset is gone.
         if (!cacheOnly) {
           showNotice(
@@ -7572,8 +7627,10 @@ class AppController extends ChangeNotifier {
       _invalidateProviderEstimate();
       formRevision += 1;
     });
-    _scheduleComposerTabsSave(touched: target);
-    notifyListeners();
+    if (persistDraft) {
+      _scheduleComposerTabsSave(touched: target);
+      notifyListeners();
+    }
   }
 
   /// Files the destination folder [item] was saved to on [tab], so a tab

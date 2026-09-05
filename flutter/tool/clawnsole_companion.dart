@@ -650,6 +650,12 @@ class CompanionHybridStore {
     return operation;
   }
 
+  Future<void> writeComposerWorkspace(ComposerTabsState state) {
+    final operation = _queue.then((_) => hybrid.writeComposerWorkspace(state));
+    _queue = operation.then<void>((_) {}, onError: (_) {});
+    return operation;
+  }
+
   Future<void> replace(StoredData data) =>
       mutate<void>((_) => StoreChange<void>(data, null));
 
@@ -874,7 +880,7 @@ class CompanionApp {
       }
       if (request.method == 'GET' && path == '/composer-tabs') {
         return await _json(request.response, 200, <String, Object?>{
-          'composerTabs': (await _store.read()).composerTabs?.toJson(),
+          'composerTabs': (await _store.readLocal()).composerTabs?.toJson(),
         });
       }
       if (request.method == 'PUT' && path == '/composer-tabs') {
@@ -886,9 +892,7 @@ class CompanionApp {
         final state = ComposerTabsState.fromJson(
           raw.map((key, value) => MapEntry(key.toString(), value)),
         );
-        await _store.mutate<void>(
-          (data) => StoreChange<void>(data.copyWith(composerTabs: state), null),
-        );
+        await _store.writeComposerWorkspace(state);
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
         });

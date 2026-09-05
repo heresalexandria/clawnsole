@@ -17,7 +17,7 @@ Clawnsole creates an app-marked folder using the narrow
 created, not unrelated files elsewhere in the account.
 
 - `clawnsole.json` contains portable generations, references, folders, tags,
-  and compact asset references. It never contains provider credentials or
+  Create tabs, aesthetic references, and compact asset references. It never contains provider credentials or
   preferences.
 - `assets/` contains retained Drive media.
 - `clawnsole-vault.json` contains provider credentials and preferences only as
@@ -32,6 +32,36 @@ on macOS. Changing the passphrase does not invalidate already unlocked devices.
 
 Disconnecting Drive leaves local credentials and the encrypted Drive files in
 place. **Forget cached unlock** removes only that device's remembered vault key.
+
+## Create workspace sync
+
+Connect every device to the same Clawnsole Drive folder to share open Create
+tabs and the aesthetic library. Draft text, titles, settings, screenplay casting,
+aesthetic selection, and retained attachment layouts survive relaunch. Writes
+save locally first; Drive publication runs in the background. Reconciliation
+runs at startup, on return to the foreground, during the periodic Drive refresh,
+and through the explicit Refresh control. Offline edits publish on reconnect.
+
+Tabs merge independently by stable id and modification time. Concurrent edits
+to different tabs survive together; for edits to the same tab, the latest
+modification wins (equal timestamps use a deterministic tie-break). Explicit
+close/delete tombstones prevent stale devices from resurrecting removed tabs
+or aesthetics. Closing a tab closes it across devices; selecting a tab does not
+change the tab currently selected on another device.
+
+Composer schema 4 adds these fields without discarding older drafts. Attachment
+records contain asset references, never media bytes or base64. Drive-backed
+media is accessible on other devices; device-local media still belongs to its
+original device. Move or copy that media to Drive when it needs to travel.
+
+Aesthetic references are text-only library entries managed under References.
+Choose a title, one of 16 SVG icons, a color, and the reference text. The Aesthetic
+menu immediately to the right of Characters selects one per Create tab, or
+**No aesthetic**. Generation requests append only the reference text after the
+editable prompt, including in Screenplay mode; the title and icon are never
+sent as prompt content. Prompt limits and estimates use the composed prompt.
+Editing an aesthetic updates selected tabs; deleting it removes its effect.
+Aesthetics do not consume media-reference slots or appear in media pickers.
 
 ## Google Cloud setup
 

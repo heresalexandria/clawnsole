@@ -7,6 +7,7 @@ import 'package:cryptography/cryptography.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'models.dart';
+import 'composer_tabs.dart';
 import 'secure_value_store.dart';
 import 'settings_vault.dart';
 import 'settings_vault_gateway.dart';
@@ -22,7 +23,10 @@ const _secureStateVersion = 1;
 /// failure therefore leaves a visible pending state without losing a verified
 /// provider key or preference change.
 class SettingsVaultDataStore
-    implements DurableDataStore, SettingsVaultStatusSource {
+    implements
+        DurableDataStore,
+        SettingsVaultStatusSource,
+        ComposerWorkspaceStore {
   SettingsVaultDataStore({
     required DurableDataStore delegate,
     required SecureValueStore secureStore,
@@ -62,6 +66,29 @@ class SettingsVaultDataStore
     final result = _queue.then((_) => operation());
     _queue = result.then<void>((_) {}, onError: (_) {});
     return result;
+  }
+
+  @override
+  Future<ComposerTabsState?> readComposerWorkspace() async {
+    final delegate = _delegate;
+    return delegate is ComposerWorkspaceStore
+        ? await (delegate as ComposerWorkspaceStore).readComposerWorkspace()
+        : (await delegate.read()).composerTabs;
+  }
+
+  @override
+  Future<void> writeComposerWorkspace(ComposerTabsState state) async {
+    final delegate = _delegate;
+    if (delegate is ComposerWorkspaceStore) {
+      await (delegate as ComposerWorkspaceStore).writeComposerWorkspace(state);
+    } else {
+      final current = await delegate.read();
+      await delegate.write(
+        current.copyWith(
+          composerTabs: mergeComposerWorkspaces(state, current.composerTabs),
+        ),
+      );
+    }
   }
 
   @override

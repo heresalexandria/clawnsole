@@ -119,6 +119,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     controller.appInForeground = state == AppLifecycleState.resumed;
+    if (state != AppLifecycleState.resumed) controller.flushComposerWorkspace();
     if (state == AppLifecycleState.resumed) {
       unawaited(controller.reconcileGenerationWork());
     }
@@ -209,92 +210,96 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Clawnsole',
-    debugShowCheckedModeBanner: false,
-    navigatorKey: _navigatorKey,
-    scaffoldMessengerKey: _scaffoldMessengerKey,
-    theme: buildClawnsoleTheme(Brightness.light),
-    darkTheme: buildClawnsoleTheme(Brightness.dark),
-    themeMode: _materialThemeMode(controller.themeMode),
-    // Native mobile Flutter keeps focus on touch taps outside text fields.
-    // Override that once so multiline fields never trap the software keyboard.
-    // The desktop shortcuts live here too so they work from any route,
-    // including the fullscreen prompt editor.
-    builder: (context, child) => Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.enter, meta: true): GenerateIntent(),
-        SingleActivator(LogicalKeyboardKey.enter, control: true):
-            GenerateIntent(),
-        SingleActivator(LogicalKeyboardKey.comma, meta: true):
-            OpenSettingsIntent(),
-        SingleActivator(LogicalKeyboardKey.comma, control: true):
-            OpenSettingsIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          EditableTextTapOutsideIntent:
-              CallbackAction<EditableTextTapOutsideIntent>(
-                onInvoke: (intent) {
-                  intent.focusNode.unfocus();
-                  return null;
-                },
-              ),
-          OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
-            onInvoke: (_) {
-              unawaited(controller.navigate(AppSection.settings));
-              return null;
-            },
-          ),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) => MaterialApp(
+      title: 'Clawnsole',
+      debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _scaffoldMessengerKey,
+      theme: buildClawnsoleTheme(Brightness.light),
+      darkTheme: buildClawnsoleTheme(Brightness.dark),
+      themeMode: _materialThemeMode(controller.themeMode),
+      // Native mobile Flutter keeps focus on touch taps outside text fields.
+      // Override that once so multiline fields never trap the software keyboard.
+      // The desktop shortcuts live here too so they work from any route,
+      // including the fullscreen prompt editor.
+      builder: (context, child) => Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.enter, meta: true):
+              GenerateIntent(),
+          SingleActivator(LogicalKeyboardKey.enter, control: true):
+              GenerateIntent(),
+          SingleActivator(LogicalKeyboardKey.comma, meta: true):
+              OpenSettingsIntent(),
+          SingleActivator(LogicalKeyboardKey.comma, control: true):
+              OpenSettingsIntent(),
         },
-        child: child ?? const SizedBox.shrink(),
-      ),
-    ),
-    home: AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        // Compare on the notice sequence, not the text: an identical message
-        // shown twice in a row (a repeated failure) must surface both times.
-        if (controller.notice != null &&
-            controller.noticeSequence != _lastNoticeSequence) {
-          _lastNoticeSequence = controller.noticeSequence;
-          final action = controller.noticeAction;
-          final actionLabel = controller.noticeActionLabel;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!context.mounted || controller.notice == null) return;
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(
-                SnackBar(
-                  content: Row(
-                    children: <Widget>[
-                      const ClawMark(
-                        size: 19,
-                        color: ClawnsoleColors.brassBright,
-                      ),
-                      const SizedBox(width: 11),
-                      Expanded(child: Text(controller.notice!)),
-                    ],
-                  ),
-                  action: action == null || actionLabel == null
-                      ? null
-                      : SnackBarAction(
-                          label: actionLabel,
-                          onPressed: () =>
-                              unawaited(controller.performNoticeAction()),
-                        ),
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            EditableTextTapOutsideIntent:
+                CallbackAction<EditableTextTapOutsideIntent>(
+                  onInvoke: (intent) {
+                    intent.focusNode.unfocus();
+                    return null;
+                  },
                 ),
-              );
-          });
-        }
-        return _AppShell(
-          controller: controller,
-          updateStatus: _updateStatus,
-          themeMode: _materialThemeMode(controller.themeMode),
-          onThemeModeChanged: (mode) =>
-              unawaited(controller.setThemeMode(_appThemeMode(mode))),
-        );
-      },
+            OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
+              onInvoke: (_) {
+                unawaited(controller.navigate(AppSection.settings));
+                return null;
+              },
+            ),
+          },
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
+      home: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          // Compare on the notice sequence, not the text: an identical message
+          // shown twice in a row (a repeated failure) must surface both times.
+          if (controller.notice != null &&
+              controller.noticeSequence != _lastNoticeSequence) {
+            _lastNoticeSequence = controller.noticeSequence;
+            final action = controller.noticeAction;
+            final actionLabel = controller.noticeActionLabel;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!context.mounted || controller.notice == null) return;
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: <Widget>[
+                        const ClawMark(
+                          size: 19,
+                          color: ClawnsoleColors.brassBright,
+                        ),
+                        const SizedBox(width: 11),
+                        Expanded(child: Text(controller.notice!)),
+                      ],
+                    ),
+                    action: action == null || actionLabel == null
+                        ? null
+                        : SnackBarAction(
+                            label: actionLabel,
+                            onPressed: () =>
+                                unawaited(controller.performNoticeAction()),
+                          ),
+                  ),
+                );
+            });
+          }
+          return _AppShell(
+            controller: controller,
+            updateStatus: _updateStatus,
+            themeMode: _materialThemeMode(controller.themeMode),
+            onThemeModeChanged: (mode) =>
+                unawaited(controller.setThemeMode(_appThemeMode(mode))),
+          );
+        },
+      ),
     ),
   );
 }

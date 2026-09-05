@@ -559,6 +559,17 @@ void main() {
           tester.getRect(find.byKey(const ValueKey('direction-toolbar'))).right,
         ),
       );
+      final aesthetic = find.byKey(const ValueKey('prompt-aesthetic-picker'));
+      expect(
+        tester.getRect(aesthetic).left,
+        greaterThanOrEqualTo(tester.getRect(characters).right),
+      );
+      expect(
+        tester.getRect(aesthetic).right,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const ValueKey('direction-toolbar'))).right,
+        ),
+      );
       final field = find.byType(TextFormField).first;
       expect(
         tester.getBottomLeft(copy).dy,

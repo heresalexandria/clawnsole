@@ -1665,7 +1665,7 @@ class StoredData {
   final String driveFolderId;
   final Map<String, Object?>? providerCatalogCache;
 
-  /// Device-local composer tabs; never part of the Drive portable data.
+  /// Portable composer workspaces, mirrored locally for offline authoring.
   final ComposerTabsState? composerTabs;
 
   StoredData copyWith({
