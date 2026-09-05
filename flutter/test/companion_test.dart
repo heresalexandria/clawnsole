@@ -810,6 +810,7 @@ void main() {
               'reference': <String, Object?>{
                 'id': 'saved-character',
                 'name': 'Hero portrait',
+                'characterName': 'ALEXANDRIA',
                 'kind': 'image',
                 'asset': <String, Object?>{
                   'kind': 'remote',
@@ -833,6 +834,11 @@ void main() {
           ),
         );
         expect(snapshot.savedReferences.single.name, 'Hero portrait');
+        expect(snapshot.savedReferences.single.characterName, 'ALEXANDRIA');
+        expect(
+          (await store.read()).savedReferences.single.characterName,
+          'ALEXANDRIA',
+        );
         expect(snapshot.savedReferences.single.asset.isLocal, isTrue);
         expect(
           snapshot.savedReferences.single.folderId,

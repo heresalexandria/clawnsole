@@ -19,6 +19,7 @@ import 'provider_api.dart';
 import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
+import 'screenplay.dart';
 
 enum ApiKeySource { saved, configured }
 
@@ -540,6 +541,12 @@ class DirectGateway
       throw StateError(savedReferenceNameRule);
     }
     final current = await _store.read();
+    final character = normalizeCharacterName(reference.characterName ?? '');
+    final characterProblem = referenceCharacterAssignmentProblem(
+      reference,
+      current.savedReferences,
+    );
+    if (characterProblem != null) throw StateError(characterProblem);
     if (reference.folderId != null &&
         !current.folders.any(
           (folder) =>
@@ -569,6 +576,7 @@ class DirectGateway
     final clean = SavedReference(
       id: reference.id,
       name: name,
+      characterName: character,
       kind: reference.kind,
       asset: asset,
       thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,

@@ -224,6 +224,72 @@ void main() {
   });
 
   group('composer tab startup', () {
+    test(
+      'restores screenplay references into their own inactive tab',
+      () async {
+        final now = DateTime.utc(2026);
+        final saved = SavedReference(
+          id: 'alx',
+          name: 'alx.mp4',
+          characterName: 'ALEXANDRIA',
+          kind: MediaReferenceKind.video,
+          asset: const AssetReference(
+            kind: 'remote',
+            value: 'https://example.com/alx.mp4',
+            label: 'alx.mp4',
+          ),
+          createdAt: now,
+          updatedAt: now,
+        );
+        final gateway = _TabsGateway(
+          _snapshot().copyWith(savedReferences: [saved]),
+          stored: const ComposerTabsState(
+            activeTabId: 'prose',
+            tabs: [
+              ComposerTabRecord(
+                id: 'script',
+                providerId: _referenceProvider,
+                modelId: _referenceModel,
+                prompt: 'ALEXANDRIA enters.\n\nHERO: @alx.mp4',
+                screenplayCharacterAliases: {'ALEXANDRIA': 'HERO'},
+                screenplayMode: true,
+                screenplayReferenceNames: {'alx': 'alx.mp4'},
+                screenplayLinkedCharacters: ['ALEXANDRIA'],
+              ),
+              ComposerTabRecord(id: 'prose', prompt: 'A quiet morning.'),
+            ],
+          ),
+        );
+        final controller = AppController(gateway: gateway);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await _settle();
+        expect(controller.activeComposerTabId, 'prose');
+        expect(controller.form.screenplayMode, isFalse);
+        expect(controller.form.references, isEmpty);
+        controller.activateComposerTab('script');
+        expect(controller.form.screenplayMode, isTrue);
+        expect(controller.form.references.single.savedReferenceId, 'alx');
+        expect(controller.currentConfig.screenplayMode, isTrue);
+        expect(controller.characterMappingName('ALEXANDRIA'), 'HERO');
+        expect(
+          GenerationConfig.fromJson(
+            controller.currentConfig.toJson(),
+          ).screenplayCharacterAliases,
+          {'ALEXANDRIA': 'HERO'},
+        );
+        expect(
+          GenerationConfig.fromJson(
+            controller.currentConfig.toJson(),
+          ).screenplayMode,
+          isTrue,
+        );
+        controller.updateForm((form) => form.prompt = 'ALEXANDRIA enters.');
+        controller.updateForm((form) => form.prompt += ' ALEXANDRIA sits.');
+        expect(controller.form.prompt, isNot(contains('@alx.mp4')));
+      },
+    );
+
     test('reopens saved tabs, with the record overruling the film', () async {
       final item = _delivered();
       final gateway = _TabsGateway(

@@ -266,6 +266,8 @@ class GenerationConfig {
     required this.draft,
     this.frameRate = 24,
     this.exactTiming = false,
+    this.screenplayMode = false,
+    this.screenplayCharacterAliases = const {},
     this.keyframes,
     this.references,
     this.referenceTask = MediaReferenceTask.reference,
@@ -286,6 +288,8 @@ class GenerationConfig {
   final bool draft;
   final int frameRate;
   final bool exactTiming;
+  final bool screenplayMode;
+  final Map<String, String> screenplayCharacterAliases;
   final List<KeyframeLabel>? keyframes;
   final List<MediaReferenceLabel>? references;
   final MediaReferenceTask referenceTask;
@@ -318,6 +322,8 @@ class GenerationConfig {
     draft: draft,
     frameRate: frameRate ?? this.frameRate,
     exactTiming: exactTiming,
+    screenplayMode: screenplayMode,
+    screenplayCharacterAliases: screenplayCharacterAliases,
     keyframes: keyframes ?? this.keyframes,
     references: references ?? this.references,
     referenceTask: referenceTask ?? this.referenceTask,
@@ -339,6 +345,9 @@ class GenerationConfig {
     'draft': draft,
     if (frameRate != 24) 'frameRate': frameRate,
     if (exactTiming) 'exactTiming': true,
+    if (screenplayMode) 'screenplayMode': true,
+    if (screenplayCharacterAliases.isNotEmpty)
+      'screenplayCharacterAliases': screenplayCharacterAliases,
     if (keyframes != null)
       'keyframes': keyframes!.map((frame) => frame.toJson()).toList(),
     if (references != null)
@@ -401,6 +410,15 @@ class GenerationConfig {
       draft: json['draft'] == true,
       frameRate: (json['frameRate'] as num?)?.toInt() ?? 24,
       exactTiming: json['exactTiming'] == true,
+      screenplayMode: json['screenplayMode'] == true,
+      screenplayCharacterAliases: json['screenplayCharacterAliases'] is Map
+          ? {
+              for (final entry
+                  in (json['screenplayCharacterAliases']! as Map).entries)
+                if (entry.key is String && entry.value is String)
+                  entry.key as String: entry.value as String,
+            }
+          : const {},
       keyframes: keyframes,
       references: references,
       referenceTask: MediaReferenceTaskValue.parse(json['referenceTask']),
@@ -648,12 +666,14 @@ class SavedReference {
     this.favorite = false,
     this.hidden = false,
     this.storage = LibraryStorage.local,
+    this.characterName,
     this.contentDigest,
     this.durationSeconds,
   });
 
   final String id;
   final String name;
+  final String? characterName;
   final MediaReferenceKind kind;
   final AssetReference asset;
   final AssetReference? thumbnailAsset;
@@ -676,6 +696,7 @@ class SavedReference {
 
   SavedReference copyWith({
     String? name,
+    String? characterName,
     AssetReference? asset,
     AssetReference? thumbnailAsset,
     DateTime? updatedAt,
@@ -691,6 +712,7 @@ class SavedReference {
   }) => SavedReference(
     id: id,
     name: name ?? this.name,
+    characterName: characterName ?? this.characterName,
     kind: kind,
     asset: asset ?? this.asset,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
@@ -710,6 +732,7 @@ class SavedReference {
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
     'name': name,
+    if (characterName?.isNotEmpty == true) 'characterName': characterName,
     'kind': kind.name,
     'asset': asset.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
@@ -729,6 +752,10 @@ class SavedReference {
     return SavedReference(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? 'Saved reference',
+      // Schema 25 adds optional character assignments; older media is preserved.
+      characterName: json['characterName'] is String
+          ? (json['characterName']! as String).trim().toUpperCase()
+          : null,
       kind: MediaReferenceKindValue.parse(json['kind']),
       asset: AssetReference.fromJson(
         rawAsset is Map<Object?, Object?>
@@ -1722,7 +1749,7 @@ class StoredData {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'schemaVersion': 24,
+    'schemaVersion': 25,
     if (providerRetentionAcknowledgements.isNotEmpty)
       'providerRetentionAcknowledgements': Map<String, String>.fromEntries(
         providerRetentionAcknowledgements.entries.toList()

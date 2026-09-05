@@ -221,7 +221,7 @@ void main() {
         builder: (context, _) => CreateScreen(controller: controller),
       ),
     );
-    IconButton wand() => tester.widget<IconButton>(
+    TextButton wand() => tester.widget<TextButton>(
       find.byKey(const ValueKey('prompt-rewrite-button')),
     );
     expect(wand().onPressed, isNull, reason: 'nothing to rewrite yet');
