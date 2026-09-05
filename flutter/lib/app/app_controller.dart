@@ -23,10 +23,12 @@ import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
+import '../core/screenplay.dart';
 import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
 
 part 'app_controller_rewrite.dart';
+part 'app_controller_screenplay.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -285,6 +287,10 @@ class ReferenceCandidate {
 
 class GenerationFormState {
   String prompt = '';
+  bool screenplayMode = false;
+  final Set<String> screenplayLinkedCharacters = {};
+  final Map<String, String> screenplayCharacterAliases = {};
+  final Map<String, String> draftCharacterNames = {};
   String aspectRatio = '16:9';
   bool autoDuration = false;
   int durationSeconds = 8;
@@ -810,6 +816,14 @@ class AppController extends ChangeNotifier {
     id: tab.id,
     title: tab.title,
     prompt: tab.form.prompt,
+    screenplayMode: tab.form.screenplayMode,
+    screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
+    screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
+    screenplayReferenceNames: {
+      for (final reference in tab.form.references)
+        if (reference.savedReferenceId != null)
+          reference.savedReferenceId!: reference.promptName ?? reference.label,
+    },
     providerId: tab.providerId,
     modelId: tab.modelId,
     aspectRatio: tab.form.aspectRatio,
@@ -930,6 +944,32 @@ class AppController extends ChangeNotifier {
             if (_disposed) return true;
           }
           _inComposerTab(tab, () => _applyComposerTabRecord(tab, record));
+          for (final entry in record.screenplayReferenceNames.entries) {
+            final saved = savedReferences
+                .where((item) => item.id == entry.key)
+                .firstOrNull;
+            if (saved == null ||
+                tab.form.references.any(
+                  (item) => item.savedReferenceId == saved.id,
+                )) {
+              continue;
+            }
+            await _inComposerTab(
+              tab,
+              () => addReferenceCandidates(saved.kind, [
+                _screenplayCandidate(saved),
+              ]),
+            );
+            _inComposerTab(tab, () {
+              tab.form.references = tab.form.references
+                  .map(
+                    (item) => item.savedReferenceId == saved.id
+                        ? item.copyWith(promptName: entry.value)
+                        : item,
+                  )
+                  .toList();
+            });
+          }
         }
       } finally {
         _restoringComposerTabs = false;
@@ -944,6 +984,12 @@ class AppController extends ChangeNotifier {
   /// Lays a saved record over [tab], overruling anything the source
   /// generation seeded: the record is what the director last had on screen.
   void _applyComposerTabRecord(ComposerTab tab, ComposerTabRecord record) {
+    tab.form.screenplayLinkedCharacters.addAll(
+      record.screenplayLinkedCharacters,
+    );
+    tab.form.screenplayCharacterAliases.addAll(
+      record.screenplayCharacterAliases,
+    );
     tab.title = record.title;
     tab.sourceGenerationId = record.sourceGenerationId;
     tab.rewriteSummary = record.rewriteSummary;
@@ -962,6 +1008,7 @@ class AppController extends ChangeNotifier {
     }
     tab.form
       ..prompt = record.prompt
+      ..screenplayMode = record.screenplayMode
       ..aspectRatio = record.aspectRatio
       ..autoDuration = record.autoDuration
       ..durationSeconds = record.durationSeconds
@@ -1993,6 +2040,8 @@ class AppController extends ChangeNotifier {
         form.mode == VideoMode.v2v &&
         selectedModel.sourceGuidanceRequiresTimestamps;
     return GenerationConfig(
+      screenplayMode: form.screenplayMode,
+      screenplayCharacterAliases: Map.of(form.screenplayCharacterAliases),
       aspectRatio: upscaling ? 'auto' : form.aspectRatio,
       duration: upscaling || selectedModel.durationComesFromSource(form.mode)
           ? 'source'
@@ -3638,12 +3687,22 @@ class AppController extends ChangeNotifier {
   Future<SavedReference?> saveDraftReference(
     MediaReferenceDraft draft, {
     required String name,
+    String? characterName,
     String? folderId,
     required Iterable<String> tags,
     LibraryStorage? storage,
   }) async {
     if (gateway is! ReferenceLibraryGateway) {
       showNotice('Saved references are unavailable on this build.');
+      return null;
+    }
+    final characterProblem = characterNameProblem(
+      characterName ?? characterNameForDraft(draft),
+      excludeDraftId: draft.id,
+      excludeSavedReferenceId: draft.savedReferenceId,
+    );
+    if (characterProblem != null) {
+      showNotice(characterProblem);
       return null;
     }
     final requestedName = name.trim();
@@ -3693,6 +3752,9 @@ class AppController extends ChangeNotifier {
     final reference = SavedReference(
       id: id,
       name: clean,
+      characterName: normalizeCharacterName(
+        characterName ?? characterNameForDraft(draft),
+      ),
       kind: draft.kind,
       asset:
           retained ??
@@ -3757,6 +3819,8 @@ class AppController extends ChangeNotifier {
         );
       }).toList();
       notifyListeners();
+      _syncScreenplayReferences();
+      _scheduleComposerTabsSave();
       showNotice('“${savedReference.name}” saved to References.');
       return savedReference;
     } on Object catch (error) {
@@ -3768,10 +3832,19 @@ class AppController extends ChangeNotifier {
   Future<bool> updateSavedReference(
     SavedReference reference, {
     required String name,
+    String? characterName,
     String? folderId,
     required Iterable<String> tags,
   }) async {
     if (gateway is! ReferenceLibraryGateway) return false;
+    final characterProblem = characterNameProblem(
+      characterName ?? reference.characterName ?? '',
+      excludeSavedReferenceId: reference.id,
+    );
+    if (characterProblem != null) {
+      showNotice(characterProblem);
+      return false;
+    }
     final clean = name.trim();
     final problem = referenceNameProblem(
       clean,
@@ -3786,6 +3859,9 @@ class AppController extends ChangeNotifier {
         await (gateway as ReferenceLibraryGateway).saveReference(
           reference.copyWith(
             name: clean,
+            characterName: characterName == null
+                ? null
+                : normalizeCharacterName(characterName),
             folderId: folderId,
             clearFolder: folderId == null,
             tags: cleanLibraryTags(tags),
@@ -3811,6 +3887,17 @@ class AppController extends ChangeNotifier {
         }).toList();
       }
       notifyListeners();
+      if (characterName != null &&
+          normalizeCharacterName(characterName) !=
+              (reference.characterName ?? '')) {
+        _savedCharacterChanged(
+          reference.id,
+          reference.characterName ?? '',
+          normalizeCharacterName(characterName),
+        );
+      }
+      _syncScreenplayReferences();
+      _scheduleComposerTabsSave();
       showNotice('Reference updated.');
       return true;
     } on Object catch (error) {
@@ -4136,7 +4223,7 @@ class AppController extends ChangeNotifier {
     MediaReferenceKind kind,
     Iterable<ReferenceCandidate> candidates,
   ) async {
-    final tab = activeComposerTab;
+    final tab = _draftTab;
     final available = referenceLimit(kind) - form.referenceCount(kind);
     final selected = candidates
         .where((item) => item.kind == kind)
@@ -4291,12 +4378,22 @@ class AppController extends ChangeNotifier {
     String name,
     Object error,
   ) {
+    final failed = form.references
+        .where((item) => item.id == draftId)
+        .firstOrNull;
+    if (failed != null) {
+      form.prompt = removeScreenplayReference(
+        form.prompt,
+        referencePromptName(failed),
+      );
+    }
     final before = form.references.length;
     form.references = form.references
         .where((item) => item.id != draftId)
         .toList();
     if (form.references.length != before) {
       _invalidateProviderEstimate();
+      _scheduleComposerTabsSave();
       notifyListeners();
     }
     showNotice('“$name” could not be loaded. ${_message(error)}');
@@ -4434,6 +4531,11 @@ class AppController extends ChangeNotifier {
 
   void updateForm(void Function(GenerationFormState value) update) {
     update(form);
+    if (form.prompt.trim().isEmpty) {
+      form.screenplayLinkedCharacters.clear();
+      form.screenplayCharacterAliases.clear();
+    }
+    _syncScreenplayReferences();
     _selectCompatibleModel();
     if (form.draft && selectedModel.supportsDraft) form.resolution = 'hd';
     final resolutions = availableResolutions;
@@ -5498,7 +5600,17 @@ class AppController extends ChangeNotifier {
         .where((reference) => reference.id == id)
         .firstOrNull;
     if (removed == null) return;
+    final character = characterNameForDraft(removed);
+    if (character.isNotEmpty) {
+      form.screenplayLinkedCharacters.add(character);
+    }
+    form.prompt = removeScreenplayReference(
+      form.prompt,
+      referencePromptName(removed),
+    );
+    form.draftCharacterNames.remove(id);
     form.references = form.references.where((item) => item.id != id).toList();
+    _scheduleComposerTabsSave();
     _selectCompatibleModel();
     _normalizeFormForModel();
     _invalidateProviderEstimate();
@@ -7400,10 +7512,16 @@ class AppController extends ChangeNotifier {
           ? item.config.referenceTask
           : MediaReferenceTask.reference;
       _disabledReferences.clear();
+      form.screenplayLinkedCharacters.clear();
+      form.screenplayCharacterAliases
+        ..clear()
+        ..addAll(item.config.screenplayCharacterAliases);
+      form.draftCharacterNames.clear();
       form
         ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
             ? item.prompt
             : form.prompt
+        ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
         ..durationSeconds = item.config.duration is num

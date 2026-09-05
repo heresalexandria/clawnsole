@@ -20,6 +20,44 @@ void main() {
     storage: StorageStats(path: 'memory', bytes: 0, records: 0),
   );
 
+  test(
+    'failed automatic character hydration removes its unchanged mapping',
+    () async {
+      final now = DateTime.utc(2026);
+      final saved = SavedReference(
+        id: 'missing',
+        name: 'missing.mp4',
+        characterName: 'ALEXANDRIA',
+        kind: MediaReferenceKind.video,
+        asset: const AssetReference(
+          kind: 'local',
+          value: 'missing',
+          label: 'missing.mp4',
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final snapshot = emptySnapshot.copyWith(savedReferences: [saved]);
+      final gateway = _ReferenceGateway(
+        snapshot,
+        beforeRead: () async => throw StateError('Missing media'),
+      );
+      final controller = AppController(gateway: gateway)
+        ..snapshot = snapshot
+        ..selectedProviderId = 'artcraft'
+        ..selectedModelId = 'seedance_2p5';
+      addTearDown(controller.dispose);
+      controller.setScreenplayMode(true);
+      controller.updateForm((form) => form.prompt = 'ALEXANDRIA enters.');
+      expect(controller.form.prompt, contains('ALEXANDRIA: @missing.mp4'));
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.form.references, isEmpty);
+      expect(controller.form.prompt, isNot(contains('@missing.mp4')));
+      controller.updateForm((form) => form.prompt += ' Then pauses.');
+      expect(controller.form.references, isEmpty);
+    },
+  );
+
   testWidgets('reference upload shows loading while the picker reads a file', (
     tester,
   ) async {
@@ -1048,7 +1086,7 @@ void main() {
 
     final migrated = StoredData.fromJson(json);
 
-    expect(migrated.toJson()['schemaVersion'], 25);
+    expect(migrated.toJson()['schemaVersion'], 26);
     expect(
       migrated.generations.single.config.references!.single.referenceId,
       'legacy-reference',

@@ -14,6 +14,7 @@ import 'app_intents.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'composer_tab_rail.dart';
+import 'characters_dialog.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
@@ -973,65 +974,32 @@ class _ComposerState extends State<_Composer> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (!enhancing) ...<Widget>[
-            FieldLabel(
-              upscaling ? 'Detail guidance · optional' : 'Direction',
-              icon: Icons.edit_note_rounded,
-              inlineAction: IconButton(
-                key: const ValueKey('prompt-clear-button'),
-                tooltip: 'Clear prompt',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 26,
-                  height: 26,
-                ),
-                iconSize: 15,
-                onPressed: form.prompt.isEmpty
-                    ? null
-                    : () => unawaited(_confirmClearPrompt()),
-                icon: const Icon(Icons.backspace_outlined),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  IconButton(
-                    key: const ValueKey('prompt-rewrite-button'),
-                    tooltip: 'Rewrite with AI',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: controller.canRewriteDirection
-                        ? () => unawaited(
-                            showPromptRewriteDialog(
-                              context,
-                              controller: controller,
-                            ),
-                          )
-                        : null,
-                    icon: const Icon(Icons.auto_fix_high_rounded),
-                  ),
-                  _PromptCharacterCounter(controller: controller),
-                  IconButton(
-                    key: const ValueKey('prompt-copy-button'),
-                    tooltip: 'Copy prompt to clipboard',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => unawaited(_copyPrompt()),
-                    icon: const Icon(Icons.copy_rounded),
-                  ),
-                  IconButton(
-                    key: const ValueKey('prompt-fullscreen-button'),
-                    tooltip: 'Expand prompt to full screen',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () =>
-                        unawaited(_showFullscreenPrompt(upscaling: upscaling)),
-                    icon: const Icon(Icons.fullscreen_rounded),
-                  ),
-                ],
-              ),
+            _DirectionHeader(
+              controller: controller,
+              upscaling: upscaling,
+              onClear: () => unawaited(_confirmClearPrompt()),
+              onExpand: () =>
+                  unawaited(_showFullscreenPrompt(upscaling: upscaling)),
+              onModeChanged: (enabled) =>
+                  setState(() => controller.setScreenplayMode(enabled)),
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 10),
             ReferencePromptField(
               key: ValueKey(
                 'generation-prompt-${controller.activeComposerTabId}-'
                 '${controller.formRevision}',
+              ),
+              minLines:
+                  short &&
+                      MediaQuery.sizeOf(context).width >= 1000 &&
+                      !form.screenplayMode
+                  ? 2
+                  : 4,
+              screenplayMode: form.screenplayMode,
+              characterNames: controller.screenplayCharacterNames,
+              toolbar: _DirectionToolbar(
+                controller: controller,
+                onCopy: () => unawaited(_copyPrompt()),
               ),
               prompt: form.prompt,
               formRevision: controller.formRevision,
@@ -1040,7 +1008,7 @@ class _ComposerState extends State<_Composer> {
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
             ),
-            SizedBox(height: short ? 10 : 16),
+            SizedBox(height: short ? 8 : 16),
           ],
           if (draftActive)
             _SourceEditor(
@@ -1191,6 +1159,180 @@ class _ComposerState extends State<_Composer> {
   }
 }
 
+class _DirectionHeader extends StatelessWidget {
+  const _DirectionHeader({
+    required this.controller,
+    required this.upscaling,
+    required this.onClear,
+    required this.onExpand,
+    required this.onModeChanged,
+    this.expanded = false,
+  });
+  final AppController controller;
+  final bool upscaling;
+  final VoidCallback onClear;
+  final VoidCallback onExpand;
+  final ValueChanged<bool> onModeChanged;
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconExtent = MediaQuery.sizeOf(context).width >= 1000 ? 36.0 : 40.0;
+    return LayoutBuilder(
+      builder: (context, constraints) => Row(
+        key: const ValueKey('direction-header'),
+        children: [
+          SizedBox(
+            width: ((constraints.maxWidth - iconExtent * 2 - 4) * .6).clamp(
+              0.0,
+              120.0,
+            ),
+            child: Semantics(
+              label: upscaling ? 'Detail guidance format' : 'Direction format',
+              child: DropdownButton<bool>(
+                key: const ValueKey('prompt-format-picker'),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                borderRadius: BorderRadius.circular(8),
+                value: controller.form.screenplayMode,
+                isDense: true,
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                style: Theme.of(context).textTheme.labelMedium,
+                selectedItemBuilder: (context) => [
+                  for (final label in ['Plaintext', 'Screenplay'])
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(label),
+                      ),
+                    ),
+                ],
+                items: const [
+                  DropdownMenuItem(value: false, child: Text('Plaintext')),
+                  DropdownMenuItem(value: true, child: Text('Screenplay')),
+                ],
+                onChanged: (value) {
+                  if (value != null) onModeChanged(value);
+                },
+              ),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('prompt-clear-button'),
+            tooltip: 'Clear prompt',
+            constraints: BoxConstraints.tightFor(
+              width: iconExtent,
+              height: iconExtent,
+            ),
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: controller.form.prompt.isEmpty ? null : onClear,
+            icon: const Icon(Icons.backspace_outlined, size: 18),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _PromptCharacterCounter(controller: controller),
+              ),
+            ),
+          ),
+          IconButton(
+            key: ValueKey(
+              expanded
+                  ? 'prompt-fullscreen-minimize'
+                  : 'prompt-fullscreen-button',
+            ),
+            tooltip: expanded ? 'Minimize prompt' : 'Expand prompt',
+            constraints: BoxConstraints.tightFor(
+              width: iconExtent,
+              height: iconExtent,
+            ),
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: onExpand,
+            icon: Icon(
+              expanded
+                  ? Icons.fullscreen_exit_rounded
+                  : Icons.fullscreen_rounded,
+              size: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DirectionToolbar extends StatelessWidget {
+  const _DirectionToolbar({required this.controller, required this.onCopy});
+  final AppController controller;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('direction-toolbar'),
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerLow,
+      border: Border.all(color: context.colors.outlineVariant),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: TextButtonTheme(
+      data: TextButtonThemeData(
+        style: (TextButtonTheme.of(context).style ?? const ButtonStyle()).merge(
+          TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            minimumSize: const Size(0, 40),
+            textStyle: Theme.of(context).textTheme.labelMedium,
+          ),
+        ),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          spacing: 2,
+          children: [
+            TextButton.icon(
+              key: const ValueKey('prompt-copy-button'),
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_rounded, size: 17),
+              label: const Text('Copy'),
+            ),
+            TextButton.icon(
+              key: const ValueKey('prompt-rewrite-button'),
+              onPressed: controller.canRewriteDirection
+                  ? () => unawaited(
+                      showPromptRewriteDialog(context, controller: controller),
+                    )
+                  : null,
+              icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
+              label: const Text('AI rewrite'),
+            ),
+            TextButton.icon(
+              key: const ValueKey('prompt-characters-button'),
+              onPressed: () =>
+                  unawaited(showCharactersDialog(context, controller)),
+              icon: const Icon(Icons.people_outline_rounded, size: 17),
+              label: const Text('Characters'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _FullscreenPromptEditor extends StatelessWidget {
   const _FullscreenPromptEditor({
     required this.controller,
@@ -1207,72 +1349,98 @@ class _FullscreenPromptEditor extends StatelessWidget {
         : 24.0;
     // The barrier is deliberately not dismissible (a stray click must not
     // lose the editor mid-thought), but Escape is an explicit request.
-    return Actions(
-      actions: <Type, Action<Intent>>{
-        DismissIntent: CallbackAction<DismissIntent>(
-          onInvoke: (_) {
-            Navigator.of(context).pop();
-            return null;
-          },
-        ),
-      },
-      child: Material(
-        key: const ValueKey('prompt-fullscreen-editor'),
-        type: MaterialType.transparency,
-        child: AppBackdrop(
-          child: AnimatedPadding(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(context).bottom,
-            ),
-            child: SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  horizontalPadding,
-                  12,
-                  horizontalPadding,
-                  16,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    FieldLabel(
-                      upscaling ? 'Detail guidance · optional' : 'Direction',
-                      icon: Icons.edit_note_rounded,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          _PromptCharacterCounter(controller: controller),
-                          IconButton(
-                            key: const ValueKey('prompt-fullscreen-minimize'),
-                            tooltip: 'Minimize prompt',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => Navigator.of(context).pop(),
-                            icon: const Icon(Icons.fullscreen_exit_rounded),
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => Actions(
+        actions: <Type, Action<Intent>>{
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) {
+              Navigator.of(context).pop();
+              return null;
+            },
+          ),
+        },
+        child: Material(
+          key: const ValueKey('prompt-fullscreen-editor'),
+          type: MaterialType.transparency,
+          child: AppBackdrop(
+            child: AnimatedPadding(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    12,
+                    horizontalPadding,
+                    16,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _DirectionHeader(
+                        controller: controller,
+                        upscaling: upscaling,
+                        expanded: true,
+                        onExpand: () => Navigator.of(context).pop(),
+                        onModeChanged: controller.setScreenplayMode,
+                        onClear: () async {
+                          final clear = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Clear the prompt?'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Clear prompt'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (clear == true) {
+                            controller.updateForm((form) => form.prompt = '');
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: ReferencePromptField(
+                          key: ValueKey(
+                            'generation-prompt-fullscreen-'
+                            '${controller.formRevision}',
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: ReferencePromptField(
-                        key: ValueKey(
-                          'generation-prompt-fullscreen-'
-                          '${controller.formRevision}',
+                          screenplayMode: controller.form.screenplayMode,
+                          characterNames: controller.screenplayCharacterNames,
+                          toolbar: _DirectionToolbar(
+                            controller: controller,
+                            onCopy: () => unawaited(
+                              Clipboard.setData(
+                                ClipboardData(text: controller.form.prompt),
+                              ),
+                            ),
+                          ),
+                          prompt: controller.form.prompt,
+                          formRevision: controller.formRevision,
+                          references: _promptReferenceOptions(controller),
+                          expands: true,
+                          autofocus: true,
+                          maxLength:
+                              controller.selectedModel.maxPromptCharacters,
+                          onChanged: (value) => controller.updateForm(
+                            (form) => form.prompt = value,
+                          ),
                         ),
-                        prompt: controller.form.prompt,
-                        formRevision: controller.formRevision,
-                        references: _promptReferenceOptions(controller),
-                        expands: true,
-                        autofocus: true,
-                        maxLength: controller.selectedModel.maxPromptCharacters,
-                        onChanged: (value) => controller.updateForm(
-                          (form) => form.prompt = value,
-                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2821,6 +2989,24 @@ class _ReferenceTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
         ),
+        if (reference.kind != MediaReferenceKind.audio)
+          TextButton.icon(
+            key: ValueKey('name-character-${reference.id}'),
+            onPressed: () => unawaited(
+              showCharacterAssignmentDialog(context, controller, reference),
+            ),
+            icon: const Icon(Icons.person_outline, size: 16),
+            label: Text(
+              controller.characterNameForDraft(reference).isEmpty
+                  ? 'Name character'
+                  : controller.characterNameForDraft(reference),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            style: TextButton.styleFrom(
+              textStyle: const TextStyle(fontSize: 11),
+            ),
+          ),
         if (controller.canUseReferenceAsFirstFrame(reference)) ...<Widget>[
           const SizedBox(height: 4),
           TextButton.icon(

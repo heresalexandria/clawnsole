@@ -2462,7 +2462,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 25);
+    expect(decoded.toJson()['schemaVersion'], 26);
   });
 
   test(
@@ -2658,7 +2658,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 25);
+      expect(decoded.toJson()['schemaVersion'], 26);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',
@@ -5394,7 +5394,8 @@ void main() {
     );
     expect(fullscreen, findsOneWidget);
     expect(tester.getSize(fullscreen), viewport);
-    expect(tester.getSize(fullscreenPrompt).height, greaterThan(600));
+    // The labeled toolbar remains available in the expanded editor.
+    expect(tester.getSize(fullscreenPrompt).height, greaterThan(550));
     final fullscreenTextField = tester.widget<TextField>(
       find.descendant(of: fullscreenPrompt, matching: find.byType(TextField)),
     );
@@ -5514,14 +5515,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The clear control hugs the Direction label, left of the header's
-    // trailing cluster.
+    // Clear sits next to the format picker in the direction header.
     final clear = find.byKey(const ValueKey('prompt-clear-button'));
     expect(clear, findsOneWidget);
     expect(
       tester.getCenter(clear).dx,
       lessThan(
-        tester.getCenter(find.byKey(const ValueKey('prompt-copy-button'))).dx,
+        tester
+            .getCenter(find.byKey(const ValueKey('prompt-fullscreen-button')))
+            .dx,
       ),
     );
 

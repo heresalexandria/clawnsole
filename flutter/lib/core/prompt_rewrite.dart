@@ -244,6 +244,7 @@ class PromptRewriteRequest {
     this.aspectRatio,
     this.mode,
     this.referenceMentions = const <String>[],
+    this.screenplayMode = false,
   });
 
   /// [RewriteProvider.id].
@@ -270,12 +271,14 @@ class PromptRewriteRequest {
 
   /// Reference mentions such as `@Image 1` the prompt may use verbatim.
   final List<String> referenceMentions;
+  final bool screenplayMode;
 
   Map<String, Object?> toJson() => <String, Object?>{
     'provider': providerId,
     'model': modelId,
     if (effort != null) 'effort': effort,
     'originalPrompt': originalPrompt,
+    if (screenplayMode) 'screenplayMode': true,
     'direction': direction,
     'frames': frames.map((frame) => frame.toJson()).toList(),
     if (targetProviderName != null) 'targetProviderName': targetProviderName,
@@ -299,6 +302,7 @@ class PromptRewriteRequest {
       modelId: json['model']?.toString() ?? '',
       effort: text(json['effort']),
       originalPrompt: json['originalPrompt']?.toString() ?? '',
+      screenplayMode: json['screenplayMode'] == true,
       direction: json['direction']?.toString() ?? '',
       frames: (json['frames'] as List<Object?>? ?? const <Object?>[])
           .whereType<Map<Object?, Object?>>()
@@ -481,6 +485,11 @@ String buildRewriteInstructions(PromptRewriteRequest request) {
       '"summary": <one sentence under 140 characters describing what you '
       'changed>}.',
     );
+  if (request.screenplayMode) {
+    buffer.writeln(
+      'The prompt is a screenplay. Preserve screenplay layout: uppercase scene headings and character cues, indented dialogue and parentheticals, action paragraphs, and transitions. Keep character-to-reference mapping lines such as CHARACTER: @reference unchanged unless the director requests a casting change. Return the revised screenplay as the prompt, without code fences.',
+    );
+  }
   return buffer.toString();
 }
 

@@ -13,6 +13,44 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'native reference writes preserve assignments and reject duplicate characters',
+    () async {
+      final store = _MemoryStore(const StoredData());
+      final gateway = DirectGateway(store: store);
+      final now = DateTime.utc(2026);
+      SavedReference reference(String id, String character) => SavedReference(
+        id: id,
+        name: '$id.png',
+        characterName: character,
+        kind: MediaReferenceKind.image,
+        asset: AssetReference(
+          kind: 'remote',
+          value: 'https://example.com/$id.png',
+          label: '$id.png',
+        ),
+        createdAt: now,
+        updatedAt: now,
+      );
+      await gateway.saveReference(reference('one', 'alexandria'));
+      expect(store.data.savedReferences.single.characterName, 'ALEXANDRIA');
+      await expectLater(
+        gateway.saveReference(reference('two', 'Alexandria')),
+        throwsStateError,
+      );
+      expect(store.data.savedReferences, hasLength(1));
+      await gateway.saveReference(reference('one', ''));
+      await gateway.saveReference(reference('two', 'Alexandria'));
+      expect(
+        store.data.savedReferences
+            .where((item) => item.characterName == 'ALEXANDRIA')
+            .single
+            .id,
+        'two',
+      );
+    },
+  );
+
   test('portable Drive metadata excludes every provider credential', () {
     final portable = googleDrivePortableData(
       const StoredData(
@@ -277,7 +315,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 25);
+      expect(migrated.toJson()['schemaVersion'], 26);
     },
   );
 

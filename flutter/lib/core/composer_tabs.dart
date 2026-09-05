@@ -42,6 +42,10 @@ class ComposerTabRecord {
     required this.id,
     this.title,
     this.prompt = '',
+    this.screenplayMode = false,
+    this.screenplayLinkedCharacters = const [],
+    this.screenplayReferenceNames = const {},
+    this.screenplayCharacterAliases = const {},
     this.providerId,
     this.modelId,
     this.aspectRatio = '16:9',
@@ -74,6 +78,12 @@ class ComposerTabRecord {
   /// prompt via [composerTabTitle].
   final String? title;
   final String prompt;
+  final bool screenplayMode;
+  final List<String> screenplayLinkedCharacters;
+
+  /// Saved reference ids and their authoring names, never media or secrets.
+  final Map<String, String> screenplayReferenceNames;
+  final Map<String, String> screenplayCharacterAliases;
   final String? providerId;
   final String? modelId;
   final String aspectRatio;
@@ -118,6 +128,10 @@ class ComposerTabRecord {
     String? title,
     bool clearTitle = false,
     String? prompt,
+    bool? screenplayMode,
+    List<String>? screenplayLinkedCharacters,
+    Map<String, String>? screenplayReferenceNames,
+    Map<String, String>? screenplayCharacterAliases,
     String? providerId,
     String? modelId,
     String? aspectRatio,
@@ -151,6 +165,13 @@ class ComposerTabRecord {
     id: id ?? this.id,
     title: clearTitle ? null : title ?? this.title,
     prompt: prompt ?? this.prompt,
+    screenplayMode: screenplayMode ?? this.screenplayMode,
+    screenplayLinkedCharacters:
+        screenplayLinkedCharacters ?? this.screenplayLinkedCharacters,
+    screenplayReferenceNames:
+        screenplayReferenceNames ?? this.screenplayReferenceNames,
+    screenplayCharacterAliases:
+        screenplayCharacterAliases ?? this.screenplayCharacterAliases,
     providerId: providerId ?? this.providerId,
     modelId: modelId ?? this.modelId,
     aspectRatio: aspectRatio ?? this.aspectRatio,
@@ -189,6 +210,13 @@ class ComposerTabRecord {
     'id': id,
     if (title != null && title!.trim().isNotEmpty) 'title': title,
     'prompt': prompt,
+    'screenplayMode': screenplayMode,
+    if (screenplayLinkedCharacters.isNotEmpty)
+      'screenplayLinkedCharacters': screenplayLinkedCharacters,
+    if (screenplayReferenceNames.isNotEmpty)
+      'screenplayReferenceNames': screenplayReferenceNames,
+    if (screenplayCharacterAliases.isNotEmpty)
+      'screenplayCharacterAliases': screenplayCharacterAliases,
     if (providerId != null) 'provider': providerId,
     if (modelId != null) 'model': modelId,
     'aspectRatio': aspectRatio,
@@ -235,6 +263,29 @@ class ComposerTabRecord {
       id: json['id']?.toString() ?? '',
       title: text(json['title']),
       prompt: json['prompt'] is String ? json['prompt']! as String : '',
+      screenplayMode: flag(json['screenplayMode'], false),
+      screenplayLinkedCharacters:
+          (json['screenplayLinkedCharacters'] is List
+                  ? json['screenplayLinkedCharacters']! as List
+                  : const [])
+              .whereType<String>()
+              .toList(),
+      screenplayReferenceNames: json['screenplayReferenceNames'] is Map
+          ? {
+              for (final entry
+                  in (json['screenplayReferenceNames']! as Map).entries)
+                if (entry.key is String && entry.value is String)
+                  entry.key as String: entry.value as String,
+            }
+          : const {},
+      screenplayCharacterAliases: json['screenplayCharacterAliases'] is Map
+          ? {
+              for (final entry
+                  in (json['screenplayCharacterAliases']! as Map).entries)
+                if (entry.key is String && entry.value is String)
+                  entry.key as String: entry.value as String,
+            }
+          : const {},
       providerId: text(json['provider']),
       modelId: text(json['model']),
       aspectRatio: text(json['aspectRatio']) ?? '16:9',
@@ -272,7 +323,8 @@ class ComposerTabsState {
     this.activeTabId,
   });
 
-  static const int schemaVersion = 1;
+  // Version 1 migrates additively to prose mode with no character links.
+  static const int schemaVersion = 3;
 
   final List<ComposerTabRecord> tabs;
   final String? activeTabId;

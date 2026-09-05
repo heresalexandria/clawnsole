@@ -26,6 +26,7 @@ import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
+import 'package:clawnsole/core/screenplay.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
@@ -1619,6 +1620,11 @@ class CompanionApp {
               : const <String, Object?>{},
         );
         final name = reference.name.trim();
+        final characterProblem = referenceCharacterAssignmentProblem(
+          reference,
+          current.savedReferences,
+        );
+        if (characterProblem != null) throw StateError(characterProblem);
         if (reference.id.trim().isEmpty || !isValidSavedReferenceName(name)) {
           throw StateError(savedReferenceNameRule);
         }
@@ -1654,6 +1660,7 @@ class CompanionApp {
         final clean = SavedReference(
           id: reference.id,
           name: name,
+          characterName: normalizeCharacterName(reference.characterName ?? ''),
           kind: reference.kind,
           asset: asset,
           thumbnailAsset: existing?.thumbnailAsset ?? reference.thumbnailAsset,

@@ -939,6 +939,15 @@ class _ReferenceCard extends StatelessWidget {
                           color: context.colors.onSurfaceVariant,
                         ),
                       ),
+                      if (reference.characterName?.isNotEmpty == true)
+                        Text(
+                          'Character · ${reference.characterName}',
+                          style: TextStyle(
+                            color: context.colors.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
+                        ),
                       if (reference.tags.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 7),
                         Text(
@@ -1679,6 +1688,12 @@ Future<bool> showReferenceMetadataDialog(
   assert(reference != null || draft != null);
   final name = TextEditingController(text: reference?.name ?? draft!.label);
   final tags = TextEditingController(text: reference?.tags.join(', ') ?? '');
+  final character = TextEditingController(
+    text:
+        reference?.characterName ??
+        (draft == null ? '' : controller.characterNameForDraft(draft)),
+  );
+  String? characterError;
   var folderId = reference?.folderId;
   var destination = reference?.storage ?? controller.effectiveStorage;
   final saved = await showDialog<bool>(
@@ -1686,92 +1701,112 @@ Future<bool> showReferenceMetadataDialog(
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
         title: Text(reference == null ? 'Save reference' : 'Edit reference'),
-        content: SizedBox(
-          width: 440,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              if (reference == null &&
-                  controller.supportsLocalLibrary &&
-                  controller.supportsGoogleDrive) ...<Widget>[
-                DropdownButtonFormField<LibraryStorage>(
-                  initialValue: destination,
-                  decoration: const InputDecoration(
-                    labelText: 'Save in',
-                    prefixIcon: Icon(Icons.storage_outlined),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (reference == null &&
+                    controller.supportsLocalLibrary &&
+                    controller.supportsGoogleDrive) ...<Widget>[
+                  DropdownButtonFormField<LibraryStorage>(
+                    initialValue: destination,
+                    decoration: const InputDecoration(
+                      labelText: 'Save in',
+                      prefixIcon: Icon(Icons.storage_outlined),
+                    ),
+                    items: LibraryStorage.values
+                        .map(
+                          (value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value.label),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) => setState(() {
+                      destination = value ?? destination;
+                      folderId = null;
+                    }),
                   ),
-                  items: LibraryStorage.values
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(value.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) => setState(() {
-                    destination = value ?? destination;
-                    folderId = null;
-                  }),
-                ),
-                const SizedBox(height: 10),
-              ] else ...<Widget>[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: StorageBadge(storage: destination),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
-                  null) ...<Widget>[
-                Text(
-                  'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
-                  style: TextStyle(
-                    color: context.colors.onSurfaceVariant,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(height: 10),
+                ] else ...<Widget>[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: StorageBadge(storage: destination),
                   ),
+                  const SizedBox(height: 10),
+                ],
+                if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
+                    null) ...<Widget>[
+                  Text(
+                    'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
+                    style: TextStyle(
+                      color: context.colors.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                TextField(
+                  controller: name,
+                  autofocus: true,
+                  maxLength: 80,
+                  decoration: const InputDecoration(labelText: 'Name'),
                 ),
                 const SizedBox(height: 10),
-              ],
-              TextField(
-                controller: name,
-                autofocus: true,
-                maxLength: 80,
-                decoration: const InputDecoration(labelText: 'Name'),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String?>(
-                initialValue: folderId,
-                decoration: const InputDecoration(labelText: 'Folder'),
-                items: <DropdownMenuItem<String?>>[
-                  const DropdownMenuItem(value: null, child: Text('Unfiled')),
-                  ...controller.referenceFolderTree
-                      .where((folder) => folder.storage == destination)
-                      .map(
-                        (folder) => DropdownMenuItem(
-                          value: folder.id,
-                          child: Text(
-                            controller.folderPath(
-                              folder.id,
-                              collection: LibraryCollection.references,
+                if ((reference?.kind ?? draft?.kind) !=
+                    MediaReferenceKind.audio) ...[
+                  TextField(
+                    key: const ValueKey('reference-character-name'),
+                    controller: character,
+                    textCapitalization: TextCapitalization.characters,
+                    maxLength: 60,
+                    decoration: InputDecoration(
+                      labelText: 'Character name',
+                      hintText: 'ALEXANDRIA',
+                      errorText: characterError,
+                      helperText:
+                          'Optional, unique. Used to cast this reference in a screenplay.',
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                DropdownButtonFormField<String?>(
+                  initialValue: folderId,
+                  decoration: const InputDecoration(labelText: 'Folder'),
+                  items: <DropdownMenuItem<String?>>[
+                    const DropdownMenuItem(value: null, child: Text('Unfiled')),
+                    ...controller.referenceFolderTree
+                        .where((folder) => folder.storage == destination)
+                        .map(
+                          (folder) => DropdownMenuItem(
+                            value: folder.id,
+                            child: Text(
+                              controller.folderPath(
+                                folder.id,
+                                collection: LibraryCollection.references,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                ],
-                onChanged: (value) => setState(() => folderId = value),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: tags,
-                decoration: const InputDecoration(
-                  labelText: 'Tags',
-                  hintText: 'character, product, motion',
-                  helperText: 'Separate tags with commas',
+                  ],
+                  onChanged: (value) => setState(() => folderId = value),
                 ),
-              ),
-            ],
+                const SizedBox(height: 10),
+                TextField(
+                  controller: tags,
+                  decoration: const InputDecoration(
+                    labelText: 'Tags',
+                    hintText: 'character, product, motion',
+                    helperText: 'Separate tags with commas',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         actions: <Widget>[
@@ -1781,11 +1816,22 @@ Future<bool> showReferenceMetadataDialog(
           ),
           FilledButton(
             onPressed: () async {
+              final problem = controller.characterNameProblem(
+                character.text,
+                excludeDraftId: draft?.id,
+                excludeSavedReferenceId:
+                    reference?.id ?? draft?.savedReferenceId,
+              );
+              if (problem != null) {
+                setState(() => characterError = problem);
+                return;
+              }
               final values = tags.text.split(',');
               final success = reference == null
                   ? await controller.saveDraftReference(
                           draft!,
                           name: name.text,
+                          characterName: character.text,
                           folderId: folderId,
                           tags: values,
                           storage: destination,
@@ -1794,6 +1840,7 @@ Future<bool> showReferenceMetadataDialog(
                   : await controller.updateSavedReference(
                       reference,
                       name: name.text,
+                      characterName: character.text,
                       folderId: folderId,
                       tags: values,
                     );
@@ -1807,6 +1854,7 @@ Future<bool> showReferenceMetadataDialog(
   );
   name.dispose();
   tags.dispose();
+  character.dispose();
   return saved == true;
 }
 
@@ -2664,4 +2712,101 @@ Future<void> _confirmReferenceDelete(
   if (confirmed == true) {
     await controller.deleteSavedReference(reference.id);
   }
+}
+
+Future<void> showCharacterAssignmentDialog(
+  BuildContext context,
+  AppController controller,
+  MediaReferenceDraft reference,
+) async {
+  final name = TextEditingController(
+    text: controller.characterNameForDraft(reference),
+  );
+  String? error;
+  bool saving = false;
+  await showDialog<void>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: const Text('Cast a character'),
+        content: SingleChildScrollView(
+          child: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('@${controller.referencePromptName(reference)}'),
+                const SizedBox(height: 16),
+                TextField(
+                  key: const ValueKey('character-name-field'),
+                  controller: name,
+                  autofocus: true,
+                  maxLength: 60,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    labelText: 'Character name',
+                    hintText: 'ALEXANDRIA',
+                    errorText: error,
+                    helperText:
+                        'Use this name in your screenplay to link this reference. Clear it to remove the assignment.',
+                    helperMaxLines: 3,
+                  ),
+                ),
+                if (controller.screenplayCharacterNames.isNotEmpty)
+                  Wrap(
+                    spacing: 6,
+                    children: controller.screenplayCharacterNames
+                        .map(
+                          (character) => ActionChip(
+                            label: Text(character),
+                            onPressed: () => name.text = character,
+                          ),
+                        )
+                        .toList(),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('save-character-name'),
+            onPressed: saving
+                ? null
+                : () async {
+                    final problem = controller.characterNameProblem(
+                      name.text,
+                      excludeDraftId: reference.id,
+                      excludeSavedReferenceId: reference.savedReferenceId,
+                    );
+                    if (problem != null) {
+                      setState(() => error = problem);
+                      return;
+                    }
+                    setState(() => saving = true);
+                    final saved = await controller.setDraftCharacterName(
+                      reference.id,
+                      name.text,
+                    );
+                    if (!context.mounted) return;
+                    if (saved) {
+                      Navigator.pop(context);
+                    } else {
+                      setState(() => saving = false);
+                    }
+                  },
+            child: Text(saving ? 'Saving…' : 'Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  // Dialog exit animations retain the field for one more frame.
+  await Future<void>.delayed(const Duration(milliseconds: 250));
+  name.dispose();
 }

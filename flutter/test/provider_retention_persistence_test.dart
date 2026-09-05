@@ -14,57 +14,62 @@ import 'package:http/http.dart' as http;
 import '../tool/clawnsole_companion.dart';
 
 void main() {
-  test(
-    'schema 24 warning choices migrate into settings without losing data',
-    () {
-      final credentialId = providerCredentialAcknowledgementId(
-        'bfl',
-        'test-key',
-      );
-      final migrated = StoredData.fromJson(<String, Object?>{
-        'schemaVersion': 24,
-        'providerRetentionAcknowledgements': <String, String>{
-          'bfl': credentialId,
-        },
-        'preferences': const AppPreferences(
-          themeMode: AppThemeMode.dark,
-        ).toJson(),
-        'preferencesUpdatedAt': '2026-01-01T00:00:00Z',
-        'driveFolderId': 'existing-folder',
-      });
-
-      expect(
-        migrated.preferences.providerRetentionAcknowledgements['bfl'],
-        credentialId,
-      );
-      expect(migrated.preferences.themeMode, AppThemeMode.dark);
-      expect(migrated.driveFolderId, 'existing-folder');
-      expect(
-        migrated.preferencesUpdatedAt!.isAfter(DateTime.utc(2026)),
-        isTrue,
-      );
-      final encoded = migrated.toJson();
-      expect(encoded['schemaVersion'], 25);
-      expect(encoded.containsKey('providerRetentionAcknowledgements'), isFalse);
-      final restarted = StoredData.decode(migrated.encode());
-      expect(
-        restarted.providerRetentionAcknowledgements,
-        migrated.providerRetentionAcknowledgements,
-      );
-      expect(restarted.preferencesUpdatedAt, migrated.preferencesUpdatedAt);
-      // Once migrated, clearing preferences must not resurrect an old choice.
-      expect(
-        StoredData.fromJson(<String, Object?>{
-          ...encoded,
-          'preferences': const AppPreferences().toJson(),
+  for (final schemaVersion in <int>[24, 25]) {
+    test(
+      'schema $schemaVersion warning choices migrate into settings without losing data',
+      () {
+        final credentialId = providerCredentialAcknowledgementId(
+          'bfl',
+          'test-key',
+        );
+        final migrated = StoredData.fromJson(<String, Object?>{
+          'schemaVersion': schemaVersion,
           'providerRetentionAcknowledgements': <String, String>{
             'bfl': credentialId,
           },
-        }).providerRetentionAcknowledgements,
-        isEmpty,
-      );
-    },
-  );
+          'preferences': const AppPreferences(
+            themeMode: AppThemeMode.dark,
+          ).toJson(),
+          'preferencesUpdatedAt': '2026-01-01T00:00:00Z',
+          'driveFolderId': 'existing-folder',
+        });
+
+        expect(
+          migrated.preferences.providerRetentionAcknowledgements['bfl'],
+          credentialId,
+        );
+        expect(migrated.preferences.themeMode, AppThemeMode.dark);
+        expect(migrated.driveFolderId, 'existing-folder');
+        expect(
+          migrated.preferencesUpdatedAt!.isAfter(DateTime.utc(2026)),
+          isTrue,
+        );
+        final encoded = migrated.toJson();
+        expect(encoded['schemaVersion'], 26);
+        expect(
+          encoded.containsKey('providerRetentionAcknowledgements'),
+          isFalse,
+        );
+        final restarted = StoredData.decode(migrated.encode());
+        expect(
+          restarted.providerRetentionAcknowledgements,
+          migrated.providerRetentionAcknowledgements,
+        );
+        expect(restarted.preferencesUpdatedAt, migrated.preferencesUpdatedAt);
+        // Once migrated, clearing preferences must not resurrect an old choice.
+        expect(
+          StoredData.fromJson(<String, Object?>{
+            ...encoded,
+            'preferences': const AppPreferences().toJson(),
+            'providerRetentionAcknowledgements': <String, String>{
+              'bfl': credentialId,
+            },
+          }).providerRetentionAcknowledgements,
+          isEmpty,
+        );
+      },
+    );
+  }
 
   test(
     'native warning choices survive local restart and unrelated settings',
