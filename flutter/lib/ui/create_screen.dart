@@ -1288,7 +1288,10 @@ class _DirectionToolbar extends StatelessWidget {
       data: TextButtonThemeData(
         style: (TextButtonTheme.of(context).style ?? const ButtonStyle()).merge(
           TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             minimumSize: const Size(0, 40),
             textStyle: Theme.of(context).textTheme.labelMedium,
           ),
@@ -1298,7 +1301,7 @@ class _DirectionToolbar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          spacing: 4,
+          spacing: 2,
           children: [
             TextButton.icon(
               key: const ValueKey('prompt-copy-button'),

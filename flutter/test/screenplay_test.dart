@@ -442,6 +442,12 @@ void main() {
       final characters = find.byKey(const ValueKey('prompt-characters-button'));
       expect(tester.getCenter(copy).dy, tester.getCenter(rewrite).dy);
       expect(tester.getCenter(copy).dy, tester.getCenter(characters).dy);
+      expect(
+        tester.getRect(characters).right,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const ValueKey('direction-toolbar'))).right,
+        ),
+      );
       final field = find.byType(TextFormField).first;
       expect(
         tester.getBottomLeft(copy).dy,
