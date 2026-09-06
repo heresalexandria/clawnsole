@@ -5,6 +5,12 @@ final _characterReferenceExtension = RegExp(
   caseSensitive: false,
 );
 
+/// A reference name with its media extension trimmed off, the form a file name
+/// is matched against a character in. The cast chooser sorts by the same rule,
+/// so "Vinny.mp4" reads as a match for VINNY there too.
+String characterReferenceBaseName(String name) =>
+    name.replaceFirst(_characterReferenceExtension, '');
+
 extension ScreenplayAuthoring on AppController {
   String characterNameForDraft(MediaReferenceDraft draft) =>
       form.draftCharacterNames[draft.id] ??
@@ -20,11 +26,11 @@ extension ScreenplayAuthoring on AppController {
     ..._defaultCharacterReferences.keys,
   }.toList()..sort();
 
-  /// Script names remain stable when only the footer's casting name is edited.
+  /// Script names remain stable when only the cast's casting name is edited.
   List<String> get scriptCharacterNames => {
     if (form.screenplayMode) ...screenplayCharacters(form.prompt),
     ...form.screenplayCharacterAliases.keys,
-    ...screenplayMappings(form.prompt).keys.where(
+    ...form.characterMappings.keys.where(
       (name) => !form.screenplayCharacterAliases.values.contains(name),
     ),
     if (form.screenplayMode)
@@ -44,13 +50,61 @@ extension ScreenplayAuthoring on AppController {
     return form.screenplayCharacterAliases[name] ?? name;
   }
 
-  /// Editable casting text wins over library defaults, including an explicit
-  /// removal. Defaults can still be previewed before a character speaks or the
-  /// first script edit triggers automatic attachment.
+  /// The script name a cast entry belongs to, so a chip in the Cast row opens
+  /// the same editor the Characters dialog does. Falls back to the cast name
+  /// itself, which is what an added-by-hand character is filed under.
+  String castScriptName(String mappingName) {
+    final name = normalizeCharacterName(mappingName);
+    return scriptCharacterNames.firstWhere(
+      (script) => characterMappingName(script) == name,
+      orElse: () => name,
+    );
+  }
+
+  /// The casting block as it will be appended at submission.
+  List<String> get castLines => screenplayCastLines(form.characterMappings);
+
+  /// The direction plus its casting block. Everything that measures or sends
+  /// the prompt — the counter, the limit, the estimate, the submitted input —
+  /// goes through here (or [generationPrompt]), so a cast counts against the
+  /// character limit without ever appearing in the editable text.
+  String get promptWithCast {
+    final lines = castLines;
+    if (lines.isEmpty) return form.prompt;
+    final direction = form.prompt.trimRight();
+    final block = lines.join('\n');
+    return direction.isEmpty ? block : '$direction\n\n$block';
+  }
+
+  /// Lifts casting lines that arrived inside the prompt — a legacy workspace,
+  /// a reused film, a paste, an AI Rewrite — into [form.characterMappings] and
+  /// strips them from the editable text. Returns whether anything moved.
+  bool absorbPromptMappings() {
+    final absorbed = screenplayMappings(form.prompt);
+    if (absorbed.isEmpty) return false;
+    form.prompt = stripScreenplayMappings(form.prompt);
+    for (final entry in absorbed.entries) {
+      final name = normalizeCharacterName(entry.key);
+      if (name.isEmpty) continue;
+      if (entry.value.isEmpty) {
+        form.characterMappings.remove(name);
+      } else {
+        form.characterMappings[name] = entry.value.toSet().toList();
+      }
+      // A line that was written down is an explicit choice, exactly as it was
+      // when the prompt held it: automatic casting must not undo it.
+      form.screenplayLinkedCharacters.add(name);
+    }
+    return true;
+  }
+
+  /// The cast wins over library defaults, including an explicit removal.
+  /// Defaults can still be previewed before a character speaks or the first
+  /// script edit triggers automatic attachment.
   List<String> characterMappingReferences(String scriptName) {
     final name = normalizeCharacterName(scriptName);
     final mappingName = characterMappingName(name);
-    final mapped = screenplayMappings(form.prompt)[mappingName];
+    final mapped = form.characterMappings[mappingName];
     if (mapped != null) return mapped;
     if (_hasExplicitCharacterMapping(name)) return const [];
     return _defaultCharacterReferences[mappingName] ?? const [];
@@ -61,7 +115,7 @@ extension ScreenplayAuthoring on AppController {
     return form.screenplayCharacterAliases.containsKey(name) ||
         form.screenplayLinkedCharacters.contains(name) ||
         form.screenplayLinkedCharacters.contains(mappingName) ||
-        (mappedNames ?? screenplayMappings(form.prompt).keys.toSet()).contains(
+        (mappedNames ?? form.characterMappings.keys.toSet()).contains(
           mappingName,
         );
   }
@@ -101,7 +155,9 @@ extension ScreenplayAuthoring on AppController {
   }
 
   /// Explicit cast edits also work in plaintext. Saved card assignments stay
-  /// library defaults; a script may cast several media references per character.
+  /// library defaults; a script may cast several media references per
+  /// character. The choice lands in [form.characterMappings], never in the
+  /// editable prompt.
   Future<String?> saveCharacterMapping({
     required String scriptName,
     required String name,
@@ -174,12 +230,13 @@ extension ScreenplayAuthoring on AppController {
       )) {
         return 'A reference could not be loaded. Please try again.';
       }
-      form.prompt = replaceScreenplayMapping(
-        form.prompt,
-        previous,
-        normalized,
-        referenceNames,
-      );
+      final chosen = referenceNames.toSet().toList();
+      form.characterMappings.remove(previous);
+      if (chosen.isEmpty) {
+        form.characterMappings.remove(normalized);
+      } else {
+        form.characterMappings[normalized] = chosen;
+      }
       if (renameInScript) {
         form.prompt = renameScreenplayCharacter(
           form.prompt,
@@ -280,17 +337,57 @@ extension ScreenplayAuthoring on AppController {
         form.draftCharacterNames.remove(id);
         _savedCharacterChanged(saved.id, previous, name);
       }
-      final oldMapping = '$previous: @${referencePromptName(draft)}';
-      form.prompt = form.prompt
-          .split('\n')
-          .where((line) => line.trim() != oldMapping)
-          .join('\n');
+      _dropDefaultCastEntry(previous, referencePromptName(draft));
       form.screenplayLinkedCharacters.remove(name);
       _syncScreenplayReferences();
       _scheduleComposerTabsSave();
     });
     notifyListeners();
     return true;
+  }
+
+  /// Forgets the cast entry a character name change made stale — the one this
+  /// reference was the whole of. A cast assembled by hand from several media
+  /// is the director's, so it survives a rename of one of its members.
+  void _dropDefaultCastEntry(String previous, String referenceName) {
+    final name = normalizeCharacterName(previous);
+    final current = form.characterMappings[name];
+    if (current != null &&
+        current.length == 1 &&
+        current.single == referenceName) {
+      form.characterMappings.remove(name);
+    }
+  }
+
+  /// Drops [referenceName] from every cast entry, emptied entries with it.
+  /// The characters stay linked so automatic casting does not put them back.
+  void _removeCastReference(String referenceName) {
+    for (final name in form.characterMappings.keys.toList()) {
+      final current = form.characterMappings[name]!;
+      if (!current.contains(referenceName)) continue;
+      final remaining = current.where((item) => item != referenceName).toList();
+      form.screenplayLinkedCharacters.add(name);
+      if (remaining.isEmpty) {
+        form.characterMappings.remove(name);
+      } else {
+        form.characterMappings[name] = remaining;
+      }
+    }
+  }
+
+  /// Follows a reference rename into the cast, so a renamed card keeps the
+  /// characters it was cast as.
+  void _renameCastReference(String previous, String name) {
+    if (previous == name) return;
+    final renamed = <String, List<String>>{
+      for (final entry in form.characterMappings.entries)
+        entry.key: entry.value
+            .map((item) => item == previous ? name : item)
+            .toList(),
+    };
+    form.characterMappings
+      ..clear()
+      ..addAll(renamed);
   }
 
   void _savedCharacterChanged(String savedId, String previous, String name) {
@@ -300,11 +397,7 @@ extension ScreenplayAuthoring on AppController {
           (item) => item.savedReferenceId == savedId,
         )) {
           form.draftCharacterNames.remove(draft.id);
-          final oldMapping = '$previous: @${referencePromptName(draft)}';
-          form.prompt = form.prompt
-              .split('\n')
-              .where((line) => line.trim() != oldMapping)
-              .join('\n');
+          _dropDefaultCastEntry(previous, referencePromptName(draft));
         }
         form.screenplayLinkedCharacters.remove(name);
         _syncScreenplayReferences();
@@ -332,14 +425,18 @@ extension ScreenplayAuthoring on AppController {
         durationSeconds: saved.durationSeconds,
       );
 
-  /// Insert once as ordinary editable text. Remembering the character means
-  /// deleting or editing a mapping never causes it to spring back on typing.
+  /// Cast once. Remembering the character means deleting or editing a cast
+  /// entry never causes it to spring back on the next keystroke.
   void syncScreenplayCharacterMappings() {
     final prompt = form.prompt;
+    final cast = castLines.join('\n');
     final references = form.references.length;
     final linked = form.screenplayLinkedCharacters.length;
+    // Self-healing for any path that seeded the prompt with casting lines.
+    absorbPromptMappings();
     _syncScreenplayReferences();
     if (prompt != form.prompt ||
+        cast != castLines.join('\n') ||
         references != form.references.length ||
         linked != form.screenplayLinkedCharacters.length) {
       _invalidateProviderEstimate();
@@ -353,11 +450,11 @@ extension ScreenplayAuthoring on AppController {
       return;
     }
     final names = _defaultCharacterReferences;
-    final mappedNames = screenplayMappings(form.prompt).keys.toSet();
+    final mappedNames = form.characterMappings.keys.toSet();
     for (final entry in names.entries) {
       final name = entry.key;
       if (_hasExplicitCharacterMapping(name, mappedNames: mappedNames)) {
-        // Remember restored/manual footers too, so deleting one is final.
+        // Remember restored/manual cast entries too, so deleting one is final.
         form.screenplayLinkedCharacters.add(name);
         continue;
       }
@@ -397,13 +494,7 @@ extension ScreenplayAuthoring on AppController {
       }
       if (attached.isEmpty) continue;
       form.screenplayLinkedCharacters.add(name);
-      final mappingName = characterMappingName(name);
-      form.prompt = replaceScreenplayMapping(
-        form.prompt,
-        mappingName,
-        mappingName,
-        attached,
-      );
+      form.characterMappings[characterMappingName(name)] = attached;
     }
   }
 }

@@ -314,13 +314,14 @@ void main() {
       controller.setScreenplayMode(true);
       controller.updateForm((form) => form.prompt = 'ALEXANDRIA enters.');
       expect(controller.form.references, hasLength(1));
+      expect(controller.form.prompt, 'ALEXANDRIA enters.');
       expect(
-        controller.form.prompt,
+        controller.promptWithCast,
         'ALEXANDRIA enters.\n\nALEXANDRIA: @alx.mp4',
       );
       expect(
         translateReferencePrompt(
-          controller.form.prompt,
+          controller.promptWithCast,
           dialect: ReferencePromptDialect.compactAt,
           available: controller.formPromptReferenceMentions,
         ),
@@ -330,8 +331,10 @@ void main() {
         (form) => form.prompt = 'ALEXANDRIA enters.\n\nALEXANDRIA: @custom',
       );
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA sits.');
-      expect(controller.form.prompt, contains('@custom'));
-      expect(controller.form.prompt, isNot(contains('@alx.mp4')));
+      expect(controller.form.prompt, isNot(contains('@')));
+      expect(controller.form.characterMappings, {
+        'ALEXANDRIA': ['custom'],
+      });
       controller.removeReference(controller.form.references.single.id);
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA leaves.');
       expect(controller.form.references, isEmpty);
@@ -373,13 +376,16 @@ void main() {
         await controller.setDraftCharacterName('one', ' alexandria '),
         isTrue,
       );
-      expect(controller.form.prompt, contains('ALEXANDRIA: @Video 1'));
+      expect(controller.form.characterMappings, {
+        'ALEXANDRIA': ['Video 1'],
+      });
+      expect(controller.form.prompt, 'ALEXANDRIA enters.');
       expect(
         await controller.setDraftCharacterName('two', 'Alexandria'),
         isFalse,
       );
       expect(await controller.setDraftCharacterName('one', ''), isTrue);
-      expect(controller.form.prompt, isNot(contains('ALEXANDRIA: @')));
+      expect(controller.form.characterMappings, isEmpty);
     },
   );
   test('mode and removed-link memory round trip without storing media', () {
@@ -428,8 +434,8 @@ void main() {
         isNull,
       );
       expect(controller.form.references, hasLength(2));
-      expect(controller.form.prompt, contains('ALEXANDRIA turns.'));
-      expect(controller.form.prompt, endsWith('HERO: @alx.mp4 @alt.mp4'));
+      expect(controller.form.prompt, 'ALEXANDRIA turns. ALEXANDRIAN waits.');
+      expect(controller.promptWithCast, endsWith('HERO: @alx.mp4 @alt.mp4'));
       expect(controller.characterMappingReferences('ALEXANDRIA'), [
         'alx.mp4',
         'alt.mp4',
@@ -444,13 +450,10 @@ void main() {
         ),
         isNull,
       );
-      expect(
-        controller.form.prompt,
-        startsWith('HERO turns. ALEXANDRIAN waits.'),
-      );
-      expect(controller.form.prompt, endsWith('HERO: @alt.mp4'));
+      expect(controller.form.prompt, 'HERO turns. ALEXANDRIAN waits.');
+      expect(controller.promptWithCast, endsWith('HERO: @alt.mp4'));
       controller.removeReference(controller.form.references.last.id);
-      expect(screenplayMappings(controller.form.prompt), isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
       expect(
         await controller.saveCharacterMapping(
           scriptName: 'HERO',
@@ -460,7 +463,8 @@ void main() {
         isNull,
       );
       controller.updateForm((form) => form.prompt += '\nMore action.');
-      expect(screenplayMappings(controller.form.prompt), isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
+      expect(controller.promptWithCast, controller.form.prompt);
     },
   );
 
@@ -893,7 +897,10 @@ void main() {
     ) async {
       await tester.binding.setSurfaceSize(Size(width, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final controller = director(references: [actor('alx', '')]);
+      final controller = director(
+        references: [actor('alx', '')],
+        gateway: _ToolbarGateway(),
+      );
       addTearDown(controller.dispose);
       controller.form.screenplayMode = true;
       controller.form.prompt = '        ALEXANDRIA\n    Hello.';
@@ -917,11 +924,16 @@ void main() {
         find.byKey(const ValueKey('mapping-character-name')),
         'HERO',
       );
+      await tester.ensureVisible(find.text('@alx.mp4'));
       await tester.tap(find.text('@alx.mp4'));
       await tester.tap(find.byKey(const ValueKey('save-character-mapping')));
       await tester.pumpAndSettle();
+      expect(controller.form.prompt, '        ALEXANDRIA\n    Hello.');
+      expect(controller.form.characterMappings, {
+        'HERO': ['alx.mp4'],
+      });
       expect(
-        controller.form.prompt,
+        controller.promptWithCast,
         '        ALEXANDRIA\n    Hello.\n\nHERO: @alx.mp4',
       );
       expect(find.text('HERO'), findsOneWidget);

@@ -124,6 +124,36 @@ void main() {
     );
   });
 
+  test('cast round-trips out of the prompt, empty entries dropped', () {
+    const record = ComposerTabRecord(
+      id: 'tab-cast',
+      prompt: 'ALEXANDRIA enters.',
+      characterMappings: {
+        'ALEXANDRIA': ['alx.mp4', 'alt.mp4'],
+        'EXTRA': [],
+      },
+    );
+    final json =
+        jsonDecode(jsonEncode(record.toJson())) as Map<String, Object?>;
+    final decoded = ComposerTabRecord.fromJson(json);
+
+    expect(decoded.prompt, 'ALEXANDRIA enters.');
+    expect(decoded.characterMappings, {
+      'ALEXANDRIA': ['alx.mp4', 'alt.mp4'],
+    });
+    expect(
+      ComposerTabRecord.fromJson({'id': 'legacy'}).characterMappings,
+      isEmpty,
+    );
+    expect(
+      const ComposerTabRecord(
+        id: 'bare',
+      ).toJson().containsKey('characterMappings'),
+      isFalse,
+      reason: 'an uncast draft stays out of the workspace record',
+    );
+  });
+
   test('composer tab decoding tolerates junk and applies defaults', () {
     final decoded = ComposerTabRecord.fromJson(<String, Object?>{
       'id': 'tab-2',

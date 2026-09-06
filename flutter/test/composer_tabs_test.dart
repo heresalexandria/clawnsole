@@ -797,6 +797,16 @@ void main() {
         controller.activateComposerTab('script');
         expect(controller.form.screenplayMode, isTrue);
         expect(controller.form.references.single.savedReferenceId, 'alx');
+        // A workspace written before schema 6 keeps its cast inside the
+        // prompt; restoring lifts it out and leaves the direction alone.
+        expect(controller.form.prompt, 'ALEXANDRIA enters.');
+        expect(controller.form.characterMappings, {
+          'HERO': ['alx.mp4'],
+        });
+        expect(
+          controller.promptWithCast,
+          'ALEXANDRIA enters.\n\nHERO: @alx.mp4',
+        );
         expect(controller.currentConfig.screenplayMode, isTrue);
         expect(controller.characterMappingName('ALEXANDRIA'), 'HERO');
         expect(

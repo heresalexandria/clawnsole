@@ -224,7 +224,16 @@ Layout order:
    clear control sits directly after the label (disabled while empty) and
    asks before wiping the text; the live counter, copy, and fullscreen
    controls keep the header's far end.
-2. **Keyframes / References accordions**: the two guidance sections are
+2. **Cast row**: a compact strip between the direction and the guidance /
+   settings pair, present only when a character actually holds a
+   reference on a model that accepts creative references. A brass label,
+   then one chip per cast member — up to three overlapping 26-pixel
+   thumbnails of its media, a "+n" spillover, and the name — each opening
+   the mapping editor, followed by a quiet *Add character*. The casting
+   itself never appears in the prompt box; it is appended silently at
+   submission, so an uncast composer keeps the heading through Generate
+   above the fold.
+3. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny
    thumbnails of what is attached, and a status word (*None* / *n
@@ -243,17 +252,17 @@ Layout order:
    both accordions open, warns in madder, and cannot submit. The
    *Normalize visual references* switch applies to both sections, so it
    sits below the pair.
-3. **"Or start from…"**: two quiet text buttons under the accordions
+4. **"Or start from…"**: two quiet text buttons under the accordions
    disclose the video-continuation and draft-enhance panels. An attached
    source collapses the irrelevant sections and explains what is set
    aside; removing it restores them. Draft enhance hides prompt/frames
    entirely (the original generation owns them) and shows only Finish +
    Safety.
-4. **Frame**: a console-key ratio dropdown whose trigger and menu rows
+5. **Frame**: a console-key ratio dropdown whose trigger and menu rows
    keep the *drawn glyph of the actual shape* plus label and hint; Auto
    uses the free-crop glyph. Frame and Finish share one dropdown row at
    every width above 330 px, so phones stop spending a full row on each.
-5. **Duration**: Manual is the default. Models that support provider-selected
+6. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
    resolution-specific slider range. Auto replaces the slider with the same
@@ -262,18 +271,18 @@ Layout order:
    and it commits clamped to the range on blur/submit; focusing it while
    AUTO is lit drops to Manual, like touching the slider. Layouts that
    require fixed timing lock the switch to Manual and say why.
-6. **Finish**: a console-key resolution dropdown (label + pixel detail
+7. **Finish**: a console-key resolution dropdown (label + pixel detail
    per row; draft mode dims tiers above HD) on the Frame row, then audio
    and fast-draft hardware switches (lit hunter green when on),
    safety-tolerance knob with an `n / 4` readout, and — for models whose
    API takes one — a **Seed** field with a dice button (empty = random),
    all stacked in the single settings column.
-7. **Estimated charge + Save generation to**: side by side in one row at
+8. **Estimated charge + Save generation to**: side by side in one row at
    desktop widths. The stitched hunter-green panel keeps the brass coin,
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-8. Footer: claw + readiness line, mode chip, then the navy **model
+9. Footer: claw + readiness line, mode chip, then the navy **model
    plaque** (provider + model, opens the picker) directly before the plum
    **Generate video** — under 480 px the plaque takes its own line above
    the button.

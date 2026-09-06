@@ -197,7 +197,9 @@ List<String> screenplayCompletions(
       .toList();
 }
 
-/// Editable casting lines are the source of truth for selected media.
+/// Reads casting lines out of text. The composer no longer keeps them in the
+/// editable prompt — this parses legacy workspaces, reused films, and pasted
+/// or rewritten text so [stripScreenplayMappings] can lift them into the cast.
 Map<String, List<String>> screenplayMappings(String prompt) {
   final result = <String, List<String>>{};
   for (final line in prompt.split('\n').where(isScreenplayMapping)) {
@@ -219,26 +221,45 @@ Map<String, List<String>> screenplayMappings(String prompt) {
   return result;
 }
 
-String replaceScreenplayMapping(
-  String prompt,
-  String previous,
-  String name,
-  Iterable<String> references,
-) {
-  final body = prompt
-      .split('\n')
-      .where(
-        (line) =>
-            !isScreenplayMapping(line) ||
-            normalizeCharacterName(line.substring(0, line.indexOf(':'))) !=
-                previous,
-      )
-      .join('\n')
-      .trimRight();
-  final names = references.toSet();
-  return names.isEmpty
-      ? body
-      : '$body\n\n$name: ${names.map((name) => '@$name').join(' ')}';
+/// Removes casting lines from [prompt], leaving the rest byte-identical. The
+/// blank separator a casting block was written with goes with it, so lifting
+/// legacy lines into the cast restores exactly the direction that was typed.
+String stripScreenplayMappings(String prompt) {
+  final lines = prompt.split('\n');
+  if (!lines.any(isScreenplayMapping)) return prompt;
+  final kept = <String>[];
+  for (final line in lines) {
+    if (!isScreenplayMapping(line)) {
+      kept.add(line);
+      continue;
+    }
+    while (kept.isNotEmpty && kept.last.trim().isEmpty) {
+      kept.removeLast();
+    }
+  }
+  final last = lines.lastWhere(
+    (line) => line.trim().isNotEmpty,
+    orElse: () => '',
+  );
+  if (isScreenplayMapping(last)) {
+    while (kept.isNotEmpty && kept.last.trim().isEmpty) {
+      kept.removeLast();
+    }
+  }
+  return kept.join('\n');
+}
+
+/// The casting block appended to the direction at submission: one line per
+/// cast member holding at least one reference, names in alphabetical order.
+List<String> screenplayCastLines(Map<String, List<String>> mappings) {
+  final names = mappings.keys.where((name) {
+    final references = mappings[name];
+    return name.isNotEmpty && references != null && references.isNotEmpty;
+  }).toList()..sort();
+  return [
+    for (final name in names)
+      '$name: ${mappings[name]!.toSet().map((item) => '@$item').join(' ')}',
+  ];
 }
 
 String renameScreenplayCharacter(
@@ -260,19 +281,3 @@ String renameScreenplayCharacter(
       )
       .join('\n');
 }
-
-String removeScreenplayReference(String prompt, String referenceName) => prompt
-    .split('\n')
-    .map((line) {
-      final mappings = screenplayMappings(line);
-      if (mappings.isEmpty || !mappings.values.single.contains(referenceName)) {
-        return line;
-      }
-      final remaining = mappings.values.single.where(
-        (name) => name != referenceName,
-      );
-      return remaining.isEmpty
-          ? ''
-          : '${mappings.keys.single}: ${remaining.map((name) => '@$name').join(' ')}';
-    })
-    .join('\n');

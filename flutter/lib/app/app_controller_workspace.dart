@@ -7,8 +7,11 @@ extension AppControllerWorkspace on AppController {
   AestheticReference? get selectedAestheticReference => _aestheticReferences
       .where((item) => item.id == form.aestheticReferenceId)
       .firstOrNull;
+
+  /// What is actually sent: the direction, then its casting block, then the
+  /// aesthetic text. None of the two appended parts is in the editable prompt.
   String get generationPrompt =>
-      appendAestheticPrompt(form.prompt, selectedAestheticReference);
+      appendAestheticPrompt(promptWithCast, selectedAestheticReference);
 
   void selectAestheticReference(String? id) {
     updateForm((form) => form.aestheticReferenceId = id);

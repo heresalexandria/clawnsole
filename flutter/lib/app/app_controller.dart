@@ -602,7 +602,13 @@ class AppController extends ChangeNotifier {
 
   /// The direction an AI Rewrite replaced in place, kept one notice tap
   /// away until the director moves on.
-  ({String tabId, String previous, String rewritten})? _directionRewriteUndo;
+  ({
+    String tabId,
+    String previous,
+    String rewritten,
+    Map<String, List<String>> cast,
+  })?
+  _directionRewriteUndo;
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -1144,6 +1150,8 @@ class AppController extends ChangeNotifier {
       ..seed = record.seed
       ..videoUrl = record.videoUrl
       ..draftUrl = record.draftUrl;
+    // Workspaces written before schema 6 keep their cast inside the prompt.
+    _inComposerTab(tab, absorbPromptMappings);
     // The record has no separate "muted by hand" flag; a saved false is one.
     tab.generateAudioExplicitlyDisabled = !record.generateAudio;
     _selectCompatibleModel();
@@ -4138,6 +4146,7 @@ class AppController extends ChangeNotifier {
           oldName: reference.name,
           newName: clean,
         );
+        _renameCastReference(reference.name, clean);
         form.references = form.references.map((draft) {
           if (draft.savedReferenceId != reference.id) return draft;
           final oldPromptName = referencePromptName(draft);
@@ -4146,6 +4155,7 @@ class AppController extends ChangeNotifier {
             oldName: oldPromptName,
             newName: clean,
           );
+          _renameCastReference(oldPromptName, clean);
           return draft.copyWith(promptName: clean);
         }).toList();
       }
@@ -4644,12 +4654,7 @@ class AppController extends ChangeNotifier {
     final failed = form.references
         .where((item) => item.id == draftId)
         .firstOrNull;
-    if (failed != null) {
-      form.prompt = removeScreenplayReference(
-        form.prompt,
-        referencePromptName(failed),
-      );
-    }
+    if (failed != null) _removeCastReference(referencePromptName(failed));
     final before = form.references.length;
     form.references = form.references
         .where((item) => item.id != draftId)
@@ -4796,6 +4801,9 @@ class AppController extends ChangeNotifier {
     final previousSettings = _generationSettings(_draftTab);
     final previousPrompt = form.prompt;
     update(form);
+    // Casting lines can only arrive in the editable text now — pasted, or
+    // typed by hand. They belong to the cast, so they move there at once.
+    absorbPromptMappings();
     final settingsEdited = previousSettings != _generationSettings(_draftTab);
     if (previousPrompt.trim().isNotEmpty && form.prompt.trim().isEmpty) {
       form.screenplayLinkedCharacters.clear();
@@ -5896,10 +5904,7 @@ class AppController extends ChangeNotifier {
     if (character.isNotEmpty) {
       form.screenplayLinkedCharacters.add(character);
     }
-    form.prompt = removeScreenplayReference(
-      form.prompt,
-      referencePromptName(removed),
-    );
+    _removeCastReference(referencePromptName(removed));
     form.draftCharacterNames.remove(id);
     form.references = form.references.where((item) => item.id != id).toList();
     _scheduleComposerTabsSave();
@@ -5942,6 +5947,7 @@ class AppController extends ChangeNotifier {
         oldName: oldName,
         newName: clean,
       );
+      _renameCastReference(oldName, clean);
       form.references = form.references.map((reference) {
         return reference.id == id
             ? reference.copyWith(promptName: clean)
@@ -7719,16 +7725,16 @@ class AppController extends ChangeNotifier {
           selectedModel.referenceTasks.contains(item.config.referenceTask)
           ? item.config.referenceTask
           : MediaReferenceTask.reference;
+      final takesPrompt = includePrompt && item.mode != VideoMode.draftEnhance;
       _disabledReferences.clear();
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases
         ..clear()
         ..addAll(item.config.screenplayCharacterAliases);
       form.draftCharacterNames.clear();
+      if (takesPrompt) form.characterMappings.clear();
       form
-        ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
-            ? item.prompt
-            : form.prompt
+        ..prompt = takesPrompt ? item.prompt : form.prompt
         ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
@@ -7772,6 +7778,9 @@ class AppController extends ChangeNotifier {
                 durableSource?.kind == 'remote'
             ? durableSource!.value
             : '';
+      // A film stores the prompt it was submitted with, casting block and
+      // all; reusing it puts that block back where it is edited.
+      if (takesPrompt) absorbPromptMappings();
       _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
         item,
       );
@@ -7812,7 +7821,11 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
     }
     _inComposerTab(tab, () {
-      if (prompt != null) tab.form.prompt = prompt;
+      if (prompt != null) {
+        tab.form.prompt = prompt;
+        // A rewrite echoes the casting block back; it belongs to the cast.
+        absorbPromptMappings();
+      }
       tab.sourceGenerationId = item.localId;
       tab.rewriteSummary = rewriteSummary;
       _adoptGenerationFolder(tab, item);

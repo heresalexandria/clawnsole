@@ -11,6 +11,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'app_intents.dart';
+import 'cast_row.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
 import 'composer_tab_rail.dart';
@@ -871,7 +872,8 @@ class _ComposerState extends State<_Composer> {
   AppController get controller => widget.controller;
 
   Future<void> _copyPrompt() async {
-    await Clipboard.setData(ClipboardData(text: controller.form.prompt));
+    // The casting block goes with the direction, exactly as it is submitted.
+    await Clipboard.setData(ClipboardData(text: controller.promptWithCast));
     if (!mounted) return;
     controller.showNotice('Prompt copied to the clipboard.');
   }
@@ -1011,6 +1013,13 @@ class _ComposerState extends State<_Composer> {
                   controller.updateForm((form) => form.prompt = value),
             ),
             SizedBox(height: short ? 8 : 16),
+          ],
+          // Who is cast, above the guidance/settings pair: the one place the
+          // casting is visible while writing, since the prompt no longer
+          // carries it. Absent entirely until a character holds a reference.
+          if (CastRow.visibleFor(controller)) ...<Widget>[
+            CastRow(controller: controller),
+            SizedBox(height: short ? 8 : 12),
           ],
           if (draftActive)
             _SourceEditor(
@@ -1476,7 +1485,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                             controller: controller,
                             onCopy: () => unawaited(
                               Clipboard.setData(
-                                ClipboardData(text: controller.form.prompt),
+                                ClipboardData(text: controller.promptWithCast),
                               ),
                             ),
                           ),
