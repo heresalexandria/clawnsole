@@ -1015,6 +1015,16 @@ class CompanionApp {
   final Map<String, Future<File>> _driveVideoFills = <String, Future<File>>{};
   final Map<String, Future<Generation>> _resultRetentions = {};
 
+  /// Operations whose `/generations` request this companion is still running.
+  ///
+  /// Mirrors `DirectGateway`: the durable record carries
+  /// [submissionUnknownStatus] from just before the chargeable POST so a
+  /// companion that dies mid-request comes back warning about a possible
+  /// charge, but a `/state` response served while the request is still open
+  /// must show the renderer what is actually happening — a submission in
+  /// flight — and must not recover it as an interrupted one.
+  final Set<String> _submissionsInFlight = <String>{};
+
   Future<void> handle(HttpRequest request) async {
     final origin = request.headers.value('origin');
     if (!_allowOrigin(origin)) {
@@ -2116,7 +2126,12 @@ class CompanionApp {
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = data.generations.map((item) {
-      var next = item.recoverInterruptedSubmission(now);
+      // A submission this companion is still running is not an interrupted
+      // one, however long the adapter has spent handing the provider its
+      // reference media.
+      var next = _submissionsInFlight.contains(item.localId)
+          ? item
+          : item.recoverInterruptedSubmission(now);
       if (!identical(next, item)) changed = true;
       if (next.provider == 'apple-local' && next.isWorking) {
         changed = true;
@@ -2185,7 +2200,7 @@ class CompanionApp {
         .map((provider) => provider.id)
         .toSet();
     return LocalSnapshot(
-      generations: data.generations,
+      generations: withLiveSubmissions(data.generations, _submissionsInFlight),
       folders: data.folders,
       savedReferences: data.savedReferences,
       preferences: data.preferences,
@@ -2539,16 +2554,34 @@ class CompanionApp {
       );
     }
     final data = await _store.read();
-    var generation = Generation.fromJson(
+    final record = Generation.fromJson(
       rawRecord.map((key, value) => MapEntry(key.toString(), value)),
     );
     final existing = data.generations
-        .where((item) => item.localId == generation.localId)
+        .where((item) => item.localId == record.localId)
         .firstOrNull;
     if (existing != null &&
         (existing.canCheckStatus || existing.isSubmissionUnknown)) {
       return existing;
     }
+    // Past this point the operation is live in this companion: every /state
+    // response it serves shows the record as submitting. A duplicate
+    // activation of the same id joins the claim rather than releasing it.
+    final claimed = _submissionsInFlight.add(record.localId);
+    try {
+      return await _submitClaimed(record, input, data, body);
+    } finally {
+      if (claimed) _submissionsInFlight.remove(record.localId);
+    }
+  }
+
+  Future<Generation> _submitClaimed(
+    Generation record,
+    Map<Object?, Object?> input,
+    StoredData data,
+    Map<String, Object?> body,
+  ) async {
+    var generation = record;
     var cleanInput = input.map((key, value) => MapEntry(key.toString(), value));
     final provider = generation.provider;
     if (provider == 'apple-local') {

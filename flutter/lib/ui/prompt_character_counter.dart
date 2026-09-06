@@ -9,6 +9,7 @@ class PromptCharacterCounter extends StatelessWidget {
     required this.limit,
     required this.modelLabel,
     required this.isProviderLimit,
+    this.compact = false,
     super.key,
   }) : assert(used >= 0),
        assert(limit > 0);
@@ -17,6 +18,17 @@ class PromptCharacterCounter extends StatelessWidget {
   final int limit;
   final String modelLabel;
   final bool isProviderLimit;
+
+  /// A phone's header row has no width to spare: the readout abbreviates a
+  /// round limit of ten thousand or more ("0 / 50k") and gives up part of its
+  /// minimum width, so the model trigger beside it can spell a model name.
+  /// The tooltip and the screen reader keep the exact figures either way.
+  final bool compact;
+
+  /// The limit as the compact readout spells it: "50k" for 50000, "4096" for
+  /// a cap that does not round.
+  static String shortLimit(int limit) =>
+      limit >= 10000 && limit % 1000 == 0 ? '${limit ~/ 1000}k' : '$limit';
 
   @override
   Widget build(BuildContext context) {
@@ -50,14 +62,14 @@ class PromptCharacterCounter extends StatelessWidget {
             key: const ValueKey('prompt-character-limit'),
             padding: const EdgeInsets.only(right: 4),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 64),
+              constraints: BoxConstraints(minWidth: compact ? 44 : 64),
               child: Stack(
                 alignment: AlignmentDirectional.topEnd,
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
-                      '$used / $limit',
+                      '$used / ${compact ? shortLimit(limit) : limit}',
                       textAlign: TextAlign.right,
                       style: TextStyle(
                         color: colors.onSurfaceVariant,

@@ -16,6 +16,7 @@ Future<void> _pumpCounter(
   int limit = 1000,
   Brightness brightness = Brightness.light,
   bool isProviderLimit = true,
+  bool compact = false,
 }) => tester.pumpWidget(
   MaterialApp(
     theme: buildClawnsoleTheme(brightness),
@@ -26,6 +27,7 @@ Future<void> _pumpCounter(
           limit: limit,
           modelLabel: 'Test model',
           isProviderLimit: isProviderLimit,
+          compact: compact,
         ),
       ),
     ),
@@ -114,6 +116,43 @@ void main() {
         '50000-character editor limit; Test model has not published a limit',
       ),
     );
+  });
+
+  testWidgets('the compact readout abbreviates round limits and keeps the '
+      'exact figures for the tooltip and screen reader', (tester) async {
+    expect(PromptCharacterCounter.shortLimit(50000), '50k');
+    expect(PromptCharacterCounter.shortLimit(10000), '10k');
+    expect(PromptCharacterCounter.shortLimit(4096), '4096');
+    expect(PromptCharacterCounter.shortLimit(9000), '9000');
+
+    final handle = tester.ensureSemantics();
+    await _pumpCounter(tester, used: 42, limit: 50000, compact: true);
+    expect(find.text('42 / 50k'), findsOneWidget);
+    expect(find.text('42 / 50000'), findsNothing);
+    expect(
+      tester.widget<Tooltip>(find.byType(Tooltip)).message,
+      contains('42 of 50000 characters used'),
+    );
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Prompt character budget'))
+          .getSemanticsData()
+          .value,
+      '42 of 50000 characters used; 49958 characters remaining',
+    );
+    // The compact readout gives up part of its width for the row beside it.
+    final compactWidth = tester
+        .getSize(find.byKey(const ValueKey('prompt-character-limit')))
+        .width;
+    await _pumpCounter(tester, used: 42, limit: 50000);
+    expect(find.text('42 / 50000'), findsOneWidget);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('prompt-character-limit')))
+          .width,
+      greaterThan(compactWidth),
+    );
+    handle.dispose();
   });
 
   testWidgets(

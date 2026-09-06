@@ -27,6 +27,15 @@ retain a warning to check the provider console, and are not automatically
 resubmitted or failed over. Confirmed rejecting responses remain errors; a saved
 provider receipt remains recoverable after optional bookkeeping fails.
 
+That uncertain state describes an *interrupted* submission, so only the process
+still holding the request open may look past it: while a submission is in
+flight, its gateway serves that record as **Submitting**, does not recover it as
+interrupted, and the studio overlays the card onto every library read — a Drive
+refresh, a preference write, the periodic cross-device pass — so an
+optimistically inserted card can neither disappear from Recent work nor accuse a
+live request of an unconfirmed charge. The durable bytes are unchanged, so any
+other reader (a second device, the next launch) still sees the uncertain state.
+
 ## Library preservation
 
 Drive writes carry the immutable snapshot on which their edits were based.
