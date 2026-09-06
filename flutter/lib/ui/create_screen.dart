@@ -20,6 +20,8 @@ import 'aesthetic_references.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
+import 'hardware_button.dart';
+import 'hardware_selector.dart';
 import 'inline_video.dart';
 import 'library_screen.dart';
 import 'media_picker_source.dart';
@@ -253,100 +255,60 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
 
   @override
   Widget build(BuildContext context) {
-    final ink = PanelSurface.navyLeather.ink(context.tokens);
-    return TexturePanel(
+    // The plaque is the receiver's input selector: a machined bezel around a
+    // lit readout window, with the chevron key that opens the menu.
+    return PopupMenuButton<String>(
       key: const ValueKey('provider-plaque'),
-      surface: PanelSurface.navyLeather,
-      stitched: true,
-      // Both paddings keep content at least 4px clear of the saddle stitch,
-      // whose thread sits about 9.6px inside the panel edge.
-      padding: _isShort(context)
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 14)
-          : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-      child: PopupMenuButton<String>(
-        tooltip: 'Choose provider and model',
-        onSelected: (value) => unawaited(_select(value)),
-        constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
-        itemBuilder: (context) => <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(
-            enabled: false,
-            padding: EdgeInsets.zero,
-            child: _ProviderSearchMenu(
-              controller: controller,
-              collapsedProviders: _collapsedProviders,
-              onExpandedChanged: (providerId, expanded) {
-                if (expanded) {
-                  _collapsedProviders.remove(providerId);
-                } else {
-                  _collapsedProviders.add(providerId);
-                }
-              },
-            ),
+      tooltip: 'Choose provider and model',
+      padding: EdgeInsets.zero,
+      borderRadius: BorderRadius.circular(12),
+      onSelected: (value) => unawaited(_select(value)),
+      constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: _ProviderSearchMenu(
+            controller: controller,
+            collapsedProviders: _collapsedProviders,
+            onExpandedChanged: (providerId, expanded) {
+              if (expanded) {
+                _collapsedProviders.remove(providerId);
+              } else {
+                _collapsedProviders.add(providerId);
+              }
+            },
           ),
-        ],
-        child: Row(
+        ),
+      ],
+      child: HardwareSelector(
+        height: consoleControlHeight(context),
+        semanticHint: 'Opens the provider and model menu',
+        // An eighteen-cell display: provider on the top row, model below.
+        // Flexible bounds the readout on narrow layouts so long names clip
+        // at the window's edge instead of overflowing the plate.
+        child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: 34,
-              height: 34,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: ink.accent),
-                color: ink.on.withValues(alpha: .06),
-              ),
-              child: Icon(
-                _providerPlaqueIcon(controller.selectedProvider.id),
-                color: ink.accent,
-                size: 18,
-                semanticLabel: controller.selectedProvider.name,
-              ),
+            SegmentReadout(
+              controller.selectedProvider.name,
+              fontSize: 13,
+              minCells: 18,
             ),
-            const SizedBox(width: 12),
-            // Flexible bounds the names on narrow layouts so long provider or
-            // model labels ellipsize instead of overflowing the card.
-            Flexible(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    controller.selectedProvider.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: ink.on,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    controller.selectedModel.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: ink.onMuted, fontSize: 10.5),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 2),
+            SegmentReadout(
+              controller.selectedModel.label,
+              fontSize: 10.5,
+              primary: false,
+              minCells: 18,
             ),
-            const SizedBox(width: 12),
-            Icon(Icons.unfold_more_rounded, size: 17, color: ink.accent),
           ],
         ),
       ),
     );
   }
 }
-
-IconData _providerPlaqueIcon(String providerId) => switch (providerId) {
-  'artcraft' => Icons.palette_outlined,
-  'atlas' => Icons.cloud_outlined,
-  'bfl' => Icons.forest_outlined,
-  'krea' => Icons.gesture_outlined,
-  'ltx' => Icons.movie_filter_outlined,
-  _ => Icons.auto_awesome_motion_outlined,
-};
 
 class _ProviderSearchMenu extends StatefulWidget {
   const _ProviderSearchMenu({
@@ -5221,33 +5183,22 @@ class _ComposerFooter extends StatelessWidget {
     final localUnavailable =
         controller.selectedProvider.isLocal &&
         !controller.localGenerationAvailable;
-    final status = Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (localUnavailable)
+    final needsKey =
+        controller.selectedProvider.requiresApiKey && !controller.hasApiKey;
+    // The footer speaks only when something stands between the studio and
+    // a render. A ready console says nothing — the lit key is the signal.
+    final Widget? status = localUnavailable
+        // The on-device provider is selected but this device cannot run
+        // it; say so here rather than after a failed Generate.
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
               Icon(
                 Icons.phonelink_off_rounded,
                 color: context.colors.error,
                 size: 18,
-              )
-            else if (!controller.selectedProvider.requiresApiKey ||
-                controller.hasApiKey)
-              ClawMark(size: 19, color: context.tokens.brass)
-            else
-              Icon(
-                Icons.key_off_rounded,
-                color: context.colors.error,
-                size: 18,
               ),
-            const SizedBox(width: 9),
-            if (localUnavailable)
-              // The on-device provider is selected but this device cannot run
-              // it; say so here rather than after a failed Generate.
+              const SizedBox(width: 9),
               Flexible(
                 child: Text(
                   'Needs iOS 18.4 and Apple Intelligence',
@@ -5259,20 +5210,21 @@ class _ComposerFooter extends StatelessWidget {
                     color: context.colors.error,
                   ),
                 ),
-              )
-            else if (!controller.selectedProvider.requiresApiKey ||
-                controller.hasApiKey)
-              const Flexible(
-                child: Text(
-                  'Ready when you are',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-                ),
-              )
-            else
-              // The status line is where a new studio looks first when
-              // Generate does nothing; make it the way in, not just a verdict.
+              ),
+            ],
+          )
+        : needsKey
+        // The status line is where a new studio looks first when Generate
+        // does nothing; make it the way in, not just a verdict.
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.key_off_rounded,
+                color: context.colors.error,
+                size: 18,
+              ),
+              const SizedBox(width: 9),
               Flexible(
                 child: InkWell(
                   key: const ValueKey<String>('composer-open-providers'),
@@ -5291,54 +5243,27 @@ class _ComposerFooter extends StatelessWidget {
                   ),
                 ),
               ),
-          ],
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-          decoration: BoxDecoration(
-            color: context.colors.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: context.colors.outlineVariant),
-          ),
-          child: Text(
-            controller.selectedModel.outputKind == GenerationOutputKind.image
-                ? (form.mode == VideoMode.i2v
-                      ? 'Reference to image'
-                      : 'Text to image')
-                : form.referenceTask != MediaReferenceTask.reference
-                ? form.referenceTask.label
-                : form.mode.label,
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: context.colors.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
-    final generate = FilledButton.icon(
+            ],
+          )
+        : null;
+    // The transport key. While a render is in flight it simply stays lit and
+    // inert — the lit key is the signal, so there is no spinner.
+    final generate = HardwareLitButton(
+      key: const ValueKey<String>('generate-key'),
+      height: consoleControlHeight(context),
+      // Inked like the legend: white-filled engraving on the lens.
+      icon: const ClawMark(size: 16),
+      label: controller.selectedModel.outputKind == GenerationOutputKind.image
+          ? 'Generate image'
+          : form.mode == VideoMode.upscale
+          ? 'Upscale video'
+          : 'Generate video',
+      lit: controller.submitting,
       onPressed: controller.submitting
           ? null
           : () => unawaited(
               _submitWithProviderRetentionWarning(context, controller),
             ),
-      icon: controller.submitting
-          ? SizedBox.square(
-              dimension: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: context.colors.onPrimary,
-              ),
-            )
-          : const Icon(Icons.play_arrow_rounded, size: 20),
-      label: Text(
-        controller.selectedModel.outputKind == GenerationOutputKind.image
-            ? 'Generate image'
-            : form.mode == VideoMode.upscale
-            ? 'Upscale video'
-            : 'Generate video',
-      ),
     );
     // The model plaque sits in the footer, directly before Generate: the
     // last thing the eye checks before rendering, inside the draft it
@@ -5353,17 +5278,20 @@ class _ComposerFooter extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              status,
-              const SizedBox(height: 12),
-              Align(alignment: Alignment.centerLeft, child: plaque),
+              if (status != null) ...<Widget>[
+                status,
+                const SizedBox(height: 12),
+              ],
+              plaque,
               const SizedBox(height: 10),
               generate,
             ],
           );
         }
         return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            Expanded(child: status),
+            if (status != null) Expanded(child: status) else const Spacer(),
             const SizedBox(width: 12),
             plaque,
             const SizedBox(width: 12),
