@@ -616,7 +616,9 @@ class ComposerTabsState {
       deletedAestheticIds: deletedAestheticIds,
       devices: mergeComposerDevices(
         devices,
-        own == null ? const <ComposerDeviceDrafts>[] : <ComposerDeviceDrafts>[own],
+        own == null
+            ? const <ComposerDeviceDrafts>[]
+            : <ComposerDeviceDrafts>[own],
       ),
     );
   }
@@ -735,8 +737,9 @@ class ComposerTabsState {
         (json['devices'] as List? ?? [])
             .whereType<Map>()
             .map(
-              (item) =>
-                  ComposerDeviceDrafts.fromJson(Map<String, Object?>.from(item)),
+              (item) => ComposerDeviceDrafts.fromJson(
+                Map<String, Object?>.from(item),
+              ),
             )
             .whereType<ComposerDeviceDrafts>()
             .toList(),

@@ -917,8 +917,7 @@ class AppController extends ChangeNotifier {
       tab.form.screenplayLinkedCharacters.clear();
       tab.form.screenplayCharacterAliases.clear();
     }
-    if (_promptSettlePending != null &&
-        !identical(_promptSettlePending, tab)) {
+    if (_promptSettlePending != null && !identical(_promptSettlePending, tab)) {
       _settlePromptEdits();
     }
     _promptSettlePending = tab;
