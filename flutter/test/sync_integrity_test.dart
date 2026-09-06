@@ -358,6 +358,86 @@ void main() {
     );
     expect(local.data.folders.single.name, 'Local edit');
   });
+
+  test(
+    'a published film survives a stale write naming the staged copy',
+    () async {
+      const staged = AssetReference(
+        kind: 'local',
+        value: 'staged-0001',
+        label: 'film.mp4',
+        contentType: 'video/mp4',
+      );
+      const published = AssetReference(
+        kind: 'drive',
+        value: 'drive-file-0001',
+        label: 'film.mp4',
+        contentType: 'video/mp4',
+      );
+      Generation film({
+        required AssetReference asset,
+        required DateTime updatedAt,
+        required int checks,
+      }) => Generation(
+        localId: 'shared',
+        status: 'Ready',
+        prompt: 'A lighthouse at dusk',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: updatedAt,
+        resultAsset: asset,
+        statusCheckCount: checks,
+        storage: LibraryStorage.drive,
+      );
+
+      final base = film(asset: staged, updatedAt: now, checks: 3);
+      final api = FakeApi(StoredData(generations: [base]));
+      final drive = GoogleDriveStore(apiFactory: (_) => api);
+      await drive.connect('fake-token', 'Studio');
+      await drive.read();
+
+      // The device that made the film publishes the staged bytes to Drive and
+      // swaps the record over to the Drive file.
+      api.externalWrite(
+        StoredData(
+          generations: [
+            film(
+              asset: published,
+              updatedAt: now.subtract(const Duration(minutes: 30)),
+              checks: 4,
+            ),
+          ],
+        ),
+      );
+
+      // This device writes its own poll receipt: a clock running ahead, a much
+      // higher status counter, and the staged reference it still holds. Neither
+      // of those may take the film away from every other device.
+      await drive.write(
+        StoredData(
+          driveSyncBase: StoredData(generations: [base]),
+          generations: [
+            film(
+              asset: staged,
+              updatedAt: now.add(const Duration(minutes: 30)),
+              checks: 31,
+            ),
+          ],
+        ),
+      );
+
+      expect(api.data.generations.single.resultAsset?.kind, 'drive');
+      expect(api.data.generations.single.resultAsset?.value, published.value);
+    },
+  );
 }
 
 class MemoryStore implements DurableDataStore {

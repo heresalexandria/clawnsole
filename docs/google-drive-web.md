@@ -69,6 +69,32 @@ prompt. Editing an aesthetic updates selected tabs; deleting it removes its
 effect. Aesthetics do not consume media-reference slots or appear in media
 pickers.
 
+## Generation reconciliation
+
+Every device polls a shared generation independently, so `statusCheckCount` is
+a per-device write version, never a cross-device clock — and device clocks
+skew. Reconciliation therefore ranks delivery first: a film published to Drive
+beats one still staged on the device that made it, which beats a live provider
+delivery link, which beats a record with no media. Only an even delivery
+contest falls back to `updatedAt`. This ordering governs the Drive merge, the
+in-memory acceptance of a poll or retention result, and the per-record fold
+that happens when a library read is superseded by a local write while it was
+in flight. Delivered media is never traded away: a receipt cannot retract a
+result asset, and a record that arrives failed but delivered is treated as
+successful everywhere in the UI.
+
+A superseded periodic refresh is folded record by record instead of being
+discarded, so a device with work in flight still adopts films finished
+elsewhere; records only that device knows about (a card just submitted, a
+folder just created) survive the fold untouched.
+
+Media staged for Drive lives on one device until its background upload pass
+publishes it. Until then, other devices see the reference but not the bytes:
+the companion serves the record's provider delivery link instead when one is
+still live, and otherwise answers 404 with "This film is still uploading from
+the device that made it." The player says the same rather than blaming local
+playback.
+
 ## Google Cloud setup
 
 1. Create or select a Google Cloud project and enable the Google Drive API.

@@ -33,6 +33,7 @@ Future<void> showVideoPlayerModal(
   VideoFrameLoader? frameLoader,
   ValueListenable<double?>? progress,
   bool forceFullscreen = false,
+  String? unavailableDetail,
 }) {
   assert(
     (uri == null) != (deferredUri == null),
@@ -57,6 +58,7 @@ Future<void> showVideoPlayerModal(
                     controllerFactory: controllerFactory,
                     frameLoader: frameLoader,
                     progress: progress,
+                    unavailableDetail: unavailableDetail,
                   )
                 : DeferredGenerationVideo(
                     uri: deferredUri!,
@@ -69,6 +71,7 @@ Future<void> showVideoPlayerModal(
                     controllerFactory: controllerFactory,
                     frameLoader: frameLoader,
                     progress: progress,
+                    unavailableDetail: unavailableDetail,
                   ),
           ),
         ),
@@ -87,6 +90,7 @@ Future<void> showVideoPlayerModal(
       controllerFactory: controllerFactory,
       frameLoader: frameLoader,
       progress: progress,
+      unavailableDetail: unavailableDetail,
     ),
   );
 }
@@ -111,6 +115,7 @@ class DeferredGenerationVideo extends StatelessWidget {
     this.supportsPhotos = false,
     this.onShare,
     this.progress,
+    this.unavailableDetail,
   });
 
   final Future<Uri?> uri;
@@ -128,6 +133,11 @@ class DeferredGenerationVideo extends StatelessWidget {
   final Future<void> Function()? onShare;
   final ValueListenable<double?>? progress;
 
+  /// Replaces the generic "could not be retrieved" line when the caller knows
+  /// something more useful about why this film will not play here — a Drive
+  /// film still uploading from the device that made it, say.
+  final String? unavailableDetail;
+
   @override
   Widget build(BuildContext context) => FutureBuilder<Uri?>(
     future: uri,
@@ -139,8 +149,9 @@ class DeferredGenerationVideo extends StatelessWidget {
           icon: Icons.link_off_rounded,
           label: 'Delivery unavailable',
           detail:
+              unavailableDetail ??
               'The film could not be retrieved from its storage. '
-              'Use Save video to export the file.',
+                  'Use Save video to export the file.',
           onClose: onClose,
         );
       }
@@ -161,6 +172,7 @@ class DeferredGenerationVideo extends StatelessWidget {
         supportsPhotos: supportsPhotos,
         onShare: onShare,
         progress: progress,
+        unavailableDetail: unavailableDetail,
       );
     },
   );
@@ -177,6 +189,7 @@ class _VideoPlayerModal extends StatefulWidget {
     this.controllerFactory,
     this.frameLoader,
     this.progress,
+    this.unavailableDetail,
   }) : assert(
          (uri == null) != (deferredUri == null),
          'Provide exactly one of uri or deferredUri.',
@@ -193,6 +206,7 @@ class _VideoPlayerModal extends StatefulWidget {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final ValueListenable<double?>? progress;
+  final String? unavailableDetail;
 
   @override
   State<_VideoPlayerModal> createState() => _VideoPlayerModalState();
@@ -241,6 +255,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
                   controllerFactory: widget.controllerFactory,
                   frameLoader: widget.frameLoader,
                   progress: widget.progress,
+                  unavailableDetail: widget.unavailableDetail,
                 )
               : DeferredGenerationVideo(
                   uri: widget.deferredUri!,
@@ -253,6 +268,7 @@ class _VideoPlayerModalState extends State<_VideoPlayerModal> {
                   controllerFactory: widget.controllerFactory,
                   frameLoader: widget.frameLoader,
                   progress: widget.progress,
+                  unavailableDetail: widget.unavailableDetail,
                 ),
         ),
       ),
@@ -276,6 +292,7 @@ class GenerationVideo extends StatefulWidget {
     this.supportsPhotos = false,
     this.onShare,
     this.progress,
+    this.unavailableDetail,
   });
 
   /// Height of the inline frame timeline rendered under the video surface.
@@ -316,6 +333,11 @@ class GenerationVideo extends StatefulWidget {
   /// Live delivery progress rendered while the film is still loading. A null
   /// fraction (or a null listenable) keeps the loader indeterminate.
   final ValueListenable<double?>? progress;
+
+  /// Replaces the generic "playback failed" line when the caller knows why
+  /// this device cannot open the film — a Drive film still uploading from
+  /// the device that made it, say, which no local export can rescue either.
+  final String? unavailableDetail;
 
   @override
   State<GenerationVideo> createState() => _GenerationVideoState();
@@ -447,6 +469,7 @@ class _GenerationVideoState extends State<GenerationVideo> {
               supportsPhotos: widget.supportsPhotos,
               onShare: widget.onShare,
               progress: widget.progress,
+              unavailableDetail: widget.unavailableDetail,
             ),
           ),
         ),
@@ -519,8 +542,9 @@ class _GenerationVideoState extends State<GenerationVideo> {
           icon: Icons.link_off_rounded,
           label: 'Delivery unavailable',
           detail:
+              widget.unavailableDetail ??
               'Playback failed on this device. '
-              'Use Save video to export the file.',
+                  'Use Save video to export the file.',
           onClose: widget.onClose,
         );
       }

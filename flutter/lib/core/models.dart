@@ -957,6 +957,28 @@ class Generation {
   /// still stamp a failure status on such a record, and surfaces must not
   /// present it as a failure.
   bool get hasDeliveredMedia => resultAsset != null || resultUrl != null;
+
+  /// How completely this copy of the record delivers its film, for every
+  /// reconciliation between two devices that share one Drive library.
+  ///
+  /// A `drive` asset is published where any device can open it; a `local`
+  /// asset is still staged on the single device that produced it; a provider
+  /// link is a short-lived delivery of last resort. Device clocks skew and
+  /// every device advances [statusCheckCount] independently, so neither is a
+  /// safe tiebreaker on its own — the copy that carries more of the film wins
+  /// first.
+  int get deliveryRank {
+    final asset = resultAsset;
+    if (asset != null) return asset.kind == 'drive' ? 3 : 2;
+    return resultUrl != null ? 1 : 0;
+  }
+
+  /// A Drive-library record whose film is still staged on the device that
+  /// made it. Every other device sees the reference but cannot open the
+  /// bytes until the origin device's upload pump publishes them.
+  bool get awaitsOriginDeviceUpload =>
+      storage == LibraryStorage.drive && resultAsset?.kind == 'local';
+
   bool get needsResultRetention =>
       isReady && resultAsset == null && canCheckStatus;
   bool get isStatusUnavailable =>

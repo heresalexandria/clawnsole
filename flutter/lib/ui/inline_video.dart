@@ -21,6 +21,7 @@ class InlineVideoRequest {
     this.controllerFactory,
     this.frameLoader,
     this.progress,
+    this.unavailableDetail,
   }) : assert(
          (uri == null) != (deferredUri == null),
          'Provide exactly one of uri or deferredUri.',
@@ -39,6 +40,10 @@ class InlineVideoRequest {
   final VideoPlayerController Function(Uri uri)? controllerFactory;
   final VideoFrameLoader? frameLoader;
   final ValueListenable<double?>? progress;
+
+  /// Replaces the player's generic unavailable copy when the caller knows
+  /// why this device cannot open the film.
+  final String? unavailableDetail;
 }
 
 /// Tracks which card's embedded player is active on a screen, so starting
@@ -207,6 +212,7 @@ class _InlineVideoMediaBoxState extends State<InlineVideoMediaBox> {
                     autofocus: false,
                     onClose: _stop,
                     progress: request.progress,
+                    unavailableDetail: request.unavailableDetail,
                   )
                 : DeferredGenerationVideo(
                     uri: request.deferredUri!,
@@ -219,6 +225,7 @@ class _InlineVideoMediaBoxState extends State<InlineVideoMediaBox> {
                     autofocus: false,
                     onClose: _stop,
                     progress: request.progress,
+                    unavailableDetail: request.unavailableDetail,
                   ),
           );
         }

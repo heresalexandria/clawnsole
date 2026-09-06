@@ -2748,10 +2748,11 @@ class AppController extends ChangeNotifier {
 
   void _setSnapshot(LocalSnapshot value) => snapshot = value;
 
-  /// Applies an asynchronous library read only if no newer in-memory state
-  /// appeared while it was in flight. When requested, a superseded response
-  /// is re-read after the competing write finishes so an explicit refresh can
-  /// still complete without erasing a newly submitted generation card.
+  /// Applies an asynchronous library read, reconciling it with any newer
+  /// in-memory state that appeared while it was in flight. When requested, a
+  /// superseded response is instead re-read after the competing write
+  /// finishes so an explicit refresh can still complete without erasing a
+  /// newly submitted generation card.
   Future<bool> _applySnapshotRead(
     LocalSnapshot value, {
     required int startedAtRevision,
@@ -2760,10 +2761,13 @@ class AppController extends ChangeNotifier {
     int? expectedPreferenceRevision,
   }) async {
     if (_snapshotRevision != startedAtRevision) {
-      if (!reloadIfSuperseded) return false;
-      final reloadRevision = _snapshotRevision;
-      value = await gateway.load();
-      if (_disposed || _snapshotRevision != reloadRevision) return false;
+      if (reloadIfSuperseded) {
+        final reloadRevision = _snapshotRevision;
+        value = await gateway.load();
+        if (_disposed || _snapshotRevision != reloadRevision) return false;
+      } else {
+        value = _reconcileSupersededRead(value);
+      }
     }
     if (_disposed) return false;
     _apply(
@@ -2774,6 +2778,87 @@ class AppController extends ChangeNotifier {
               _preferenceRevision == expectedPreferenceRevision),
     );
     return true;
+  }
+
+  /// Folds a library read that a competing in-memory write superseded while
+  /// it was in flight into a snapshot that keeps both sides.
+  ///
+  /// Discarding such a read is safe but starves: every poll receipt bumps the
+  /// snapshot revision, so on a device with anything in flight the periodic
+  /// cross-device refresh could be superseded indefinitely and a film another
+  /// device published would never appear until the app was relaunched. The
+  /// loaded library is therefore adopted record by record — it wins except
+  /// where the in-memory copy carries more of the film or is plainly newer —
+  /// and anything only this device knows about (a card just submitted, a
+  /// folder just created) is carried across untouched.
+  LocalSnapshot _reconcileSupersededRead(LocalSnapshot value) {
+    final current = _snapshot;
+    if (current == null) return value;
+    final pending = <String, Generation>{
+      for (final item in current.generations) item.localId: item,
+    };
+    final generations = <Generation>[
+      for (final loaded in value.generations)
+        _preferLoadedGeneration(loaded, pending.remove(loaded.localId)),
+    ];
+    for (final orphan in pending.values) {
+      final at = generations.indexWhere(
+        (item) => item.createdAt.isBefore(orphan.createdAt),
+      );
+      generations.insert(at < 0 ? generations.length : at, orphan);
+    }
+    final references = _withUnloaded<SavedReference>(
+      value.savedReferences,
+      current.savedReferences,
+      (item) => item.id,
+    )..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return LocalSnapshot(
+      generations: generations,
+      folders: _withUnloaded<LibraryFolder>(
+        value.folders,
+        current.folders,
+        (item) => item.id,
+      ),
+      savedReferences: references,
+      preferences: value.preferences,
+      hasApiKey: value.hasApiKey,
+      connectedProviders: value.connectedProviders,
+      connectedRewriteProviders: value.connectedRewriteProviders,
+      availableProviders: value.availableProviders,
+      providerRetentionAcknowledgements:
+          value.providerRetentionAcknowledgements,
+      storage: value.storage,
+      settingsVault: value.settingsVault,
+    );
+  }
+
+  /// The reconciled copy of one generation. Delivery decides first — a film
+  /// published to Drive outranks one still staged on the device that made it,
+  /// which outranks a provider link — because clocks skew across devices and
+  /// statusCheckCount advances independently on each. Only an even delivery
+  /// contest falls back to the timestamp.
+  static Generation _preferLoadedGeneration(
+    Generation loaded,
+    Generation? pending,
+  ) {
+    if (pending == null) return loaded;
+    if (loaded.deliveryRank != pending.deliveryRank) {
+      return loaded.deliveryRank > pending.deliveryRank ? loaded : pending;
+    }
+    return pending.updatedAt.isAfter(loaded.updatedAt) ? pending : loaded;
+  }
+
+  /// The loaded list plus whatever only the in-memory snapshot holds.
+  static List<T> _withUnloaded<T>(
+    List<T> loaded,
+    List<T> pending,
+    String Function(T item) id,
+  ) {
+    final known = <String>{for (final item in loaded) id(item)};
+    return <T>[
+      ...loaded,
+      ...pending.where((item) => !known.contains(id(item))),
+    ];
   }
 
   void showNotice(String message, {AppNoticeAction? action}) {
@@ -6445,6 +6530,16 @@ class AppController extends ChangeNotifier {
     _driveRefreshTick += 1;
     final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
     if (_driveRefreshTick % everyTicks != 0) return;
+    await _refreshDriveLibrary();
+  }
+
+  /// Runs one cross-device reconciliation pass, ignoring the periodic
+  /// schedule.
+  @visibleForTesting
+  Future<void> refreshDriveLibraryForTesting() => _refreshDriveLibrary();
+
+  Future<void> _refreshDriveLibrary() async {
+    if (_disposed || _refreshingDriveLibrary) return;
     _refreshingDriveLibrary = true;
     final snapshotRevision = _snapshotRevision;
     try {
@@ -7853,6 +7948,16 @@ class AppController extends ChangeNotifier {
     VideoSaveDestination destination = VideoSaveDestination.files,
   }) => saveMedia(item, destination: destination);
 
+  /// The retained asset first, then the provider delivery link while it is
+  /// still live.
+  ///
+  /// A Drive-library record can still name media staged on the device that
+  /// generated it ([Generation.awaitsOriginDeviceUpload]), which no other
+  /// device can open. On web the companion resolves that itself — its
+  /// `/assets` route serves the provider link instead, or answers a 404 that
+  /// says the film is still uploading. On native the resolution failure lands
+  /// here and takes the same fallback; when there is no link left, the player
+  /// surface explains the wait rather than blaming local playback.
   Future<Uri?> generationMediaUri(Generation item) async {
     if (item.resultAsset != null) {
       try {

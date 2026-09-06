@@ -1787,6 +1787,107 @@ void main() {
       }
     },
   );
+
+  test(
+    'a Drive film still staged on another device falls back or says so',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'clawnsole-staged-elsewhere.',
+      );
+      final now = DateTime.utc(2026, 9, 4);
+      Generation staged(String id, {String? resultUrl}) => Generation(
+        localId: id,
+        status: 'Ready',
+        prompt: 'made on the other device',
+        mode: VideoMode.t2v,
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 8,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+        ),
+        createdAt: now,
+        updatedAt: now,
+        resultUrl: resultUrl,
+        // The record reached this device through Drive, but the bytes are
+        // still staged on the device that generated it.
+        resultAsset: AssetReference(
+          kind: 'local',
+          value: id,
+          label: 'film.mp4',
+          contentType: 'video/mp4',
+        ),
+        storage: LibraryStorage.drive,
+      );
+      final file = File('${temporary.path}/clawnsole.json');
+      await file.writeAsString(
+        StoredData(
+          generations: <Generation>[
+            staged(
+              'abcdef0123456789-aa',
+              resultUrl: 'https://media.example/linked.mp4',
+            ),
+            staged('abcdef0123456789-bb'),
+          ],
+        ).encode(),
+      );
+      final store = CompanionStore(file);
+      final application = CompanionApp(
+        store: store,
+        api: BflApi(),
+        mediaClientFactory: () => _StagedMediaClient(),
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final subscription = server.listen(application.handle);
+      final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+      try {
+        // A live provider delivery still plays the film here.
+        final proxied = await http.get(
+          base.resolve('/assets?id=abcdef0123456789-aa&kind=local'),
+        );
+        expect(proxied.statusCode, 200);
+        expect(proxied.bodyBytes, <int>[1, 2, 3]);
+
+        // Without one, the viewer is told what they are waiting for instead
+        // of getting a bare transport failure behind a generic player error.
+        final missing = await http.get(
+          base.resolve('/assets?id=abcdef0123456789-bb&kind=local'),
+        );
+        expect(missing.statusCode, 404);
+        expect(
+          jsonDecode(missing.body),
+          containsPair(
+            'error',
+            'This film is still uploading from the device that made it.',
+          ),
+        );
+
+        // The cache-only route reports the same thing as a clean miss.
+        final cached = await http.get(
+          base.resolve('/asset-cache?id=abcdef0123456789-bb'),
+        );
+        expect(cached.statusCode, 404);
+      } finally {
+        await subscription.cancel();
+        await server.close(force: true);
+        await temporary.delete(recursive: true);
+      }
+    },
+  );
+}
+
+/// Stands in for the provider CDN still holding the delivery link.
+class _StagedMediaClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(
+        Stream<List<int>>.value(const <int>[1, 2, 3]),
+        200,
+        headers: const <String, String>{'content-type': 'video/mp4'},
+      );
 }
 
 class _StateCountingDriveStore extends _MemoryDriveStore {
