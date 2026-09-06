@@ -88,14 +88,15 @@ void main() {
   ) async {
     final handle = tester.ensureSemantics();
     await _pumpCounter(tester, used: 800);
+    final semantics = tester
+        .getSemantics(find.bySemanticsLabel('Prompt character budget'))
+        .getSemanticsData();
+    expect(semantics.label, 'Prompt character budget');
     expect(
-      tester.getSemantics(find.bySemanticsLabel('Prompt character budget')),
-      containsSemantics(
-        label: 'Prompt character budget',
-        value: '800 of 1000 characters used; 200 characters remaining',
-        hint: 'Test model accepts up to 1000 characters',
-      ),
+      semantics.value,
+      '800 of 1000 characters used; 200 characters remaining',
     );
+    expect(semantics.hint, 'Test model accepts up to 1000 characters');
     expect(find.bySemanticsLabel('800 / 1000'), findsNothing);
     handle.dispose();
   });
