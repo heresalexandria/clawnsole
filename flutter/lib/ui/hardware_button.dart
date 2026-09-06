@@ -13,6 +13,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../app/app_theme.dart';
 import 'hardware.dart';
@@ -122,12 +123,24 @@ class HardwareLitButton extends StatefulWidget {
 /// Public so tests can read the lamp without screen-scraping pixels.
 class HardwareLitButtonState extends State<HardwareLitButton>
     with TickerProviderStateMixin {
+  // Incandescent lamps: the filament heats over a quarter second and
+  // settles; switched off it drops fast, then the afterglow lingers.
   late final AnimationController _lamp = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 140),
-    reverseDuration: const Duration(milliseconds: 280),
+    duration: const Duration(milliseconds: 240),
+    reverseDuration: const Duration(milliseconds: 420),
     value: widget.lit ? 1 : 0,
+  )..addStatusListener(_handleLampStatus);
+  late final Animation<double> _glow = CurvedAnimation(
+    parent: _lamp,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
   );
+
+  // The filament's wander, ticking only while the lamps are on.
+  late final Ticker _filamentTicker = createTicker(_tickFilament);
+  final ValueNotifier<double> _filament = ValueNotifier<double>(1);
+  final int _seed = math.Random().nextInt(1 << 20);
   late final AnimationController _hoverLift = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 140),
@@ -141,7 +154,22 @@ class HardwareLitButtonState extends State<HardwareLitButton>
 
   /// How lit the lens is right now, 0 (lamps off) to 1 (full lamps).
   @visibleForTesting
-  double get litAmount => _lamp.value;
+  double get litAmount => _glow.value;
+
+  /// The filament's momentary brightness relative to steady, about
+  /// 0.9–1.05 while the lamps are on and exactly 1 when they are off.
+  @visibleForTesting
+  double get filament => _filament.value;
+
+  /// Whether the filament wander is ticking — true only while lit.
+  @visibleForTesting
+  bool get isFilamentLit => _filamentTicker.isActive;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.lit) _filamentTicker.start();
+  }
 
   /// Whether a pointer is currently holding the key down.
   @visibleForTesting
@@ -165,9 +193,55 @@ class HardwareLitButtonState extends State<HardwareLitButton>
 
   @override
   void dispose() {
+    _filamentTicker.dispose();
+    _filament.dispose();
     _lamp.dispose();
     _hoverLift.dispose();
     super.dispose();
+  }
+
+  // The wander runs exactly as long as any light is in the lens: from the
+  // first frame of warm-up to the last of the afterglow, and never once
+  // the lamp is cold, so a dark console schedules no frames.
+  void _handleLampStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) {
+      _filamentTicker.stop();
+      _filament.value = 1;
+    } else if (!_filamentTicker.isActive) {
+      _filamentTicker.start();
+    }
+  }
+
+  void _tickFilament(Duration elapsed) {
+    final next = _filamentAt(
+      elapsed.inMicroseconds / Duration.microsecondsPerSecond,
+    );
+    if ((next - _filament.value).abs() > .0004) _filament.value = next;
+  }
+
+  double _phase(int n) => math.Random(_seed + n).nextDouble() * 2 * math.pi;
+
+  double _noise(int n) => math.Random(_seed ^ (n * 7919)).nextDouble();
+
+  /// Incandescent filaments never hold perfectly steady: a few percent of
+  /// slow wander from the supply, and now and then a brief sag. Subtle by
+  /// design — the eye should feel it before it sees it.
+  double _filamentAt(double t) {
+    var w =
+        1 +
+        .02 * math.sin(2 * math.pi * 1.31 * t + _phase(0)) +
+        .012 * math.sin(2 * math.pi * 3.07 * t + _phase(1)) +
+        .008 * math.sin(2 * math.pi * 5.83 * t + _phase(2));
+    // Every so often, in about one window of nine hundred milliseconds in
+    // five, the supply sags for a moment.
+    const window = .9;
+    final k = (t / window).floor();
+    if (_noise(k) < .22) {
+      final at = (k + .2 + .6 * _noise(k + 1000)) * window;
+      final d = (t - at) / .045;
+      w -= .07 * math.exp(-d * d);
+    }
+    return w.clamp(.9, 1.05);
   }
 
   // One calm pace: 140 ms up, 280 ms down, and never a loop.
@@ -199,9 +273,11 @@ class HardwareLitButtonState extends State<HardwareLitButton>
     final dark = Theme.of(context).brightness == Brightness.dark;
 
     final face = AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[_lamp, _hoverLift]),
+      animation: Listenable.merge(<Listenable>[_lamp, _hoverLift, _filament]),
       builder: (context, _) {
-        final lit = _lamp.value;
+        final lit = _glow.value;
+        final filament = _filament.value;
+        final glow = (lit * filament).clamp(0.0, 1.0);
         final ink = Color.lerp(_legendInk, _legendInkLit, lit)!;
         final legend = Text(
           HardwareLitButton.engrave(widget.label),
@@ -220,7 +296,7 @@ class HardwareLitButtonState extends State<HardwareLitButton>
                 shadows: lit > 0
                     ? <Shadow>[
                         Shadow(
-                          color: Colors.white.withValues(alpha: .38 * lit),
+                          color: Colors.white.withValues(alpha: .38 * glow),
                           blurRadius: 4,
                         ),
                       ]
@@ -248,6 +324,7 @@ class HardwareLitButtonState extends State<HardwareLitButton>
           painter: _IndicatorPainter(
             dark: dark,
             lit: lit,
+            filament: filament,
             hover: _hoverLift.value,
             pressed: _pressed,
             focusGlow: _focused ? context.tokens.brass : null,
@@ -334,13 +411,26 @@ class _IndicatorPainter extends CustomPainter {
   const _IndicatorPainter({
     required this.dark,
     required this.lit,
+    required this.filament,
     required this.hover,
     required this.pressed,
     required this.focusGlow,
   });
 
   final bool dark;
+
+  /// How far the lamps have warmed, 0 to 1.
   final double lit;
+
+  /// The filament's momentary brightness relative to steady.
+  final double filament;
+
+  /// What the lamps are actually giving right now.
+  double get glow => (lit * filament).clamp(0.0, 1.0);
+
+  /// The diffuser smooths the wander before it reaches the whole block, so
+  /// the body follows the filament only a little.
+  double get body => (lit * (.85 + .15 * filament)).clamp(0.0, 1.0);
   final double hover;
   final bool pressed;
   final Color? focusGlow;
@@ -429,7 +519,7 @@ class _IndicatorPainter extends CustomPainter {
         const Radius.circular(_outerRadius + 1.5),
       ),
       Paint()
-        ..color = _spill.withValues(alpha: (dark ? .22 : .14) * lit)
+        ..color = _spill.withValues(alpha: (dark ? .22 : .14) * glow)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
     );
   }
@@ -484,8 +574,8 @@ class _IndicatorPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            _lift(Color.lerp(_lensTopIdle, _lensTopLit, lit)!),
-            _lift(Color.lerp(_lensBottomIdle, _lensBottomLit, lit)!),
+            _lift(Color.lerp(_lensTopIdle, _lensTopLit, body)!),
+            _lift(Color.lerp(_lensBottomIdle, _lensBottomLit, body)!),
           ],
         ).createShader(lensRect),
     );
@@ -526,8 +616,8 @@ class _IndicatorPainter extends CustomPainter {
         Paint()
           ..shader = RadialGradient(
             colors: <Color>[
-              _lamp.withValues(alpha: .55 * lit),
-              _lamp.withValues(alpha: .2 * lit),
+              _lamp.withValues(alpha: .55 * glow),
+              _lamp.withValues(alpha: .2 * glow),
               _lamp.withValues(alpha: 0),
             ],
             stops: const <double>[0, .45, 1],
@@ -543,8 +633,8 @@ class _IndicatorPainter extends CustomPainter {
         Paint()
           ..shader = RadialGradient(
             colors: <Color>[
-              const Color(0xFFFCE3F4).withValues(alpha: .42 * lit),
-              _lamp.withValues(alpha: .26 * lit),
+              const Color(0xFFFCE3F4).withValues(alpha: .42 * glow),
+              _lamp.withValues(alpha: .26 * glow),
               _lamp.withValues(alpha: 0),
             ],
             stops: const <double>[0, .35, 1],
@@ -619,6 +709,7 @@ class _IndicatorPainter extends CustomPainter {
   bool shouldRepaint(_IndicatorPainter old) =>
       old.dark != dark ||
       old.lit != lit ||
+      old.filament != filament ||
       old.hover != hover ||
       old.pressed != pressed ||
       old.focusGlow != focusGlow;

@@ -126,7 +126,8 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    // A lit lamp keeps ticking, so settle by the clock instead.
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(_state(tester).litAmount, 1);
     // A working key is not dimmed: the lamp is the signal.
@@ -145,7 +146,7 @@ void main() {
         HardwareLitButton(label: 'Generate video', onPressed: () {}, lit: true),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(_state(tester).litAmount, 1);
 
     await tester.pumpWidget(
@@ -154,9 +155,53 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 150));
     expect(_state(tester).litAmount, lessThan(1));
-    // Out in under the 300 ms ceiling, and nothing loops afterwards.
+    // Cold within half a second, and nothing ticks afterwards.
     await tester.pump(const Duration(milliseconds: 300));
     expect(_state(tester).litAmount, 0);
+    expect(_state(tester).isFilamentLit, isFalse);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('the filament wanders while lit and rests when cold', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(HardwareLitButton(label: 'Generate video', onPressed: () {})),
+    );
+    final state = _state(tester);
+    expect(state.isFilamentLit, isFalse);
+    expect(state.filament, 1);
+
+    await tester.pumpWidget(
+      _host(
+        HardwareLitButton(label: 'Generate video', onPressed: () {}, lit: true),
+      ),
+    );
+    // Warm-up: a quarter second to full, never a snap.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(state.litAmount, inExclusiveRange(0, 1));
+    expect(state.isFilamentLit, isTrue);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(state.litAmount, 1);
+
+    // On, the filament drifts a few percent — never steady, never wild.
+    final samples = <double>{};
+    for (var i = 0; i < 24; i++) {
+      await tester.pump(const Duration(milliseconds: 37));
+      samples.add(state.filament);
+      expect(state.filament, inInclusiveRange(.9, 1.05));
+    }
+    expect(samples.length, greaterThan(4));
+
+    // Off, the wander stops with the light, so a dark console is still.
+    await tester.pumpWidget(
+      _host(HardwareLitButton(label: 'Generate video', onPressed: () {})),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(state.isFilamentLit, isFalse);
+    expect(state.filament, 1);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('lights up on pointer-down, before the tap completes', (
