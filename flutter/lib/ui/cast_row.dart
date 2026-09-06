@@ -165,25 +165,42 @@ class _CastChip extends StatelessWidget {
     character: controller.castScriptName(name),
   );
 
+  /// Clears this character's cast entry. The media stays in the References
+  /// tray, exactly as the editor's Remove all leaves it, so a recast is one
+  /// tap away.
+  Future<void> _remove() async {
+    final error = await controller.saveCharacterMapping(
+      scriptName: controller.castScriptName(name),
+      name: name,
+      referenceNames: const <String>[],
+    );
+    controller.showNotice(
+      error ?? '$name removed from the cast. Its media stays attached.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final references = controller.form.characterMappings[name] ?? const [];
     final shown = references.take(CastRow._visibleThumbs).toList();
     final extra = references.length - shown.length;
-    return MergeSemantics(
+    return Semantics(
+      explicitChildNodes: true,
       child: Semantics(
         container: true,
         button: true,
         label: 'Edit $name casting',
+        onTap: () => unawaited(_edit(context)),
         child: HardwareTouchTarget(
           onTap: () => unawaited(_edit(context)),
           child: InkWell(
             key: ValueKey<String>('cast-chip-$name'),
             onTap: () => unawaited(_edit(context)),
             borderRadius: BorderRadius.circular(10),
-            child: ExcludeSemantics(
+            child: Semantics(
+              explicitChildNodes: true,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(4, 4, 9, 4),
+                padding: const EdgeInsets.fromLTRB(4, 4, 3, 4),
                 decoration: BoxDecoration(
                   color: context.colors.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(10),
@@ -238,13 +255,30 @@ class _CastChip extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      name,
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: context.colors.onSurface,
+                    ExcludeSemantics(
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: context.colors.onSurface,
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 4),
+                    _CastChipControl(
+                      key: ValueKey<String>('cast-edit-$name'),
+                      icon: Icons.edit_outlined,
+                      tooltip: 'Recast $name',
+                      semanticLabel: 'Recast $name',
+                      onTap: () => unawaited(_edit(context)),
+                    ),
+                    _CastChipControl(
+                      key: ValueKey<String>('cast-remove-$name'),
+                      icon: Icons.close_rounded,
+                      tooltip: 'Remove $name from the cast',
+                      semanticLabel: 'Remove $name from the cast',
+                      onTap: () => unawaited(_remove()),
                     ),
                   ],
                 ),
@@ -255,6 +289,48 @@ class _CastChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The pencil and × inside a cast chip: their own button nodes, with a hit
+/// area that lands a finger without stretching the chip.
+class _CastChipControl extends StatelessWidget {
+  const _CastChipControl({
+    required this.icon,
+    required this.tooltip,
+    required this.semanticLabel,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final String semanticLabel;
+  final VoidCallback onTap;
+
+  static const double _hit = 22;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: semanticLabel,
+    onTap: onTap,
+    child: HardwareTouchTarget(
+      onTap: onTap,
+      minWidth: _hit,
+      minHeight: _hit,
+      child: Tooltip(
+        message: tooltip,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 14,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+            child: Icon(icon, size: 13, color: context.colors.onSurfaceVariant),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _AddCastAction extends StatelessWidget {

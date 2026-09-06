@@ -56,8 +56,10 @@ original device. Move or copy that media to Drive when it needs to travel.
 
 Aesthetic references are text-only library entries managed on the **Aesthetics**
 tab of the References desk, beside **Media**. Each entry carries a title, one
-SVG line icon (grouped by subject in the editor), a color, comma-separated
-tags, a star, and the reference text. The tab's toolbar filters by All /
+SVG line icon, a color, comma-separated tags, a star, and the reference text.
+The editor keeps the icon out of the way: the current icon sits beside a
+**Change icon** action that unfolds a short, scrolling grid grouped by
+subject, and twenty-two colour swatches sit underneath. The tab's toolbar filters by All /
 Starred, a search across titles, text, and tags, and a Tags popover; rows show
 the star and tag pills. The Aesthetic menu immediately to the right of
 Characters selects one per Create tab, or **No aesthetic**; it is a searchable

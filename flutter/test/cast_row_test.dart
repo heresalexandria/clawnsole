@@ -215,6 +215,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('each cast chip recasts and uncasts in place', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(references: [_saved('portrait.png')]);
+    addTearDown(controller.dispose);
+    controller.form.characterMappings['HERO'] = ['portrait.png'];
+    await _pumpCreate(tester, controller);
+
+    await tester.tap(find.byKey(const ValueKey('cast-edit-HERO')));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit character'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const ValueKey('mapping-character-name')),
+          )
+          .controller!
+          .text,
+      'HERO',
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('cast-remove-HERO')));
+    await tester.pumpAndSettle();
+    expect(controller.form.characterMappings, isEmpty);
+    expect(find.byType(CastRow), findsNothing);
+    expect(controller.notice, contains('HERO removed from the cast'));
+    // Uncasting is an explicit choice: typing must not cast HERO again.
+    controller.updateForm((form) => form.prompt = 'HERO waits.');
+    await tester.pumpAndSettle();
+    expect(controller.characterMappingReferences('HERO'), isEmpty);
+    expect(find.byType(CastRow), findsNothing);
+    await tester.pump(const Duration(seconds: 5));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the chooser searches, filters by kind and leads with matches', (
     tester,
   ) async {

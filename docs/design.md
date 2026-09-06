@@ -229,7 +229,9 @@ Layout order:
    reference on a model that accepts creative references. A brass label,
    then one chip per cast member — up to three overlapping 26-pixel
    thumbnails of its media, a "+n" spillover, and the name — each opening
-   the mapping editor, followed by a quiet *Add character*. The casting
+   the mapping editor; a small pencil and × inside each chip recast or
+   uncast that character in place (the media stays in the References
+   tray). A quiet *Add character* ends the row. The casting
    itself never appears in the prompt box; it is appended silently at
    submission, so an uncast composer keeps the heading through Generate
    above the fold.
@@ -357,10 +359,14 @@ generation-mode rule above still stands — tabs never select a mode.
   fill with cream icon and text; both modes were verified against the old
   unreadable-active-tab bug. Narrow layouts stack the search above the
   segment row and shrink Select to an icon key.
-- **The References desk is two console-key tabs** — *Media* and
-  *Aesthetics*, with facet counts — sitting in the pinned heading under
-  *Your creative ingredients.* Both tabs keep the same 1440-px column and
-  padding, so switching never shifts the heading. The aesthetic half
+- **The References desk is two folder tabs** — *Media* and *Aesthetics*,
+  with facet counts — standing on a hairline rule that closes the pinned
+  heading under *Your creative ingredients.* They are the Create draft
+  rail's construction (`SectionTabRail`, `lib/ui/section_tabs.dart`) cut
+  larger: idle tabs are raised console keys on the rule, the open desk is
+  cut from the surface beneath it with a brass lip and covers the rule,
+  never a lit button. Both tabs keep the same 1440-px column and padding,
+  so switching never shifts the heading. The aesthetic half
   replaces the folder rail with one scrolling column, which is what keeps a
   long aesthetic list scrollable instead of growing the pinned heading;
   dropped files still only ever mean media.

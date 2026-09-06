@@ -87,8 +87,10 @@ When at least one character holds a reference on a model that accepts creative
 image or video references, a compact **Cast** strip sits above the composer's
 guidance and settings columns. Each chip carries up to three overlapping
 thumbnails of that character's media, a "+n" spillover, and the cast name; a tap
-opens the same mapping editor the Characters modal uses. A quiet **Add
-character** action ends the row. With no cast, the row is absent entirely, so an
+opens the same mapping editor the Characters modal uses, and the chip's own
+pencil and × recast or uncast that character without opening the Characters
+modal (uncasting keeps the media attached). A quiet **Add character** action
+ends the row. With no cast, the row is absent entirely, so an
 empty composer keeps its heading through Generate above the fold.
 
 The **Characters** control is available only on models that accept creative

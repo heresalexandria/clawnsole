@@ -10,7 +10,9 @@ import 'hardware.dart';
 
 export 'aesthetic_icons.dart';
 
-/// The ten swatches an aesthetic can wear, in picker order.
+/// The swatches an aesthetic can wear, in picker order: the original ten
+/// mid-tones first, then a second dozen that stay legible on both paper and
+/// espresso.
 const aestheticSwatches = <int>[
   0xffaf853c,
   0xffd64c4c,
@@ -22,6 +24,18 @@ const aestheticSwatches = <int>[
   0xffaa55b5,
   0xffc35c90,
   0xff737373,
+  0xffcfa32b,
+  0xffb85a32,
+  0xffe0705a,
+  0xffb3304f,
+  0xff946243,
+  0xff8c8c34,
+  0xff4faa7f,
+  0xff2f8f8f,
+  0xff3f5b8f,
+  0xff6f7d94,
+  0xff9384d6,
+  0xff7b4a7b,
 ];
 
 /// A small brass eyebrow used inside the picker panel and the editor, where
@@ -427,6 +441,10 @@ class _AestheticEditorState extends State<_AestheticEditor> {
   late int _color = widget.reference?.color ?? aestheticSwatches.first;
   late bool _favorite = widget.reference?.favorite ?? false;
 
+  /// The icon grid is a finder's aid, not the point of an aesthetic, so it
+  /// stays folded until asked for and never grows past a few rows.
+  bool _iconPickerOpen = false;
+
   @override
   void dispose() {
     _title.dispose();
@@ -538,78 +556,113 @@ class _AestheticEditorState extends State<_AestheticEditor> {
                 ),
                 const SizedBox(height: 4),
                 _section(
-                  'Icon',
+                  'Icon & color',
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      for (final group
-                          in aestheticIconGroups.entries) ...<Widget>[
-                        // A single group needs no second label under 'ICON'.
-                        if (aestheticIconGroups.length > 1)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: AestheticEyebrow(group.key),
-                          ),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: <Widget>[
-                            for (final name in group.value)
-                              Tooltip(
-                                message: name,
-                                child: InkWell(
-                                  key: ValueKey('aesthetic-icon-$name'),
-                                  borderRadius: BorderRadius.circular(10),
-                                  onTap: () => setState(() => _icon = name),
-                                  child: Container(
-                                    width: 36,
-                                    height: 36,
-                                    alignment: Alignment.center,
-                                    decoration: consoleKeyDecoration(
-                                      context,
-                                      selected: name == _icon,
-                                      radius: 10,
-                                    ),
-                                    child: AestheticIcon(
-                                      name: name,
-                                      color: name == _icon
-                                          ? context.colors.onPrimary.toARGB32()
-                                          : _color,
-                                      size: 20,
-                                    ),
-                                  ),
+                      Row(
+                        children: <Widget>[
+                          Tooltip(
+                            message: _iconPickerOpen
+                                ? 'Hide icons'
+                                : 'Choose an icon',
+                            child: InkWell(
+                              key: const ValueKey('aesthetic-icon-picker'),
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () => setState(
+                                () => _iconPickerOpen = !_iconPickerOpen,
+                              ),
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: consoleKeyDecoration(
+                                  context,
+                                  selected: _iconPickerOpen,
+                                  radius: 10,
+                                ),
+                                child: AestheticIcon(
+                                  name: _icon,
+                                  color: _iconPickerOpen
+                                      ? context.colors.onPrimary.toARGB32()
+                                      : _color,
+                                  size: 22,
                                 ),
                               ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                    ],
-                  ),
-                ),
-                _section(
-                  'Color',
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: <Widget>[
-                      for (final color in aestheticSwatches)
-                        IconButton(
-                          tooltip:
-                              'Color #${color.toRadixString(16).substring(2)}',
-                          onPressed: () => setState(() => _color = color),
-                          icon: CircleAvatar(
-                            radius: 14,
-                            backgroundColor: Color(color),
-                            child: _color == color
-                                ? const Icon(
-                                    Icons.check,
-                                    size: 18,
-                                    color: Colors.white,
-                                  )
-                                : null,
+                            ),
                           ),
+                          const SizedBox(width: 6),
+                          TextButton(
+                            key: const ValueKey('aesthetic-icon-toggle'),
+                            onPressed: () => setState(
+                              () => _iconPickerOpen = !_iconPickerOpen,
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            child: Text(
+                              _iconPickerOpen ? 'Hide icons' : 'Change icon',
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_iconPickerOpen) ...<Widget>[
+                        const SizedBox(height: 8),
+                        _IconGrid(
+                          selected: _icon,
+                          color: _color,
+                          onSelected: (name) => setState(() {
+                            _icon = name;
+                            _iconPickerOpen = false;
+                          }),
                         ),
+                      ],
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: <Widget>[
+                          for (final color in aestheticSwatches)
+                            Tooltip(
+                              message:
+                                  'Color #${color.toRadixString(16).substring(2)}',
+                              child: InkWell(
+                                key: ValueKey(
+                                  'aesthetic-color-${color.toRadixString(16).substring(2)}',
+                                ),
+                                customBorder: const CircleBorder(),
+                                onTap: () => setState(() => _color = color),
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    color: Color(color),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _color == color
+                                          ? context.colors.onSurface
+                                          : Colors.transparent,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: _color == color
+                                      ? const Icon(
+                                          Icons.check,
+                                          size: 14,
+                                          color: Colors.white,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -693,4 +746,99 @@ class _AestheticEditorState extends State<_AestheticEditor> {
       ],
     );
   }
+}
+
+/// The folded icon grid: every icon by group, capped at a few rows and
+/// scrolling within itself so the dialog never grows to fit all of them.
+class _IconGrid extends StatefulWidget {
+  const _IconGrid({
+    required this.selected,
+    required this.color,
+    required this.onSelected,
+  });
+
+  final String selected;
+  final int color;
+  final ValueChanged<String> onSelected;
+
+  @override
+  State<_IconGrid> createState() => _IconGridState();
+}
+
+class _IconGridState extends State<_IconGrid> {
+  /// The grid owns its scroll position so the scrollbar can stay visible —
+  /// the one hint that more icons wait below the fold.
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: context.colors.outlineVariant),
+    ),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 190),
+      child: Scrollbar(
+        controller: _scroll,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          key: const ValueKey('aesthetic-icon-sheet'),
+          controller: _scroll,
+          primary: false,
+          padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              for (final group in aestheticIconGroups.entries) ...<Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 5, top: 3),
+                  child: AestheticEyebrow(group.key),
+                ),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: <Widget>[
+                    for (final name in group.value)
+                      Tooltip(
+                        message: name,
+                        child: InkWell(
+                          key: ValueKey('aesthetic-icon-$name'),
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => widget.onSelected(name),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: consoleKeyDecoration(
+                              context,
+                              selected: name == widget.selected,
+                              radius: 8,
+                            ),
+                            child: AestheticIcon(
+                              name: name,
+                              color: name == widget.selected
+                                  ? context.colors.onPrimary.toARGB32()
+                                  : widget.color,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

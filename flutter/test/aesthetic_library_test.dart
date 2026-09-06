@@ -413,6 +413,49 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the editor folds its icon grid and picks from it', (
+    tester,
+  ) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    controller.setReferencesTab(ReferencesTab.aesthetics);
+    await _pumpReferences(tester, controller);
+    await tester.tap(
+      find.byKey(const ValueKey('add-first-aesthetic-reference')),
+    );
+    await tester.pumpAndSettle();
+    // Folded by default: the icon is a finder's aid, not the point.
+    expect(find.byKey(const ValueKey('aesthetic-icon-sheet')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('aesthetic-icon-toggle')));
+    await tester.pumpAndSettle();
+    final grid = find.byKey(const ValueKey('aesthetic-icon-sheet'));
+    expect(grid, findsOneWidget);
+    expect(tester.getSize(grid).height, lessThanOrEqualTo(190));
+    await tester.tap(find.byKey(const ValueKey('aesthetic-icon-moon')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('aesthetic-icon-sheet')), findsNothing);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('aesthetic-color-2f8f8f')),
+    );
+    await tester.tap(find.byKey(const ValueKey('aesthetic-color-2f8f8f')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('aesthetic-title')),
+      'Night',
+    );
+    await tester.ensureVisible(find.byKey(const ValueKey('aesthetic-text')));
+    await tester.enterText(
+      find.byKey(const ValueKey('aesthetic-text')),
+      'Moonlit.',
+    );
+    await tester.tap(find.byKey(const ValueKey('aesthetic-save')));
+    await tester.pumpAndSettle();
+    final saved = controller.aestheticReferences.single;
+    expect(saved.icon, 'moon');
+    expect(saved.color, 0xff2f8f8f);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the Create picker searches, stars in place, and clears', (
     tester,
   ) async {

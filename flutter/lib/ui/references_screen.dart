@@ -12,6 +12,7 @@ import 'aesthetic_library.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
+import 'section_tabs.dart';
 import 'library_folders.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
@@ -349,40 +350,36 @@ class _ReferencesHeading extends StatelessWidget {
           ),
         ],
       ),
-      const SizedBox(height: 16),
-      // The desk's two halves live in the pinned heading on both tabs, so
-      // switching never moves them.
-      Align(
-        alignment: Alignment.centerLeft,
-        child: ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) => Wrap(
-            spacing: 5,
-            runSpacing: 5,
-            children: <Widget>[
-              ConsoleFilterSegment(
-                key: const ValueKey('references-tab-media'),
-                label: 'Media',
-                semanticLabel: 'Media references',
-                icon: Icons.perm_media_rounded,
-                count: controller.savedReferences
-                    .where((item) => !item.hidden)
-                    .length,
-                selected: controller.referencesTab == ReferencesTab.media,
-                onTap: () => controller.setReferencesTab(ReferencesTab.media),
-              ),
-              ConsoleFilterSegment(
-                key: const ValueKey('references-tab-aesthetics'),
-                label: 'Aesthetics',
-                semanticLabel: 'Aesthetic references',
-                icon: Icons.palette_outlined,
-                count: controller.aestheticReferences.length,
-                selected: controller.referencesTab == ReferencesTab.aesthetics,
-                onTap: () =>
-                    controller.setReferencesTab(ReferencesTab.aesthetics),
-              ),
-            ],
-          ),
+      const SizedBox(height: 18),
+      // The desk's two halves are folder tabs on a rule that closes the
+      // pinned heading, so switching never moves the heading itself.
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => SectionTabRail(
+          semanticLabel: 'References desk',
+          tabs: <SectionTab>[
+            SectionTab(
+              key: const ValueKey('references-tab-media'),
+              label: 'Media',
+              semanticLabel: 'Media references',
+              icon: Icons.perm_media_rounded,
+              count: controller.savedReferences
+                  .where((item) => !item.hidden)
+                  .length,
+              selected: controller.referencesTab == ReferencesTab.media,
+              onTap: () => controller.setReferencesTab(ReferencesTab.media),
+            ),
+            SectionTab(
+              key: const ValueKey('references-tab-aesthetics'),
+              label: 'Aesthetics',
+              semanticLabel: 'Aesthetic references',
+              icon: Icons.palette_outlined,
+              count: controller.aestheticReferences.length,
+              selected: controller.referencesTab == ReferencesTab.aesthetics,
+              onTap: () =>
+                  controller.setReferencesTab(ReferencesTab.aesthetics),
+            ),
+          ],
         ),
       ),
       ReferenceUploadIndicator(
