@@ -8,6 +8,7 @@ import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'models.dart';
 import 'composer_tabs.dart';
+import 'device_identity.dart';
 import 'secure_value_store.dart';
 import 'settings_vault.dart';
 import 'settings_vault_gateway.dart';
@@ -78,17 +79,41 @@ class SettingsVaultDataStore
   }
 
   @override
-  Future<void> writeComposerWorkspace(ComposerTabsState state) async {
+  Future<void> writeComposerWorkspace(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) async {
     final delegate = _delegate;
     if (delegate is ComposerWorkspaceStore) {
-      await (delegate as ComposerWorkspaceStore).writeComposerWorkspace(state);
+      await (delegate as ComposerWorkspaceStore).writeComposerWorkspace(
+        state,
+        publishNow: publishNow,
+      );
     } else {
       final current = await delegate.read();
       await delegate.write(
         current.copyWith(
-          composerTabs: mergeComposerWorkspaces(state, current.composerTabs),
+          composerTabs: mergeComposerWorkspaces(
+            stampComposerWorkspace(
+              state,
+              previous: current.composerTabs,
+              now: _clock(),
+              deviceName: composerDeviceName(),
+              platform: composerDevicePlatform(),
+              newId: _randomId,
+            ),
+            current.composerTabs,
+          ),
         ),
       );
+    }
+  }
+
+  @override
+  Future<void> publishComposerWorkspace() async {
+    final delegate = _delegate;
+    if (delegate is ComposerWorkspaceStore) {
+      await (delegate as ComposerWorkspaceStore).publishComposerWorkspace();
     }
   }
 

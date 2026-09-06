@@ -428,6 +428,7 @@ extension ScreenplayAuthoring on AppController {
   /// Cast once. Remembering the character means deleting or editing a cast
   /// entry never causes it to spring back on the next keystroke.
   void syncScreenplayCharacterMappings() {
+    _settlePromptEdits();
     final prompt = form.prompt;
     final cast = castLines.join('\n');
     final references = form.references.length;

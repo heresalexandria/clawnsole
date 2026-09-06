@@ -5684,6 +5684,9 @@ void main() {
     ];
     controller.removeReference('image-reference');
     expect(controller.form.prompt, 'Use @Image 1, then @Image 2.');
+    // Typing armed the controller's settle pause; let it run before the
+    // pending-timer check.
+    await tester.pump(AppController.promptSettleDelay);
   });
 
   test('reference names keep gaps and new references fill the lowest gap', () {

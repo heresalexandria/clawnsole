@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import 'formatters.dart';
 import 'hardware.dart';
 
 /// The Create heading's tab rail: one tab per open draft plus a "+" tab,
@@ -62,17 +63,9 @@ class ComposerTabRail extends StatelessWidget {
                     const SizedBox(width: 4),
                   ],
                   _NewComposerTabKey(controller: controller),
-                  if (controller.canReopenComposerTab)
-                    PopupMenuButton<String>(
-                      tooltip: 'Recover closed draft',
-                      onSelected: (id) =>
-                          unawaited(controller.reopenComposerTab(id)),
-                      itemBuilder: (context) => [
-                        for (final tab in controller.recoverableComposerTabs)
-                          PopupMenuItem(value: tab.id, child: Text(tab.label)),
-                      ],
-                      icon: const Icon(Icons.restore, size: 19),
-                    ),
+                  if (controller.canReopenComposerTab ||
+                      controller.hasOtherDeviceDrafts)
+                    _ComposerDraftsMenu(controller: controller),
                 ],
               ),
             ),
@@ -137,6 +130,75 @@ class ComposerTabRail extends StatelessWidget {
 
 /// The hairline the tabs stand on: the same thread as card borders.
 Color railRuleColor(BuildContext context) => context.colors.outlineVariant;
+
+/// One entry of the drafts menu: a draft closed here ([deviceId] null) or
+/// one open on another device.
+class _DraftChoice {
+  const _DraftChoice({required this.tabId, this.deviceId});
+
+  final String tabId;
+  final String? deviceId;
+}
+
+/// "Recover a draft": what was closed on this device and what is open on
+/// the other devices sharing this library. One key beside "+" covers both,
+/// because the answer is the same either way — open a copy of it as a tab
+/// here. Nothing syncs into the open tabs on its own; opening the menu
+/// quietly refreshes the other devices' records.
+class _ComposerDraftsMenu extends StatelessWidget {
+  const _ComposerDraftsMenu({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final closed = controller.recoverableComposerTabs;
+    final devices = controller.otherDeviceDrafts;
+    final heading = Theme.of(context).textTheme.labelSmall?.copyWith(
+      color: context.colors.onSurfaceVariant,
+      letterSpacing: .4,
+    );
+    PopupMenuEntry<_DraftChoice> section(String label) =>
+        PopupMenuItem<_DraftChoice>(
+          enabled: false,
+          height: 30,
+          child: Text(label.toUpperCase(), style: heading),
+        );
+    return PopupMenuButton<_DraftChoice>(
+      key: const ValueKey('composer-drafts-menu'),
+      tooltip: devices.isEmpty ? 'Recover closed draft' : 'Recover a draft',
+      icon: const Icon(Icons.restore, size: 19),
+      onOpened: () => unawaited(controller.refreshOtherDeviceDrafts()),
+      onSelected: (choice) => unawaited(
+        choice.deviceId == null
+            ? controller.reopenComposerTab(choice.tabId)
+            : controller.openDeviceDraft(choice.deviceId!, choice.tabId),
+      ),
+      itemBuilder: (context) => <PopupMenuEntry<_DraftChoice>>[
+        if (closed.isNotEmpty && devices.isNotEmpty) section('Closed here'),
+        for (final tab in closed)
+          PopupMenuItem<_DraftChoice>(
+            key: ValueKey<String>('composer-draft-closed-${tab.id}'),
+            value: _DraftChoice(tabId: tab.id),
+            child: Text(tab.label, overflow: TextOverflow.ellipsis),
+          ),
+        for (final device in devices) ...<PopupMenuEntry<_DraftChoice>>[
+          section(
+            'Open on ${device.deviceName} · ${relativeTime(device.updatedAt)}',
+          ),
+          for (final tab in device.drafts)
+            PopupMenuItem<_DraftChoice>(
+              key: ValueKey<String>(
+                'composer-draft-${device.deviceId}-${tab.id}',
+              ),
+              value: _DraftChoice(tabId: tab.id, deviceId: device.deviceId),
+              child: Text(tab.label, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+      ],
+    );
+  }
+}
 
 /// The corner radius of a tab's shoulders.
 const double _tabRadius = 9;

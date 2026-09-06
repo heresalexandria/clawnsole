@@ -59,6 +59,9 @@ extension AppControllerSubmission on AppController {
     required bool providerRetentionRiskAcknowledged,
   }) async {
     if (submitting || _disposed) return;
+    // A keystroke's deferred work (cast lines, reference casting) must be in
+    // the draft before anything reads the prompt to send.
+    _settlePromptEdits();
     final problem = validate();
     if (problem != null) {
       showNotice(problem);

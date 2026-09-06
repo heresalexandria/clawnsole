@@ -200,7 +200,55 @@ extension AppControllerWorkspace on AppController {
     closedTabs: List.of(_recoverableComposerTabs),
     aestheticReferences: List.of(_aestheticReferences),
     deletedAestheticIds: Set.of(_deletedAestheticIds),
+    deviceId: _composerDeviceId,
+    deviceName: _composerDeviceName,
+    devicePlatform: _composerDevicePlatform,
+    devices: List.of(_composerDevices),
   );
+
+  /// Takes the store-owned facts a read carries: this device's identity and
+  /// every device's published strip. Never touches the open tabs.
+  void _absorbDeviceCatalog(ComposerTabsState state) {
+    _composerDeviceId = state.deviceId ?? _composerDeviceId;
+    _composerDeviceName = state.deviceName ?? _composerDeviceName;
+    _composerDevicePlatform = state.devicePlatform ?? _composerDevicePlatform;
+    _composerDevices
+      ..clear()
+      ..addAll(mergeComposerDevices(_composerDevices, state.devices));
+  }
+
+  /// Other devices' published drafts, newest device first. This device's
+  /// own record and devices with nothing but blank tabs are left out.
+  List<ComposerDeviceDrafts> get otherDeviceDrafts => [
+    for (final device in _composerDevices)
+      if (device.deviceId != _composerDeviceId && device.drafts.isNotEmpty)
+        device,
+  ];
+
+  bool get hasOtherDeviceDrafts => otherDeviceDrafts.isNotEmpty;
+
+  /// Pulls the other devices' latest records: a quiet Drive read when
+  /// connected, else whatever the local mirror already holds.
+  Future<void> refreshOtherDeviceDrafts() async {
+    if (googleDriveConnected) {
+      await _refreshDriveLibrary();
+    } else {
+      await syncComposerWorkspace();
+    }
+  }
+
+  /// Opens a copy of [tabId] from [deviceId]'s published strip as a new tab
+  /// here. The other device keeps its own; nothing is moved or closed.
+  Future<void> openDeviceDraft(String deviceId, String tabId) async {
+    final record = _composerDevices
+        .where((device) => device.deviceId == deviceId)
+        .firstOrNull
+        ?.tabs
+        .where((tab) => tab.id == tabId)
+        .firstOrNull;
+    if (record == null) return;
+    await _openComposerTabCopy(record);
+  }
 
   void _applyWorkspaceCatalog(ComposerTabsState state) {
     _closedComposerTabIds.addAll(state.closedTabIds);
@@ -256,7 +304,19 @@ extension AppControllerWorkspace on AppController {
         .where((tab) => tab.id == id)
         .firstOrNull;
     if (record == null) return;
-    final memory = _closedComposerDrafts.remove(record.id);
+    await _openComposerTabCopy(
+      record,
+      memory: _closedComposerDrafts.remove(record.id),
+    );
+  }
+
+  /// Opens [record] as a new tab under a fresh id, re-hydrating retained
+  /// media, or reusing [memory] (the closed tab's in-memory draft) when the
+  /// original is still here so session-only media survives too.
+  Future<void> _openComposerTabCopy(
+    ComposerTabRecord record, {
+    ComposerTab? memory,
+  }) async {
     final restored = record.copyWith(
       id: _uid(),
       updatedAt: DateTime.now().toUtc(),
@@ -292,10 +352,27 @@ extension AppControllerWorkspace on AppController {
     notifyListeners();
   }
 
-  void flushComposerWorkspace() => _flushComposerTabsSave(onlyIfPending: true);
+  /// The app is leaving the foreground: write a pending draft and ask the
+  /// store to publish this device's record at once rather than on its
+  /// background cadence, so the other devices see it before this one sleeps.
+  void flushComposerWorkspace() {
+    final pending = _composerTabsSaveTimer?.isActive ?? false;
+    _flushComposerTabsSave(onlyIfPending: true, publishNow: true);
+    if (pending || _disposed || !_persistsComposerTabs) return;
+    if (gateway case final ComposerTabsGateway tabsGateway) {
+      unawaited(
+        tabsGateway.publishComposerTabs().catchError((Object _) {
+          // Publication retries on the next save or Drive read.
+        }),
+      );
+    }
+  }
 
-  /// Reconcile incoming records without losing local edits made
-  /// while the read was in flight. Active selection remains device-local.
+  /// Takes what the store learned from Drive — other devices' published
+  /// strips and the shared aesthetic library — without touching the tabs
+  /// open here. A sync never rewrites the draft the director is typing in;
+  /// another device's work is offered through [otherDeviceDrafts] and opens
+  /// as a copy on request.
   Future<void> syncComposerWorkspace() async {
     if (!_composerTabsRestored ||
         _syncingComposerWorkspace ||
@@ -304,73 +381,37 @@ extension AppControllerWorkspace on AppController {
       return;
     }
     _syncingComposerWorkspace = true;
+    final recoveringUnreadStrip = _composerTabsLoadFailed;
     try {
-      final remote = await (gateway as ComposerTabsGateway).loadComposerTabs();
+      final stored = await (gateway as ComposerTabsGateway).loadComposerTabs();
       if (_disposed) return;
       _composerTabsLoadFailed = false;
       _composerWorkspaceSyncFailed = false;
-      final merged = mergeComposerWorkspaces(_composerWorkspace, remote)!;
-      _applyWorkspaceCatalog(merged);
-      for (final record in merged.tabs) {
-        final previous = _composerTabById(record.id);
-        if (previous != null &&
-            jsonEncode(_composerTabRecord(previous).toJson()) ==
-                jsonEncode(record.toJson())) {
-          continue;
-        }
-        final previousStamp = previous?.updatedAt;
-        final rebuilt = ComposerTab(
-          id: record.id,
-          providerId: record.providerId ?? providers.first.id,
-          modelId: record.modelId ?? providers.first.defaultModel.id,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        );
-        final source =
-            _composerMediaGeneration(record) ??
-            generations
-                .where((item) => item.localId == record.sourceGenerationId)
-                .firstOrNull;
-        if (source != null) {
-          await _restoreGenerationSettings(
-            source,
-            cacheOnly: true,
-            persistDraft: false,
-            tab: rebuilt,
-          );
-        }
+      if (_composerSaveFailures == 0) composerTabsSaveError = null;
+      if (stored == null) return;
+      _absorbDeviceCatalog(stored);
+      if (recoveringUnreadStrip) {
+        // Startup could not read this device's own strip, so the work done
+        // since lives only in memory. Both halves are this device's: bring
+        // the saved tabs back beside the new ones, then write them together.
+        _applyWorkspaceCatalog(stored);
+        await _adoptStoredTabs(stored);
         if (_disposed) return;
-        if (_closedComposerTabIds.contains(record.id)) continue;
-        final current = _composerTabById(record.id);
-        if (current?.updatedAt != previousStamp) continue;
-        _inComposerTab(rebuilt, () => _applyComposerTabRecord(rebuilt, record));
-        final index = _composerTabs.indexWhere((tab) => tab.id == record.id);
-        if (index < 0) {
-          _composerTabs.add(rebuilt);
-        } else {
-          _composerTabs[index] = rebuilt;
+        await _saveComposerTabs();
+      }
+      final merged = mergeComposerWorkspaces(_composerWorkspace, stored)!;
+      _deletedAestheticIds.addAll(merged.deletedAestheticIds);
+      _aestheticReferences
+        ..clear()
+        ..addAll(merged.aestheticReferences);
+      for (final tab in _composerTabs) {
+        final selected = tab.form.aestheticReferenceId;
+        if (selected != null && _deletedAestheticIds.contains(selected)) {
+          tab.form.aestheticReferenceId = null;
         }
-        unawaited(_hydrateComposerMedia(rebuilt));
-      }
-      _composerTabs.removeWhere(
-        (tab) => _closedComposerTabIds.contains(tab.id),
-      );
-      if (_composerTabs.isEmpty) {
-        _composerTabs.add(
-          ComposerTab(
-            id: _uid(),
-            providerId: providers.first.id,
-            modelId: providers.first.defaultModel.id,
-          ),
-        );
-      }
-      if (_composerTabById(_activeComposerTabId) == null) {
-        _activeComposerTabId = _composerTabs.first.id;
       }
       _invalidateProviderEstimate();
       notifyListeners();
-      // Also publishes offline edits after reconnect, even without a new edit.
-      await _saveComposerTabs();
     } on Object {
       _composerWorkspaceSyncFailed = true;
       composerTabsSaveError =
@@ -379,6 +420,49 @@ extension AppControllerWorkspace on AppController {
     } finally {
       _syncingComposerWorkspace = false;
     }
+  }
+
+  /// Rebuilds the saved tabs this device does not have open (and never
+  /// closed) beside the ones in memory. Used only to recover a strip that
+  /// could not be read at startup; a cross-device sync never adds tabs.
+  Future<void> _adoptStoredTabs(ComposerTabsState stored) async {
+    for (final record in stored.tabs) {
+      if (_composerTabById(record.id) != null ||
+          _closedComposerTabIds.contains(record.id)) {
+        continue;
+      }
+      final rebuilt = ComposerTab(
+        id: record.id,
+        providerId: record.providerId ?? providers.first.id,
+        modelId: record.modelId ?? providers.first.defaultModel.id,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      );
+      final source =
+          _composerMediaGeneration(record) ??
+          generations
+              .where((item) => item.localId == record.sourceGenerationId)
+              .firstOrNull;
+      if (source != null) {
+        try {
+          await _restoreGenerationSettings(
+            source,
+            cacheOnly: true,
+            persistDraft: false,
+            tab: rebuilt,
+          );
+        } on Object {
+          // Missing media must not cost the recovered text.
+        }
+        if (_disposed) return;
+      }
+      if (_composerTabById(record.id) != null) continue;
+      _inComposerTab(rebuilt, () => _applyComposerTabRecord(rebuilt, record));
+      _composerTabs.add(rebuilt);
+      unawaited(_hydrateComposerMedia(rebuilt));
+    }
+    _invalidateProviderEstimate();
+    notifyListeners();
   }
 
   /// Loads retained bytes without rewriting authoring text or timestamps.

@@ -17,8 +17,8 @@ Clawnsole creates an app-marked folder using the narrow
 created, not unrelated files elsewhere in the account.
 
 - `clawnsole.json` contains portable generations, references, folders, tags,
-  Create tabs, aesthetic references, and compact asset references. It never contains provider credentials or
-  preferences.
+  each device's published Create drafts, aesthetic references, and compact
+  asset references. It never contains provider credentials or preferences.
 - `assets/` contains retained Drive media.
 - `clawnsole-vault.json` contains provider credentials and preferences only as
   an authenticated encrypted envelope.
@@ -35,19 +35,34 @@ place. **Forget cached unlock** removes only that device's remembered vault key.
 
 ## Create workspace sync
 
-Connect every device to the same Clawnsole Drive folder to share open Create
-tabs and the aesthetic library. Draft text, titles, settings, screenplay casting,
-aesthetic selection, and retained attachment layouts survive relaunch. Writes
-save locally first; Drive publication runs in the background. Reconciliation
-runs at startup, on return to the foreground, during the periodic Drive refresh,
-and through the explicit Refresh control. Offline edits publish on reconnect.
+Connect every device to the same Clawnsole Drive folder to share the aesthetic
+library and to reach the drafts open on your other devices. Draft text,
+titles, settings, screenplay casting, aesthetic selection, and retained
+attachment layouts survive relaunch. Every write saves locally first; the
+device's published record reaches Drive in the background, at most once every
+twenty seconds while you keep typing and at once when the app leaves the
+foreground or a film is submitted.
 
-Tabs merge independently by stable id and modification time. Concurrent edits
-to different tabs survive together; for edits to the same tab, the latest
-modification wins (equal timestamps use a deterministic tie-break). Explicit
-close/delete tombstones prevent stale devices from resurrecting removed tabs
-or aesthetics. Closing a tab closes it across devices; selecting a tab does not
-change the tab currently selected on another device.
+Open tabs belong to the device that has them open. Each device publishes its
+own strip (its tabs, which one is in front, a device name and a save time) as
+a record of its own, and a sync only ever *reads* the other devices' records:
+nothing arriving from Drive rewrites the tab you are typing in, and a stale
+copy echoed back by another device can no longer replace newer local text.
+The aesthetic library still merges by id and modification time, with deletion
+tombstones so an offline device cannot resurrect a removed aesthetic.
+
+To pick up work from elsewhere, use the **Recover a draft** key beside "+"
+on the Create tab rail. It lists the drafts closed on this device and, under
+each other device's name and last save time, the drafts open there. Choosing
+one opens a *copy* as a new tab here; the other device keeps its own. Opening
+the menu quietly refreshes the other devices' records; the periodic Drive
+refresh keeps them current the rest of the time. Devices that have not saved
+for thirty days drop off the list until they save again.
+
+A Drive file last written by an older build carries one merged strip at the
+top level; newer builds read it as the drafts of "Another device (older
+version)" so nothing is lost while the other devices update. Closing a tab is
+local to the device that closes it.
 
 Composer schema 4 adds these fields without discarding older drafts. Attachment
 records contain asset references, never media bytes or base64. Drive-backed

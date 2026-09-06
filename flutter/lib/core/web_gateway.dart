@@ -178,14 +178,25 @@ class WebGateway
   }
 
   @override
-  Future<void> saveComposerTabs(ComposerTabsState state) async {
+  Future<void> saveComposerTabs(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) async {
     await _read(
       await _client.put(
         _url('/composer-tabs'),
         headers: const <String, String>{'Content-Type': 'application/json'},
-        body: jsonEncode(<String, Object?>{'composerTabs': state.toJson()}),
+        body: jsonEncode(<String, Object?>{
+          'composerTabs': state.toJson(),
+          if (publishNow) 'publish': 'now',
+        }),
       ),
     );
+  }
+
+  @override
+  Future<void> publishComposerTabs() async {
+    await _read(await _client.post(_url('/composer-tabs/publish')));
   }
 
   @override

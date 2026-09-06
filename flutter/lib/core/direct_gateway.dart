@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -8,6 +9,7 @@ import 'public_media_http.dart';
 import 'media_content_policy.dart';
 import 'bfl_api.dart';
 import 'composer_tabs.dart';
+import 'device_identity.dart';
 import 'durable_data_store.dart';
 import 'gateway.dart';
 import 'generation_status.dart';
@@ -274,18 +276,45 @@ class DirectGateway
       : (await _store.read()).composerTabs;
 
   @override
-  Future<void> saveComposerTabs(ComposerTabsState state) async {
+  Future<void> saveComposerTabs(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) async {
     if (_store is ComposerWorkspaceStore) {
-      await (_store as ComposerWorkspaceStore).writeComposerWorkspace(state);
+      await (_store as ComposerWorkspaceStore).writeComposerWorkspace(
+        state,
+        publishNow: publishNow,
+      );
       return;
     }
     final current = await _store.read();
     await _store.write(
       current.copyWith(
-        composerTabs: mergeComposerWorkspaces(state, current.composerTabs),
+        composerTabs: mergeComposerWorkspaces(
+          stampComposerWorkspace(
+            state,
+            previous: current.composerTabs,
+            now: DateTime.now(),
+            deviceName: composerDeviceName(),
+            platform: composerDevicePlatform(),
+            newId: _newDeviceId,
+          ),
+          current.composerTabs,
+        ),
       ),
     );
   }
+
+  @override
+  Future<void> publishComposerTabs() async {
+    if (_store is ComposerWorkspaceStore) {
+      await (_store as ComposerWorkspaceStore).publishComposerWorkspace();
+    }
+  }
+
+  static String _newDeviceId() =>
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-'
+      '${Random.secure().nextInt(1 << 32).toRadixString(16)}';
 
   @override
   Future<List<RewriteModel>> listRewriteModels(

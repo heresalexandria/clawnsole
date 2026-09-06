@@ -858,6 +858,11 @@ class AppController extends ChangeNotifier {
   /// file write behind every keystroke.
   static const Duration composerTabsSaveDebounce = Duration(milliseconds: 750);
 
+  /// How long typing pauses before a keystroke's derived work runs: casting
+  /// lines lifted out of the text, screenplay reference casting, the cost
+  /// estimate, and the studio-wide rebuild that shows them.
+  static const Duration promptSettleDelay = Duration(milliseconds: 300);
+
   bool get _persistsComposerTabs =>
       _composerTabsRestored && gateway is ComposerTabsGateway;
 
@@ -874,6 +879,66 @@ class AppController extends ChangeNotifier {
   bool _syncingComposerWorkspace = false;
   Future<void> _composerStartupRestore = Future<void>.value();
   final Map<ComposerTab, Future<bool>> _composerMediaLoads = {};
+
+  /// This device's identity and the other devices' published strips, as the
+  /// store last reported them. The store mints the id; the controller only
+  /// echoes it back so a save never loses it.
+  String? _composerDeviceId;
+  String? _composerDeviceName;
+  String? _composerDevicePlatform;
+  final List<ComposerDeviceDrafts> _composerDevices = [];
+
+  Timer? _promptSettleTimer;
+  ComposerTab? _promptSettlePending;
+  final ValueNotifier<int> _promptEditRevision = ValueNotifier<int>(0);
+
+  /// Fires on every keystroke in the Direction field, unlike the controller
+  /// itself, which stays quiet until typing pauses. Only the lightest
+  /// readouts (the character budget) should listen to it.
+  ValueListenable<int> get promptEdits => _promptEditRevision;
+
+  /// The keystroke path. Only the text changes here; everything derived from
+  /// it — casting lines lifted out of the prompt, screenplay reference
+  /// casting, the cost estimate, and the rest of the studio — settles once
+  /// typing pauses for [promptSettleDelay] or at the next save point.
+  /// Nothing on this path notifies the studio, so a keystroke never rebuilds
+  /// it; the field owns its own text.
+  void updatePrompt(String value) {
+    final tab = _draftTab;
+    final previous = tab.form.prompt;
+    if (previous == value) return;
+    tab.form.prompt = value;
+    if (previous.trim().isNotEmpty && value.trim().isEmpty) {
+      tab.form.screenplayLinkedCharacters.clear();
+      tab.form.screenplayCharacterAliases.clear();
+    }
+    if (_promptSettlePending != null &&
+        !identical(_promptSettlePending, tab)) {
+      _settlePromptEdits();
+    }
+    _promptSettlePending = tab;
+    _promptSettleTimer?.cancel();
+    _promptSettleTimer = Timer(promptSettleDelay, _settlePromptEdits);
+    _scheduleComposerTabsSave(touched: tab);
+    _promptEditRevision.value += 1;
+  }
+
+  /// Runs the derived work [updatePrompt] deferred, then tells the studio.
+  /// Idempotent and cheap when nothing is pending, so every save point and
+  /// submission can call it first.
+  void _settlePromptEdits() {
+    _promptSettleTimer?.cancel();
+    _promptSettleTimer = null;
+    final tab = _promptSettlePending;
+    _promptSettlePending = null;
+    if (tab == null || _disposed) return;
+    _inComposerTab(tab, () {
+      absorbPromptMappings();
+      _syncScreenplayReferences();
+      _invalidateProviderEstimate();
+    });
+    notifyListeners();
+  }
 
   ComposerTabRecord _composerTabRecord(ComposerTab tab) => ComposerTabRecord(
     id: tab.id,
@@ -938,21 +1003,26 @@ class AppController extends ChangeNotifier {
     _composerTabsSaveTimer?.cancel();
     _composerTabsSaveTimer = Timer(
       composerTabsSaveDebounce,
-      () => unawaited(_saveComposerTabs()),
+      () => _flushComposerTabsSave(),
     );
   }
 
   /// Writes the strip now. Tab switches, closes, navigation, and submission
   /// are the moments a half-typed draft must already be on disk.
   /// [onlyIfPending] skips the write when nothing has changed since the last.
-  void _flushComposerTabsSave({bool onlyIfPending = false}) {
+  /// [publishNow] asks the store to push this device's record to Drive at
+  /// once instead of on its background cadence.
+  void _flushComposerTabsSave({
+    bool onlyIfPending = false,
+    bool publishNow = false,
+  }) {
     _flushGenerationPreferencesSave();
     final pending = _composerTabsSaveTimer?.isActive ?? false;
     _composerTabsSaveTimer?.cancel();
     _composerTabsSaveTimer = null;
     if (_disposed || _restoringComposerTabs || !_persistsComposerTabs) return;
     if (onlyIfPending && !pending) return;
-    unawaited(_saveComposerTabs());
+    unawaited(_saveComposerTabs(publishNow: publishNow));
   }
 
   Future<void> retryComposerTabsSave() async {
@@ -965,13 +1035,15 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveComposerTabs() async {
+  Future<void> _saveComposerTabs({bool publishNow = false}) async {
     if (_disposed || _composerTabsLoadFailed) return;
     if (gateway case final ComposerTabsGateway tabsGateway) {
+      // The written record must carry what a pause would have settled.
+      _settlePromptEdits();
       final state = _composerWorkspace;
       _composerTabWrites = _composerTabWrites.then((_) async {
         try {
-          await tabsGateway.saveComposerTabs(state);
+          await tabsGateway.saveComposerTabs(state, publishNow: publishNow);
           if (!_composerWorkspaceSyncFailed) composerTabsSaveError = null;
           _composerSaveFailures = 0;
           _composerSaveRetry?.cancel();
@@ -1010,6 +1082,7 @@ class AppController extends ChangeNotifier {
       }
       if (_disposed || stored == null) return false;
       _applyWorkspaceCatalog(stored);
+      _absorbDeviceCatalog(stored);
       if (stored.tabs.isEmpty) return false;
       final known = <String, Generation>{
         for (final item in generations) item.localId: item,
@@ -4798,6 +4871,15 @@ class AppController extends ChangeNotifier {
   }
 
   void updateForm(void Function(GenerationFormState value) update) {
+    // Everything a keystroke deferred runs here in full for this tab; a
+    // pause pending on another tab settles first so it is never dropped.
+    if (identical(_promptSettlePending, _draftTab)) {
+      _promptSettleTimer?.cancel();
+      _promptSettleTimer = null;
+      _promptSettlePending = null;
+    } else {
+      _settlePromptEdits();
+    }
     final previousSettings = _generationSettings(_draftTab);
     final previousPrompt = form.prompt;
     update(form);
@@ -8151,6 +8233,8 @@ class AppController extends ChangeNotifier {
     _prefetchDebounce?.cancel();
     _composerTabsSaveTimer?.cancel();
     _composerSaveRetry?.cancel();
+    _promptSettleTimer?.cancel();
+    _promptEditRevision.dispose();
     super.dispose();
   }
 }

@@ -176,43 +176,204 @@ void main() {
   );
 
   test(
-    'incoming tab edits preserve unrelated local work and shared closes',
+    'a sync never rewrites open tabs; other devices offer copies instead',
     () async {
+      final phoneDraft = ComposerTabRecord(
+        id: 'train',
+        prompt: 'On the train',
+        title: 'Commute',
+        updatedAt: DateTime.utc(2026, 9, 6, 8),
+      );
       final gateway = _TabsGateway(
         _snapshot(),
-        stored: const ComposerTabsState(
-          tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Local draft')],
+        stored: ComposerTabsState(
+          tabs: const [ComposerTabRecord(id: 'desktop', prompt: 'Local draft')],
           activeTabId: 'desktop',
+          deviceId: 'mac',
+          deviceName: 'Studio Mac',
+          devices: [
+            ComposerDeviceDrafts(
+              deviceId: 'mac',
+              deviceName: 'Studio Mac',
+              updatedAt: DateTime.utc(2026, 9, 6, 9),
+              tabs: const [
+                ComposerTabRecord(id: 'desktop', prompt: 'Local draft'),
+              ],
+            ),
+            ComposerDeviceDrafts(
+              deviceId: 'phone',
+              deviceName: 'Pocket Phone',
+              platform: 'ios',
+              updatedAt: DateTime.utc(2026, 9, 6, 8),
+              activeTabId: 'train',
+              tabs: [
+                phoneDraft,
+                const ComposerTabRecord(id: 'blank'),
+              ],
+            ),
+          ],
         ),
       );
       final controller = AppController(gateway: gateway);
       await controller.initialize();
       await _settle();
       addTearDown(controller.dispose);
-      controller.updateForm((form) => form.prompt = 'Typing locally');
-      gateway.stored = ComposerTabsState(
+      expect(controller.form.prompt, 'Local draft');
+      // This device's own record is not "another device"; blank tabs are
+      // not drafts.
+      expect(controller.otherDeviceDrafts.map((d) => d.deviceId), ['phone']);
+      expect(controller.otherDeviceDrafts.single.drafts.map((t) => t.id), [
+        'train',
+      ]);
+
+      controller.updatePrompt('Typing locally');
+      // Drive answers with an older copy of this very tab, stamped later by
+      // an echoing device, plus a fresh edit on the phone.
+      gateway.stored = gateway.stored!.copyWith(
         tabs: [
-          const ComposerTabRecord(id: 'desktop', prompt: 'Old'),
           ComposerTabRecord(
-            id: 'phone',
-            prompt: 'On the train',
-            updatedAt: DateTime.now().toUtc(),
+            id: 'desktop',
+            prompt: 'Old',
+            updatedAt: DateTime.utc(2030),
+          ),
+        ],
+        devices: [
+          ComposerDeviceDrafts(
+            deviceId: 'phone',
+            deviceName: 'Pocket Phone',
+            platform: 'ios',
+            updatedAt: DateTime.utc(2026, 9, 6, 10),
+            activeTabId: 'train',
+            tabs: [phoneDraft.copyWith(prompt: 'On the train, later')],
           ),
         ],
       );
       await controller.syncComposerWorkspace();
       expect(controller.form.prompt, 'Typing locally');
-      expect(controller.composerTabs, hasLength(2));
-      controller.activateComposerTab('phone');
-      gateway.stored = const ComposerTabsState(
-        tabs: [ComposerTabRecord(id: 'desktop')],
-        closedTabIds: {'phone'},
+      expect(controller.composerTabs, hasLength(1));
+      expect(
+        controller.otherDeviceDrafts.single.drafts.single.prompt,
+        'On the train, later',
       );
-      await controller.syncComposerWorkspace();
-      expect(controller.composerTabs.map((tab) => tab.id), ['desktop']);
-      expect(controller.form.prompt, 'Typing locally');
+
+      await controller.openDeviceDraft('phone', 'train');
+      expect(controller.composerTabs, hasLength(2));
+      expect(controller.activeComposerTabId, isNot('train'));
+      expect(controller.form.prompt, 'On the train, later');
+      expect(controller.activeComposerTab.title, 'Commute');
+      // A copy: the phone's record is untouched and still offered.
+      expect(controller.otherDeviceDrafts.single.drafts, hasLength(1));
+      await _settle();
+      expect(gateway.stored!.tabs, hasLength(2));
+      expect(gateway.stored!.deviceId, 'mac');
+      expect(gateway.stored!.devices.map((d) => d.deviceId), contains('phone'));
     },
   );
+
+  test('keystrokes stay out of the studio until typing pauses', () async {
+    final gateway = _TabsGateway(_snapshot());
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await _settle();
+    addTearDown(controller.dispose);
+    var notifications = 0;
+    var keystrokes = 0;
+    controller.addListener(() => notifications += 1);
+    controller.promptEdits.addListener(() => keystrokes += 1);
+
+    for (final text in ['A', 'A ', 'A s', 'A sl', 'A slo', 'A slow']) {
+      controller.updatePrompt(text);
+    }
+    expect(controller.form.prompt, 'A slow');
+    expect(keystrokes, 6);
+    expect(notifications, 0, reason: 'typing must not rebuild the studio');
+    expect(gateway.saves, isEmpty, reason: 'typing must not write at once');
+
+    await Future<void>.delayed(
+      AppController.promptSettleDelay + const Duration(milliseconds: 60),
+    );
+    expect(notifications, 1, reason: 'one settle per pause');
+
+    // A casting line typed into the text is lifted into the cast on
+    // settle, and the debounced save carries the settled text.
+    controller.updatePrompt('A slow pan.\n\nVINNY: @Vinny.mp4');
+    expect(controller.form.prompt, contains('VINNY:'));
+    await Future<void>.delayed(
+      AppController.composerTabsSaveDebounce + const Duration(milliseconds: 60),
+    );
+    expect(controller.form.prompt, 'A slow pan.');
+    expect(controller.form.characterMappings['VINNY'], ['Vinny.mp4']);
+    expect(gateway.saves.last.tabs.single.prompt, 'A slow pan.');
+    expect(gateway.saves.last.tabs.single.characterMappings['VINNY'], [
+      'Vinny.mp4',
+    ]);
+
+    // Save points settle at once: a tab switch writes the settled draft.
+    controller.updatePrompt('A slow pan.\n\nMARA: @Mara.png');
+    controller.addComposerTab();
+    await _settle();
+    expect(gateway.saves.last.tabs.first.prompt, 'A slow pan.');
+    expect(gateway.saves.last.tabs.first.characterMappings.keys, contains('MARA'));
+  });
+
+  test('leaving the foreground publishes the strip at once', () async {
+    final gateway = _TabsGateway(_snapshot());
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await _settle();
+    addTearDown(controller.dispose);
+    controller.updatePrompt('Half a thought');
+    controller.flushComposerWorkspace();
+    await _settle();
+    expect(gateway.saves.last.tabs.single.prompt, 'Half a thought');
+    expect(gateway.immediatePublishes, 1);
+    // Nothing pending: only the background publication is nudged.
+    controller.flushComposerWorkspace();
+    await _settle();
+    expect(gateway.immediatePublishes, 1);
+    expect(gateway.publishes, 1);
+  });
+
+  testWidgets('the drafts key offers other devices\' drafts as copies', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final gateway = _TabsGateway(
+      _snapshot(),
+      stored: ComposerTabsState(
+        tabs: const [ComposerTabRecord(id: 'desktop', prompt: 'Local draft')],
+        deviceId: 'mac',
+        devices: [
+          ComposerDeviceDrafts(
+            deviceId: 'phone',
+            deviceName: 'Pocket Phone',
+            updatedAt: DateTime.now().toUtc(),
+            tabs: const [
+              ComposerTabRecord(id: 'train', prompt: 'On the train'),
+            ],
+          ),
+        ],
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('composer-drafts-menu')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('POCKET PHONE'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey<String>('composer-draft-phone-train')),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.composerTabs, hasLength(2));
+    expect(controller.form.prompt, 'On the train');
+    expect(controller.otherDeviceDrafts.single.drafts, hasLength(1));
+    controller.dispose();
+  });
 
   testWidgets(
     'manual appearance overrides a dark system and restores on restart',
@@ -1381,6 +1542,8 @@ class _TabsGateway extends _PlainGateway implements ComposerTabsGateway {
   bool loadThrows;
   bool saveThrows = false;
   final List<ComposerTabsState> saves = <ComposerTabsState>[];
+  int immediatePublishes = 0;
+  int publishes = 0;
 
   @override
   Future<ComposerTabsState?> loadComposerTabs() async {
@@ -1388,10 +1551,21 @@ class _TabsGateway extends _PlainGateway implements ComposerTabsGateway {
     return stored;
   }
 
+  /// Like the real stores, keeps the identity and device records the file
+  /// already carries when the controller writes its strip.
   @override
-  Future<void> saveComposerTabs(ComposerTabsState state) async {
+  Future<void> saveComposerTabs(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) async {
     if (saveThrows) throw StateError('disk full');
-    stored = state;
+    stored = mergeComposerWorkspaces(state, stored);
     saves.add(state);
+    if (publishNow) immediatePublishes += 1;
+  }
+
+  @override
+  Future<void> publishComposerTabs() async {
+    publishes += 1;
   }
 }

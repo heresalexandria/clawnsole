@@ -87,7 +87,17 @@ abstract interface class ProviderCatalogCacheGateway {
 /// for the session only.
 abstract interface class ComposerTabsGateway {
   Future<ComposerTabsState?> loadComposerTabs();
-  Future<void> saveComposerTabs(ComposerTabsState state);
+
+  /// Saves this device's strip. The write completes locally; the device's
+  /// published record reaches Drive in the background, at once when
+  /// [publishNow] is set.
+  Future<void> saveComposerTabs(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  });
+
+  /// Pushes any saved-but-unpublished strip to Drive. A no-op without one.
+  Future<void> publishComposerTabs();
 }
 
 /// AI Rewrite: multimodal LLM calls that must run beside the saved key.

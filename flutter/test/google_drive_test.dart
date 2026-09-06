@@ -22,7 +22,13 @@ void main() {
     () async {
       final local = _MemoryStore(const StoredData());
       final drive = _SlowWorkspaceDriveStore();
-      final hybrid = HybridDataStore(local: local, drive: drive);
+      final hybrid = HybridDataStore(
+        local: local,
+        drive: drive,
+        newDeviceId: () => 'desk',
+        deviceName: () => 'Desk',
+        devicePlatform: () => 'macos',
+      );
       await hybrid.connect('token', 'Studio');
       final staleLibrary = await hybrid.read();
       drive.pending = Completer<void>();
@@ -43,28 +49,60 @@ void main() {
         ),
       );
       await hybrid.write(staleLibrary);
-      expect(
-        (await hybrid.readComposerWorkspace())?.tabs.single.prompt,
-        'Latest keystrokes',
-      );
+      final saved = await hybrid.readComposerWorkspace();
+      expect(saved?.tabs.single.prompt, 'Latest keystrokes');
+      expect(saved?.deviceId, 'desk', reason: 'the store mints the identity');
+      expect(saved?.deviceName, 'Desk');
       drive.pending!.complete();
       await hybrid.syncComposerWorkspaceToDrive();
-      expect(drive.data.composerTabs?.tabs.single.prompt, 'Latest keystrokes');
+      final published = drive.data.composerTabs!;
+      expect(published.tabs, isEmpty, reason: 'Drive holds device records');
+      expect(published.deviceId, isNull);
+      expect(published.deviceById('desk')!.deviceName, 'Desk');
+      expect(published.deviceById('desk')!.platform, 'macos');
+      expect(
+        published.deviceById('desk')!.tabs.single.prompt,
+        'Latest keystrokes',
+      );
     },
   );
 
   test(
-    'workspace persists offline and merges cloud tabs on reconnect',
+    'a strip persists offline, publishes on reconnect, and never absorbs '
+    'another device\'s tabs',
     () async {
       final local = _MemoryStore(const StoredData());
       final drive = _MemoryDriveStore(
-        const StoredData(
+        StoredData(
           composerTabs: ComposerTabsState(
-            tabs: [ComposerTabRecord(id: 'phone', prompt: 'Phone draft')],
+            // An older build's phone: one merged strip at the top level.
+            tabs: [
+              ComposerTabRecord(
+                id: 'phone',
+                prompt: 'Phone draft',
+                updatedAt: DateTime.utc(2026, 9, 1),
+              ),
+            ],
+            devices: [
+              ComposerDeviceDrafts(
+                deviceId: 'tablet',
+                deviceName: 'Tablet',
+                updatedAt: DateTime.utc(2026, 9, 2),
+                tabs: const [
+                  ComposerTabRecord(id: 'sketch', prompt: 'Tablet sketch'),
+                ],
+              ),
+            ],
           ),
         ),
       );
-      final hybrid = HybridDataStore(local: local, drive: drive);
+      final hybrid = HybridDataStore(
+        local: local,
+        drive: drive,
+        newDeviceId: () => 'desk',
+        deviceName: () => 'Desk',
+        clock: () => DateTime.utc(2026, 9, 6),
+      );
       await hybrid.writeComposerWorkspace(
         const ComposerTabsState(
           tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Offline draft')],
@@ -75,23 +113,94 @@ void main() {
         'Offline draft',
       );
       await hybrid.connect('test-token', 'Studio');
-      expect(
-        (await hybrid.readComposerWorkspace())?.tabs.map((tab) => tab.id),
-        ['desktop', 'phone'],
-      );
-      expect(drive.data.composerTabs?.tabs.length, 2);
-      final relaunched = HybridDataStore(local: local, drive: drive);
-      expect((await relaunched.readComposerWorkspace())?.tabs.length, 2);
-      await hybrid.writeComposerWorkspace(
-        const ComposerTabsState(
-          tabs: [ComposerTabRecord(id: 'desktop', prompt: 'Offline draft')],
-          closedTabIds: {'phone'},
-        ),
-      );
       await hybrid.syncComposerWorkspaceToDrive();
-      expect(drive.data.composerTabs?.tabs.map((tab) => tab.id), ['desktop']);
+      final workspace = (await hybrid.readComposerWorkspace())!;
+      expect(workspace.tabs.map((tab) => tab.id), ['desktop']);
+      expect(workspace.devices.map((d) => d.deviceId), [
+        'desk',
+        'tablet',
+        composerLegacyDeviceId,
+      ]);
+      expect(
+        workspace.deviceById(composerLegacyDeviceId)!.tabs.single.prompt,
+        'Phone draft',
+      );
+      final published = drive.data.composerTabs!;
+      expect(published.tabs, isEmpty);
+      expect(published.deviceById('desk')!.tabs.single.prompt, 'Offline draft');
+      expect(published.deviceById('tablet'), isNotNull);
+      expect(published.deviceById(composerLegacyDeviceId), isNotNull);
+
+      final relaunched = HybridDataStore(local: local, drive: drive);
+      final reread = (await relaunched.readComposerWorkspace())!;
+      expect(reread.tabs.map((tab) => tab.id), ['desktop']);
+      expect(reread.deviceId, 'desk');
+      expect(reread.devices.map((d) => d.deviceId), contains('tablet'));
     },
   );
+
+  test('workspace publication is throttled, flushed on request, and '
+      'self-heals after a lost publish', () async {
+    var now = DateTime.utc(2026, 9, 6, 12);
+    final local = _MemoryStore(const StoredData());
+    final drive = _MemoryDriveStore(const StoredData());
+    final hybrid = HybridDataStore(
+      local: local,
+      drive: drive,
+      newDeviceId: () => 'desk',
+      deviceName: () => 'Desk',
+      clock: () => now,
+    );
+    await hybrid.connect('token', 'Studio');
+    String? published() =>
+        drive.data.composerTabs?.deviceById('desk')?.tabs.single.prompt;
+
+    await hybrid.writeComposerWorkspace(
+      const ComposerTabsState(tabs: [ComposerTabRecord(id: 'a', prompt: '1')]),
+    );
+    await hybrid.publishComposerWorkspace();
+    expect(published(), '1', reason: 'the first save publishes at once');
+
+    now = now.add(const Duration(seconds: 3));
+    await hybrid.writeComposerWorkspace(
+      const ComposerTabsState(tabs: [ComposerTabRecord(id: 'a', prompt: '12')]),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(published(), '1', reason: 'inside the window nothing is sent');
+    expect((await hybrid.readComposerWorkspace())?.tabs.single.prompt, '12');
+
+    await hybrid.writeComposerWorkspace(
+      const ComposerTabsState(
+        tabs: [ComposerTabRecord(id: 'a', prompt: '123')],
+      ),
+      publishNow: true,
+    );
+    await hybrid.publishComposerWorkspace();
+    expect(published(), '123', reason: 'a flush bypasses the window');
+
+    now = now.add(HybridDataStore.workspacePublishInterval);
+    await hybrid.writeComposerWorkspace(
+      const ComposerTabsState(
+        tabs: [ComposerTabRecord(id: 'a', prompt: '1234')],
+      ),
+    );
+    await hybrid.publishComposerWorkspace();
+    expect(published(), '1234', reason: 'the window has passed');
+
+    // Drive lost the record (another device's older write, say): the next
+    // read notices the file is ahead and republishes.
+    drive.data = const StoredData();
+    final fresh = HybridDataStore(
+      local: local,
+      drive: drive,
+      newDeviceId: () => 'unused',
+      deviceName: () => 'Desk',
+      clock: () => now,
+    );
+    await fresh.read();
+    await fresh.publishComposerWorkspace();
+    expect(published(), '1234');
+  });
 
   test(
     'native reference writes preserve assignments and reject duplicate characters',
