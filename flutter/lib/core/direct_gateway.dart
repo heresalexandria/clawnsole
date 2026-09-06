@@ -90,6 +90,17 @@ class DirectGateway
   final Map<String, Future<Generation>> _retainingResults =
       <String, Future<Generation>>{};
 
+  /// Operations whose [submit] this process is still running.
+  ///
+  /// Their durable record is deliberately pessimistic: it says
+  /// [submissionUnknownStatus] from just before the chargeable POST so a
+  /// process that dies mid-request comes back warning about a possible
+  /// charge. That marker describes an *interrupted* submission, and while
+  /// this process is still holding the request open it is simply not true —
+  /// so every snapshot served from here, and the interrupted-submission
+  /// sweep in [_readFresh], treat these records as what they are: submitting.
+  final Set<String> _submissionsInFlight = <String>{};
+
   ActiveApiKey? activeApiKey(String provider, StoredData data) {
     final saved = data.apiKeyFor(provider).trim();
     return saved.isEmpty ? null : ActiveApiKey(saved, ApiKeySource.saved);
@@ -130,7 +141,13 @@ class DirectGateway
     final now = DateTime.now().toUtc();
     var changed = false;
     final generations = current.generations.map((item) {
-      var next = item.recoverInterruptedSubmission(now);
+      // A submission this process is still running is not an interrupted one.
+      // Its pre-send record can sit unchanged for minutes while the adapter
+      // hands the provider megabytes of reference media, and recovering it
+      // here would durably accuse a live request of an unconfirmed charge.
+      var next = _submissionsInFlight.contains(item.localId)
+          ? item
+          : item.recoverInterruptedSubmission(now);
       if (!identical(next, item)) changed = true;
       if (next.isReady && next.resultAsset == null) {
         final availability = providerById(
@@ -206,7 +223,7 @@ class DirectGateway
         .map((provider) => provider.id)
         .toSet();
     return LocalSnapshot(
-      generations: data.generations,
+      generations: withLiveSubmissions(data.generations, _submissionsInFlight),
       folders: data.folders,
       savedReferences: data.savedReferences,
       preferences: data.preferences,
@@ -1107,17 +1124,35 @@ class DirectGateway
 
   @override
   Future<Generation> submit(GenerationSubmission submission) async {
-    var record = submission.record;
-    var input = submission.input;
     final data = await _readFresh();
-    final provider = record.provider;
+    final operationId = submission.record.localId;
     final existing = data.generations
-        .where((item) => item.localId == record.localId)
+        .where((item) => item.localId == operationId)
         .firstOrNull;
     if (existing != null &&
         (existing.canCheckStatus || existing.isSubmissionUnknown)) {
       return existing;
     }
+    // Past this point the operation is live in this process. Claiming its id
+    // keeps every library read served from here — a Drive refresh, a
+    // preference write, the periodic cross-device pass — from presenting the
+    // pre-send crash marker as a real unconfirmed charge. A duplicate
+    // activation of the same id joins the claim rather than releasing it.
+    final claimed = _submissionsInFlight.add(operationId);
+    try {
+      return await _submitClaimed(submission, data);
+    } finally {
+      if (claimed) _submissionsInFlight.remove(operationId);
+    }
+  }
+
+  Future<Generation> _submitClaimed(
+    GenerationSubmission submission,
+    StoredData data,
+  ) async {
+    var record = submission.record;
+    var input = submission.input;
+    final provider = record.provider;
     final providerDefinition = providerByIdOrNull(provider);
     final modelDefinition = providerDefinition?.models
         .where((model) => model.id == record.model)

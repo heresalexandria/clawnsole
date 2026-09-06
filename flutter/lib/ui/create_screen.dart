@@ -598,41 +598,73 @@ class _DirectionHeader extends StatelessWidget {
   final ValueChanged<bool> onModeChanged;
   final bool expanded;
 
-  /// Below this header width the row cannot hold a readable model name
-  /// beside the format dropdown and the counter (a phone shows three
-  /// letters and an ellipsis), so the trigger takes a line of its own
-  /// directly under the clear key instead.
-  static const double _stackedTriggerWidth = 480;
+  /// Gap between the model trigger and the character counter.
+  static const double _triggerGap = 2;
+
+  /// The narrowest the counter may be squeezed before the trigger stops
+  /// claiming row. The counter sets "0 / 50000" in about 50px of its own type
+  /// and carries 4px of trailing padding, so this keeps the readout whole.
+  static const double _counterFloor = 56;
+
+  /// Rows narrower than this are a phone's: the counter switches to its
+  /// compact reading ("0 / 50k") and a smaller floor, so the model trigger
+  /// beside it can spell a model name instead of clipping it.
+  static const double _compactRowWidth = 480;
+  static const double _compactCounterFloor = 44;
+
+  /// Horizontal padding and arrow extent of the format picker. It is sized to
+  /// its widest reading rather than to a fixed slab, so the arrow sits beside
+  /// the word instead of across a gap and the slack goes to the model trigger.
+  static const double _formatPadding = 4;
+  static const double _formatArrow = 18;
+
+  /// Width the format picker needs for its widest reading, "Screenplay".
+  static double _formatPickerWidth(BuildContext context) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: 'Screenplay',
+        style: Theme.of(context).textTheme.labelMedium,
+      ),
+      maxLines: 1,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return (width + _formatPadding * 2 + _formatArrow).ceilToDouble();
+  }
 
   @override
   Widget build(BuildContext context) {
     final iconExtent = MediaQuery.sizeOf(context).width >= 1000 ? 36.0 : 40.0;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final stacked = constraints.maxWidth < _stackedTriggerWidth;
         // Widths are resolved here rather than left to Flex, which can only
-        // split space proportionally. The header's priority is ordered: the two
-        // keys and the format dropdown keep their size, the model trigger takes
-        // what its label needs (72px at least, so the model name starts to
-        // read), and the counter keeps the remainder — 64px at least. Below the
-        // width where both minimums fit, the two share what is left evenly
-        // rather than the counter collapsing on its own.
-        final shared = math.max(0.0, constraints.maxWidth - iconExtent * 2 - 4);
-        final formatWidth = math.min(120.0, shared * .45);
+        // split space proportionally. The header is one row at every width, a
+        // phone included, so the priority is ordered: the two keys and the
+        // format picker keep the size their content asks for, the model
+        // trigger takes what its — possibly shortened — label needs, 72px at
+        // least, and the counter keeps the remainder, [_counterFloor] at
+        // least. Below the width where both minimums fit, the two share what
+        // is left evenly rather than the counter collapsing on its own.
+        final compact = constraints.maxWidth < _compactRowWidth;
+        final counterFloor = compact ? _compactCounterFloor : _counterFloor;
+        final shared = math.max(
+          0.0,
+          constraints.maxWidth - iconExtent * 2 - _triggerGap,
+        );
+        final formatWidth = math.min(_formatPickerWidth(context), shared * .45);
         final available = math.max(0.0, shared - formatWidth);
         final triggerCap = math.min(
           available,
-          math.max(math.min(72.0, available * .5), available - 64.0),
+          math.max(math.min(72.0, available * .5), available - counterFloor),
         );
-        final triggerWidth = math.min(
-          _DirectionModelTrigger.naturalWidth(context, controller),
+        final triggerWidth = _DirectionModelTrigger.preferredWidth(
+          context,
+          controller,
           triggerCap,
         );
-        final trigger = _DirectionModelTrigger(
-          controller: controller,
-          extent: stacked ? 36 : iconExtent,
-        );
-        final row = Row(
+        return Row(
           key: const ValueKey('direction-header'),
           children: [
             SizedBox(
@@ -643,7 +675,10 @@ class _DirectionHeader extends StatelessWidget {
                     : 'Direction format',
                 child: DropdownButton<bool>(
                   key: const ValueKey('prompt-format-picker'),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: _formatPadding,
+                  ),
+                  iconSize: _formatArrow,
                   borderRadius: BorderRadius.circular(8),
                   value: controller.form.screenplayMode,
                   isDense: true,
@@ -683,14 +718,23 @@ class _DirectionHeader extends StatelessWidget {
               onPressed: controller.form.prompt.isEmpty ? null : onClear,
               icon: const Icon(Icons.backspace_outlined, size: 18),
             ),
-            if (!stacked) SizedBox(width: triggerWidth, child: trigger),
-            const SizedBox(width: 4),
+            SizedBox(
+              width: triggerWidth,
+              child: _DirectionModelTrigger(
+                controller: controller,
+                extent: iconExtent,
+              ),
+            ),
+            const SizedBox(width: _triggerGap),
             Expanded(
               child: Align(
                 alignment: Alignment.centerRight,
                 child: FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: _PromptCharacterCounter(controller: controller),
+                  child: _PromptCharacterCounter(
+                    controller: controller,
+                    compact: compact,
+                  ),
                 ),
               ),
             ),
@@ -718,29 +762,17 @@ class _DirectionHeader extends StatelessWidget {
             ),
           ],
         );
-        if (!stacked) return row;
-        // The stacked trigger keeps the header's left edge, its own padding
-        // lining the text up under the format dropdown's label, and may take
-        // the whole width before its label has to ellipsize.
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            row,
-            ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-              child: trigger,
-            ),
-          ],
-        );
       },
     );
   }
 }
 
-/// The quiet way to change model while writing: the current model and provider
-/// as plain header text with a chevron, opening the same picker as the
-/// console footer's selector. Deliberately unmachined — the Direction header
-/// is paper, and the hardware register belongs to the footer plaque.
+/// The quiet way to change model while writing: the current model's name as
+/// plain header text with a chevron, opening the same picker as the console
+/// footer's selector. The provider is not repeated here — the footer readout
+/// names it — so the row spends its width on the model. Deliberately
+/// unmachined: the Direction header is paper, and the hardware register
+/// belongs to the footer plaque.
 class _DirectionModelTrigger extends StatelessWidget {
   const _DirectionModelTrigger({
     required this.controller,
@@ -752,17 +784,22 @@ class _DirectionModelTrigger extends StatelessWidget {
   /// Minimum height, matched to the header's icon keys so the row stays level.
   final double extent;
 
-  static const double _horizontalPadding = 8;
-  static const double _chevronExtent = 20;
+  static const double _horizontalPadding = 4;
+  static const double _chevronExtent = 16;
 
-  static String _label(AppController controller) =>
+  /// Everything the trigger draws besides the label itself.
+  static const double _chrome = _chevronExtent + _horizontalPadding * 2;
+
+  /// What the screen reader hears: the model and its provider, even though
+  /// only the model is drawn.
+  static String _fullLabel(AppController controller) =>
       '${controller.selectedModel.label} · ${controller.selectedProvider.name}';
 
-  /// Width the trigger wants before the label has to ellipsize.
-  static double naturalWidth(BuildContext context, AppController controller) {
+  /// Width the trigger wants to set [label] without ellipsizing it.
+  static double _widthFor(BuildContext context, String label) {
     final painter = TextPainter(
       text: TextSpan(
-        text: _label(controller),
+        text: label,
         style: Theme.of(context).textTheme.labelMedium,
       ),
       maxLines: 1,
@@ -771,8 +808,20 @@ class _DirectionModelTrigger extends StatelessWidget {
     )..layout();
     final width = painter.width;
     painter.dispose();
-    return width + _chevronExtent + _horizontalPadding * 2;
+    // Rounded up so the header hands the label at least the width its own
+    // measurement asked for and sub-pixel arithmetic cannot clip it.
+    return (width + _chrome).ceilToDouble();
   }
+
+  /// Width to give the trigger when the row can spare no more than [cap]:
+  /// what the model name needs, or the cap when the name must clip. Asking
+  /// for the name's own width, not the cap, hands the difference back to the
+  /// counter.
+  static double preferredWidth(
+    BuildContext context,
+    AppController controller,
+    double cap,
+  ) => math.min(_widthFor(context, controller.selectedModel.label), cap);
 
   @override
   Widget build(BuildContext context) {
@@ -796,11 +845,14 @@ class _DirectionModelTrigger extends StatelessWidget {
           children: <Widget>[
             Flexible(
               child: Text(
-                _label(controller),
+                controller.selectedModel.label,
                 style: style,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,
+                // The drawn name is the model's; the screen reader still hears
+                // the provider with it.
+                semanticsLabel: _fullLabel(controller),
               ),
             ),
             Icon(
@@ -1046,9 +1098,15 @@ class _FullscreenPromptEditor extends StatelessWidget {
 }
 
 class _PromptCharacterCounter extends StatelessWidget {
-  const _PromptCharacterCounter({required this.controller});
+  const _PromptCharacterCounter({
+    required this.controller,
+    this.compact = false,
+  });
 
   final AppController controller;
+
+  /// A phone row's abbreviated reading; see [PromptCharacterCounter.compact].
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -1065,6 +1123,7 @@ class _PromptCharacterCounter extends StatelessWidget {
         limit: controller.promptCharacterLimit,
         modelLabel: model.label,
         isProviderLimit: (model.maxPromptCharacters ?? 0) > 0,
+        compact: compact,
       );
     },
   );

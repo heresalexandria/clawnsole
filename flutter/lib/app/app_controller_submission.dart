@@ -189,6 +189,10 @@ extension AppControllerSubmission on AppController {
       final sourceThumbnailBytes =
           tab.form.videoAsset?.thumbnailBytes ?? tab.form.videoThumbnailBytes;
       _replaceInMemory(pending);
+      // The card is on screen now. Until the gateway answers, no library read
+      // may take it away again or repaint it with the pre-send crash marker.
+      final operationId = pending.localId;
+      _submissionsInFlight[operationId] = pending;
       showNotice(
         checksVisualReferences
             ? 'Checking visual reference compatibility before sending…'
@@ -196,13 +200,19 @@ extension AppControllerSubmission on AppController {
             ? 'Submitting upscale…'
             : 'Submitting generation…',
       );
-      pending = await gateway.submit(
-        GenerationSubmission(
-          record: pending,
-          input: input,
-          autoFixReferenceVideos: normalizeReferences,
-        ),
-      );
+      try {
+        pending = await gateway.submit(
+          GenerationSubmission(
+            record: pending,
+            input: input,
+            autoFixReferenceVideos: normalizeReferences,
+          ),
+        );
+      } finally {
+        // Released before any recovery read below: once the call is over the
+        // durable record — receipt, uncertainty, or failure — is the truth.
+        _submissionsInFlight.remove(operationId);
+      }
       _replaceInMemory(pending);
       if (pending.isSubmissionUnknown) {
         showNotice(

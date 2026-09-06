@@ -28,6 +28,46 @@ const references = [
 ];
 
 void main() {
+  for (final screenplay in <bool>[false, true]) {
+    testWidgets(
+      'the soft keyboard capitalizes sentences with screenplayMode $screenplay',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ReferencePromptField(
+                prompt: screenplay ? 'INT. STUDIO - DAY' : 'A wide shot.',
+                formRevision: 0,
+                references: const [],
+                screenplayMode: screenplay,
+                onChanged: (_) {},
+              ),
+            ),
+          ),
+        );
+        // A screenplay page wants the shift key too: the core uppercases
+        // scene headings and cues itself when it formats a line, so sentence
+        // capitalization has nothing to fight with.
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).textCapitalization,
+          TextCapitalization.sentences,
+        );
+        expect(
+          tester
+              .widget<EditableText>(find.byType(EditableText))
+              .textCapitalization,
+          TextCapitalization.sentences,
+        );
+        // Autocorrect still stands down on a screenplay page.
+        expect(
+          tester.widget<EditableText>(find.byType(EditableText)).autocorrect,
+          !screenplay,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('Escape then Tab lets a screenplay editor release focus', (
     tester,
   ) async {

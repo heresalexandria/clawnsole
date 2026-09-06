@@ -1354,6 +1354,32 @@ class Generation {
   );
 }
 
+/// [generations] with every record in [inFlight] shown as still submitting.
+///
+/// A gateway persists [submissionUnknownStatus] just before a chargeable
+/// provider POST so a process that dies mid-request comes back warning about
+/// a possible charge. That durable marker describes an *interrupted*
+/// submission; for as long as the process that wrote it is still holding the
+/// request open, the honest status is `submitting`. Only the writer knows the
+/// difference, so only the writer un-masks it — the bytes on disk keep the
+/// pessimistic marker, and any other reader (a second device, the next
+/// launch) still sees an unconfirmed submission.
+List<Generation> withLiveSubmissions(
+  List<Generation> generations,
+  Set<String> inFlight,
+) {
+  if (inFlight.isEmpty) return generations;
+  return <Generation>[
+    for (final item in generations)
+      if (item.isSubmissionUnknown &&
+          !item.canCheckStatus &&
+          inFlight.contains(item.localId))
+        item.copyWith(status: 'submitting', clearError: true)
+      else
+        item,
+  ];
+}
+
 /// The appearance a person chose from the top bar. Kept in preferences so an
 /// explicit Light or Dark pick survives relaunch instead of snapping back to
 /// the system setting.

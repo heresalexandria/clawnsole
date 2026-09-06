@@ -867,9 +867,10 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             inputFormatters: [
               TextInputFormatter.withFunction(_formatEditUpdate),
             ],
-            textCapitalization: widget.screenplayMode
-                ? TextCapitalization.none
-                : TextCapitalization.sentences,
+            // Screenplay pages want sentence capitalization too: the core
+            // uppercases scene headings, cues and transitions itself when it
+            // formats a line, so the soft keyboard's shift cannot fight it.
+            textCapitalization: TextCapitalization.sentences,
             autocorrect: !widget.screenplayMode,
             style: TextStyle(
               fontFamily: promptFontFamily,

@@ -272,14 +272,17 @@ Layout order:
    clear control sits directly after the label (disabled while empty) and
    asks before wiping the text; the live counter, copy, and fullscreen
    controls keep the header's far end. Right of the clear key a quiet
-   text trigger reads *model · provider* with a small chevron and opens
+   text trigger names the current *model* with a small chevron and opens
    the same picker modal as the footer's selector — header type, not the
    machined plaque, so the model can be changed without leaving the
-   prompt. The model name comes first so it survives the ellipsis on a
-   narrow row; under 480 px of header width the row cannot hold a model
-   name at all, so the trigger drops to its own line directly beneath the
-   clear key and reads in full. It rides along into the fullscreen
-   editor.
+   prompt. It does not repeat the provider (the footer readout names it),
+   though the screen reader hears both. The header is one row at every
+   width, a phone included: the format picker is sized to its own widest
+   word rather than a fixed slab, the trigger takes what the model name
+   needs and clips it only when a row truly cannot hold it, and on a
+   phone row the character counter takes a compact reading (`0 / 50k`,
+   exact figures in its tooltip) so the name is spelled whole at 390 pt.
+   It rides along into the fullscreen editor.
 2. **Cast row**: a compact strip between the direction and the guidance /
    settings pair, present only when a character actually holds a
    reference on a model that accepts creative references. A brass label,

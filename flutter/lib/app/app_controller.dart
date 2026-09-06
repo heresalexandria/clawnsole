@@ -682,6 +682,18 @@ class AppController extends ChangeNotifier {
   LocalSnapshot? _pendingDriveUploadSnapshot;
   int _pendingDriveUploadCache = 0;
   final Set<String> _statusChecks = <String>{};
+
+  /// Generations whose submission call this process is still running, by
+  /// local id, holding the live copy of each card.
+  ///
+  /// A card is on screen from the moment Generate is pressed, but the durable
+  /// library does not carry it until the gateway has finished persisting its
+  /// references and inputs — and from just before the provider POST until the
+  /// receipt lands it carries the pessimistic crash marker instead. A library
+  /// read that arrives in either window must not be allowed to drop the card
+  /// from Recent work or to accuse a live request of an unconfirmed charge,
+  /// so [_apply] overlays these copies onto every snapshot it adopts.
+  final Map<String, Generation> _submissionsInFlight = <String, Generation>{};
   final Map<String, Generation> _queuedRetentions = <String, Generation>{};
   final Set<String> _activeRetentions = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -2701,7 +2713,37 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// [value] with every submission this process is still running restored to
+  /// the copy the studio is showing. A record that has not reached the store
+  /// yet is carried back in at the top of the library rather than vanishing
+  /// from Recent work mid-submission; a record the store holds keeps the
+  /// stored organization (folder, tags, favorite, hidden, storage) so a move
+  /// or a rename made during the wait is not undone.
+  LocalSnapshot _withSubmissionsInFlight(LocalSnapshot value) {
+    if (_submissionsInFlight.isEmpty) return value;
+    final live = Map<String, Generation>.of(_submissionsInFlight);
+    final generations = <Generation>[
+      for (final item in value.generations)
+        if (live.remove(item.localId) case final Generation pending)
+          pending.copyWith(
+            folderId: item.folderId,
+            clearFolder: item.folderId == null,
+            tags: item.tags,
+            favorite: item.favorite,
+            hidden: item.hidden,
+            storage: item.storage,
+          )
+        else
+          item,
+    ];
+    for (final pending in live.values) {
+      generations.insert(0, pending);
+    }
+    return value.copyWith(generations: generations);
+  }
+
   void _apply(LocalSnapshot value, {bool restorePreferences = false}) {
+    value = _withSubmissionsInFlight(value);
     final previouslyReady = snapshot == null
         ? null
         : <String>{
@@ -6646,6 +6688,9 @@ class AppController extends ChangeNotifier {
   void _replaceInMemory(Generation generation) {
     final current = snapshot;
     if (current == null) return;
+    if (_submissionsInFlight.containsKey(generation.localId)) {
+      _submissionsInFlight[generation.localId] = generation;
+    }
     final items = List<Generation>.from(current.generations);
     final index = items.indexWhere(
       (item) => item.localId == generation.localId,
