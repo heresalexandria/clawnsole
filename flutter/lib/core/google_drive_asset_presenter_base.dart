@@ -20,5 +20,11 @@ abstract interface class GoogleDriveAssetPresenter {
     int? expectedLength,
   });
 
+  /// Makes an already-complete local file the materialized copy of
+  /// [reference] without passing its bytes through memory, and returns the
+  /// resulting URI. Returns null, leaving [localFile] untouched, on surfaces
+  /// that cannot adopt files (the browser) or have no durable cache for them.
+  Future<Uri?> adopt(AssetReference reference, Uri localFile);
+
   Future<void> clear();
 }

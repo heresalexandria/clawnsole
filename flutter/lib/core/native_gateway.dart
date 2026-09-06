@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -287,8 +288,10 @@ class NativeGateway extends DirectGateway
     _driveUploadPump = DriveUploadPump(
       flush: () => runDriveUploadPass(
         hybrid: _hybrid,
+        ledger: _uploadLedger,
         read: _vault.read,
         write: _vault.write,
+        log: (message) => developer.log(message, name: 'clawnsole.drive'),
       ),
     );
     _hybrid.onDeferredDriveUpload = _driveUploadPump.schedule;
@@ -296,6 +299,8 @@ class NativeGateway extends DirectGateway
 
   final HybridDataStore _hybrid;
   late final DriveUploadPump _driveUploadPump;
+  final DriveUploadLedger _uploadLedger = DriveUploadLedger();
+
   final LocalDataStore? _localStore;
   final SettingsVaultDataStore _vault;
   final VideoCache _videoCache;
@@ -394,6 +399,14 @@ class NativeGateway extends DirectGateway
   @override
   Future<void> prefetchVideoAsset(AssetReference reference) async {
     if (reference.kind != 'drive' || !_videoCache.enabled) return;
+    if (await _videoCache.lookup(reference.value) != null) return;
+    // Background warming never evicts: a full cache keeps what was played or
+    // published most recently, and this film downloads on tap instead.
+    final size = reference.bytes ?? 0;
+    if (size > 0 &&
+        await _videoCache.usedBytes() + size > _videoCache.maxBytes) {
+      return;
+    }
     await _hybrid.assetUri(reference);
   }
 

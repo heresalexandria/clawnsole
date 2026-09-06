@@ -13,7 +13,9 @@ import 'package:clawnsole/core/reference_prompts.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
 import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
+
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/provider_api.dart';
@@ -35,6 +37,8 @@ import '../tool/clawnsole_companion.dart';
 import 'support/memory_asset_streaming.dart';
 
 void main() {
+  _localFirstPublishTests();
+
   test('companion config accepts an embedded Flutter web root', () {
     final config = CompanionConfig.from(<String>[
       '--port',
@@ -1901,7 +1905,10 @@ class _StateCountingDriveStore extends _MemoryDriveStore {
 }
 
 class _StreamingDriveStore extends _MemoryDriveStore {
+  _StreamingDriveStore({super.presenter});
+
   int streamDownloads = 0;
+
   int rangeReads = 0;
   int fullReads = 0;
 
@@ -1940,7 +1947,10 @@ class _StreamingDriveStore extends _MemoryDriveStore {
 }
 
 class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
+  _MemoryDriveStore({super.presenter});
+
   StoredData data = const StoredData();
+
   final Map<String, Uint8List> assets = <String, Uint8List>{};
   int _assetCounter = 0;
   GoogleDriveConnection _memoryConnection = const GoogleDriveConnection(
@@ -2216,4 +2226,254 @@ class _RecordingRewriteApi implements PromptRewriteApi {
     if (reason == null) return;
     throw PromptRewriteException('$providerId declined', failure: reason);
   }
+}
+
+/// The device that generates a film stages it locally, publishes it to Drive
+/// in the background, and must keep playing it from its own disk afterwards —
+/// including for a client that still holds the staged id from a record it
+/// read before the swap.
+void _localFirstPublishTests() {
+  final now = DateTime.utc(2026, 9, 6, 12);
+  const config = GenerationConfig(
+    aspectRatio: '16:9',
+    duration: 8,
+    resolution: 'hd',
+    generateAudio: true,
+    safetyTolerance: 2,
+    draft: false,
+  );
+  Generation film(
+    String id, {
+    required AssetReference result,
+    String? resultUrl,
+  }) => Generation(
+    localId: id,
+    status: 'Ready',
+    prompt: 'a film made on this device',
+    mode: VideoMode.t2v,
+    config: config,
+    createdAt: now,
+    updatedAt: now,
+    resultUrl: resultUrl,
+    resultAsset: result,
+    storage: LibraryStorage.drive,
+  );
+
+  test('a published film stays local and its staged id still serves', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-local-first-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final cache = VideoCache(
+      directory: () async => Directory('${temporary.path}/video-cache'),
+    );
+    final thumbnails = VideoCache(
+      directory: () async => Directory('${temporary.path}/thumbnail-cache'),
+    );
+    final drive = _StreamingDriveStore(
+      presenter: IoGoogleDriveAssetPresenter(
+        videoCache: cache,
+        thumbnailCache: thumbnails,
+      ),
+    );
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    final bytes = Uint8List.fromList(<int>[1, 2, 3, 4, 5, 6, 7, 8]);
+    final staged = await local.writeAsset(
+      bytes,
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    // The record already lives in the Drive library; its film is still the
+    // staged original on this disk, waiting for the upload pass.
+    drive.data = StoredData(
+      generations: <Generation>[film('made-here', result: staged)],
+    );
+    await store.connectDrive('token', 'Studio');
+    final application = CompanionApp.hybrid(
+      store: store,
+      api: BflApi(),
+      videoCache: cache,
+      thumbnailCache: thumbnails,
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      expect(await store.flushDriveUploads(), isTrue);
+      final published = (await store.read()).generations.single.resultAsset!;
+      expect(published.kind, 'drive');
+      expect(drive.assets[published.value], bytes);
+
+      // The staged original became the cache entry for the Drive id — no
+      // second copy, and nothing to download back from Drive.
+      final cached = File(
+        '${temporary.path}/video-cache/${published.value}.mp4',
+      );
+      expect(await cached.readAsBytes(), bytes);
+      expect(
+        Directory('${temporary.path}/assets').listSync().whereType<File>(),
+        isEmpty,
+      );
+
+      // A client still holding the staged id (its record was read before
+      // the swap) gets the same bytes, from disk.
+      final stale = await http.get(
+        base.resolve('/assets?id=${staged.value}&kind=local'),
+      );
+      expect(stale.statusCode, 200);
+      expect(stale.bodyBytes, bytes);
+      final staleCache = await http.get(
+        base.resolve('/asset-cache?id=${staged.value}'),
+      );
+      expect(staleCache.statusCode, 200);
+      expect(staleCache.bodyBytes, bytes);
+
+      // So does the swapped record, straight from the cache.
+      final fresh = await http.get(
+        base.resolve('/assets?id=${published.value}&kind=drive'),
+        headers: const <String, String>{'Range': 'bytes=0-'},
+      );
+      expect(fresh.statusCode, 206);
+      expect(fresh.bodyBytes, bytes);
+      expect(drive.streamDownloads, 0);
+      expect(drive.fullReads, 0);
+    } finally {
+      store.dispose();
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
+  test('a staged film that vanished is fetched again from its link', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-restage-test.',
+    );
+    final drive = _StreamingDriveStore();
+    drive.data = StoredData(
+      generations: <Generation>[
+        film(
+          'lost',
+          resultUrl: 'https://media.example/linked.mp4',
+          result: const AssetReference(
+            kind: 'local',
+            value: 'abcdef0123456789-aa',
+            label: 'film.mp4',
+            contentType: 'video/mp4',
+          ),
+        ),
+      ],
+    );
+    final store = CompanionHybridStore(
+      HybridDataStore(
+        local: CompanionStore(File('${temporary.path}/clawnsole.json')),
+        drive: drive,
+      ),
+    );
+    await store.connectDrive('token', 'Studio');
+    CompanionApp.hybrid(
+      store: store,
+      api: BflApi(),
+      mediaClientFactory: () => _StagedMediaClient(),
+    );
+
+    try {
+      expect(
+        await store.flushDriveUploads(),
+        isFalse,
+        reason: 'the fresh copy still has to upload',
+      );
+      final refetched = (await store.read()).generations.single.resultAsset!;
+      expect(refetched.kind, 'local');
+      expect(refetched.value, isNot('abcdef0123456789-aa'));
+
+      expect(await store.flushDriveUploads(), isTrue);
+      final published = (await store.read()).generations.single.resultAsset!;
+      expect(published.kind, 'drive');
+      expect(drive.assets[published.value], <int>[1, 2, 3]);
+    } finally {
+      store.dispose();
+      await temporary.delete(recursive: true);
+    }
+  });
+
+  test('background prefetch never evicts a full cache', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-prefetch-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    // The persisted cap is what the companion applies: one megabyte.
+    await local.write(
+      const StoredData(preferences: AppPreferences(localVideoCacheMb: 1)),
+    );
+    final drive = _StreamingDriveStore();
+    final played = Uint8List.fromList(List<int>.filled(600 * 1024, 1));
+    final other = Uint8List.fromList(List<int>.filled(600 * 1024, 2));
+    drive.assets['drive-film-played'] = played;
+    drive.assets['drive-film-other'] = other;
+    AssetReference asset(String id, Uint8List bytes) => AssetReference(
+      kind: 'drive',
+      value: id,
+      label: 'clip.mp4',
+      contentType: 'video/mp4',
+      bytes: bytes.length,
+    );
+    drive.data = StoredData(
+      generations: <Generation>[
+        film('played', result: asset('drive-film-played', played)),
+        film('other', result: asset('drive-film-other', other)),
+      ],
+    );
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    await store.connectDrive('token', 'Studio');
+    final cache = VideoCache(
+      directory: () async => Directory('${temporary.path}/video-cache'),
+    );
+    final application = CompanionApp.hybrid(
+      store: store,
+      api: BflApi(),
+      videoCache: cache,
+    );
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+    Future<Map<String, Object?>> prefetch(String id) async {
+      final response = await http.post(
+        base.resolve('/video-cache/prefetch'),
+        headers: const <String, String>{'Content-Type': 'application/json'},
+        body: jsonEncode(<String, Object?>{'id': id}),
+      );
+      expect(response.statusCode, 200);
+      return jsonDecode(response.body) as Map<String, Object?>;
+    }
+
+    try {
+      // Playing fills the cache: 600 KB of a 1 MB cap.
+      final play = await http.get(
+        base.resolve('/assets?id=drive-film-played&kind=drive'),
+      );
+      expect(play.statusCode, 200);
+      expect(drive.streamDownloads, 1);
+
+      // Warming another film would have to evict the one just played; the
+      // prefetch declines and leaves that download to a tap.
+      expect(await prefetch('drive-film-other'), containsPair('queued', false));
+      expect(drive.streamDownloads, 1);
+      expect(await cache.lookup('drive-film-played'), isNotNull);
+      expect(await cache.lookup('drive-film-other'), isNull);
+
+      // A film already in the cache still reports as warm.
+      expect(await prefetch('drive-film-played'), containsPair('queued', true));
+    } finally {
+      store.dispose();
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
 }

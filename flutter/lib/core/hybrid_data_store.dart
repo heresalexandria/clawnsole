@@ -471,20 +471,36 @@ class HybridDataStore
   /// any records. Returns the published Drive files keyed by staged local
   /// asset id. [DriveUploadPassResult.failures] counts uploads this device
   /// holds bytes for that did not reach Drive and should be retried; staged
-  /// media whose bytes live on another device is skipped silently, because
-  /// only that device can publish it.
-  Future<DriveUploadPassResult> uploadQueuedDriveAssets(StoredData data) async {
-    if (!isDriveConnected) {
-      return const DriveUploadPassResult(<String, AssetReference>{}, 0);
-    }
+  /// media whose bytes are not on this device is reported in
+  /// [DriveUploadPassResult.missing] rather than uploaded, because only the
+  /// device holding the bytes can publish them.
+  ///
+  /// [published] carries Drive files an earlier pass already uploaded whose
+  /// record swap has not landed yet (Drive was disconnected, say). Those are
+  /// returned as replacements again without a second upload, so a retry
+  /// never duplicates a film on Drive.
+  Future<DriveUploadPassResult> uploadQueuedDriveAssets(
+    StoredData data, {
+    Map<String, AssetReference> published = const <String, AssetReference>{},
+    void Function(String message)? log,
+  }) async {
+    if (!isDriveConnected) return const DriveUploadPassResult.empty();
     final replacements = <String, AssetReference>{};
+    final staged = <String, AssetReference>{};
+    final missing = <String, AssetReference>{};
     var failures = 0;
     for (final entry in pendingDriveUploads(data).entries) {
+      final already = published[entry.key];
+      if (already != null) {
+        replacements[entry.key] = already;
+        staged[entry.key] = entry.value;
+        continue;
+      }
       final Stream<List<int>> source;
       try {
         source = await _local.openAssetRead(entry.value);
       } on Object {
-        // A staged reference from another device has no local bytes to send.
+        missing[entry.key] = entry.value;
         continue;
       }
       try {
@@ -495,11 +511,41 @@ class HybridDataStore
           expectedLength: entry.value.bytes,
           expectedSha256: entry.value.sha256,
         );
-      } on Object {
+        staged[entry.key] = entry.value;
+      } on Object catch (error) {
         failures += 1;
+        log?.call('Drive upload of ${entry.value.label} failed: $error');
       }
     }
-    return DriveUploadPassResult(replacements, failures);
+    return DriveUploadPassResult(
+      replacements,
+      failures,
+      staged: staged,
+      missing: missing,
+    );
+  }
+
+  /// Keeps this device's copy of every film and preview it just published:
+  /// each staged original moves into the Drive media cache under its new
+  /// Drive id, so the swap to a `drive` reference never costs a download of
+  /// bytes that were on this disk a moment ago. Best effort; returns how many
+  /// files were adopted.
+  Future<int> adoptPublishedAssets(DriveUploadPassResult result) async {
+    var adopted = 0;
+    for (final entry in result.replacements.entries) {
+      final source = result.staged[entry.key];
+      if (source == null) continue;
+      try {
+        final uri = await _local.assetUri(source);
+        if (uri.scheme != 'file') continue;
+        if (await _drive.adoptPublishedAsset(entry.value, uri) != null) {
+          adopted += 1;
+        }
+      } on Object {
+        // The staged file may already be gone; the cache fills on demand.
+      }
+    }
+    return adopted;
   }
 
   /// Points Drive-tagged records at their published Drive files. Changed
@@ -1392,13 +1438,29 @@ class GoogleDriveCopyCounts {
 
 /// The outcome of one background Drive upload pass.
 class DriveUploadPassResult {
-  const DriveUploadPassResult(this.replacements, this.failures);
+  const DriveUploadPassResult(
+    this.replacements,
+    this.failures, {
+    this.staged = const <String, AssetReference>{},
+    this.missing = const <String, AssetReference>{},
+  });
+
+  const DriveUploadPassResult.empty()
+    : this(const <String, AssetReference>{}, 0);
 
   /// Published Drive files keyed by the staged local asset id they replace.
   final Map<String, AssetReference> replacements;
 
   /// Uploads this device holds bytes for that failed and should be retried.
   final int failures;
+
+  /// The staged references behind [replacements], keyed the same way, so the
+  /// originals can be adopted into the local cache once records swap over.
+  final Map<String, AssetReference> staged;
+
+  /// Staged references whose bytes are not on this device: media generated
+  /// elsewhere, or a staged original that vanished before it was published.
+  final Map<String, AssetReference> missing;
 }
 
 extension on LibraryFolder {

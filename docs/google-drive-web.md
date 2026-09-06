@@ -106,11 +106,26 @@ elsewhere; records only that device knows about (a card just submitted, a
 folder just created) survive the fold untouched.
 
 Media staged for Drive lives on one device until its background upload pass
-publishes it. Until then, other devices see the reference but not the bytes:
-the companion serves the record's provider delivery link instead when one is
-still live, and otherwise answers 404 with "This film is still uploading from
-the device that made it." The player says the same rather than blaming local
-playback.
+publishes it. That device never waits on the upload and never downloads its
+own film back: the staged original plays and previews from disk, and when the
+pass publishes it the original is moved into the Drive media cache under its
+new Drive id (a rename, not a copy), so the swapped record keeps playing from
+the same bytes. A client that still holds the staged id from a record it read
+before the swap is served the published film too; the companion remembers
+which staged ids it published for the life of the process. Preview bytes a
+card already restored carry over the id swap, so the card never falls back to
+a loading placeholder. The pass reads what is pending from the local mirror
+(no Drive round trip), remembers uploads across a failed record swap so a
+retry never duplicates a file on Drive, keeps retrying cheaply while Drive is
+disconnected instead of reporting the queue empty, and re-fetches a ready
+result from its provider link when the staged copy has gone missing. Every
+pass is logged to the companion log. Background prefetch of the listing never
+evicts a full cache; only playback and publishing do.
+
+Until then, other devices see the reference but not the bytes: the companion
+serves the record's provider delivery link instead when one is still live,
+and otherwise answers 404 with "This film is still uploading from the device
+that made it." The player says the same rather than blaming local playback.
 
 ## Google Cloud setup
 

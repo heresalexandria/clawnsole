@@ -31,5 +31,8 @@ class _MemoryGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   }
 
   @override
+  Future<Uri?> adopt(AssetReference reference, Uri localFile) async => null;
+
+  @override
   Future<void> clear() async {}
 }

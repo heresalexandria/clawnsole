@@ -2042,8 +2042,14 @@ final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
     <String, _GeneratedVideoPreviewJob>{};
 final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
 
+/// One extraction job per film. A record's retained film never changes
+/// content — the background upload pass only moves it from a staged local
+/// id to a Drive id — so the key names *that* a film is retained, not which
+/// store holds it, and the swap neither restarts extraction nor flashes the
+/// card back to its loading placeholder.
 String _generationPreviewJobKey(Generation item) =>
-    '${item.storage.name}:${item.localId}:${item.resultAsset?.value ?? item.resultUrl}';
+    '${item.storage.name}:${item.localId}:'
+    '${item.resultAsset != null ? 'retained' : item.resultUrl}';
 
 /// The idle chrome bar a full video card renders under its film: the cached
 /// filmstrip occupies the exact band the player's live timeline will use, and
