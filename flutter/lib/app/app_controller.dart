@@ -4685,9 +4685,10 @@ class AppController extends ChangeNotifier {
 
   void updateForm(void Function(GenerationFormState value) update) {
     final previousSettings = _generationSettings(_draftTab);
+    final previousPrompt = form.prompt;
     update(form);
     final settingsEdited = previousSettings != _generationSettings(_draftTab);
-    if (form.prompt.trim().isEmpty) {
+    if (previousPrompt.trim().isNotEmpty && form.prompt.trim().isEmpty) {
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases.clear();
     }

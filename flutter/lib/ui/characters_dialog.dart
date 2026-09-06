@@ -6,10 +6,13 @@ import '../core/models.dart';
 Future<void> showCharactersDialog(
   BuildContext context,
   AppController controller,
-) => showDialog<void>(
-  context: context,
-  builder: (context) => _CharactersDialog(controller: controller),
-);
+) {
+  controller.syncScreenplayCharacterMappings();
+  return showDialog<void>(
+    context: context,
+    builder: (context) => _CharactersDialog(controller: controller),
+  );
+}
 
 class _CharactersDialog extends StatefulWidget {
   const _CharactersDialog({required this.controller});
@@ -19,6 +22,22 @@ class _CharactersDialog extends StatefulWidget {
 }
 
 class _CharactersDialogState extends State<_CharactersDialog> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_refresh);
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_refresh);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -40,7 +59,7 @@ class _CharactersDialogState extends State<_CharactersDialog> {
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
                   child: Text(
-                    'Characters are detected from screenplay character cues. Add other characters below.',
+                    'Add any character below, even before writing the script. Matching references are selected automatically; you can change them.',
                   ),
                 ),
               for (final character in characters)
@@ -110,18 +129,43 @@ class _CharacterMappingEditor extends StatefulWidget {
 }
 
 class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
-  late final TextEditingController _name = TextEditingController(
-    text: widget.controller.characterMappingName(widget.character),
-  );
-  late final Set<String> _selected = widget.controller
-      .characterMappingReferences(widget.character)
-      .toSet();
+  late final TextEditingController _name;
+  late final Set<String> _selected;
+  bool _selectionEdited = false;
   bool _renameScript = false;
   bool _saving = false;
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(
+      text: widget.controller.characterMappingName(widget.character),
+    );
+    _selected = widget.controller
+        .characterMappingReferences(widget.character)
+        .toSet();
+    _name.addListener(_refresh);
+    widget.controller.addListener(_refresh);
+  }
+
+  void _refresh() {
+    if (!mounted) return;
+    setState(() {
+      // Naming a new character suggests matching media until the user makes
+      // a selection. Renaming an existing cast keeps its selected references.
+      if (widget.character.isEmpty && !_selectionEdited && !_saving) {
+        _selected
+          ..clear()
+          ..addAll(widget.controller.characterMappingReferences(_name.text));
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    widget.controller.removeListener(_refresh);
+    _name.removeListener(_refresh);
     _name.dispose();
     super.dispose();
   }
@@ -163,6 +207,8 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
                   decoration: const InputDecoration(
                     labelText: 'Character name',
                     hintText: 'ALEXANDRIA',
+                    helperText: 'Any name, with or without a speaking role.',
+                    helperMaxLines: 2,
                   ),
                 ),
                 if (widget.character.isNotEmpty)
@@ -185,13 +231,16 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
                     TextButton(
                       onPressed: _saving || _selected.isEmpty
                           ? null
-                          : () => setState(_selected.clear),
+                          : () => setState(() {
+                              _selectionEdited = true;
+                              _selected.clear();
+                            }),
                       child: const Text('Remove all'),
                     ),
                   ],
                 ),
                 const Text(
-                  'Choose one or more images or videos. Saved references will be attached to this direction.',
+                  'Matching names are preselected. Choose any images or videos instead. Saved references will be attached to this direction.',
                 ),
                 const SizedBox(height: 8),
                 if (names.isEmpty)
@@ -211,6 +260,7 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
                     onChanged: _saving
                         ? null
                         : (value) => setState(() {
+                            _selectionEdited = true;
                             if (value == true) {
                               _selected.add(name);
                             } else {
