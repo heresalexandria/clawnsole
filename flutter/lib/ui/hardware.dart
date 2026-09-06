@@ -50,6 +50,11 @@ const _brushedDark = <Color>[
 /// this size around the same artwork.
 const double kHardwareTouchTarget = 44;
 
+/// The drawn height of the composer footer's faceplate controls — the model
+/// selector and the Generate key stand shoulder to shoulder at this height,
+/// like the input selector and transport key on one receiver.
+const double kConsoleControlHeight = 56;
+
 /// Whether this build runs on a finger-first platform.
 ///
 /// Only phones and tablets grow their hit areas and click their detents;
@@ -132,6 +137,24 @@ double _wellShadowAlpha(Brightness brightness) =>
 Color _litPlum(Brightness brightness) => brightness == Brightness.dark
     ? const Color(0xFF96628D)
     : ClawnsoleColors.plum;
+
+/// The recessed-well color for [brightness]: shadowed warm cream on paper,
+/// warm near-black at night. Shared with the faceplate controls drawn in
+/// their own modules so every well in the console is cut from one stock.
+Color hardwareWellColor(Brightness brightness) => _well(brightness);
+
+/// Alpha of the inner shadow along the top edge of a recessed well.
+double hardwareWellShadowAlpha(Brightness brightness) =>
+    _wellShadowAlpha(brightness);
+
+/// The plum that lights a control's traveled or active side.
+Color hardwareLitPlum(Brightness brightness) => _litPlum(brightness);
+
+/// Sweep-gradient stops for brushed steel under this room's light. Rotate
+/// the gradient for a radial machining pattern, or lay the same stops in a
+/// [LinearGradient] for straight brushing.
+List<Color> brushedSteelStops(Brightness brightness) =>
+    brightness == Brightness.dark ? _brushedDark : _brushedLight;
 
 /// Paints the machined knob: knurled rim, brushed face, and an optional lit
 /// indicator line. Shared by the slider thumb and the switch handle.

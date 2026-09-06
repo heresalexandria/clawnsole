@@ -5221,33 +5221,22 @@ class _ComposerFooter extends StatelessWidget {
     final localUnavailable =
         controller.selectedProvider.isLocal &&
         !controller.localGenerationAvailable;
-    final status = Wrap(
-      spacing: 12,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            if (localUnavailable)
+    final needsKey =
+        controller.selectedProvider.requiresApiKey && !controller.hasApiKey;
+    // The footer speaks only when something stands between the studio and
+    // a render. A ready console says nothing — the lit key is the signal.
+    final Widget? status = localUnavailable
+        // The on-device provider is selected but this device cannot run
+        // it; say so here rather than after a failed Generate.
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
               Icon(
                 Icons.phonelink_off_rounded,
                 color: context.colors.error,
                 size: 18,
-              )
-            else if (!controller.selectedProvider.requiresApiKey ||
-                controller.hasApiKey)
-              ClawMark(size: 19, color: context.tokens.brass)
-            else
-              Icon(
-                Icons.key_off_rounded,
-                color: context.colors.error,
-                size: 18,
               ),
-            const SizedBox(width: 9),
-            if (localUnavailable)
-              // The on-device provider is selected but this device cannot run
-              // it; say so here rather than after a failed Generate.
+              const SizedBox(width: 9),
               Flexible(
                 child: Text(
                   'Needs iOS 18.4 and Apple Intelligence',
@@ -5259,20 +5248,21 @@ class _ComposerFooter extends StatelessWidget {
                     color: context.colors.error,
                   ),
                 ),
-              )
-            else if (!controller.selectedProvider.requiresApiKey ||
-                controller.hasApiKey)
-              const Flexible(
-                child: Text(
-                  'Ready when you are',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-                ),
-              )
-            else
-              // The status line is where a new studio looks first when
-              // Generate does nothing; make it the way in, not just a verdict.
+              ),
+            ],
+          )
+        : needsKey
+        // The status line is where a new studio looks first when Generate
+        // does nothing; make it the way in, not just a verdict.
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.key_off_rounded,
+                color: context.colors.error,
+                size: 18,
+              ),
+              const SizedBox(width: 9),
               Flexible(
                 child: InkWell(
                   key: const ValueKey<String>('composer-open-providers'),
@@ -5291,32 +5281,9 @@ class _ComposerFooter extends StatelessWidget {
                   ),
                 ),
               ),
-          ],
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-          decoration: BoxDecoration(
-            color: context.colors.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: context.colors.outlineVariant),
-          ),
-          child: Text(
-            controller.selectedModel.outputKind == GenerationOutputKind.image
-                ? (form.mode == VideoMode.i2v
-                      ? 'Reference to image'
-                      : 'Text to image')
-                : form.referenceTask != MediaReferenceTask.reference
-                ? form.referenceTask.label
-                : form.mode.label,
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: context.colors.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
+            ],
+          )
+        : null;
     final generate = FilledButton.icon(
       onPressed: controller.submitting
           ? null
@@ -5353,8 +5320,10 @@ class _ComposerFooter extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              status,
-              const SizedBox(height: 12),
+              if (status != null) ...<Widget>[
+                status,
+                const SizedBox(height: 12),
+              ],
               Align(alignment: Alignment.centerLeft, child: plaque),
               const SizedBox(height: 10),
               generate,
@@ -5363,7 +5332,7 @@ class _ComposerFooter extends StatelessWidget {
         }
         return Row(
           children: <Widget>[
-            Expanded(child: status),
+            if (status != null) Expanded(child: status) else const Spacer(),
             const SizedBox(width: 12),
             plaque,
             const SizedBox(width: 12),
