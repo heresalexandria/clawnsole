@@ -8,6 +8,7 @@ import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/composer_tab_rail.dart';
+import 'package:clawnsole/ui/aesthetic_library.dart';
 import 'package:clawnsole/ui/aesthetic_references.dart';
 import 'package:clawnsole/app/clawnsole_app.dart';
 import 'package:flutter/foundation.dart'
@@ -267,11 +268,12 @@ void main() {
       final controller = await _controller(settle: false);
       await tester.pumpWidget(
         MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.dark),
           home: Scaffold(
             body: SingleChildScrollView(
               child: Column(
                 children: [
-                  AestheticReferenceLibrary(controller: controller),
+                  AestheticLibraryView(controller: controller),
                   ListenableBuilder(
                     listenable: controller,
                     builder: (_, _) =>
@@ -295,16 +297,17 @@ void main() {
         find.byKey(const ValueKey('aesthetic-text')),
         'Soft monochrome grain.',
       );
-      await tester.tap(find.text('Save'));
+      await tester.tap(find.byKey(const ValueKey('aesthetic-save')));
       await tester.pumpAndSettle();
       expect(
         controller.aestheticReferences.single.text,
         'Soft monochrome grain.',
       );
+      final aestheticId = controller.aestheticReferences.single.id;
       await tester.tap(find.byKey(const ValueKey('prompt-aesthetic-picker')));
       await tester.pumpAndSettle();
       await tester.tap(
-        find.widgetWithText(CheckedPopupMenuItem<String>, 'Silver screen'),
+        find.byKey(ValueKey('prompt-aesthetic-option-$aestheticId')),
       );
       await tester.pumpAndSettle();
       expect(controller.generationPrompt, 'Soft monochrome grain.');
@@ -315,12 +318,14 @@ void main() {
         find.byKey(const ValueKey('aesthetic-text')),
         'High contrast grain.',
       );
-      await tester.tap(find.text('Save'));
+      await tester.tap(find.byKey(const ValueKey('aesthetic-save')));
       await tester.pumpAndSettle();
       expect(controller.generationPrompt, 'High contrast grain.');
       await tester.tap(find.byTooltip('Edit Silver screen'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Delete'));
+      await tester.tap(find.byKey(const ValueKey('aesthetic-delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('aesthetic-delete-confirm')));
       await tester.pumpAndSettle();
       expect(controller.aestheticReferences, isEmpty);
       expect(controller.form.references, isEmpty);

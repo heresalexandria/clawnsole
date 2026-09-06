@@ -781,7 +781,7 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(
-            find.widgetWithText(CheckedPopupMenuItem<String>, title),
+            find.byKey(const ValueKey('prompt-aesthetic-option-golden-hour')),
           );
           await tester.pumpAndSettle();
           expect(controller.form.aestheticReferenceId, 'golden-hour');
@@ -803,9 +803,7 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          await tester.tap(
-            find.widgetWithText(CheckedPopupMenuItem<String>, 'No aesthetic'),
-          );
+          await tester.tap(find.byKey(const ValueKey('prompt-aesthetic-none')));
           await tester.pumpAndSettle();
           expect(controller.form.aestheticReferenceId, isNull);
           expectToolbar(fullscreen, 'Aesthetic');

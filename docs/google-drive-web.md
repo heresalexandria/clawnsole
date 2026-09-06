@@ -54,14 +54,20 @@ records contain asset references, never media bytes or base64. Drive-backed
 media is accessible on other devices; device-local media still belongs to its
 original device. Move or copy that media to Drive when it needs to travel.
 
-Aesthetic references are text-only library entries managed under References.
-Choose a title, one of 16 SVG icons, a color, and the reference text. The Aesthetic
-menu immediately to the right of Characters selects one per Create tab, or
-**No aesthetic**. Generation requests append only the reference text after the
-editable prompt, including in Screenplay mode; the title and icon are never
-sent as prompt content. Prompt limits and estimates use the composed prompt.
-Editing an aesthetic updates selected tabs; deleting it removes its effect.
-Aesthetics do not consume media-reference slots or appear in media pickers.
+Aesthetic references are text-only library entries managed on the **Aesthetics**
+tab of the References desk, beside **Media**. Each entry carries a title, one
+SVG line icon (grouped by subject in the editor), a color, comma-separated
+tags, a star, and the reference text. The tab's toolbar filters by All /
+Starred, a search across titles, text, and tags, and a Tags popover; rows show
+the star and tag pills. The Aesthetic menu immediately to the right of
+Characters selects one per Create tab, or **No aesthetic**; it is a searchable
+panel that lists starred aesthetics first, stars entries in place, and links
+back to the library. Generation requests append only the reference text after
+the editable prompt, including in Screenplay mode; the title, icon, and tags
+are never sent as prompt content. Prompt limits and estimates use the composed
+prompt. Editing an aesthetic updates selected tabs; deleting it removes its
+effect. Aesthetics do not consume media-reference slots or appear in media
+pickers.
 
 ## Google Cloud setup
 

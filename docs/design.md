@@ -348,6 +348,24 @@ generation-mode rule above still stands — tabs never select a mode.
   fill with cream icon and text; both modes were verified against the old
   unreadable-active-tab bug. Narrow layouts stack the search above the
   segment row and shrink Select to an icon key.
+- **The References desk is two console-key tabs** — *Media* and
+  *Aesthetics*, with facet counts — sitting in the pinned heading under
+  *Your creative ingredients.* Both tabs keep the same 1440-px column and
+  padding, so switching never shifts the heading. The aesthetic half
+  replaces the folder rail with one scrolling column, which is what keeps a
+  long aesthetic list scrollable instead of growing the pinned heading;
+  dropped files still only ever mean media.
+- **The aesthetic library follows the one-row toolbar pattern**
+  (`lib/ui/aesthetic_library.dart`): All / Starred facet segments, one
+  search field over titles, text, and tags, a **Tags** console key popover
+  (`#tag · count` chips plus *Reset filters*), and the *Add aesthetic* key.
+  Rows are one card of hairline-separated lines — line icon, title, brass
+  star toggle, tag pills (four, then *+n*), two lines of the reference
+  text, and a pencil. Starred entries lead, then titles A→Z. On Create the
+  aesthetic key opens a searchable anchored panel with the same ordering:
+  *No aesthetic*, a **Favorites** group, then **All**, each row starring in
+  place without closing the panel, and a *Manage aesthetics…* footer that
+  opens this tab.
 - **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
   live in an anchored panel instead of stacked chip rows. The key lights
   plum with a count while any of them narrows the view, and the panel
