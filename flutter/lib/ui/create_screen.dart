@@ -20,6 +20,7 @@ import 'aesthetic_references.dart';
 import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
+import 'hardware_button.dart';
 import 'inline_video.dart';
 import 'library_screen.dart';
 import 'media_picker_source.dart';
@@ -5284,28 +5285,22 @@ class _ComposerFooter extends StatelessWidget {
             ],
           )
         : null;
-    final generate = FilledButton.icon(
+    // The transport key. While a render is in flight it simply stays lit and
+    // inert — the lit key is the signal, so there is no spinner.
+    final generate = HardwareLitButton(
+      key: const ValueKey<String>('generate-key'),
+      icon: const ClawMark(size: 18, color: Colors.white),
+      label: controller.selectedModel.outputKind == GenerationOutputKind.image
+          ? 'Generate image'
+          : form.mode == VideoMode.upscale
+          ? 'Upscale video'
+          : 'Generate video',
+      lit: controller.submitting,
       onPressed: controller.submitting
           ? null
           : () => unawaited(
               _submitWithProviderRetentionWarning(context, controller),
             ),
-      icon: controller.submitting
-          ? SizedBox.square(
-              dimension: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: context.colors.onPrimary,
-              ),
-            )
-          : const Icon(Icons.play_arrow_rounded, size: 20),
-      label: Text(
-        controller.selectedModel.outputKind == GenerationOutputKind.image
-            ? 'Generate image'
-            : form.mode == VideoMode.upscale
-            ? 'Upscale video'
-            : 'Generate video',
-      ),
     );
     // The model plaque sits in the footer, directly before Generate: the
     // last thing the eye checks before rendering, inside the draft it
@@ -5324,13 +5319,14 @@ class _ComposerFooter extends StatelessWidget {
                 status,
                 const SizedBox(height: 12),
               ],
-              Align(alignment: Alignment.centerLeft, child: plaque),
+              plaque,
               const SizedBox(height: 10),
               generate,
             ],
           );
         }
         return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (status != null) Expanded(child: status) else const Spacer(),
             const SizedBox(width: 12),
