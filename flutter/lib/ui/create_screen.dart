@@ -1341,9 +1341,10 @@ class _DirectionToolbar extends StatelessWidget {
     ),
   );
 
+  // Leave space for the aesthetic name before adding action labels.
   bool _compact(BuildContext context, BoxConstraints constraints) =>
       constraints.maxWidth <
-      440 * MediaQuery.textScalerOf(context).scale(12) / 12;
+      620 * MediaQuery.textScalerOf(context).scale(12) / 12;
 }
 
 class _DirectionToolbarAction extends StatelessWidget {

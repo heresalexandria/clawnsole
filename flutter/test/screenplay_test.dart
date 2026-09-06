@@ -629,7 +629,7 @@ void main() {
     },
   );
 
-  for (final width in [320.0, 360.0]) {
+  for (final width in [320.0, 360.0, 520.0, 620.0]) {
     for (final textScale in [1.0, 1.5]) {
       testWidgets(
         'mobile aesthetic stays visible at width $width and scale $textScale',
@@ -738,6 +738,16 @@ void main() {
             expect(text.overflow, TextOverflow.ellipsis);
             expect(tester.getSize(label).width, greaterThan(0));
             if (expectedTitle == title) {
+              final minimumVisibleTitle = TextPainter(
+                text: TextSpan(text: 'G…', style: text.style),
+                textDirection: TextDirection.ltr,
+                textScaler: TextScaler.linear(textScale),
+              )..layout();
+              expect(
+                tester.getSize(label).width,
+                greaterThanOrEqualTo(minimumVisibleTitle.width),
+              );
+              minimumVisibleTitle.dispose();
               expect(
                 tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
                 isTrue,
