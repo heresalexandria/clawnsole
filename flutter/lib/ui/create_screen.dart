@@ -24,6 +24,7 @@ import 'library_screen.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
+import 'prompt_character_counter.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
@@ -1005,7 +1006,7 @@ class _ComposerState extends State<_Composer> {
               prompt: form.prompt,
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(controller),
-              maxLength: controller.selectedModel.maxPromptCharacters,
+              maxLength: controller.promptCharacterLimit,
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
             ),
@@ -1300,58 +1301,88 @@ class _DirectionToolbar extends StatelessWidget {
                 ),
               ),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 2,
-            children: [
-              Tooltip(
-                message: 'Copy prompt',
-                child: TextButton.icon(
-                  key: const ValueKey('prompt-copy-button'),
-                  onPressed: onCopy,
-                  icon: const Icon(Icons.copy_rounded, size: 17),
-                  label: constraints.maxWidth < 440
-                      ? const SizedBox.shrink()
-                      : const Text('Copy'),
-                ),
+        child: Row(
+          spacing: 2,
+          children: [
+            _DirectionToolbarAction(
+              buttonKey: const ValueKey('prompt-copy-button'),
+              tooltip: 'Copy prompt',
+              label: 'Copy',
+              compact: _compact(context, constraints),
+              onPressed: onCopy,
+              icon: Icons.copy_rounded,
+            ),
+            _DirectionToolbarAction(
+              buttonKey: const ValueKey('prompt-rewrite-button'),
+              tooltip: 'AI rewrite',
+              label: 'AI rewrite',
+              compact: _compact(context, constraints),
+              onPressed: controller.canRewriteDirection
+                  ? () => unawaited(
+                      showPromptRewriteDialog(context, controller: controller),
+                    )
+                  : null,
+              icon: Icons.auto_fix_high_rounded,
+            ),
+            if (controller.selectedModel.supportsCharacterReferences)
+              _DirectionToolbarAction(
+                buttonKey: const ValueKey('prompt-characters-button'),
+                tooltip: 'Characters',
+                label: 'Characters',
+                compact: _compact(context, constraints),
+                onPressed: () =>
+                    unawaited(showCharactersDialog(context, controller)),
+                icon: Icons.people_outline_rounded,
               ),
-              Tooltip(
-                message: 'AI rewrite',
-                child: TextButton.icon(
-                  key: const ValueKey('prompt-rewrite-button'),
-                  onPressed: controller.canRewriteDirection
-                      ? () => unawaited(
-                          showPromptRewriteDialog(
-                            context,
-                            controller: controller,
-                          ),
-                        )
-                      : null,
-                  icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
-                  label: constraints.maxWidth < 440
-                      ? const SizedBox.shrink()
-                      : const Text('AI rewrite'),
-                ),
-              ),
-              if (controller.selectedModel.supportsCharacterReferences)
-                TextButton.icon(
-                  key: const ValueKey('prompt-characters-button'),
-                  onPressed: () =>
-                      unawaited(showCharactersDialog(context, controller)),
-                  icon: const Icon(Icons.people_outline_rounded, size: 17),
-                  label: const Text('Characters'),
-                ),
-              AestheticReferencePicker(
-                controller: controller,
-                compact: constraints.maxWidth < 440,
-              ),
-            ],
-          ),
+            Flexible(child: AestheticReferencePicker(controller: controller)),
+          ],
         ),
       ),
     ),
+  );
+
+  // Leave space for the aesthetic name before adding action labels.
+  bool _compact(BuildContext context, BoxConstraints constraints) =>
+      constraints.maxWidth <
+      620 * MediaQuery.textScalerOf(context).scale(12) / 12;
+}
+
+class _DirectionToolbarAction extends StatelessWidget {
+  const _DirectionToolbarAction({
+    required this.buttonKey,
+    required this.tooltip,
+    required this.label,
+    required this.compact,
+    required this.onPressed,
+    required this.icon,
+  });
+
+  final Key buttonKey;
+  final String tooltip;
+  final String label;
+  final bool compact;
+  final VoidCallback? onPressed;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    excludeFromSemantics: compact,
+    child: compact
+        ? SizedBox(
+            width: 44,
+            child: TextButton(
+              key: buttonKey,
+              onPressed: onPressed,
+              child: Icon(icon, size: 17, semanticLabel: tooltip),
+            ),
+          )
+        : TextButton.icon(
+            key: buttonKey,
+            onPressed: onPressed,
+            icon: Icon(icon, size: 17),
+            label: Text(label),
+          ),
   );
 }
 
@@ -1454,8 +1485,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                           references: _promptReferenceOptions(controller),
                           expands: true,
                           autofocus: true,
-                          maxLength:
-                              controller.selectedModel.maxPromptCharacters,
+                          maxLength: controller.promptCharacterLimit,
                           onChanged: (value) => controller.updateForm(
                             (form) => form.prompt = value,
                           ),
@@ -1483,28 +1513,11 @@ class _PromptCharacterCounter extends StatelessWidget {
     listenable: controller,
     builder: (context, _) {
       final model = controller.selectedModel;
-      final limit = model.maxPromptCharacters;
-      final typed = controller.generationPrompt.length;
-      final nearLimit = limit != null && typed >= limit * .95;
-      return Tooltip(
-        message: limit == null
-            ? '${model.label} does not publish a prompt limit'
-            : '${model.label} accepts up to $limit characters',
-        child: Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: Text(
-            limit == null ? '$typed' : '$typed / $limit',
-            key: const ValueKey('prompt-character-limit'),
-            style: TextStyle(
-              color: nearLimit
-                  ? context.colors.error
-                  : context.colors.onSurfaceVariant,
-              fontSize: 10.5,
-              fontWeight: nearLimit ? FontWeight.w700 : FontWeight.w500,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
+      return PromptCharacterCounter(
+        used: controller.generationPrompt.length,
+        limit: controller.promptCharacterLimit,
+        modelLabel: model.label,
+        isProviderLimit: (model.maxPromptCharacters ?? 0) > 0,
       );
     },
   );

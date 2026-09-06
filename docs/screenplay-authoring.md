@@ -1,10 +1,19 @@
 # Screenplay authoring
 
 A compact single-row header contains the Plaintext / Screenplay selector, an
-icon-only Clear control, the character count, and an icon-only Expand control.
-Below the header, a single-line toolbar contains Copy, AI rewrite, and, on
-compatible models, Characters.
-It can scroll horizontally at large accessibility text sizes. In screenplay mode
+icon-only Clear control, the used/max character count, and an icon-only Expand
+control. A 3-pixel bar below the count fills green, then orange at 80% and red
+at 95%, with a gray unused track. The count includes added aesthetic direction.
+Its tooltip and accessibility label give the remaining or exceeded allowance;
+when a provider publishes no maximum, the editor's 50,000-character cap is shown
+and explicitly identified as an editor limit.
+Below the header, a single-line toolbar contains Copy, AI rewrite, Characters
+on compatible models, and the aesthetic picker. Compact layouts use labelled
+tooltips with icon-only actions, reserving room for the selected aesthetic's
+name. The picker reads "Aesthetic" when none is selected; long names truncate
+with an ellipsis and remain available in full through its tooltip and menu.
+The same layout adapts to larger accessibility text without horizontal scrolling.
+In screenplay mode
 the element selector, Prev, and Next sit directly below the editor, followed by
 the suggestion tags.
 The Enter / Tab hint sits directly above the text entry area. The expanded editor
@@ -43,8 +52,10 @@ while a typed @ query is active; Left/Right or Escape dismiss that menu.
 
 Use **Name character** on an attached image/video card, or **Character name** in
 a saved reference's edit dialog. Assignments are optional, uppercased, and
-unique across references. Use the character in the script as a speaker or an
-uppercase entity in action. On a compatible model with room, its saved media
+unique across references. Known names match whole names in the screenplay,
+including mixed-case names in action without a speaking role. If no character
+assignment is set, an exact reference name (ignoring its media extension) can
+also supply the default. On a compatible model with room, matching saved media
 attaches automatically and a line appears at the end of Direction:
 
 ```text
@@ -62,11 +73,19 @@ limits. Unsupported media can be attached after choosing a compatible model.
 The **Characters** control is available only on models that accept creative
 image or video references; keyframe-only and audio-only models do not support
 casting. In Screenplay mode, the modal detects character cues using the same
-parser as the editor. Uppercase words in action or Plaintext do not become cast
-members. Explicitly added characters and casting lines remain listed in either
-format. Use **Add character** for non-speaking roles or manual Plaintext casting.
-Choose a character to select, change, or remove one or more attached or saved
-image/video references. Saving attaches new media within the chosen model's
+parser as the editor and also lists known reference names mentioned in action.
+Unmatched uppercase words do not become cast members. Opening Characters
+reconciles matching references in an existing screenplay, so restored scripts
+do not require another keystroke to show their mapping. Explicitly added
+characters and casting lines remain listed in either format.
+Use **Add character** at any time, including before writing a prompt, for
+non-speaking roles or manual Plaintext casting. Entering a matching name
+preselects its references. Choose a character to select, change, or remove one
+or more attached or saved image/video references. A manual selection, including
+**Remove all**, takes precedence over automatic matching and survives later
+typing. Renaming an existing cast keeps its reference selection. A character
+added without references to an empty draft survives unrelated settings edits.
+Saving attaches new media within the chosen model's
 limits and replaces that character's editable footer line. Removing a mapping
 keeps media in the References tray for other uses. Removing a card from that
 tray removes its token from every casting line, preserving other mapped media.

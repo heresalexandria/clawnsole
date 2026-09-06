@@ -81,6 +81,8 @@ extension AppControllerSubmission on AppController {
     // Capture every recipe and routing choice before the first await, including
     // before hydration of a restored draft. Editing/switching tabs is still safe.
     final tab = _captureSubmissionTab();
+    _rememberGenerationPreferences(tab);
+    _flushGenerationPreferencesSave();
     final provider = selectedProvider;
     final model = selectedModel;
     final prompt = generationPrompt;

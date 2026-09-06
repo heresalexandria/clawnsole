@@ -138,7 +138,11 @@ Set<String> screenplayCharacters(String text) {
   return result;
 }
 
-bool screenplayMentionsCharacter(String script, String character) {
+bool screenplayMentionsCharacter(
+  String script,
+  String character, {
+  bool caseSensitive = true,
+}) {
   final body = script
       .split('\n')
       .where((line) => !isScreenplayMapping(line))
@@ -146,6 +150,7 @@ bool screenplayMentionsCharacter(String script, String character) {
   return RegExp(
     '(?<![\\p{L}\\p{N}_@])${RegExp.escape(character)}(?![\\p{L}\\p{N}_])',
     unicode: true,
+    caseSensitive: caseSensitive,
   ).hasMatch(body);
 }
 
@@ -236,10 +241,16 @@ String replaceScreenplayMapping(
       : '$body\n\n$name: ${names.map((name) => '@$name').join(' ')}';
 }
 
-String renameScreenplayCharacter(String prompt, String previous, String name) {
+String renameScreenplayCharacter(
+  String prompt,
+  String previous,
+  String name, {
+  bool caseSensitive = true,
+}) {
   final pattern = RegExp(
     '(?<![\\p{L}\\p{N}_@])${RegExp.escape(previous)}(?![\\p{L}\\p{N}_])',
     unicode: true,
+    caseSensitive: caseSensitive,
   );
   return prompt
       .split('\n')

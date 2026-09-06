@@ -53,13 +53,8 @@ class AestheticIcon extends StatelessWidget {
 }
 
 class AestheticReferencePicker extends StatelessWidget {
-  const AestheticReferencePicker({
-    super.key,
-    required this.controller,
-    this.compact = false,
-  });
+  const AestheticReferencePicker({super.key, required this.controller});
   final AppController controller;
-  final bool compact;
   @override
   Widget build(BuildContext context) {
     final selected = controller.selectedAestheticReference;
@@ -110,15 +105,19 @@ class AestheticReferencePicker extends StatelessWidget {
               size: 18,
             ),
             const SizedBox(width: 6),
-            if (!compact)
-              ConstrainedBox(
+            Flexible(
+              child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 150),
                 child: Text(
                   selected?.title ?? 'Aesthetic',
+                  key: const ValueKey('prompt-aesthetic-label'),
+                  maxLines: 1,
+                  softWrap: false,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium,
                 ),
               ),
+            ),
             const Icon(Icons.arrow_drop_down, size: 18),
           ],
         ),
