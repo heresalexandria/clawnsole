@@ -436,6 +436,49 @@ void main() {
     },
   );
 
+  test('an abort carries a stack trace to whoever is still reading', () async {
+    // A StateError that is signalled rather than thrown carries no stack of
+    // its own, so an abort that surfaces through an abandoned stream would be
+    // logged as a bare line naming neither the request nor the caller that
+    // closed the client.
+    final source = StreamController<List<int>>();
+    final client = PublicMediaClient(
+      addressLookup: (_) async => <InternetAddress>[_public],
+      transportFactory: (_, _, _) =>
+          _Transport((_) async => http.StreamedResponse(source.stream, 200)),
+    );
+    final response = await client.send(http.Request('GET', _url));
+    final failure = Completer<(Object, StackTrace)>();
+    response.stream.listen(
+      (_) {},
+      onError: (Object error, StackTrace stack) =>
+          failure.complete((error, stack)),
+    );
+    client.close();
+    final (error, stack) = await failure.future;
+    expect(error, isA<StateError>());
+    expect(
+      stack.toString().split('\n').first,
+      contains('PublicMediaClient.close'),
+    );
+    await source.close();
+  });
+
+  test('an abort reaches a request that has not answered yet', () async {
+    final client = PublicMediaClient(
+      addressLookup: (_) async {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        return <InternetAddress>[_public];
+      },
+      transportFactory: (_, _, _) => _Transport(
+        (_) async => http.StreamedResponse(const Stream.empty(), 200),
+      ),
+    );
+    final pending = client.send(http.Request('GET', _url));
+    client.close();
+    await expectLater(pending, throwsStateError);
+  });
+
   test(
     'background preflight rejects unsafe initial DNS without fetching media',
     () async {

@@ -37,7 +37,45 @@ import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
 import 'package:http/http.dart' as http;
 
-Future<void> main(List<String> arguments) async {
+Future<void> main(List<String> arguments) =>
+    runCompanionProcess(() => _serveCompanion(arguments));
+
+/// Runs the companion with stray asynchronous errors reported instead of fatal.
+///
+/// The companion is a long-lived local server behind a desktop shell, and an
+/// unhandled asynchronous error ends the Dart isolate outright. One abandoned
+/// download — a media client aborting a stream nobody is reading any more —
+/// would exit the process, and a second exit inside the shell's restart budget
+/// puts a "could not be restarted" dialog in front of the user. A request that
+/// fails must cost that request, not the session, so stray errors are logged
+/// and the server keeps serving. A failure to start still ends the process:
+/// the shell can retry a launch, but not a companion that is listening on
+/// nothing.
+Future<void> runCompanionProcess(
+  Future<void> Function() serve, {
+  StringSink? log,
+}) {
+  final stopped = Completer<void>();
+  final sink = log ?? stderr;
+  runZonedGuarded(
+    () async {
+      try {
+        await serve();
+      } on Object catch (error, stack) {
+        if (!stopped.isCompleted) stopped.completeError(error, stack);
+        return;
+      }
+      if (!stopped.isCompleted) stopped.complete();
+    },
+    (error, stack) {
+      sink.writeln('Unhandled companion error: $error');
+      sink.writeln(stack.toString().trimRight());
+    },
+  );
+  return stopped.future;
+}
+
+Future<void> _serveCompanion(List<String> arguments) async {
   final config = CompanionConfig.from(arguments, Platform.environment);
   final bootstrap = await CompanionBootstrap.load(
     Platform.environment,

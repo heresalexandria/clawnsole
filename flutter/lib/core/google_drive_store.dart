@@ -10,6 +10,7 @@ import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_asset_presenter.dart';
 import 'models.dart';
+import 'stream_discard.dart';
 
 typedef GoogleDriveApiFactory = GoogleDriveApi Function(String accessToken);
 
@@ -341,7 +342,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     Duration totalTimeout = assetStreamTotalTimeout,
   }) async {
     if (!_connection.isConnected) {
-      await stream.listen(null).cancel();
+      await discardStream(stream);
       _requireConnected();
     }
     final sessionRevision = _sessionRevision;

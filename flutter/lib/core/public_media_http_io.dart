@@ -168,8 +168,14 @@ class PublicMediaClient extends http.BaseClient {
   void close() {
     if (_closed) return;
     _closed = true;
+    // Abort reasons travel with a stack trace: a StateError that is signalled
+    // rather than thrown carries none of its own, and an abort that surfaces
+    // through an abandoned stream would otherwise be logged as a bare line
+    // with nothing pointing back at the caller that closed the client.
+    final reason = StateError('The media client is closed.');
+    final raised = StackTrace.current;
     for (final scope in _active.toList()) {
-      scope.fail(StateError('The media client is closed.'));
+      scope.fail(reason, raised);
     }
   }
 }
@@ -318,11 +324,11 @@ class _MediaRequestScope {
     );
   }
 
-  final Completer<Object> _aborted = Completer<Object>();
+  final Completer<AsyncError> _aborted = Completer<AsyncError>();
   late final Timer _deadline;
   http.Client? transport;
   void Function()? onFinish;
-  void Function(Object)? _streamFailure;
+  void Function(Object, StackTrace)? _streamFailure;
   bool _finished = false;
 
   void checkOpen() {
@@ -331,13 +337,16 @@ class _MediaRequestScope {
 
   Future<T> wait<T>(Future<T> future) => Future.any(<Future<T>>[
     future,
-    _aborted.future.then<T>((error) => throw error),
+    _aborted.future.then<T>(
+      (abort) => Error.throwWithStackTrace(abort.error, abort.stackTrace),
+    ),
   ]);
 
-  void fail(Object error) {
+  void fail(Object error, [StackTrace? stackTrace]) {
     if (_finished) return;
-    _aborted.complete(error);
-    _streamFailure?.call(error);
+    final raised = stackTrace ?? StackTrace.current;
+    _aborted.complete(AsyncError(error, raised));
+    _streamFailure?.call(error, raised);
     finish();
   }
 
@@ -365,9 +374,9 @@ class _MediaRequestScope {
       finish();
     }
 
-    void failStream(Object error) {
+    void failStream(Object error, StackTrace stackTrace) {
       if (output.isClosed) return;
-      output.addError(error);
+      output.addError(error, stackTrace);
       unawaited(output.close());
       stop();
     }

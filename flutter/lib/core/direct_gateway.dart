@@ -25,6 +25,7 @@ import 'provider_submission.dart';
 import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
 import 'screenplay.dart';
+import 'stream_discard.dart';
 
 enum ApiKeySource { saved, configured }
 
@@ -1373,7 +1374,7 @@ class DirectGateway
         .send(request)
         .timeout(const Duration(seconds: 30));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      await response.stream.listen(null).cancel();
+      await discardStream(response.stream);
       throw ProviderException(
         'The provider result download returned HTTP ${response.statusCode}.',
         status: response.statusCode,
@@ -1385,7 +1386,7 @@ class DirectGateway
         response.headers['content-type'] ?? 'video/mp4',
       );
     } on Object {
-      await response.stream.listen(null).cancel();
+      await discardStream(response.stream);
       rethrow;
     }
     return _store.writeAssetStream(

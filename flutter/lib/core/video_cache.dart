@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'asset_stream.dart';
+import 'stream_discard.dart';
 
 /// Reports byte progress for one cached download. [total] is null when the
 /// source did not announce a length.
@@ -95,7 +96,8 @@ class VideoCache {
     }
     final pending = _inFlight[key];
     if (pending != null) {
-      unawaited(_cancelUnused(bytes));
+      // Closing an unused duplicate response cannot fail the shared download.
+      unawaited(discardStream(bytes));
       return pending;
     }
     late final Future<File> operation;
@@ -150,14 +152,6 @@ class VideoCache {
     }
     await _sweep(<String>{key});
     return adopted;
-  }
-
-  Future<void> _cancelUnused(Stream<List<int>> bytes) async {
-    try {
-      await bytes.listen(null).cancel();
-    } on Object {
-      // Closing an unused duplicate response cannot fail the shared download.
-    }
   }
 
   bool isDownloading(String key) => _inFlight.containsKey(key);
@@ -272,7 +266,7 @@ class VideoCache {
       _notify(key, received, expectedLength, true);
       rethrow;
     } finally {
-      if (!consumed) await bytes.listen(null).cancel();
+      if (!consumed) await discardStream(bytes);
       try {
         await staged?.dispose();
       } on FileSystemException {

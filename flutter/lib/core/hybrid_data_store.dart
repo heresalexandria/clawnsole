@@ -12,6 +12,7 @@ import 'google_drive.dart';
 import 'google_drive_store.dart';
 import 'models.dart';
 import 'composer_tabs.dart';
+import 'stream_discard.dart';
 
 /// Presents local and Google Drive records as one library while keeping their
 /// persistence and retained media physically separate.
@@ -375,11 +376,11 @@ class HybridDataStore
     Duration totalTimeout = assetStreamTotalTimeout,
   }) async {
     if (storage == LibraryStorage.drive && !isDriveConnected) {
-      await stream.listen(null).cancel();
+      await discardStream(stream);
       throw StateError('Connect Google Drive before storing this media.');
     }
     if (storage != LibraryStorage.drive && !localLibraryAvailable) {
-      await stream.listen(null).cancel();
+      await discardStream(stream);
       throw StateError('This build stores generated media in Google Drive.');
     }
     final stageLocally = storage == LibraryStorage.drive && _stagesDriveUploads;
