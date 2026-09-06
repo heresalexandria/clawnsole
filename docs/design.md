@@ -44,7 +44,7 @@ through `TexturePanel` (`flutter/lib/ui/panels.dart`).
 | --- | --- | --- |
 | Walnut burl | `wood_burl.jpg` | Side rail and mobile bottom nav; casework, dark in both modes |
 | Plum leather | `leather_plum.jpg` | Settings feature panel (dark mode), dark canvas grain |
-| Navy leather | `leather_navy.jpg` | Provider plaque (dark mode) |
+| Navy leather | `leather_navy.jpg` | Reserved — the model plaque wore it until the footer became console hardware; no panel uses it today |
 | Baize / hunter felt (solid) | None | Estimated-charge panel; follows the mode |
 | Cream linen | `linen_cream.jpg` | Light-mode canvas, and the tooth on pale content panels |
 
@@ -165,6 +165,20 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
 - **`consoleKeyDecoration`**: selection tiles (ratio strip, resolution pair,
   library filters) read as console keys: a faint raised gradient when idle,
   a lit plum gradient with a soft glow when selected.
+- **`HardwareLitButton`** (`hardware_button.dart`): the Generate key — a
+  wide translucent plum acrylic push key seated in a dark bezel, like the
+  transport key on a receiver: body gradient, inner lamp, edge vignette,
+  specular crown, a refraction line along the bottom lip, and a fixed
+  grain. It lights on pointer-down and stays lit while a render is in
+  flight (there is no spinner); keyboard focus wears the brass halo. The
+  masked white claw leads the legend. Plum in both modes — a button is
+  allowed to stay dark on paper.
+- **`HardwareSelector`** (`hardware_selector.dart`): the model selector —
+  a brushed-steel bezel framing a recessed readout window (smoked glass
+  with backlit cream at night, the pale counter-window well with ink on
+  paper) and a separate raised chevron key that says "press to choose".
+  It carries no gesture of its own; the wrapping `PopupMenuButton` owns
+  the tap. Both footer controls share `kConsoleControlHeight` (56 px).
 
 The grooves, wells, and readout windows are recessed into the surface they
 sit on: shadowed warm cream with ink numerals in light mode, warm
@@ -172,8 +186,8 @@ near-black with cream numerals in dark mode, so light mode stays paper and
 cream rather than sprouting reverse-type islands. The same rule covers media
 ghosts (empty frame, reference, and library placeholders): they follow the
 mode instead of always sitting on plum ink. Only the machined metal, the
-navy plaque, the hunter cost panel, and a switch's lit green side stay dark
-in light mode.
+plum Generate key (a button), and a switch's lit green side stay dark in
+light mode.
 
 ## 6. Shell anatomy
 
@@ -191,7 +205,7 @@ in light mode.
   720/1180 (library 2/3 columns), 620 (gutters), 880 (composer pairs
   the guidance accordions with the settings column, and the cost +
   destination row), 330 (Frame/Finish dropdowns stack instead of
-  sharing a row), 480 (composer footer stacks). A viewport under 950 px
+  sharing a row), 640 (composer footer stacks). A viewport under 950 px
   tall switches the create screen into a dense mode (no first-run
   guidance line, tighter gaps).
 
@@ -205,11 +219,13 @@ reads what you attach; `GenerationFormState.mode` is derived:
 3. any keyframes → **Image to video**
 4. otherwise → **Text to video**
 
-The current inference is always visible as a quiet chip beside the
-Generate button.
+The inference shows in the cost panel's summary line (`Text`, `Image`,
+`Video`…); the footer carries no mode chip and no readiness line — a ready
+console says nothing, and the lit Generate key is the signal.
 
-**Model & Provider plaque:** the navy stitched plaque opens a searchable
-picker. Every model row and provider heading carries a small star (brass
+**Model selector:** the brushed-steel input selector in the footer
+(`HardwareSelector`: machined bezel, recessed readout with provider and
+model, engraved chevron key) opens a searchable picker. Every model row and provider heading carries a small star (brass
 when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
@@ -284,10 +300,12 @@ Layout order:
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-9. Footer: claw + readiness line, mode chip, then the navy **model
-   plaque** (provider + model, opens the picker) directly before the plum
-   **Generate video** — under 480 px the plaque takes its own line above
-   the button.
+9. Footer: the brushed-steel **model selector** (provider + model in a
+   recessed readout, chevron key; opens the picker) directly before the
+   lit plum acrylic **Generate video** key, shoulder to shoulder at 56 px.
+   A status line appears only when something blocks a render (API key
+   missing, this device cannot run the local model). Under 640 px the
+   selector and the key stack, each spanning the composer.
 
 **Fold contract:** the heading and the whole composer, Generate button
 included, fit above the fold at 1440×900, with the Recent work header

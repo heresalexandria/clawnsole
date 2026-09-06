@@ -21,6 +21,7 @@ import 'formatters.dart';
 import 'generation_view_widgets.dart';
 import 'hardware.dart';
 import 'hardware_button.dart';
+import 'hardware_selector.dart';
 import 'inline_video.dart';
 import 'library_screen.dart';
 import 'media_picker_source.dart';
@@ -254,57 +255,57 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
 
   @override
   Widget build(BuildContext context) {
-    final ink = PanelSurface.navyLeather.ink(context.tokens);
-    return TexturePanel(
+    // The plaque is the receiver's input selector: a machined bezel around a
+    // lit readout window, with the chevron key that opens the menu.
+    final ink = HardwareSelector.inkOf(context);
+    return PopupMenuButton<String>(
       key: const ValueKey('provider-plaque'),
-      surface: PanelSurface.navyLeather,
-      stitched: true,
-      // Both paddings keep content at least 4px clear of the saddle stitch,
-      // whose thread sits about 9.6px inside the panel edge.
-      padding: _isShort(context)
-          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 14)
-          : const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
-      child: PopupMenuButton<String>(
-        tooltip: 'Choose provider and model',
-        onSelected: (value) => unawaited(_select(value)),
-        constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
-        itemBuilder: (context) => <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(
-            enabled: false,
-            padding: EdgeInsets.zero,
-            child: _ProviderSearchMenu(
-              controller: controller,
-              collapsedProviders: _collapsedProviders,
-              onExpandedChanged: (providerId, expanded) {
-                if (expanded) {
-                  _collapsedProviders.remove(providerId);
-                } else {
-                  _collapsedProviders.add(providerId);
-                }
-              },
-            ),
+      tooltip: 'Choose provider and model',
+      padding: EdgeInsets.zero,
+      borderRadius: BorderRadius.circular(12),
+      onSelected: (value) => unawaited(_select(value)),
+      constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        PopupMenuItem<String>(
+          enabled: false,
+          padding: EdgeInsets.zero,
+          child: _ProviderSearchMenu(
+            controller: controller,
+            collapsedProviders: _collapsedProviders,
+            onExpandedChanged: (providerId, expanded) {
+              if (expanded) {
+                _collapsedProviders.remove(providerId);
+              } else {
+                _collapsedProviders.add(providerId);
+              }
+            },
           ),
-        ],
+        ),
+      ],
+      child: HardwareSelector(
+        semanticHint: 'Opens the provider and model menu',
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Container(
-              width: 34,
-              height: 34,
+              width: 28,
+              height: 28,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: ink.accent),
-                color: ink.on.withValues(alpha: .06),
+                border: Border.all(
+                  color: ink.accent.withValues(alpha: .55),
+                  width: .9,
+                ),
               ),
               child: Icon(
                 _providerPlaqueIcon(controller.selectedProvider.id),
                 color: ink.accent,
-                size: 18,
+                size: 16,
                 semanticLabel: controller.selectedProvider.name,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 11),
             // Flexible bounds the names on narrow layouts so long provider or
             // model labels ellipsize instead of overflowing the card.
             Flexible(
@@ -320,6 +321,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
                       color: ink.on,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
+                      shadows: ink.glow,
                     ),
                   ),
                   Text(
@@ -331,8 +333,6 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            Icon(Icons.unfold_more_rounded, size: 17, color: ink.accent),
           ],
         ),
       ),
