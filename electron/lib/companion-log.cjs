@@ -37,15 +37,29 @@ class CompanionLog {
     if (!stream) return;
     stream.setEncoding("utf8");
     stream.on("data", (chunk) => this.write(label, chunk));
+    stream.on("error", () => this.write("shell", "companion-output-stream-error"));
   }
 
   write(label, text) {
-    const stamp = this.now().toISOString();
-    for (const line of String(text ?? "").trimEnd().split("\n")) {
-      if (!line) continue;
-      const entry = `${stamp} [${label}] ${line}\n`;
-      this.echo?.(entry);
-      this.#append(entry);
+    try {
+      const stamp = this.now().toISOString();
+      for (const line of String(text ?? "").trimEnd().split("\n")) {
+        if (!line) continue;
+        let entry = Buffer.from(`${stamp} [${label}] ${line}\n`);
+        // An unusually long native error must not bypass rotation's cap.
+        const limit = Math.min(this.maxBytes, 64 * 1024);
+        if (entry.length > limit) {
+          const suffix = Buffer.from("... [truncated]\n");
+          entry = limit > suffix.length
+            ? Buffer.concat([entry.subarray(0, limit - suffix.length), suffix])
+            : entry.subarray(0, limit);
+        }
+        try { this.echo?.(entry.toString("utf8")); } catch { /* Terminal may be closed. */ }
+        this.#append(entry);
+      }
+    } catch {
+      this.#disabled = true;
+      this.close();
     }
   }
 
@@ -67,13 +81,11 @@ class CompanionLog {
       if (this.#size > 0 && this.#size + bytes > this.maxBytes) this.#rotate();
       fs.writeSync(this.#descriptor, entry);
       this.#size += bytes;
-    } catch (error) {
+    } catch {
       // A log that cannot be written must never take the shell down with it.
       this.#disabled = true;
       this.close();
-      process.stderr.write(
-        `Clawnsole could not write ${this.file}: ${error.message}\n`,
-      );
+      // Do not fall back to another potentially closed output stream here.
     }
   }
 

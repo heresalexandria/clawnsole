@@ -38,7 +38,7 @@ function harness({ answers = [], now = () => 0, ...options } = {}) {
   return { actions, events, prompts };
 }
 
-const flush = () => new Promise((resolve) => setImmediate(resolve));
+const flush = () => new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
 
 test("a clean renderer exit is not a crash", async () => {
   const { actions, events, prompts } = harness();
@@ -59,6 +59,7 @@ test("the first renderer crash reloads the window silently", async () => {
 test("a crash loop asks the user to reload or quit", async () => {
   const { actions, events, prompts } = harness({ answers: [1] });
   events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
   events.emit("render-process-gone", {}, { reason: "oom" });
   await flush();
 
@@ -71,6 +72,7 @@ test("a crash loop asks the user to reload or quit", async () => {
 test("choosing Reload restores the crash budget", async () => {
   const { actions, events } = harness({ answers: [0] });
   events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
   events.emit("render-process-gone", {}, { reason: "crashed" });
   await flush();
   assert.deepEqual(actions, ["reload", "reload"]);
@@ -142,4 +144,112 @@ test("a window that recovers on its own closes its own prompt", async () => {
   events.emit("unresponsive");
   await flush();
   assert.equal(prompts.length, 2);
+});
+
+test("dialog rejection is contained and allows a later recovery prompt", async () => {
+  const { actions, events, prompts } = harness({
+    answers: [() => Promise.reject(new Error("native dialog closed")), 0],
+  });
+  events.emit("unresponsive");
+  await flush();
+  events.emit("unresponsive");
+  await flush();
+  assert.equal(prompts.length, 2);
+  assert.deepEqual(actions, []);
+});
+
+test("a stale hang answer cannot relaunch a recovered window", async () => {
+  let answer;
+  const { actions, events } = harness({
+    answers: [() => new Promise((resolve) => { answer = resolve; })],
+  });
+  events.emit("unresponsive");
+  events.emit("responsive");
+  answer({ response: 1 });
+  await flush();
+  assert.deepEqual(actions, []);
+});
+
+test("a crash invalidates the hang prompt before reloading", async () => {
+  let answer;
+  const { actions, events, prompts } = harness({
+    answers: [() => new Promise((resolve) => { answer = resolve; })],
+  });
+  events.emit("unresponsive");
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  assert.equal(prompts[0].signal.aborted, true);
+  answer({ response: 1 });
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+});
+
+test("duplicate crash events share one prompt and closed windows ignore its answer", async () => {
+  let answer;
+  const { actions, events, prompts } = harness({
+    answers: [() => new Promise((resolve) => { answer = resolve; })],
+  });
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  events.emit("render-process-gone", {}, { reason: "oom" });
+  assert.equal(prompts.length, 1);
+  events.emit("destroyed");
+  assert.equal(prompts[0].signal.aborted, true);
+  answer({ response: 1 });
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+});
+
+test("crash dialog rejection and logging failure do not escape recovery", async () => {
+  const { actions, events } = harness({
+    log: { write: () => { throw new Error("disk unavailable"); } },
+    answers: [() => Promise.reject(new Error("dialog unavailable"))],
+  });
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+});
+
+
+test("renderer navigation waits until native crash teardown returns", async () => {
+  const { actions, events } = harness();
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  assert.deepEqual(actions, [], "navigation must not re-enter native teardown");
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+});
+
+test("closing a window cancels an already queued automatic reload", async () => {
+  const { actions, events } = harness();
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  events.emit("destroyed");
+  await flush();
+  assert.deepEqual(actions, []);
+});
+
+test("a companion reload invalidates a pending crash answer without resetting the budget", async () => {
+  let answer;
+  const { actions, events, prompts } = harness({
+    answers: [() => new Promise((resolve) => { answer = resolve; }), 0],
+  });
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  events.emit("did-finish-load");
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  assert.equal(prompts.length, 1);
+
+  // The companion restarts and independently navigates the same window to
+  // its live URL. A late answer from the old crash dialog is now irrelevant.
+  events.emit("did-finish-load");
+  assert.equal(prompts[0].signal.aborted, true);
+  answer({ response: 1 });
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  assert.equal(prompts.length, 2, "loading alone must not reset the crash-loop budget");
+  assert.deepEqual(actions, ["reload", "reload"]);
 });

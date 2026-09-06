@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawn: spawnProcess } = require("node:child_process");
+const { runShellTask, writeLifecycle } = require("./lifecycle-log.cjs");
 const {
   findOpenPort: allocatePort,
   waitForServer: awaitServer,
@@ -29,6 +30,9 @@ class CompanionSupervisor {
   #healthFailures = 0;
   #healthTimer = null;
   #restartTimer = null;
+  #launchAbort = null;
+  #startPromise = null;
+  #healthInFlight = null;
 
   constructor({
     executable,
@@ -86,63 +90,130 @@ class CompanionSupervisor {
     return Boolean(this.#child && this.#child.exitCode === null);
   }
 
-  async start() {
-    this.url = await this.#launch(null);
-    return this.url;
+  start() {
+    if (this.#stopping) {
+      return Promise.reject(new Error("The companion supervisor has stopped."));
+    }
+    if (this.#startPromise) return this.#startPromise;
+    if (this.running) return Promise.resolve(this.url);
+    this.#startPromise = this.#launch(null).finally(() => {
+      this.#startPromise = null;
+    });
+    return this.#startPromise;
   }
 
   stop() {
     this.#stopping = true;
     this.#clearTimers();
+    this.#launchAbort?.abort(new Error("The companion launch was cancelled."));
     const child = this.#child;
     this.#child = null;
-    if (child && child.exitCode === null) child.kill("SIGTERM");
+    this.#kill(child, "SIGTERM");
   }
 
   async #launch(preferredPort) {
     this.#launching = true;
-    try {
+    const controller = new AbortController();
+    this.#launchAbort = controller;
+    let child = null;
+    const cancelled = new Promise((_resolve, reject) => {
+      controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true });
+    });
+    const launch = async () => {
       const port = await this.findOpenPort("127.0.0.1", { preferred: preferredPort });
+      controller.signal.throwIfAborted();
       const url = `http://127.0.0.1:${port}`;
-      const child = this.spawn(this.executable, this.argumentsFor(port), {
+      child = this.spawn(this.executable, this.argumentsFor(port), {
         cwd: this.cwd,
         env: this.env,
         stdio: ["pipe", "pipe", "pipe"],
       });
       this.#child = child;
       this.#port = port;
-      this.log?.attach(child.stdout, "out");
-      this.log?.attach(child.stderr, "error");
+      // A failed spawn emits 'error', often without 'exit'. Leaving this
+      // listener absent terminates Electron's main process.
+      child.on("error", () => {
+        if (this.#child !== child) return;
+        writeLifecycle(this.log, "companion-process-error");
+        if (this.#launching) {
+          controller.abort(new Error("Clawnsole could not start its local companion."));
+        } else {
+          this.#child = null;
+          this.#kill(child, "SIGTERM");
+          this.#recover("The companion reported a process error.");
+        }
+      });
       child.once("exit", (code, signal) => {
         if (this.#child !== child) return;
         this.#child = null;
-        this.log?.write("shell", `The companion exited (${signal || code}).`);
-        if (!this.#stopping && !this.#launching) {
+        writeLifecycle(this.log, "companion-exited", {
+          reason: signal ? "killed" : code === 0 ? "clean-exit" : "abnormal-exit",
+          exitCode: code,
+        });
+        if (this.#launching) {
+          controller.abort(new Error("The companion exited before it became ready."));
+        } else if (!this.#stopping) {
           this.#recover(`The companion exited (${signal || code}).`);
         }
       });
-
+      for (const [stream, label] of [[child.stdout, "out"], [child.stderr, "error"]]) {
+        stream?.on("error", () => writeLifecycle(this.log, "companion-output-stream-error"));
+        try { this.log?.attach(stream, label); } catch { /* Logging is best effort. */ }
+      }
+      // Keep the pipe listener after end(): a late EPIPE must not become an
+      // unhandled EventEmitter error while the app is running or closing.
+      child.stdin.on("error", () => {
+        if (this.#child === child && this.#launching) {
+          controller.abort(new Error("Clawnsole could not initialize its local secure storage."));
+        }
+      });
       await new Promise((resolve, reject) => {
-        const failed = () => reject(
-          new Error("Clawnsole could not initialize its local secure storage."),
-        );
-        child.stdin.once("error", failed);
-        child.stdin.end(this.bootstrapLine, () => {
-          child.stdin.removeListener("error", failed);
-          resolve();
+        child.stdin.end(this.bootstrapLine, (error) => {
+          if (error) reject(new Error("Clawnsole could not initialize its local secure storage."));
+          else resolve();
         });
       });
-
+      controller.signal.throwIfAborted();
       await this.waitForServer(`${url}/health`, {
         isProcessAlive: () => this.#child === child && child.exitCode === null,
       });
+      controller.signal.throwIfAborted();
+      if (this.#child !== child || child.exitCode !== null) {
+        throw new Error("The companion exited before it became ready.");
+      }
+      this.url = url;
       this.#startedAt = this.now();
       this.#healthFailures = 0;
       this.#scheduleHealth();
+      writeLifecycle(this.log, "companion-ready");
       return url;
+    };
+    try {
+      return await Promise.race([launch(), cancelled]);
+    } catch (error) {
+      controller.abort(error);
+      if (child && this.#child === child) {
+        this.#child = null;
+        this.#kill(child, "SIGTERM");
+      }
+      throw error;
     } finally {
+      if (this.#launchAbort === controller) this.#launchAbort = null;
       this.#launching = false;
     }
+  }
+
+  #kill(child, signal) {
+    if (!child || child.exitCode !== null) return;
+    try {
+      child.kill(signal);
+    } catch {
+      writeLifecycle(this.log, "companion-stop-failed");
+    }
+  }
+
+  #notify(name, value) {
+    void runShellTask(this.log, `companion-${name}-callback-failed`, () => this[name](value));
   }
 
   #recover(reason) {
@@ -157,11 +228,11 @@ class CompanionSupervisor {
       this.#restarts = 0;
     }
     if (this.#restarts >= this.maxRestarts) {
-      this.onFailed(reason);
+      this.#notify("onFailed", reason);
       return;
     }
     this.#restarts += 1;
-    this.log?.write(
+    this.#write(
       "shell",
       `${reason} Restarting in ${this.restartDelayMs}ms `
         + `(attempt ${this.#restarts} of ${this.maxRestarts}).`,
@@ -179,11 +250,11 @@ class CompanionSupervisor {
       this.url = await this.#launch(this.#port);
     } catch (error) {
       if (this.#stopping) return;
-      this.onFailed(`${reason} ${error.message}`);
+      this.#notify("onFailed", `${reason} ${error.message}`);
       return;
     }
-    this.log?.write("shell", `The companion restarted at ${this.url}.`);
-    this.onRestarted({ url: this.url, changedUrl: this.url !== previousUrl });
+    this.#write("shell", `The companion restarted at ${this.url}.`);
+    this.#notify("onRestarted", { url: this.url, changedUrl: this.url !== previousUrl });
   }
 
   #scheduleHealth() {
@@ -197,30 +268,37 @@ class CompanionSupervisor {
   }
 
   async #pingHealth() {
-    if (this.#stopping || this.#launching || !this.#child) return;
+    if (this.#stopping || this.#launching || !this.#child || this.#healthInFlight === this.#child) return;
     const child = this.#child;
+    this.#healthInFlight = child;
     try {
       const response = await this.fetch(`${this.url}/health`, {
         signal: AbortSignal.timeout(this.healthTimeoutMs),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      this.#healthFailures = 0;
+      if (this.#child === child && !this.#stopping) this.#healthFailures = 0;
       return;
     } catch (error) {
       if (this.#child !== child || this.#stopping) return;
       this.#healthFailures += 1;
-      this.log?.write(
+      this.#write(
         "shell",
         `Health check failed (${this.#healthFailures} of `
           + `${this.healthFailuresBeforeRestart}): ${error.message}`,
       );
       if (this.#healthFailures < this.healthFailuresBeforeRestart) return;
+    } finally {
+      if (this.#healthInFlight === child) this.#healthInFlight = null;
     }
     // The process is alive but no longer answering, so treat it as an exit.
     this.#healthFailures = 0;
     this.#child = null;
-    if (child.exitCode === null) child.kill("SIGKILL");
+    this.#kill(child, "SIGKILL");
     this.#recover("The companion stopped answering health checks.");
+  }
+
+  #write(label, message) {
+    try { this.log?.write(label, message); } catch { /* Logging is best effort. */ }
   }
 
   #clearHealthTimer() {

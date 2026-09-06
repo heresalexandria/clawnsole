@@ -11,10 +11,12 @@ import 'models.dart';
 /// deliberately preserves unknown fields instead of round-tripping an older
 /// model schema over a newer library.
 Future<void> writeLibraryTextAtomically(File file, String contents) async {
+  String? previousContents;
   if (await file.exists()) {
+    previousContents = await file.readAsString();
     Object? current;
     try {
-      current = jsonDecode(await file.readAsString());
+      current = jsonDecode(previousContents);
     } on FormatException {
       // Malformed metadata remains eligible for the existing backup recovery.
     }
@@ -40,11 +42,18 @@ Future<void> writeLibraryTextAtomically(File file, String contents) async {
       );
     }
   }
-  await writeTextAtomically(
-    file,
-    contents,
-    prepareBackup: _sanitizedLibraryRecovery,
-  );
+  // Polls, reconciliations and draft callbacks can save an unchanged snapshot.
+  // Compare with the actual disk contents, not a process cache: another app
+  // instance or a library restore may have replaced it since the last write.
+  // Keep the previous *different* revision as recovery insurance as well as
+  // avoiding two whole-file writes and flushes on every no-op save.
+  if (previousContents != contents) {
+    await writeTextAtomically(
+      file,
+      contents,
+      prepareBackup: _sanitizedLibraryRecovery,
+    );
+  }
   final name = file.uri.pathSegments.last;
   await for (final entry in file.parent.list()) {
     if (entry is! File) continue;

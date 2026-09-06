@@ -102,3 +102,26 @@ test("an unwritable log disables itself instead of taking the shell down", (t) =
   assert.doesNotThrow(() => log.write("out", "still running"));
   assert.doesNotThrow(() => log.close());
 });
+
+test("a single huge line cannot exceed either rotated log cap", (t) => {
+  const directory = temporaryDirectory(t);
+  const log = openLog(t, directory, { maxBytes: 200 });
+  log.write("error", "x".repeat(10_000));
+  log.write("error", "y".repeat(10_000));
+  for (const name of [LOG_FILE, PREVIOUS_LOG_FILE]) {
+    assert.ok(fs.statSync(path.join(directory, name)).size <= 200);
+    assert.match(fs.readFileSync(path.join(directory, name), "utf8"), /truncated/);
+  }
+});
+
+test("a broken terminal echo and output stream cannot crash logging", (t) => {
+  const log = openLog(t, temporaryDirectory(t), {
+    echo: () => { throw new Error("terminal closed"); },
+  });
+  const stream = new Readable({ read() {} });
+  log.attach(stream, "out");
+  assert.doesNotThrow(() => log.write("out", "still saved"));
+  assert.doesNotThrow(() => stream.emit("error", new Error("pipe closed")));
+  assert.match(fs.readFileSync(log.file, "utf8"), /still saved/);
+  assert.match(fs.readFileSync(log.file, "utf8"), /output-stream-error/);
+});

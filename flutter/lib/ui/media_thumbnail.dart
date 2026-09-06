@@ -3,46 +3,64 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/async_value_cache.dart';
 import '../core/gateway.dart';
 import '../core/models.dart';
 import 'media_duration_loader.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
 
-/// Per-process memo of in-flight and completed loads, bounded so a long
-/// session browsing a large library does not retain every asset's bytes for
-/// its lifetime: the least recently touched entries fall out first.
-class _BoundedJobs<T> {
-  _BoundedJobs({this.capacity = 240});
+// Encoded image bytes need their own budget: Flutter's decoded image cache
+// does not account for byte arrays retained by our completed Futures.
+final _assetImageJobs = AsyncValueCache<Uint8List>(
+  maximumWeight: 32 * 1024 * 1024,
+  weightOf: (bytes) => bytes.buffer.lengthInBytes,
+);
+final _videoThumbnailJobs = AsyncValueCache<Uint8List?>(
+  maximumWeight: 8 * 1024 * 1024,
+  weightOf: (bytes) => bytes?.buffer.lengthInBytes ?? 0,
+);
+final _videoMetadataJobs = AsyncValueCache<VideoSourceMetadata?>(
+  maximumWeight: 240,
+  weightOf: (_) => 1,
+);
+final _mediaDurationJobs = AsyncValueCache<double?>(
+  maximumWeight: 240,
+  weightOf: (_) => 1,
+);
 
-  final int capacity;
-  final Map<String, T> _entries = <String, T>{};
-
-  T? operator [](String key) {
-    final value = _entries.remove(key);
-    if (value != null) _entries[key] = value;
-    return value;
+class _PreviewMemoryObserver with WidgetsBindingObserver {
+  @override
+  void didHaveMemoryPressure() {
+    _assetImageJobs.clear();
+    _videoThumbnailJobs.clear();
+    _videoMetadataJobs.clear();
+    _mediaDurationJobs.clear();
   }
-
-  void operator []=(String key, T value) {
-    _entries.remove(key);
-    _entries[key] = value;
-    while (_entries.length > capacity) {
-      _entries.remove(_entries.keys.first);
-    }
-  }
-
-  T? remove(String key) => _entries.remove(key);
 }
 
-final _BoundedJobs<Future<Uint8List>> _assetImageJobs =
-    _BoundedJobs<Future<Uint8List>>();
-final _BoundedJobs<Future<Uint8List?>> _videoThumbnailJobs =
-    _BoundedJobs<Future<Uint8List?>>();
-final _BoundedJobs<Future<VideoSourceMetadata?>> _videoMetadataJobs =
-    _BoundedJobs<Future<VideoSourceMetadata?>>();
-final _BoundedJobs<Future<double?>> _mediaDurationJobs =
-    _BoundedJobs<Future<double?>>();
+final _previewMemoryObserver = _PreviewMemoryObserver();
+WidgetsBinding? _observedBinding;
+final _gatewayCacheKeys = Expando<int>('media-preview-gateway');
+int _nextGatewayCacheKey = 0;
+
+int _gatewayCacheKey(AppGateway gateway) =>
+    _gatewayCacheKeys[gateway] ??= ++_nextGatewayCacheKey;
+
+Object _previewFingerprint(MediaThumbnail input) => (
+  _gatewayCacheKey(input.gateway),
+  input.kind,
+  input.reference?.kind,
+  input.reference?.value,
+  input.thumbnailReference?.kind,
+  input.thumbnailReference?.value,
+  input.thumbnailBytes == null ? null : identityHashCode(input.thumbnailBytes),
+  input.source,
+  input.localPath,
+  input.bytes == null ? null : identityHashCode(input.bytes),
+  input.mimeType,
+  input.mediaUriRevision,
+);
 
 /// Decodes at the tile's pixel width instead of the source's: a 1080p frame
 /// filling a 200 px tile otherwise costs a full-size decode on every scroll
@@ -109,112 +127,83 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   Future<Uint8List>? _imageBytes;
   Future<_VideoThumbnailResult?>? _videoThumbnail;
 
-  String get _fingerprint => <Object?>[
-    widget.kind.name,
-    widget.reference?.kind,
-    widget.reference?.value,
-    widget.thumbnailReference?.kind,
-    widget.thumbnailReference?.value,
-    widget.thumbnailBytes == null
-        ? null
-        : identityHashCode(widget.thumbnailBytes),
-    widget.source,
-    widget.localPath,
-    widget.bytes == null ? null : identityHashCode(widget.bytes),
-    widget.mediaUriRevision,
-  ].join(':');
+  int _loadToken = 0;
 
   @override
   void initState() {
     super.initState();
+    if (!identical(_observedBinding, WidgetsBinding.instance)) {
+      _observedBinding?.removeObserver(_previewMemoryObserver);
+      _observedBinding = WidgetsBinding.instance
+        ..addObserver(_previewMemoryObserver);
+    }
     _load();
   }
 
   @override
   void didUpdateWidget(covariant MediaThumbnail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final oldFingerprint = <Object?>[
-      oldWidget.kind.name,
-      oldWidget.reference?.kind,
-      oldWidget.reference?.value,
-      oldWidget.thumbnailReference?.kind,
-      oldWidget.thumbnailReference?.value,
-      oldWidget.thumbnailBytes == null
-          ? null
-          : identityHashCode(oldWidget.thumbnailBytes),
-      oldWidget.source,
-      oldWidget.localPath,
-      oldWidget.bytes == null ? null : identityHashCode(oldWidget.bytes),
-      oldWidget.mediaUriRevision,
-    ].join(':');
-    if (oldFingerprint != _fingerprint) _load();
-  }
-
-  void _load() {
-    _imageBytes = null;
-    _videoThumbnail = null;
-    if (widget.kind == MediaReferenceKind.image &&
-        widget.bytes == null &&
-        widget.reference?.isLocal == true) {
-      _imageBytes = _readAsset(widget.reference!);
-    } else if (widget.kind == MediaReferenceKind.video) {
-      _videoThumbnail = _loadVideoThumbnail();
-      if (widget.onVideoMetadata != null) unawaited(_loadVideoMetadata());
-    } else if (widget.kind == MediaReferenceKind.audio &&
-        widget.onMediaDuration != null) {
-      unawaited(_loadMediaDuration());
+    if (_previewFingerprint(oldWidget) != _previewFingerprint(widget) ||
+        (oldWidget.onVideoMetadata == null && widget.onVideoMetadata != null) ||
+        (oldWidget.onMediaDuration == null && widget.onMediaDuration != null)) {
+      _load();
     }
   }
 
-  Future<Uint8List> _readAsset(AssetReference reference) {
-    final key = '${reference.kind}:${reference.value}';
-    final existing = _assetImageJobs[key];
-    if (existing != null) return existing;
-    late final Future<Uint8List> job;
-    job = widget.gateway.readAsset(reference).catchError((Object error) {
-      if (identical(_assetImageJobs[key], job)) _assetImageJobs.remove(key);
-      throw error;
-    });
-    _assetImageJobs[key] = job;
-    return job;
+  bool _isCurrent(int token) => mounted && token == _loadToken;
+
+  void _load() {
+    final token = ++_loadToken;
+    final input = widget;
+    _imageBytes = null;
+    _videoThumbnail = null;
+    if (input.kind == MediaReferenceKind.image &&
+        input.bytes == null &&
+        input.reference?.isLocal == true) {
+      _imageBytes = _readAsset(input.gateway, input.reference!);
+    } else if (input.kind == MediaReferenceKind.video) {
+      _videoThumbnail = _loadVideoThumbnail(input, token);
+      if (input.onVideoMetadata != null) {
+        unawaited(_loadVideoMetadata(input, token));
+      }
+    } else if (input.kind == MediaReferenceKind.audio &&
+        input.onMediaDuration != null) {
+      unawaited(_loadMediaDuration(input, token));
+    }
   }
 
-  Future<_VideoThumbnailResult?> _loadVideoThumbnail() async {
-    final providedThumbnail = widget.thumbnailBytes;
+  Future<Uint8List> _readAsset(AppGateway gateway, AssetReference reference) =>
+      _assetImageJobs.load((
+        _gatewayCacheKey(gateway),
+        reference.kind,
+        reference.value,
+      ), () => gateway.readAsset(reference));
+
+  Future<_VideoThumbnailResult?> _loadVideoThumbnail(
+    MediaThumbnail input,
+    int token,
+  ) async {
+    final providedThumbnail = input.thumbnailBytes;
     if (providedThumbnail != null && providedThumbnail.isNotEmpty) {
       return _VideoThumbnailResult(providedThumbnail);
     }
-    final retainedThumbnail = widget.thumbnailReference;
+    final retainedThumbnail = input.thumbnailReference;
     if (retainedThumbnail != null) {
       try {
-        return _VideoThumbnailResult(await _readAsset(retainedThumbnail));
+        final bytes = await _readAsset(input.gateway, retainedThumbnail);
+        if (!_isCurrent(token)) return null;
+        return _VideoThumbnailResult(bytes);
       } on Object {
         // A stale preview must not hide media that can still make a new frame.
       }
     }
-    final key = _fingerprint;
-    var job = _videoThumbnailJobs[key];
-    if (job == null) {
-      late final Future<Uint8List?> created;
-      created = _generateVideoThumbnail()
-          .then((bytes) {
-            if (bytes == null && identical(_videoThumbnailJobs[key], created)) {
-              _videoThumbnailJobs.remove(key);
-            }
-            return bytes;
-          })
-          .catchError((Object error) {
-            if (identical(_videoThumbnailJobs[key], created)) {
-              _videoThumbnailJobs.remove(key);
-            }
-            throw error;
-          });
-      _videoThumbnailJobs[key] = created;
-      job = created;
-    }
+    if (!_isCurrent(token)) return null;
     try {
-      final bytes = await job;
-      if (bytes == null) return null;
+      final bytes = await _videoThumbnailJobs.load((
+        _previewFingerprint(input),
+        input.frameLoader == null ? null : identityHashCode(input.frameLoader),
+      ), () => _generateVideoThumbnail(input));
+      if (!_isCurrent(token) || bytes == null) return null;
       widget.onThumbnail?.call(bytes);
       return _VideoThumbnailResult(bytes);
     } on Object {
@@ -222,112 +211,74 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     }
   }
 
-  Future<Uint8List?> _generateVideoThumbnail() async {
-    final uri = await _mediaUri();
+  Future<Uint8List?> _generateVideoThumbnail(MediaThumbnail input) async {
+    final uri = await _mediaUri(input);
     if (uri == null) return null;
-    return (widget.frameLoader ?? loadVideoFrame)(
+    return (input.frameLoader ?? loadVideoFrame)(
       uri,
       const Duration(milliseconds: 250),
     );
   }
 
-  Future<void> _loadVideoMetadata() async {
-    Uri? uri;
+  Future<void> _loadVideoMetadata(MediaThumbnail input, int token) async {
     try {
-      uri = await _mediaUri();
+      final uri = await _mediaUri(input);
+      if (!_isCurrent(token) || uri == null) return;
+      final metadata = await _videoMetadataJobs.load((
+        _previewFingerprint(input),
+        input.metadataLoader == null
+            ? null
+            : identityHashCode(input.metadataLoader),
+      ), () => (input.metadataLoader ?? loadVideoMetadata)(uri));
+      if (!_isCurrent(token) || metadata == null) return;
+      widget.onVideoMetadata?.call(metadata);
     } on Object {
-      // Metadata is a best-effort enhancement launched unawaited; a failing
-      // URI resolution (a disconnected Drive, a missing file) must not become
-      // an unhandled async error.
-      return;
+      // URI lookup, platform probes and callbacks are best-effort work. A
+      // disconnected source must not escape an unawaited background probe.
     }
-    if (uri == null) return;
-    final key = _fingerprint;
-    var job = _videoMetadataJobs[key];
-    if (job == null) {
-      late final Future<VideoSourceMetadata?> created;
-      created = (widget.metadataLoader ?? loadVideoMetadata)(uri)
-          .then((metadata) {
-            if (metadata == null &&
-                identical(_videoMetadataJobs[key], created)) {
-              _videoMetadataJobs.remove(key);
-            }
-            return metadata;
-          })
-          .catchError((Object error) {
-            if (identical(_videoMetadataJobs[key], created)) {
-              _videoMetadataJobs.remove(key);
-            }
-            return null;
-          });
-      _videoMetadataJobs[key] = created;
-      job = created;
-    }
-    final metadata = await job;
-    if (!mounted || metadata == null) return;
-    widget.onVideoMetadata?.call(metadata);
   }
 
-  Future<void> _loadMediaDuration() async {
-    Uri? uri;
+  Future<void> _loadMediaDuration(MediaThumbnail input, int token) async {
     try {
-      uri = await _mediaUri();
+      final uri = await _mediaUri(input);
+      if (!_isCurrent(token) || uri == null) return;
+      final duration = await _mediaDurationJobs.load((
+        _previewFingerprint(input),
+        input.durationLoader == null
+            ? null
+            : identityHashCode(input.durationLoader),
+      ), () => (input.durationLoader ?? loadMediaDuration)(uri));
+      if (!_isCurrent(token) || duration == null) return;
+      widget.onMediaDuration?.call(duration);
     } on Object {
-      // Same contract as _loadVideoMetadata: never leak an unhandled error
-      // from an unawaited best-effort probe.
-      return;
+      // Same contract as video metadata: never leak an unhandled async error.
     }
-    if (uri == null) return;
-    final key = _fingerprint;
-    var job = _mediaDurationJobs[key];
-    if (job == null) {
-      late final Future<double?> created;
-      created = (widget.durationLoader ?? loadMediaDuration)(uri)
-          .then((duration) {
-            if (duration == null &&
-                identical(_mediaDurationJobs[key], created)) {
-              _mediaDurationJobs.remove(key);
-            }
-            return duration;
-          })
-          .catchError((Object error) {
-            if (identical(_mediaDurationJobs[key], created)) {
-              _mediaDurationJobs.remove(key);
-            }
-            return null;
-          });
-      _mediaDurationJobs[key] = created;
-      job = created;
-    }
-    final duration = await job;
-    if (!mounted || duration == null) return;
-    widget.onMediaDuration?.call(duration);
   }
 
-  Future<Uri?> _mediaUri() async {
-    final loader = widget.mediaUriLoader;
+  Future<Uri?> _mediaUri(MediaThumbnail input) async {
+    final loader = input.mediaUriLoader;
     if (loader != null) return loader();
-    final path = widget.localPath?.trim() ?? '';
+    final path = input.localPath?.trim() ?? '';
     if (path.isNotEmpty) {
       final parsed = Uri.tryParse(path);
       if (kIsWeb && parsed?.hasScheme == true) return parsed;
       return Uri.file(path);
     }
-    final reference = widget.reference;
+    final reference = input.reference;
     if (reference != null) {
-      if (reference.isLocal) return widget.gateway.assetUri(reference);
+      if (reference.isLocal) return input.gateway.assetUri(reference);
       final remote = Uri.tryParse(reference.value);
       if (remote?.scheme == 'https') {
-        return widget.gateway.mediaUri(reference.value);
+        return input.gateway.mediaUri(reference.value);
       }
     }
-    final source = widget.source?.trim() ?? '';
+    final source = input.source?.trim() ?? '';
     final remote = Uri.tryParse(source);
-    if (remote?.scheme == 'https') return widget.gateway.mediaUri(source);
-    final bytes = widget.bytes;
+    if (remote?.scheme == 'https') return input.gateway.mediaUri(source);
+    final bytes = input.bytes;
     if (bytes != null && bytes.isNotEmpty) {
       return Uri.parse(
-        'data:${widget.mimeType ?? (widget.kind == MediaReferenceKind.audio ? 'audio/mpeg' : 'video/mp4')};base64,${base64Encode(bytes)}',
+        'data:${input.mimeType ?? (input.kind == MediaReferenceKind.audio ? 'audio/mpeg' : 'video/mp4')};base64,${base64Encode(bytes)}',
       );
     }
     return null;
@@ -370,6 +321,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       return const _ThumbnailPlaceholder(icon: Icons.image_outlined);
     }
     return FutureBuilder<Uint8List>(
+      key: ValueKey(_previewFingerprint(widget)),
       future: imageBytes,
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.isEmpty) {
@@ -409,6 +361,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
       return const _ThumbnailPlaceholder(icon: Icons.movie_outlined);
     }
     return FutureBuilder<_VideoThumbnailResult?>(
+      key: ValueKey(_previewFingerprint(widget)),
       future: thumbnail,
       initialData:
           widget.thumbnailBytes != null && widget.thumbnailBytes!.isNotEmpty
@@ -432,6 +385,9 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
                 fit: widget.fit,
                 gaplessPlayback: true,
                 cacheWidth: _decodeWidthFor(context, constraints),
+                errorBuilder: (_, _, _) => const _ThumbnailPlaceholder(
+                  icon: Icons.broken_image_outlined,
+                ),
               ),
             ),
             Center(

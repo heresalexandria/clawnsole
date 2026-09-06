@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:clawnsole/core/video_cache.dart';
+import 'package:clawnsole/core/asset_stream.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -106,10 +107,10 @@ void main() {
 
   test('concurrent puts for one key share a single download', () async {
     final subject = cache();
-    var pulls = 0;
+    var completed = 0;
     Stream<List<int>> counted() async* {
-      pulls += 1;
       yield List<int>.filled(3, 1);
+      completed += 1;
     }
 
     final first = subject.put('shared', '.mp4', counted());
@@ -117,8 +118,30 @@ void main() {
     expect(identical(first, second), isTrue);
     await first;
     await second;
-    expect(pulls, 1);
+    // Cancellation may enter an async generator before its first yield; only
+    // the winning stream is consumed to completion and published.
+    expect(completed, 1);
   });
+
+  test(
+    'a duplicate response is cancelled while the original finishes',
+    () async {
+      final subject = cache();
+      final original = StreamController<List<int>>();
+      var duplicateCancelled = false;
+      final duplicate = StreamController<List<int>>(
+        onCancel: () => duplicateCancelled = true,
+      );
+      final first = subject.put('shared', '.mp4', original.stream);
+      final second = subject.put('shared', '.mp4', duplicate.stream);
+      expect(identical(first, second), isTrue);
+      original.add([1, 2]);
+      await original.close();
+      await first;
+      expect(duplicateCancelled, isTrue);
+      await duplicate.close();
+    },
+  );
 
   test('progress listeners observe streamed bytes and completion', () async {
     final subject = cache();
@@ -176,4 +199,84 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test(
+    'truncated replacement keeps the previous complete cached film',
+    () async {
+      final subject = cache();
+      await subject.put('film', '.mp4', bytes(4, 9));
+
+      await expectLater(
+        subject.put('film', '.mov', bytes(2), expectedLength: 4),
+        throwsA(isA<AssetTransferException>()),
+      );
+
+      expect(await (await subject.lookup('film'))!.readAsBytes(), [9, 9, 9, 9]);
+      expect(temporary.listSync(), hasLength(1));
+      await subject.put('film', '.mov', bytes(4), expectedLength: 4);
+      expect((await subject.lookup('film'))!.path, endsWith('.mov'));
+      expect(temporary.listSync(), hasLength(1));
+    },
+  );
+
+  test('unknown-length oversized downloads cancel and clean staging', () async {
+    final subject = VideoCache(
+      directory: () async => temporary,
+      transferMaxBytes: 4,
+    );
+    var cancelled = false;
+    Stream<List<int>> oversized() async* {
+      try {
+        yield [1, 2, 3];
+        yield [4, 5, 6];
+        fail('Oversized stream was not cancelled');
+      } finally {
+        cancelled = true;
+      }
+    }
+
+    await expectLater(
+      subject.put('oversized', '.mp4', oversized()),
+      throwsA(isA<AssetTransferException>()),
+    );
+    expect(cancelled, isTrue);
+    expect(subject.isDownloading('oversized'), isFalse);
+    expect(temporary.listSync(), isEmpty);
+  });
+
+  test('stalled downloads time out and free the key for a retry', () async {
+    final subject = VideoCache(
+      directory: () async => temporary,
+      idleTimeout: const Duration(milliseconds: 30),
+    );
+    var cancelled = false;
+    final stream = StreamController<List<int>>(
+      onCancel: () => cancelled = true,
+    );
+    await expectLater(
+      subject.put('stalled', '.mp4', stream.stream),
+      throwsA(isA<TimeoutException>()),
+    );
+    expect(cancelled, isTrue);
+    expect(temporary.listSync(), isEmpty);
+    await subject.put('stalled', '.mp4', bytes(2));
+    expect(await subject.lookup('stalled'), isNotNull);
+    await stream.close();
+  });
+
+  test(
+    'throwing progress listeners cannot fail a download or other listeners',
+    () async {
+      final subject = cache();
+      var completed = false;
+      subject.addProgressListener(
+        'film',
+        (_, _, _) => throw StateError('disposed'),
+      );
+      subject.addProgressListener('film', (_, _, done) => completed = done);
+      await subject.put('film', '.mp4', bytes(2));
+      expect(completed, isTrue);
+      expect(await subject.lookup('film'), isNotNull);
+    },
+  );
 }
