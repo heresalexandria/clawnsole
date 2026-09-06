@@ -283,6 +283,7 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
         ),
       ],
       child: HardwareSelector(
+        height: consoleControlHeight(context),
         semanticHint: 'Opens the provider and model menu',
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -5289,6 +5290,7 @@ class _ComposerFooter extends StatelessWidget {
     // inert — the lit key is the signal, so there is no spinner.
     final generate = HardwareLitButton(
       key: const ValueKey<String>('generate-key'),
+      height: consoleControlHeight(context),
       icon: const ClawMark(size: 18, color: Colors.white),
       label: controller.selectedModel.outputKind == GenerationOutputKind.image
           ? 'Generate image'

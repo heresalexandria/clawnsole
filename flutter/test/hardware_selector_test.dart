@@ -265,4 +265,51 @@ void main() {
     );
     handle.dispose();
   });
+
+  testWidgets('grows with large text so a two-line readout still fits', (
+    tester,
+  ) async {
+    Widget readout() => Builder(
+      builder: (context) => HardwareSelector(
+        height: consoleControlHeight(context),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Black Forest Labs', style: TextStyle(fontSize: 13)),
+            Text('FLUX.3 Video', style: TextStyle(fontSize: 10.5)),
+          ],
+        ),
+      ),
+    );
+    Widget scaled(double scale) => MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.dark),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(scale)),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: Align(alignment: Alignment.topLeft, child: readout()),
+      ),
+    );
+
+    // Up to a modest scale the faceplate keeps its drawn height…
+    await tester.pumpWidget(scaled(1.2));
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSize(find.byType(HardwareSelector)).height,
+      kConsoleControlHeight,
+    );
+
+    // …and past it the whole plate grows instead of the readout overflowing.
+    await tester.pumpWidget(scaled(1.5));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(
+      tester.getSize(find.byType(HardwareSelector)).height,
+      greaterThan(kConsoleControlHeight),
+    );
+  });
 }

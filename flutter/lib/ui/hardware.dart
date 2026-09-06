@@ -55,6 +55,17 @@ const double kHardwareTouchTarget = 44;
 /// like the input selector and transport key on one receiver.
 const double kConsoleControlHeight = 56;
 
+/// [kConsoleControlHeight] under this context's text scaling.
+///
+/// The selector's readout holds two lines of type, which fit the drawn
+/// window up to about 1.25× text scale; past that the whole faceplate grows
+/// with the type, and the Generate key beside it grows the same amount so
+/// the two still stand shoulder to shoulder.
+double consoleControlHeight(BuildContext context) {
+  final scale = MediaQuery.textScalerOf(context).scale(1);
+  return kConsoleControlHeight * math.max(1, scale / 1.25);
+}
+
 /// Whether this build runs on a finger-first platform.
 ///
 /// Only phones and tablets grow their hit areas and click their detents;
