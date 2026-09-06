@@ -1,7 +1,12 @@
 # Screenplay authoring
 
 A compact single-row header contains the Plaintext / Screenplay selector, an
-icon-only Clear control, the character count, and an icon-only Expand control.
+icon-only Clear control, the used/max character count, and an icon-only Expand
+control. A 3-pixel bar below the count fills green, then orange at 80% and red
+at 95%, with a gray unused track. The count includes added aesthetic direction.
+Its tooltip and accessibility label give the remaining or exceeded allowance;
+when a provider publishes no maximum, the editor's 50,000-character cap is shown
+and explicitly identified as an editor limit.
 Below the header, a single-line toolbar contains Copy, AI rewrite, and, on
 compatible models, Characters.
 It can scroll horizontally at large accessibility text sizes. In screenplay mode

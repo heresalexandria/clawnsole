@@ -24,6 +24,7 @@ import 'library_screen.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
 import 'panels.dart';
+import 'prompt_character_counter.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
@@ -1005,7 +1006,7 @@ class _ComposerState extends State<_Composer> {
               prompt: form.prompt,
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(controller),
-              maxLength: controller.selectedModel.maxPromptCharacters,
+              maxLength: controller.promptCharacterLimit,
               onChanged: (value) =>
                   controller.updateForm((form) => form.prompt = value),
             ),
@@ -1454,8 +1455,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                           references: _promptReferenceOptions(controller),
                           expands: true,
                           autofocus: true,
-                          maxLength:
-                              controller.selectedModel.maxPromptCharacters,
+                          maxLength: controller.promptCharacterLimit,
                           onChanged: (value) => controller.updateForm(
                             (form) => form.prompt = value,
                           ),
@@ -1483,28 +1483,11 @@ class _PromptCharacterCounter extends StatelessWidget {
     listenable: controller,
     builder: (context, _) {
       final model = controller.selectedModel;
-      final limit = model.maxPromptCharacters;
-      final typed = controller.generationPrompt.length;
-      final nearLimit = limit != null && typed >= limit * .95;
-      return Tooltip(
-        message: limit == null
-            ? '${model.label} does not publish a prompt limit'
-            : '${model.label} accepts up to $limit characters',
-        child: Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: Text(
-            limit == null ? '$typed' : '$typed / $limit',
-            key: const ValueKey('prompt-character-limit'),
-            style: TextStyle(
-              color: nearLimit
-                  ? context.colors.error
-                  : context.colors.onSurfaceVariant,
-              fontSize: 10.5,
-              fontWeight: nearLimit ? FontWeight.w700 : FontWeight.w500,
-              fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
-            ),
-          ),
-        ),
+      return PromptCharacterCounter(
+        used: controller.generationPrompt.length,
+        limit: controller.promptCharacterLimit,
+        modelLabel: model.label,
+        isProviderLimit: (model.maxPromptCharacters ?? 0) > 0,
       );
     },
   );

@@ -298,8 +298,9 @@ continuous with the composer (owner rejected a plum-filled active tab as
 modest hit areas and never stretch the tab past its neighbours.
 Each tab is a complete, independent draft — Direction, provider and model,
 every setting, attachments, and the save-to folder — so several films can be
-worked on side by side. A "+" tab opens a blank draft that inherits only the
-active tab's provider, model, and folder; the × on a tab closes it (the last
+worked on side by side. A "+" tab opens a blank draft using the active tab's
+provider, model, and folder plus the last-used controls for that provider/model;
+the × on a tab closes it (the last
 tab is replaced by a blank one); long-press or double-tap renames. Labels
 derive from the first words of the prompt until renamed. Reuse and Enhance
 fill the active tab when it is still pristine and otherwise open a new tab.
@@ -317,6 +318,18 @@ can still restore from their source generation. Unretained uploads are
 session-only: the rail identifies them before the app closes. Save failures
 stay visible beneath the rail with a Retry action; an unreadable workspace
 is not overwritten by a new session.
+
+Last-used controls are separate from draft content: ratio, duration and Auto,
+resolution, audio, frame rate, draft quality, safety, timing, and upscale controls
+are remembered per provider/model. Blank tabs leave Direction, format, seed,
+references, aesthetic selection, and source media empty. Editing only an older
+tab's prompt does not replace newer remembered controls. Explicit control edits
+and Generate update defaults; choosing another model restores its own defaults
+and checks them against current capabilities. Settings writes are coalesced while
+dragging controls and flushed on tab actions, backgrounding, and disposal. The
+versioned scalar records travel through the existing preferences and encrypted
+settings sync. Migration reads meaningful older drafts and generation history
+without displacing settings still arriving from another device.
 
 Closing a tab keeps the ten most recent recovery snapshots. The restore
 control beside the new-tab key opens a named list of closed drafts. Recovery

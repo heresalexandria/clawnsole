@@ -14,6 +14,7 @@ import '../core/aesthetic_reference.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
+import '../core/generation_preferences.dart';
 import '../core/google_drive.dart';
 import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
@@ -33,6 +34,7 @@ part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
 part 'app_controller_submission.dart';
 part 'app_controller_delivery.dart';
+part 'app_controller_generation_preferences.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -488,6 +490,8 @@ class AppController extends ChangeNotifier {
   final bool _mobileTestBuild;
 
   final List<ComposerTab> _composerTabs = <ComposerTab>[];
+  final Map<String, GenerationPreferences> _generationPreferences = {};
+  Timer? _generationPreferencesSaveTimer;
   String _activeComposerTabId = '';
 
   /// Where draft writes land. It is [activeComposerTab] except inside
@@ -747,18 +751,11 @@ class AppController extends ChangeNotifier {
   ComposerTab? _composerTabById(String id) =>
       _composerTabs.where((tab) => tab.id == id).firstOrNull;
 
-  /// Opens a blank workspace. It inherits only the current tab's provider,
-  /// model, and save-to folders; the direction and everything attached start
-  /// empty.
+  /// Opens a blank workspace using the last-used settings for its provider and
+  /// model. The direction and everything attached start empty.
   ComposerTab addComposerTab({bool activate = true}) {
     final source = activeComposerTab;
-    final tab = ComposerTab(
-      id: _uid(),
-      providerId: source.providerId,
-      modelId: source.modelId,
-      localFolderId: source.localFolderId,
-      driveFolderId: source.driveFolderId,
-    );
+    final tab = _blankComposerTab(source);
     _composerTabs.add(tab);
     if (activate) {
       _activeComposerTabId = tab.id;
@@ -800,13 +797,7 @@ class AppController extends ChangeNotifier {
     }
     final wasActive = closed.id == _activeComposerTabId;
     if (_composerTabs.isEmpty) {
-      final replacement = ComposerTab(
-        id: _uid(),
-        providerId: closed.providerId,
-        modelId: closed.modelId,
-        localFolderId: closed.localFolderId,
-        driveFolderId: closed.driveFolderId,
-      );
+      final replacement = _blankComposerTab(closed);
       _composerTabs.add(replacement);
       _activeComposerTabId = replacement.id;
     } else if (wasActive) {
@@ -931,6 +922,7 @@ class AppController extends ChangeNotifier {
   /// are the moments a half-typed draft must already be on disk.
   /// [onlyIfPending] skips the write when nothing has changed since the last.
   void _flushComposerTabsSave({bool onlyIfPending = false}) {
+    _flushGenerationPreferencesSave();
     final pending = _composerTabsSaveTimer?.isActive ?? false;
     _composerTabsSaveTimer?.cancel();
     _composerTabsSaveTimer = null;
@@ -1420,6 +1412,8 @@ class AppController extends ChangeNotifier {
       providerById(selectedProviderId);
   VideoModelDefinition get selectedModel =>
       modelById(selectedProviderId, selectedModelId);
+
+  int get promptCharacterLimit => selectedModel.promptEditorCharacterLimit;
   VideoModelDefinition get referenceModel => selectedModel;
   int get keyframeLimit => selectedModel.maxKeyframesFor(
     form.mode == VideoMode.t2v ? VideoMode.i2v : form.mode,
@@ -2492,7 +2486,10 @@ class AppController extends ChangeNotifier {
       if (_disposed) return;
       // From here on the strip may be written back over what was stored.
       _composerTabsRestored = true;
-      if (reopened) return;
+      if (reopened) {
+        _seedMissingGenerationPreferences();
+        return;
+      }
       if (generations.isNotEmpty) {
         final latest = generations.first;
         await _restoreGenerationSettings(latest, cacheOnly: true);
@@ -2500,6 +2497,9 @@ class AppController extends ChangeNotifier {
       } else {
         notifyListeners();
       }
+      // Startup carry-over can copy another model's most recent generation
+      // into the selected tab. Seed defaults from actual history identities.
+      _seedMissingGenerationPreferences(includeTabs: false);
     } on Object {
       // Local presentation restore is best effort and must never become an
       // unhandled asynchronous startup failure.
@@ -2620,6 +2620,9 @@ class AppController extends ChangeNotifier {
           );
     _announceNewlyReady(previouslyReady);
     if (restorePreferences) {
+      _generationPreferences
+        ..clear()
+        ..addAll(value.preferences.generationPreferences);
       themeMode = value.preferences.themeMode;
       section = value.preferences.activeSection;
       libraryFilter = value.preferences.libraryFilter;
@@ -2692,7 +2695,13 @@ class AppController extends ChangeNotifier {
       // A restored model must constrain the form exactly like a selected one,
       // or a session can reopen with settings the model does not support
       // (for example Auto duration on a fixed-duration model).
-      if (selectedModelId != previousModelId) _normalizeFormForModel();
+      if (!_composerTabsRestored) {
+        _restoreGenerationPreferences(_draftTab);
+        _normalizeFormForModel();
+      } else if (selectedModelId != previousModelId) {
+        _normalizeFormForModel();
+      }
+      if (_composerTabsRestored) _seedMissingGenerationPreferences();
     }
     if (libraryFolderView != libraryFolderAll &&
         libraryFolderView != libraryFolderUnfiled &&
@@ -2724,6 +2733,7 @@ class AppController extends ChangeNotifier {
     required int startedAtRevision,
     bool restorePreferences = false,
     bool reloadIfSuperseded = false,
+    int? expectedPreferenceRevision,
   }) async {
     if (_snapshotRevision != startedAtRevision) {
       if (!reloadIfSuperseded) return false;
@@ -2732,7 +2742,13 @@ class AppController extends ChangeNotifier {
       if (_disposed || _snapshotRevision != reloadRevision) return false;
     }
     if (_disposed) return false;
-    _apply(value, restorePreferences: restorePreferences);
+    _apply(
+      value,
+      restorePreferences:
+          restorePreferences &&
+          (expectedPreferenceRevision == null ||
+              _preferenceRevision == expectedPreferenceRevision),
+    );
     return true;
   }
 
@@ -2827,19 +2843,30 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _savePreferences(AppPreferences preferences) {
+    _generationPreferencesSaveTimer?.cancel();
+    _generationPreferencesSaveTimer = null;
+    preferences = preferences.copyWith(
+      generationPreferences: Map.of(_generationPreferences),
+    );
     _preferenceRevision += 1;
     final operation = _preferenceWrites.then((_) async {
       try {
-        _apply(await gateway.setPreferences(preferences));
-        await _retryPendingSettingsVaultSync();
+        final saved = await gateway.setPreferences(preferences);
+        if (!_disposed) {
+          _apply(saved);
+          await _retryPendingSettingsVaultSync();
+        }
       } on Object {
         // Mobile and companion Drive tokens are short-lived. The client can
         // still look connected when a preference write (tab selection is one)
         // is the first request to discover expiration. Silently replace the
         // session and retry the idempotent preference write once.
-        if (!await resumeGoogleDrive(force: true)) rethrow;
-        _apply(await gateway.setPreferences(preferences));
-        await _retryPendingSettingsVaultSync();
+        if (_disposed || !await resumeGoogleDrive(force: true)) rethrow;
+        final saved = await gateway.setPreferences(preferences);
+        if (!_disposed) {
+          _apply(saved);
+          await _retryPendingSettingsVaultSync();
+        }
       }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
@@ -4657,7 +4684,9 @@ class AppController extends ChangeNotifier {
   }
 
   void updateForm(void Function(GenerationFormState value) update) {
+    final previousSettings = _generationSettings(_draftTab);
     update(form);
+    final settingsEdited = previousSettings != _generationSettings(_draftTab);
     if (form.prompt.trim().isEmpty) {
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases.clear();
@@ -4676,6 +4705,7 @@ class AppController extends ChangeNotifier {
     if (!selectedModel.supportsAutoDuration) form.autoDuration = false;
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
+    if (settingsEdited) _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -4750,6 +4780,7 @@ class AppController extends ChangeNotifier {
     providerRetentionAcknowledgements:
         snapshot?.preferences.providerRetentionAcknowledgements ??
         const <String, String>{},
+    generationPreferences: Map.of(_generationPreferences),
   );
 
   int _validDuration(int value) {
@@ -4816,10 +4847,20 @@ class AppController extends ChangeNotifier {
   Future<void> selectProvider(String providerId) async {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
+    final previousKey = generationPreferenceKey(
+      selectedProviderId,
+      selectedModelId,
+    );
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
     selectedModelId = provider.defaultModel.id;
     _selectCompatibleModel();
+    if (generationPreferenceKey(selectedProviderId, selectedModelId) !=
+        previousKey) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     _scheduleComposerTabsSave();
@@ -4829,8 +4870,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> selectModel(String modelId) async {
+    final previousModelId = selectedModelId;
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedModelId = modelById(selectedProviderId, modelId).id;
+    if (selectedModelId != previousModelId) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -4844,12 +4891,18 @@ class AppController extends ChangeNotifier {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
     final providerChanged = selectedProviderId != provider.id;
+    final previousModelId = selectedModelId;
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
     selectedModelId = modelById(provider.id, modelId).id;
     // An unknown model id falls back to the provider default, which must then
     // defer to whichever model accepts the current form.
     if (selectedModelId != modelId) _selectCompatibleModel();
+    if (providerChanged || selectedModelId != previousModelId) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     _scheduleComposerTabsSave();
@@ -4872,7 +4925,7 @@ class AppController extends ChangeNotifier {
     try {
       await _savePreferences(_preferences());
     } on Object catch (error) {
-      showNotice(_message(error));
+      if (!_disposed) showNotice(_message(error));
     }
   }
 
@@ -4887,17 +4940,19 @@ class AppController extends ChangeNotifier {
       form.generateAudio = true;
     }
     if (!model.supportsDraft) form.draft = false;
+    if (form.draft) form.resolution = 'hd';
     if (!model.supportsTimedKeyframes) form.exactTiming = false;
     if (!model.referenceTasks.contains(form.referenceTask)) {
       form.referenceTask = MediaReferenceTask.reference;
     }
     if (!model.supportsSeed) form.seed = null;
-    if (model.upscaleUsesResolutionTargets && form.upscaleCreativity <= 1) {
-      form.upscaleCreativity = 50;
-    } else if (model.isUpscaler &&
-        !model.upscaleUsesResolutionTargets &&
-        form.upscaleCreativity > 1) {
-      form.upscaleCreativity = 1;
+    form.safetyTolerance = form.safetyTolerance.clamp(0, 4);
+    if (model.isUpscaler) {
+      form.upscaleFactor = form.upscaleFactor.clamp(1.5, 3).toDouble();
+      form.upscaleCreativity = form.upscaleCreativity.clamp(
+        0,
+        model.upscaleUsesResolutionTargets ? 100 : 1,
+      );
     }
     if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     final resolutions = availableResolutions;
@@ -5806,6 +5861,7 @@ class AppController extends ChangeNotifier {
         return frame;
       }).toList();
     }
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5818,6 +5874,7 @@ class AppController extends ChangeNotifier {
           ? frame.copyWith(seconds: form.durationSeconds.toDouble())
           : frame;
     }).toList();
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5831,6 +5888,7 @@ class AppController extends ChangeNotifier {
     if (!value && form.referenceTask == MediaReferenceTask.edit) return;
     if (form.autoDuration == value) return;
     form.autoDuration = value;
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5838,6 +5896,7 @@ class AppController extends ChangeNotifier {
 
   void setFrameRate(int value) {
     form.frameRate = value.clamp(1, 6);
+    _rememberGenerationPreferences(_draftTab);
     _scheduleComposerTabsSave();
     notifyListeners();
   }
@@ -6991,11 +7050,12 @@ class AppController extends ChangeNotifier {
   Future<void> connectGoogleDrive(String folderName) async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       _apply(
         await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
-        restorePreferences: true,
+        restorePreferences: _preferenceRevision == preferenceRevision,
       );
       await syncComposerWorkspace();
       showNotice('Google Drive connected and synced.');
@@ -7010,11 +7070,12 @@ class AppController extends ChangeNotifier {
   Future<void> disconnectGoogleDrive() async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       _apply(
         await (gateway as GoogleDriveGateway).disconnectGoogleDrive(),
-        restorePreferences: true,
+        restorePreferences: _preferenceRevision == preferenceRevision,
       );
       showNotice('Drive disconnected on this device. Cloud files were kept.');
     } on Object catch (error) {
@@ -7034,6 +7095,7 @@ class AppController extends ChangeNotifier {
     bool restorePreferences = false,
     int? expectedPreferenceRevision,
   }) async {
+    expectedPreferenceRevision ??= _preferenceRevision;
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return false;
     if ((!force && googleDriveConnected) ||
         !googleDriveConnection.isConfigured) {
@@ -7052,10 +7114,8 @@ class AppController extends ChangeNotifier {
         value,
         startedAtRevision: snapshotRevision,
         reloadIfSuperseded: true,
-        restorePreferences:
-            restorePreferences &&
-            (expectedPreferenceRevision == null ||
-                _preferenceRevision == expectedPreferenceRevision),
+        restorePreferences: restorePreferences,
+        expectedPreferenceRevision: expectedPreferenceRevision,
       );
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
@@ -7071,6 +7131,7 @@ class AppController extends ChangeNotifier {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
     final snapshotRevision = _snapshotRevision;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
@@ -7079,6 +7140,7 @@ class AppController extends ChangeNotifier {
         startedAtRevision: snapshotRevision,
         reloadIfSuperseded: true,
         restorePreferences: true,
+        expectedPreferenceRevision: preferenceRevision,
       );
       await syncComposerWorkspace();
       showNotice('Google Drive data refreshed.');
@@ -7093,12 +7155,16 @@ class AppController extends ChangeNotifier {
   Future<String?> setupSettingsVault(String passphrase) async {
     if (gateway is! SettingsVaultGateway || settingsVaultBusy) return null;
     settingsVaultBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       final result = await (gateway as SettingsVaultGateway).setupSettingsVault(
         passphrase,
       );
-      _apply(result.snapshot, restorePreferences: true);
+      _apply(
+        result.snapshot,
+        restorePreferences: _preferenceRevision == preferenceRevision,
+      );
       showNotice('Encrypted settings sync is ready.');
       return result.recoveryCode;
     } on Object catch (error) {
@@ -7148,9 +7214,13 @@ class AppController extends ChangeNotifier {
   ) async {
     if (gateway is! SettingsVaultGateway || settingsVaultBusy) return false;
     settingsVaultBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
-      _apply(await action(), restorePreferences: true);
+      _apply(
+        await action(),
+        restorePreferences: _preferenceRevision == preferenceRevision,
+      );
       showNotice(success);
       return true;
     } on Object catch (error) {
@@ -7926,6 +7996,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _flushGenerationPreferencesSave();
     _disposed = true;
     _queuedRetentions.clear();
     unawaited(_backgroundActivity.setPendingWork(false));

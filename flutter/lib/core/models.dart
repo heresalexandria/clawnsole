@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'composer_tabs.dart';
+import 'generation_preferences.dart';
 import 'generation_status.dart';
 
 String providerCredentialAcknowledgementId(
@@ -1383,6 +1384,7 @@ class AppPreferences {
     this.favoriteModels = const <String>[],
     this.favoriteProviders = const <String>[],
     this.providerRetentionAcknowledgements = const <String, String>{},
+    this.generationPreferences = const <String, GenerationPreferences>{},
   });
 
   static const int defaultLocalVideoCacheMb = 100;
@@ -1442,6 +1444,9 @@ class AppPreferences {
   /// Credential-bound warning choices, cached locally and synced with settings.
   final Map<String, String> providerRetentionAcknowledgements;
 
+  /// Last-used controls per [generationPreferenceKey], without draft content.
+  final Map<String, GenerationPreferences> generationPreferences;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1470,6 +1475,7 @@ class AppPreferences {
     List<String>? favoriteModels,
     List<String>? favoriteProviders,
     Map<String, String>? providerRetentionAcknowledgements,
+    Map<String, GenerationPreferences>? generationPreferences,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1507,6 +1513,7 @@ class AppPreferences {
     providerRetentionAcknowledgements:
         providerRetentionAcknowledgements ??
         this.providerRetentionAcknowledgements,
+    generationPreferences: generationPreferences ?? this.generationPreferences,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1542,6 +1549,11 @@ class AppPreferences {
       'providerRetentionAcknowledgements': _sortedStringMap(
         providerRetentionAcknowledgements,
       ),
+    if (generationPreferences.isNotEmpty)
+      'generationPreferences': <String, Object?>{
+        for (final key in generationPreferences.keys.toList()..sort())
+          key: generationPreferences[key]!.toJson(),
+      },
   };
 
   /// Reads a favorites list, dropping non-strings, blanks, and repeats while
@@ -1554,6 +1566,21 @@ class AppPreferences {
         if (item is String && item.trim().isNotEmpty && seen.add(item.trim()))
           item.trim(),
     ];
+  }
+
+  static Map<String, GenerationPreferences> _generationPreferencesMap(
+    Object? value,
+  ) {
+    if (value is! Map<Object?, Object?>) {
+      return const <String, GenerationPreferences>{};
+    }
+    return Map<String, GenerationPreferences>.unmodifiable({
+      for (final entry in value.entries)
+        if (entry.key case final String key when key.trim().isNotEmpty)
+          if (GenerationPreferences.tryFromJson(entry.value)
+              case final GenerationPreferences controls)
+            key: controls,
+    });
   }
 
   factory AppPreferences.fromJson(Map<String, Object?> json) {
@@ -1626,6 +1653,9 @@ class AppPreferences {
       favoriteProviders: _favoriteList(json['favoriteProviders']),
       providerRetentionAcknowledgements: _stringMap(
         json['providerRetentionAcknowledgements'],
+      ),
+      generationPreferences: _generationPreferencesMap(
+        json['generationPreferences'],
       ),
     );
   }
