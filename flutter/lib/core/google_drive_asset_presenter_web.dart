@@ -45,6 +45,9 @@ class _WebGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   }
 
   @override
+  Future<Uri?> adopt(AssetReference reference, Uri localFile) async => null;
+
+  @override
   Future<void> clear() async {
     for (final url in _urls.values) {
       web.URL.revokeObjectURL(url);

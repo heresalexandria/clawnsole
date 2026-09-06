@@ -529,8 +529,29 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     return _presenter.lookup(reference);
   }
 
+  /// Keeps this device's bytes for an asset it just published by moving the
+  /// staged original into the local cache under the Drive id, so the film
+  /// (or preview) never has to be downloaded back from Drive here. Returns
+  /// null, leaving [localFile] in place, when the asset is not cacheable or
+  /// the cache is off.
+  Future<Uri?> adoptPublishedAsset(
+    AssetReference reference,
+    Uri localFile,
+  ) async {
+    if (reference.kind != 'drive' || !_isLocallyCacheable(reference)) {
+      return null;
+    }
+    try {
+      return await _presenter.adopt(reference, localFile);
+    } on Object {
+      // Keeping a local copy is an optimization; the durable upload stands.
+      return null;
+    }
+  }
+
   /// Re-uploads referenced Drive assets that disappeared remotely when their
   /// bytes still exist in this device's bounded cache.
+
   ///
   /// This repairs the publication/pruning race in older builds without
   /// putting media in history JSON. The device that generated or previously

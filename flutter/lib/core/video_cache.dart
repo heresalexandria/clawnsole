@@ -106,6 +106,52 @@ class VideoCache {
     return operation;
   }
 
+  /// Moves an already-complete file on this disk into the cache under [key]
+  /// and returns the cached file. Returns null without touching [source] when
+  /// the cache is off, so the caller's file stays where it was.
+  ///
+  /// This is how a film that this device staged and then published to Drive
+  /// keeps playing from local bytes: the staged original becomes the cache
+  /// entry for its Drive id by a rename, with no second copy of the media and
+  /// no download of what this device just uploaded. A copy already landing
+  /// for [key] (an in-flight download) is used instead.
+  Future<File?> adopt(String key, String extension, File source) async {
+    if (!isValidKey(key)) {
+      throw ArgumentError.value(key, 'key', 'is not a valid cache key');
+    }
+    if (!enabled) return null;
+    final pending = _inFlight[key];
+    if (pending != null) {
+      try {
+        return await pending;
+      } on Object {
+        // The download failed; the staged original can still be adopted.
+      }
+    }
+    final directory = await _cacheDirectory();
+    final target = File(
+      '${directory.path}${Platform.pathSeparator}$key$extension',
+    );
+    final stale = await _find(key);
+    File adopted;
+    try {
+      adopted = await source.rename(target.path);
+    } on FileSystemException {
+      // A different volume cannot rename across; copy, then release the
+      // original so the bytes are not kept twice.
+      adopted = await source.copy(target.path);
+      await _delete(source);
+    }
+    if (stale != null && stale.path != adopted.path) await _delete(stale);
+    try {
+      await adopted.setLastModified(DateTime.now());
+    } on FileSystemException {
+      // Recency is best-effort on a read-only volume.
+    }
+    await _sweep(<String>{key});
+    return adopted;
+  }
+
   Future<void> _cancelUnused(Stream<List<int>> bytes) async {
     try {
       await bytes.listen(null).cancel();

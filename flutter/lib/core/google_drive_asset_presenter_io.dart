@@ -118,8 +118,22 @@ class IoGoogleDriveAssetPresenter implements GoogleDriveAssetPresenter {
   }
 
   @override
+  Future<Uri?> adopt(AssetReference reference, Uri localFile) async {
+    _requireValidId(reference);
+    final cache = _cacheFor(reference);
+    if (cache == null || !cache.enabled) return null;
+    final adopted = await cache.adopt(
+      reference.value,
+      _extension(reference),
+      File.fromUri(localFile),
+    );
+    return adopted?.uri;
+  }
+
+  @override
   Future<void> clear() async {
     await _videoCache?.clear();
+
     if (!identical(_videoCache, _thumbnailCache)) {
       await _thumbnailCache?.clear();
     }

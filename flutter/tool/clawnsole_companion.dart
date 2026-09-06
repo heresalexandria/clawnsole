@@ -698,22 +698,42 @@ class CompanionHybridStore {
 
   /// One background pass: publishes staged Drive media, then swaps records
   /// over inside the serialized mutate queue so it cannot race other writes.
-  Future<bool> _flushDriveUploads() async {
-    if (!hybrid.isDriveConnected) return true;
-    final result = await hybrid.uploadQueuedDriveAssets(await read());
-    if (result.replacements.isNotEmpty) {
-      await mutate<void>(
-        (current) => StoreChange<void>(
-          HybridDataStore.applyDriveAssetReplacements(
-            current,
-            result.replacements,
-          ),
-          null,
-        ),
-      );
-    }
-    return result.failures == 0;
-  }
+  /// What is pending comes from the local mirror, so a Drive hiccup never
+  /// fails the pass before an upload starts, and the staged originals end
+  /// up in the Drive media cache instead of being downloaded back.
+  Future<bool> _flushDriveUploads() => runDriveUploadPass(
+    hybrid: hybrid,
+    ledger: _uploadLedger,
+    readPending: readLocal,
+    swap: (replacements) => mutate<void>(
+      (current) => StoreChange<void>(
+        HybridDataStore.applyDriveAssetReplacements(current, replacements),
+        null,
+      ),
+    ),
+    restage: restageMissingResult,
+    log: stderr.writeln,
+  );
+
+  final DriveUploadLedger _uploadLedger = DriveUploadLedger();
+
+  /// Fetches a ready result again from its provider link when the staged
+  /// copy this device was about to publish has gone missing. Installed by
+  /// the companion app, which owns the media client.
+  DriveResultRestager? restageMissingResult;
+
+  /// The Drive file a staged local id became once this process published
+  /// it. Media routes use this to keep serving a client that still holds the
+  /// staged id from a record it read before the swap.
+  AssetReference? publishedAssetFor(String stagedId) =>
+      _uploadLedger.resolve(stagedId);
+
+  /// Runs one upload pass now, outside the pump's schedule.
+  Future<bool> flushDriveUploads() => _flushDriveUploads();
+
+  /// Stops the background upload pump. The production store lives for the
+  /// whole process; tests call this so retry timers do not outlive them.
+  void dispose() => _driveUploadPump.dispose();
 
   /// Publishes staged Drive media left over from an interrupted upload pass.
   void _resumeDeferredDriveUploads(StoredData data) {
@@ -934,9 +954,12 @@ class CompanionApp {
        _mediaClientFactory = mediaClientFactory ?? PublicMediaClient.new,
        _videoCache = videoCache,
        _thumbnailCache = thumbnailCache,
-       _referenceVideoNormalizer = referenceVideoNormalizer;
+       _referenceVideoNormalizer = referenceVideoNormalizer {
+    _store.restageMissingResult ??= _restageMissingResult;
+  }
 
   final CompanionHybridStore _store;
+
   final ProviderApiRouter _providers;
   final PromptRewriteRouter _rewrite;
   final Map<String, String> _fallbackApiKeys;
@@ -2360,8 +2383,22 @@ class CompanionApp {
     }
   }
 
+  /// Fetches a ready result again from its provider link when the staged
+  /// copy this device was about to publish to Drive has gone missing, so the
+  /// record stops waiting for bytes nobody has. The upload pass swaps the
+  /// record to the fresh staged copy and publishes it on its next run.
+  Future<AssetReference?> _restageMissingResult(
+    Generation owner,
+    AssetReference staged,
+  ) async {
+    final url = owner.resultUrl?.trim();
+    if (url == null || url.isEmpty) return null;
+    return _retainResult(url, staged.label, owner.storage);
+  }
+
   /// Retains a ready result through its previously captured delivery link
   /// after a status check failed. `stalled` distinguishes a timed-out
+
   /// download — which says nothing about the link itself and must keep the
   /// generation retryable — from a definitive link failure.
   Future<({AssetReference? asset, bool stalled})> _downloadRetainedResult(
@@ -3103,7 +3140,11 @@ class CompanionApp {
       );
     }
     final data = await _store.readLocal();
-    final reference = _findAsset(data.generations, data.savedReferences, id);
+    // A client can still hold a staged id from a record it read before the
+    // upload pass swapped it to a Drive file; that film is in the cache now.
+    final reference =
+        _findAsset(data.generations, data.savedReferences, id) ??
+        _store.publishedAssetFor(id);
     if (reference == null) {
       throw const ProviderException(
         'The local asset was not found.',
@@ -3111,6 +3152,7 @@ class CompanionApp {
       );
     }
     passiveMediaContentType(reference.contentType);
+
     // Retained asset ids are immutable: replacing content always mints a new
     // id, so the browser may privately reuse a delivered film for a day
     // instead of refetching it on every playback. `private` keeps user media
@@ -3119,33 +3161,43 @@ class CompanionApp {
       HttpHeaders.cacheControlHeader,
       'private, max-age=86400, immutable',
     );
+    var target = reference;
     try {
-      if (reference.kind == 'local') {
-        final file = await _store.localAssetFile(reference);
+      if (target.kind == 'local') {
+        final file = await _store.localAssetFile(target);
         if (await file.exists()) {
-          return await _serveAssetFile(request, reference, file);
+          return await _serveAssetFile(request, target, file);
         }
-        // Staged on another device: serve the record's still-live provider
-        // delivery instead, exactly as the Drive 404 path below does, and
-        // otherwise say plainly what the viewer is waiting for.
-        final fallback = _resultFallbackUrl(data, reference.value);
-        if (fallback != null) return await _serveRemoteMedia(request, fallback);
-        _missingLocalAsset(data, reference.value);
+        // This device published the staged original and moved it into the
+        // Drive media cache, but the record the client read still names the
+        // staged id: serve the same bytes under the Drive id.
+        final published = _store.publishedAssetFor(target.value);
+        if (published == null) {
+          // Staged on another device: serve the record's still-live provider
+          // delivery instead, exactly as the Drive 404 path below does, and
+          // otherwise say plainly what the viewer is waiting for.
+          final fallback = _resultFallbackUrl(data, target.value);
+          if (fallback != null) {
+            return await _serveRemoteMedia(request, fallback);
+          }
+          _missingLocalAsset(data, target.value);
+        }
+        target = published;
       }
-      if (reference.kind == 'drive' && _isVideoAsset(reference)) {
+      if (target.kind == 'drive' && _isVideoAsset(target)) {
         final cache = await _syncedVideoCache(data);
         if (cache != null && cache.enabled) {
-          return await _driveVideoAsset(request, reference, cache);
+          return await _driveVideoAsset(request, target, cache);
         }
       }
       return await _serveAssetBytes(
         request,
-        reference,
-        await _store.readAsset(reference),
+        target,
+        await _store.readAsset(target),
       );
     } on GoogleDriveException catch (error) {
       final fallback = error.status == 404
-          ? _resultFallbackUrl(data, reference.value)
+          ? _resultFallbackUrl(data, target.value)
           : null;
       if (fallback != null) return _serveRemoteMedia(request, fallback);
       rethrow;
@@ -3161,7 +3213,9 @@ class CompanionApp {
       throw const ProviderException('An asset id is required.', status: 400);
     }
     final data = await _store.readLocal();
-    final reference = _findAsset(data.generations, data.savedReferences, id);
+    var reference =
+        _findAsset(data.generations, data.savedReferences, id) ??
+        _store.publishedAssetFor(id);
     if (reference == null) {
       throw const ProviderException(
         'The retained asset was not found.',
@@ -3170,9 +3224,15 @@ class CompanionApp {
     }
     if (reference.kind != 'drive') {
       final file = await _store.localAssetFile(reference);
-      // Media staged on another device is a cache miss here, not a fault.
-      if (!await file.exists()) _missingLocalAsset(data, reference.value);
-      return _serveAssetFile(request, reference, file);
+      if (await file.exists()) {
+        return _serveAssetFile(request, reference, file);
+      }
+      // The staged original moved into the Drive cache when this device
+      // published it. Media staged on another device is a cache miss here,
+      // not a fault.
+      final published = _store.publishedAssetFor(reference.value);
+      if (published == null) _missingLocalAsset(data, reference.value);
+      reference = published;
     }
     final cache = _isVideoAsset(reference)
         ? await _syncedVideoCache(data)
@@ -3282,7 +3342,9 @@ class CompanionApp {
       throw const ProviderException('An asset id is required.', status: 400);
     }
     final data = await _store.readLocal();
-    final reference = _findAsset(data.generations, data.savedReferences, id);
+    final reference =
+        _findAsset(data.generations, data.savedReferences, id) ??
+        _store.publishedAssetFor(id);
     if (reference == null) {
       throw const ProviderException(
         'The local asset was not found.',
@@ -3290,17 +3352,28 @@ class CompanionApp {
       );
     }
     final cache = await _syncedVideoCache(data);
-    final queued =
-        reference.kind == 'drive' &&
+    var queued = false;
+    if (reference.kind == 'drive' &&
         _isVideoAsset(reference) &&
         cache != null &&
-        cache.enabled;
-    if (queued) await _fillDriveVideo(reference, cache);
+        cache.enabled) {
+      // Background warming never evicts: a full cache keeps what the studio
+      // played or published most recently, and this film downloads on tap.
+      queued =
+          await cache.lookup(reference.value) != null ||
+          await _prefetchFits(cache, reference);
+      if (queued) await _fillDriveVideo(reference, cache);
+    }
     return _json(request.response, 200, <String, Object?>{
       'ok': true,
       'queued': queued,
       'cached': queued,
     });
+  }
+
+  Future<bool> _prefetchFits(VideoCache cache, AssetReference reference) async {
+    final size = reference.bytes ?? 0;
+    return size <= 0 || await cache.usedBytes() + size <= cache.maxBytes;
   }
 
   Future<void> _serveAssetFile(

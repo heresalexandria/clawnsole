@@ -279,4 +279,48 @@ void main() {
       expect(await subject.lookup('film'), isNotNull);
     },
   );
+
+  test(
+    'adopt moves a finished file in under the key without copying',
+    () async {
+      final subject = cache(maxBytes: 10);
+      final staging = await Directory('${temporary.path}/staged').create();
+      final source = File('${staging.path}/film-staged.mp4');
+      await source.writeAsBytes(List<int>.filled(4, 3));
+
+      final adopted = await subject.adopt('drive-film', '.mp4', source);
+      expect(adopted?.path, endsWith('drive-film.mp4'));
+      expect(await adopted!.readAsBytes(), List<int>.filled(4, 3));
+      expect(await source.exists(), isFalse, reason: 'moved, not copied');
+      expect((await subject.lookup('drive-film'))?.path, adopted.path);
+      expect(await subject.usedBytes(), 4);
+    },
+  );
+
+  test('adopt replaces an older copy and sweeps the cap around it', () async {
+    final subject = cache(maxBytes: 10);
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    await (await subject.put('elder', '.mp4', bytes(4))).setLastModified(old);
+    await subject.put('drive-film', '.mp4', bytes(4, 1));
+    final source = File('${temporary.path}/fresh.mp4');
+    await source.writeAsBytes(List<int>.filled(8, 9));
+
+    final adopted = await subject.adopt('drive-film', '.mp4', source);
+    expect(await adopted!.readAsBytes(), List<int>.filled(8, 9));
+    expect(await subject.lookup('drive-film'), isNotNull);
+    expect(
+      await subject.lookup('elder'),
+      isNull,
+      reason: 'the adopted file is protected; the least recent one goes',
+    );
+    expect(await subject.usedBytes(), 8);
+  });
+
+  test('a disabled cache leaves the file where it was', () async {
+    final subject = cache(maxBytes: 0);
+    final source = File('${temporary.path}/keep.mp4');
+    await source.writeAsBytes(List<int>.filled(2, 1));
+    expect(await subject.adopt('drive-film', '.mp4', source), isNull);
+    expect(await source.exists(), isTrue);
+  });
 }

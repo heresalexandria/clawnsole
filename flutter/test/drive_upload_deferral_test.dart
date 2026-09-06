@@ -204,6 +204,212 @@ void main() {
     expect(local.assets.containsKey(localAsset.value), isFalse);
   });
 
+  test('a pass remembers its uploads when the record swap fails', () async {
+    final (hybrid, _, drive) = await connectedHybrid();
+    final staged = await hybrid.writeAsset(
+      Uint8List.fromList(<int>[9, 9, 9]),
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+      storage: LibraryStorage.drive,
+    );
+    await hybrid.write(
+      StoredData(
+        savedReferences: <SavedReference>[reference('pending', asset: staged)],
+      ),
+    );
+    final ledger = DriveUploadLedger();
+    var swaps = 0;
+    Future<bool> pass() => runDriveUploadPass(
+      hybrid: hybrid,
+      ledger: ledger,
+      swap: (replacements) async {
+        swaps += 1;
+        if (swaps == 1) {
+          // Drive dropped the session between the upload and the swap.
+          throw StateError(
+            'Connect Google Drive before changing Drive generations.',
+          );
+        }
+        await hybrid.write(
+          HybridDataStore.applyDriveAssetReplacements(
+            await hybrid.read(),
+            replacements,
+          ),
+        );
+      },
+    );
+
+    await expectLater(pass(), throwsStateError);
+    expect(drive.assets, hasLength(1));
+    expect(ledger.published.keys, <String>[staged.value]);
+
+    expect(await pass(), isTrue);
+    expect(
+      drive.assets,
+      hasLength(1),
+      reason: 'the retry swaps the record without uploading the film again',
+    );
+    expect(ledger.published, isEmpty);
+    final published = (await hybrid.read()).savedReferences.single.asset;
+    expect(published.kind, 'drive');
+    expect(
+      ledger.resolve(staged.value),
+      published,
+      reason: 'a client still holding the staged id can be pointed at the film',
+    );
+  });
+
+  test('a pass keeps waiting for Drive instead of declaring itself done', () {
+    return () async {
+      const staged = AssetReference(
+        kind: 'local',
+        value: 'staged-1',
+        label: 'film.mp4',
+        contentType: 'video/mp4',
+      );
+      final local = _MemoryStore(
+        StoredData(
+          savedReferences: <SavedReference>[
+            reference('pending', asset: staged),
+          ],
+        ),
+      );
+      final hybrid = HybridDataStore(
+        local: local,
+        drive: _MemoryDriveStore(const StoredData()),
+      );
+      final logs = <String>[];
+      expect(
+        await runDriveUploadPass(
+          hybrid: hybrid,
+          swap: (_) async {},
+          log: logs.add,
+        ),
+        isFalse,
+        reason: 'still pending, so the pump keeps retrying until Drive is back',
+      );
+      expect(logs.single, contains('waiting for Drive'));
+    }();
+  });
+
+  test('a missing staged result is fetched again from its link', () async {
+    final (hybrid, _, drive) = await connectedHybrid();
+    const vanished = AssetReference(
+      kind: 'local',
+      value: 'vanished-1',
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    await hybrid.write(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'gen',
+            status: 'Ready',
+            prompt: 'p',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: now,
+            updatedAt: now,
+            resultUrl: 'https://cdn.example/film.mp4',
+            resultAsset: vanished,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+      ),
+    );
+    final ledger = DriveUploadLedger();
+    final restaged = <String>[];
+    Future<bool> pass() => runDriveUploadPass(
+      hybrid: hybrid,
+      ledger: ledger,
+      read: hybrid.read,
+      write: hybrid.write,
+      restage: (owner, staged) async {
+        restaged.add(owner.localId);
+        return hybrid.writeAsset(
+          Uint8List.fromList(<int>[4, 2]),
+          label: staged.label,
+          contentType: 'video/mp4',
+          storage: LibraryStorage.drive,
+        );
+      },
+    );
+
+    expect(await pass(), isFalse, reason: 'the fresh copy still has to upload');
+    expect(restaged, <String>['gen']);
+    final refetched = (await hybrid.read()).generations.single.resultAsset!;
+    expect(refetched.kind, 'local');
+    expect(refetched.value, isNot('vanished-1'));
+    expect(drive.assets, isEmpty);
+
+    expect(await pass(), isTrue);
+    final published = (await hybrid.read()).generations.single.resultAsset!;
+    expect(published.kind, 'drive');
+    expect(drive.assets[published.value], <int>[4, 2]);
+    expect(restaged, <String>['gen'], reason: 'one re-fetch per launch');
+  });
+
+  test('a film another device is still uploading is left to it', () async {
+    final (hybrid, _, drive) = await connectedHybrid();
+    const inTransit = AssetReference(
+      kind: 'local',
+      value: 'on-the-other-device',
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    final justNow = DateTime.now().toUtc();
+    await hybrid.write(
+      StoredData(
+        generations: <Generation>[
+          Generation(
+            localId: 'theirs',
+            status: 'Ready',
+            prompt: 'p',
+            mode: VideoMode.t2v,
+            config: const GenerationConfig(
+              aspectRatio: '16:9',
+              duration: 8,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+            createdAt: justNow,
+            updatedAt: justNow,
+            resultUrl: 'https://cdn.example/film.mp4',
+            resultAsset: inTransit,
+            storage: LibraryStorage.drive,
+          ),
+        ],
+      ),
+    );
+    var restaged = 0;
+    expect(
+      await runDriveUploadPass(
+        hybrid: hybrid,
+        read: hybrid.read,
+        write: hybrid.write,
+        restage: (_, _) async {
+          restaged += 1;
+          return null;
+        },
+      ),
+      isTrue,
+      reason: 'nothing this device can publish is pending',
+    );
+    expect(restaged, 0, reason: 'a fresh record is the other device\'s job');
+    expect(drive.assets, isEmpty);
+    expect((await hybrid.read()).generations.single.resultAsset, inTransit);
+  });
+
   test('the pump retries with backoff until a pass succeeds', () {
     fakeAsync((async) {
       var calls = 0;
@@ -211,7 +417,9 @@ void main() {
         flush: () async => ++calls >= 3,
         initialRetryDelay: const Duration(seconds: 5),
         maximumRetryDelay: const Duration(seconds: 40),
+        settleDelay: Duration.zero,
       );
+
       pump.schedule();
       async.elapse(Duration.zero);
       expect(calls, 1);

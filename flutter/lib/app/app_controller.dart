@@ -2708,6 +2708,7 @@ class AppController extends ChangeNotifier {
             for (final item in snapshot!.generations)
               if (item.isReady && item.hasDeliveredMedia) item.localId,
           };
+    _carryRestoredAssetBytes(snapshot, value);
     snapshot = restorePreferences
         ? value
         : LocalSnapshot(
@@ -3343,6 +3344,74 @@ class AppController extends ChangeNotifier {
 
   String _assetCacheKey(AssetReference reference) =>
       '${reference.kind}:${reference.value}';
+
+  /// Once the background upload pass publishes a Drive-tagged record's staged
+  /// media, the record names Drive ids instead of the staged ones — for the
+  /// very same bytes. Preview bytes already restored under a staged id are
+  /// therefore restorable under the Drive id too, so a card whose thumbnail
+  /// was on screen a moment ago never drops back to a loading placeholder,
+  /// and nothing is fetched back from Drive to redraw it.
+  void _carryRestoredAssetBytes(LocalSnapshot? previous, LocalSnapshot next) {
+    if (previous == null || _restoredAssetBytes.isEmpty) return;
+    final generations = <String, Generation>{
+      for (final item in previous.generations) item.localId: item,
+    };
+    for (final item in next.generations) {
+      final before = generations[item.localId];
+      if (before != null) _carryGenerationAssetBytes(before, item);
+    }
+    final references = <String, SavedReference>{
+      for (final item in previous.savedReferences) item.id: item,
+    };
+    for (final item in next.savedReferences) {
+      final before = references[item.id];
+      if (before == null) continue;
+      _carryAssetBytes(before.asset, item.asset);
+      _carryAssetBytes(before.thumbnailAsset, item.thumbnailAsset);
+    }
+  }
+
+  void _carryGenerationAssetBytes(Generation before, Generation after) {
+    if (_restoredAssetBytes.isEmpty) return;
+    _carryAssetBytes(before.resultAsset, after.resultAsset);
+    _carryAssetBytes(before.thumbnailAsset, after.thumbnailAsset);
+    _carryAssetBytes(
+      before.timelineThumbnailAsset,
+      after.timelineThumbnailAsset,
+    );
+    _carryAssetBytes(
+      before.config.sourceThumbnailAsset,
+      after.config.sourceThumbnailAsset,
+    );
+    final previousReferences = before.config.references;
+    final nextReferences = after.config.references;
+    if (previousReferences == null ||
+        nextReferences == null ||
+        previousReferences.length != nextReferences.length) {
+      return;
+    }
+    for (var index = 0; index < nextReferences.length; index += 1) {
+      _carryAssetBytes(
+        previousReferences[index].thumbnailAsset,
+        nextReferences[index].thumbnailAsset,
+      );
+    }
+  }
+
+  /// Only the publish swap (staged `local` → `drive`, same size) carries
+  /// bytes over; any other change of asset is different media.
+  void _carryAssetBytes(AssetReference? from, AssetReference? to) {
+    if (from == null ||
+        to == null ||
+        from.kind != 'local' ||
+        to.kind != 'drive' ||
+        (from.bytes != null && to.bytes != null && from.bytes != to.bytes)) {
+      return;
+    }
+    final bytes = _restoredAssetBytes[_assetCacheKey(from)];
+    if (bytes == null) return;
+    _restoredAssetBytes.putIfAbsent(_assetCacheKey(to), () => bytes);
+  }
 
   /// Synchronously available retained bytes restored before first paint.
   Uint8List? cachedAssetBytes(AssetReference? reference) =>
@@ -6583,6 +6652,7 @@ class AppController extends ChangeNotifier {
     );
     if (index >= 0) {
       final existing = items[index];
+      _carryGenerationAssetBytes(existing, generation);
       items[index] = generation.copyWith(
         folderId: existing.folderId,
         clearFolder: existing.folderId == null,
