@@ -689,6 +689,20 @@ class _GenerationPromptState extends State<GenerationPrompt> {
   }
 }
 
+/// Why a delivered film will not play on this device, when the record itself
+/// explains it. Null keeps the player's generic copy.
+///
+/// A Drive-library record whose media is still a `local`-kind asset names a
+/// file staged on the device that generated it. No other device can open
+/// those bytes and no export here can rescue them, so the placeholder says
+/// what the viewer is actually waiting for instead of blaming playback on
+/// this device.
+String? generationDeliveryUnavailableDetail(Generation item) =>
+    item.awaitsOriginDeviceUpload
+    ? 'This film is still syncing from the device that made it. '
+          'It will play here once that device finishes uploading to Drive.'
+    : null;
+
 class StatusBadge extends StatelessWidget {
   const StatusBadge({required this.item, super.key});
 
@@ -2116,6 +2130,7 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
           onDownload: _download,
           supportsPhotos: widget.controller.supportsPhotoLibrarySave,
           onShare: shareGenerationMediaAction(widget.controller, widget.item),
+          unavailableDetail: generationDeliveryUnavailableDetail(widget.item),
         ),
       );
       return;
@@ -2128,6 +2143,7 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
       onShare: shareGenerationMediaAction(widget.controller, widget.item),
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
       onDownload: _download,
+      unavailableDetail: generationDeliveryUnavailableDetail(widget.item),
     );
   }
 
@@ -2409,6 +2425,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
           onDownload: _download,
           supportsPhotos: widget.controller.supportsPhotoLibrarySave,
           onShare: shareGenerationMediaAction(widget.controller, widget.item),
+          unavailableDetail: generationDeliveryUnavailableDetail(widget.item),
         ),
       );
       return;
@@ -2421,6 +2438,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
       onShare: shareGenerationMediaAction(widget.controller, widget.item),
       initialAspectRatio: generationAspectRatio(widget.item.config.aspectRatio),
       onDownload: _download,
+      unavailableDetail: generationDeliveryUnavailableDetail(widget.item),
     );
   }
 

@@ -209,7 +209,8 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     // Handle menu navigation at the primary focus. A surrounding Focus can
     // lose Enter to EditableText's multiline action before bubbling reaches
     // it, which inserts a newline instead of accepting the highlighted tag.
-    _focusNode = FocusNode(onKeyEvent: _handleKeyEvent);
+    _focusNode = FocusNode(onKeyEvent: _handleKeyEvent)
+      ..addListener(_focusChanged);
   }
 
   @override
@@ -255,6 +256,11 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       _typingReference = false;
     }
     _lastEditingValue = value;
+    _refreshSuggestions();
+  }
+
+  void _focusChanged() {
+    if (!_focusNode.hasFocus) _typingReference = false;
     _refreshSuggestions();
   }
 
@@ -354,18 +360,73 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   void _select(PromptReferenceOption option) {
     final query = _query;
     if (query == null) return;
-    final nextText = _controller.text.replaceRange(
+    _controller.value = _completeReference(_controller.value, query, option);
+    widget.onChanged(_controller.text);
+    _focusNode.requestFocus();
+  }
+
+  TextEditingValue _completeReference(
+    TextEditingValue value,
+    _PromptMentionQuery query,
+    PromptReferenceOption option,
+  ) {
+    final nextText = value.text.replaceRange(
       query.start,
       query.end,
       option.mention.canonical,
     );
     final caret = query.start + option.mention.canonical.length;
-    _controller.value = TextEditingValue(
+    return TextEditingValue(
       text: nextText,
       selection: TextSelection.collapsed(offset: caret),
     );
-    widget.onChanged(nextText);
-    _focusNode.requestFocus();
+  }
+
+  TextEditingValue _formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final query = _query;
+    final keyboard = HardwareKeyboard.instance;
+    // Software keyboards send multiline Return as an editing value instead of
+    // a KeyEvent. Only accept a single newline at the active query's caret;
+    // leave composition, selection replacement, multiline paste and modified
+    // Return alone.
+    if (query != null &&
+        _suggestions.isNotEmpty &&
+        _focusNode.hasFocus &&
+        oldValue.composing.isCollapsed &&
+        newValue.composing.isCollapsed &&
+        oldValue.selection.isCollapsed &&
+        oldValue.selection.extentOffset == query.end &&
+        newValue.selection.isCollapsed &&
+        newValue.selection.extentOffset == query.end + 1 &&
+        newValue.text.length == oldValue.text.length + 1 &&
+        newValue.text[query.end] == '\n' &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed &&
+        newValue.text ==
+            oldValue.text.replaceRange(query.end, query.end, '\n')) {
+      return _completeReference(
+        oldValue,
+        query,
+        _suggestions[_highlightedSuggestion ?? 0],
+      );
+    }
+    final formatted = widget.screenplayMode
+        ? ScreenplayInputFormatter(
+            characterNames: widget.characterNames,
+          ).formatEditUpdate(oldValue, newValue)
+        : newValue;
+    // Keep ordinary typing/paste bounded, but insert reference names atomically
+    // like click and hardware-key completion. Truncating a completed name can
+    // silently turn it back into an unrecognized partial tag.
+    return LengthLimitingTextInputFormatter(
+      widget.maxLength ?? 50000,
+      maxLengthEnforcement: MaxLengthEnforcement.enforced,
+    ).formatEditUpdate(oldValue, formatted);
   }
 
   Object? _selectAllWithoutRevealing(SelectAllTextIntent intent) {
@@ -417,6 +478,8 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     if (widget.screenplayMode) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
         _allowFocusTraversal = true;
+        _typingReference = false;
+        _refreshSuggestions();
         setState(() => _dismissScreenplaySuggestions = true);
         return KeyEventResult.handled;
       }
@@ -508,10 +571,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       });
       return KeyEventResult.handled;
     }
-    if ((event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
-        _highlightedSuggestion != null) {
-      _select(_suggestions[_highlightedSuggestion!]);
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _select(_suggestions[_highlightedSuggestion ?? 0]);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -587,7 +649,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       left: left,
       top: top,
       width: menuWidth,
-      child: _suggestionsMenu(),
+      // Keep the overlay in this editor's tap region. The app dismisses the
+      // keyboard on outside pointer-down, before a suggestion's onTap can run.
+      child: TextFieldTapRegion(groupId: _focusNode, child: _suggestionsMenu()),
     );
   }
 
@@ -616,13 +680,14 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             .entries
             .map(
               (entry) => ColoredBox(
-                color: _highlightedSuggestion == entry.key
+                color: (_highlightedSuggestion ?? 0) == entry.key
                     ? context.colors.primaryContainer
                     : Colors.transparent,
                 child: InkWell(
                   key: ValueKey(
                     'prompt-reference-${entry.value.mention.normalized}',
                   ),
+                  canRequestFocus: false,
                   onTap: () => _select(entry.value),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
@@ -678,7 +743,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     _controller
       ..removeListener(_editingChanged)
       ..dispose();
-    _focusNode.dispose();
+    _focusNode
+      ..removeListener(_focusChanged)
+      ..dispose();
     super.dispose();
   }
 
@@ -706,6 +773,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
           },
           child: TextFormField(
             key: _fieldKey,
+            groupId: _focusNode,
             controller: _controller,
             focusNode: _focusNode,
             autofocus: widget.autofocus,
@@ -715,14 +783,10 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
             minLines: widget.expands ? null : widget.minLines,
             maxLines: widget.expands ? null : 10,
             maxLength: widget.maxLength ?? 50000,
-            maxLengthEnforcement: MaxLengthEnforcement.enforced,
-            inputFormatters: widget.screenplayMode
-                ? [
-                    ScreenplayInputFormatter(
-                      characterNames: widget.characterNames,
-                    ),
-                  ]
-                : null,
+            maxLengthEnforcement: MaxLengthEnforcement.none,
+            inputFormatters: [
+              TextInputFormatter.withFunction(_formatEditUpdate),
+            ],
             textCapitalization: widget.screenplayMode
                 ? TextCapitalization.none
                 : TextCapitalization.sentences,

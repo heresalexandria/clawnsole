@@ -25,6 +25,10 @@ extension AppControllerSubmission on AppController {
       ..screenplayLinkedCharacters.addAll(value.screenplayLinkedCharacters)
       ..screenplayCharacterAliases.addAll(value.screenplayCharacterAliases)
       ..draftCharacterNames.addAll(value.draftCharacterNames)
+      ..characterMappings.addAll({
+        for (final entry in value.characterMappings.entries)
+          entry.key: List.of(entry.value),
+      })
       ..aspectRatio = value.aspectRatio
       ..autoDuration = value.autoDuration
       ..durationSeconds = value.durationSeconds
@@ -81,6 +85,8 @@ extension AppControllerSubmission on AppController {
     // Capture every recipe and routing choice before the first await, including
     // before hydration of a restored draft. Editing/switching tabs is still safe.
     final tab = _captureSubmissionTab();
+    _rememberGenerationPreferences(tab);
+    _flushGenerationPreferencesSave();
     final provider = selectedProvider;
     final model = selectedModel;
     final prompt = generationPrompt;

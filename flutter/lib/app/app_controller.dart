@@ -14,6 +14,7 @@ import '../core/aesthetic_reference.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
+import '../core/generation_preferences.dart';
 import '../core/google_drive.dart';
 import '../core/google_drive_session.dart';
 import '../core/library_rules.dart' as library_rules;
@@ -34,6 +35,7 @@ part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
 part 'app_controller_submission.dart';
 part 'app_controller_delivery.dart';
+part 'app_controller_generation_preferences.dart';
 
 String _sha256Digest(Uint8List bytes) => sha256.convert(bytes).toString();
 
@@ -299,6 +301,11 @@ class GenerationFormState {
   final Set<String> screenplayLinkedCharacters = {};
   final Map<String, String> screenplayCharacterAliases = {};
   final Map<String, String> draftCharacterNames = {};
+
+  /// Cast lines ("HERO: @a @b") kept out of the editable prompt. Keys are the
+  /// cast (mapping) names; values are prompt names of attached references.
+  /// They are appended to the prompt at submission, like the aesthetic text.
+  final Map<String, List<String>> characterMappings = {};
   String aspectRatio = '16:9';
   bool autoDuration = false;
   int durationSeconds = 8;
@@ -439,6 +446,7 @@ class ComposerTab {
       form.prompt.trim().isEmpty &&
       !form.screenplayMode &&
       form.aestheticReferenceId == null &&
+      form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
       form.references.isEmpty &&
       disabledReferences.isEmpty &&
@@ -493,6 +501,8 @@ class AppController extends ChangeNotifier {
   final bool _mobileTestBuild;
 
   final List<ComposerTab> _composerTabs = <ComposerTab>[];
+  final Map<String, GenerationPreferences> _generationPreferences = {};
+  Timer? _generationPreferencesSaveTimer;
   String _activeComposerTabId = '';
 
   /// Where draft writes land. It is [activeComposerTab] except inside
@@ -549,6 +559,14 @@ class AppController extends ChangeNotifier {
   String libraryFolderView = libraryFolderAll;
   String? libraryTag;
   String referenceSearch = '';
+
+  /// Which half of the References desk is showing (session-only).
+  ReferencesTab referencesTab = ReferencesTab.media;
+
+  /// Aesthetic library filters on the References desk (session-only).
+  String aestheticSearch = '';
+  String? aestheticTag;
+  bool aestheticFavoritesOnly = false;
   String referenceFolderView = libraryFolderAll;
   String? referenceTag;
   MediaReferenceKind? referenceKind;
@@ -589,7 +607,13 @@ class AppController extends ChangeNotifier {
 
   /// The direction an AI Rewrite replaced in place, kept one notice tap
   /// away until the director moves on.
-  ({String tabId, String previous, String rewritten})? _directionRewriteUndo;
+  ({
+    String tabId,
+    String previous,
+    String rewritten,
+    Map<String, List<String>> cast,
+  })?
+  _directionRewriteUndo;
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -752,18 +776,11 @@ class AppController extends ChangeNotifier {
   ComposerTab? _composerTabById(String id) =>
       _composerTabs.where((tab) => tab.id == id).firstOrNull;
 
-  /// Opens a blank workspace. It inherits only the current tab's provider,
-  /// model, and save-to folders; the direction and everything attached start
-  /// empty.
+  /// Opens a blank workspace using the last-used settings for its provider and
+  /// model. The direction and everything attached start empty.
   ComposerTab addComposerTab({bool activate = true}) {
     final source = activeComposerTab;
-    final tab = ComposerTab(
-      id: _uid(),
-      providerId: source.providerId,
-      modelId: source.modelId,
-      localFolderId: source.localFolderId,
-      driveFolderId: source.driveFolderId,
-    );
+    final tab = _blankComposerTab(source);
     _composerTabs.add(tab);
     if (activate) {
       _activeComposerTabId = tab.id;
@@ -805,13 +822,7 @@ class AppController extends ChangeNotifier {
     }
     final wasActive = closed.id == _activeComposerTabId;
     if (_composerTabs.isEmpty) {
-      final replacement = ComposerTab(
-        id: _uid(),
-        providerId: closed.providerId,
-        modelId: closed.modelId,
-        localFolderId: closed.localFolderId,
-        driveFolderId: closed.driveFolderId,
-      );
+      final replacement = _blankComposerTab(closed);
       _composerTabs.add(replacement);
       _activeComposerTabId = replacement.id;
     } else if (wasActive) {
@@ -879,6 +890,10 @@ class AppController extends ChangeNotifier {
     aestheticReferenceId: tab.form.aestheticReferenceId,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
+    characterMappings: {
+      for (final entry in tab.form.characterMappings.entries)
+        if (entry.value.isNotEmpty) entry.key: List.of(entry.value),
+    },
     screenplayReferenceNames: {
       for (final reference in tab.form.references)
         if (reference.savedReferenceId != null)
@@ -936,6 +951,7 @@ class AppController extends ChangeNotifier {
   /// are the moments a half-typed draft must already be on disk.
   /// [onlyIfPending] skips the write when nothing has changed since the last.
   void _flushComposerTabsSave({bool onlyIfPending = false}) {
+    _flushGenerationPreferencesSave();
     final pending = _composerTabsSaveTimer?.isActive ?? false;
     _composerTabsSaveTimer?.cancel();
     _composerTabsSaveTimer = null;
@@ -1109,6 +1125,12 @@ class AppController extends ChangeNotifier {
       tab.providerId = provider;
       tab.modelId = modelById(provider, record.modelId ?? '').id;
     }
+    tab.form.characterMappings
+      ..clear()
+      ..addAll({
+        for (final entry in record.characterMappings.entries)
+          if (entry.value.isNotEmpty) entry.key: List.of(entry.value),
+      });
     tab.form
       ..prompt = record.prompt
       ..screenplayMode = record.screenplayMode
@@ -1133,6 +1155,8 @@ class AppController extends ChangeNotifier {
       ..seed = record.seed
       ..videoUrl = record.videoUrl
       ..draftUrl = record.draftUrl;
+    // Workspaces written before schema 6 keep their cast inside the prompt.
+    _inComposerTab(tab, absorbPromptMappings);
     // The record has no separate "muted by hand" flag; a saved false is one.
     tab.generateAudioExplicitlyDisabled = !record.generateAudio;
     _selectCompatibleModel();
@@ -1425,6 +1449,8 @@ class AppController extends ChangeNotifier {
       providerById(selectedProviderId);
   VideoModelDefinition get selectedModel =>
       modelById(selectedProviderId, selectedModelId);
+
+  int get promptCharacterLimit => selectedModel.promptEditorCharacterLimit;
   VideoModelDefinition get referenceModel => selectedModel;
   int get keyframeLimit => selectedModel.maxKeyframesFor(
     form.mode == VideoMode.t2v ? VideoMode.i2v : form.mode,
@@ -2497,7 +2523,10 @@ class AppController extends ChangeNotifier {
       if (_disposed) return;
       // From here on the strip may be written back over what was stored.
       _composerTabsRestored = true;
-      if (reopened) return;
+      if (reopened) {
+        _seedMissingGenerationPreferences();
+        return;
+      }
       if (generations.isNotEmpty) {
         final latest = generations.first;
         await _restoreGenerationSettings(latest, cacheOnly: true);
@@ -2505,6 +2534,9 @@ class AppController extends ChangeNotifier {
       } else {
         notifyListeners();
       }
+      // Startup carry-over can copy another model's most recent generation
+      // into the selected tab. Seed defaults from actual history identities.
+      _seedMissingGenerationPreferences(includeTabs: false);
     } on Object {
       // Local presentation restore is best effort and must never become an
       // unhandled asynchronous startup failure.
@@ -2625,6 +2657,9 @@ class AppController extends ChangeNotifier {
           );
     _announceNewlyReady(previouslyReady);
     if (restorePreferences) {
+      _generationPreferences
+        ..clear()
+        ..addAll(value.preferences.generationPreferences);
       themeMode = value.preferences.themeMode;
       section = value.preferences.activeSection;
       libraryFilter = value.preferences.libraryFilter;
@@ -2697,7 +2732,13 @@ class AppController extends ChangeNotifier {
       // A restored model must constrain the form exactly like a selected one,
       // or a session can reopen with settings the model does not support
       // (for example Auto duration on a fixed-duration model).
-      if (selectedModelId != previousModelId) _normalizeFormForModel();
+      if (!_composerTabsRestored) {
+        _restoreGenerationPreferences(_draftTab);
+        _normalizeFormForModel();
+      } else if (selectedModelId != previousModelId) {
+        _normalizeFormForModel();
+      }
+      if (_composerTabsRestored) _seedMissingGenerationPreferences();
     }
     if (libraryFolderView != libraryFolderAll &&
         libraryFolderView != libraryFolderUnfiled &&
@@ -2720,25 +2761,117 @@ class AppController extends ChangeNotifier {
 
   void _setSnapshot(LocalSnapshot value) => snapshot = value;
 
-  /// Applies an asynchronous library read only if no newer in-memory state
-  /// appeared while it was in flight. When requested, a superseded response
-  /// is re-read after the competing write finishes so an explicit refresh can
-  /// still complete without erasing a newly submitted generation card.
+  /// Applies an asynchronous library read, reconciling it with any newer
+  /// in-memory state that appeared while it was in flight. When requested, a
+  /// superseded response is instead re-read after the competing write
+  /// finishes so an explicit refresh can still complete without erasing a
+  /// newly submitted generation card.
   Future<bool> _applySnapshotRead(
     LocalSnapshot value, {
     required int startedAtRevision,
     bool restorePreferences = false,
     bool reloadIfSuperseded = false,
+    int? expectedPreferenceRevision,
   }) async {
     if (_snapshotRevision != startedAtRevision) {
-      if (!reloadIfSuperseded) return false;
-      final reloadRevision = _snapshotRevision;
-      value = await gateway.load();
-      if (_disposed || _snapshotRevision != reloadRevision) return false;
+      if (reloadIfSuperseded) {
+        final reloadRevision = _snapshotRevision;
+        value = await gateway.load();
+        if (_disposed || _snapshotRevision != reloadRevision) return false;
+      } else {
+        value = _reconcileSupersededRead(value);
+      }
     }
     if (_disposed) return false;
-    _apply(value, restorePreferences: restorePreferences);
+    _apply(
+      value,
+      restorePreferences:
+          restorePreferences &&
+          (expectedPreferenceRevision == null ||
+              _preferenceRevision == expectedPreferenceRevision),
+    );
     return true;
+  }
+
+  /// Folds a library read that a competing in-memory write superseded while
+  /// it was in flight into a snapshot that keeps both sides.
+  ///
+  /// Discarding such a read is safe but starves: every poll receipt bumps the
+  /// snapshot revision, so on a device with anything in flight the periodic
+  /// cross-device refresh could be superseded indefinitely and a film another
+  /// device published would never appear until the app was relaunched. The
+  /// loaded library is therefore adopted record by record — it wins except
+  /// where the in-memory copy carries more of the film or is plainly newer —
+  /// and anything only this device knows about (a card just submitted, a
+  /// folder just created) is carried across untouched.
+  LocalSnapshot _reconcileSupersededRead(LocalSnapshot value) {
+    final current = _snapshot;
+    if (current == null) return value;
+    final pending = <String, Generation>{
+      for (final item in current.generations) item.localId: item,
+    };
+    final generations = <Generation>[
+      for (final loaded in value.generations)
+        _preferLoadedGeneration(loaded, pending.remove(loaded.localId)),
+    ];
+    for (final orphan in pending.values) {
+      final at = generations.indexWhere(
+        (item) => item.createdAt.isBefore(orphan.createdAt),
+      );
+      generations.insert(at < 0 ? generations.length : at, orphan);
+    }
+    final references = _withUnloaded<SavedReference>(
+      value.savedReferences,
+      current.savedReferences,
+      (item) => item.id,
+    )..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return LocalSnapshot(
+      generations: generations,
+      folders: _withUnloaded<LibraryFolder>(
+        value.folders,
+        current.folders,
+        (item) => item.id,
+      ),
+      savedReferences: references,
+      preferences: value.preferences,
+      hasApiKey: value.hasApiKey,
+      connectedProviders: value.connectedProviders,
+      connectedRewriteProviders: value.connectedRewriteProviders,
+      availableProviders: value.availableProviders,
+      providerRetentionAcknowledgements:
+          value.providerRetentionAcknowledgements,
+      storage: value.storage,
+      settingsVault: value.settingsVault,
+    );
+  }
+
+  /// The reconciled copy of one generation. Delivery decides first — a film
+  /// published to Drive outranks one still staged on the device that made it,
+  /// which outranks a provider link — because clocks skew across devices and
+  /// statusCheckCount advances independently on each. Only an even delivery
+  /// contest falls back to the timestamp.
+  static Generation _preferLoadedGeneration(
+    Generation loaded,
+    Generation? pending,
+  ) {
+    if (pending == null) return loaded;
+    if (loaded.deliveryRank != pending.deliveryRank) {
+      return loaded.deliveryRank > pending.deliveryRank ? loaded : pending;
+    }
+    return pending.updatedAt.isAfter(loaded.updatedAt) ? pending : loaded;
+  }
+
+  /// The loaded list plus whatever only the in-memory snapshot holds.
+  static List<T> _withUnloaded<T>(
+    List<T> loaded,
+    List<T> pending,
+    String Function(T item) id,
+  ) {
+    final known = <String>{for (final item in loaded) id(item)};
+    return <T>[
+      ...loaded,
+      ...pending.where((item) => !known.contains(id(item))),
+    ];
   }
 
   void showNotice(String message, {AppNoticeAction? action}) {
@@ -2832,19 +2965,30 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _savePreferences(AppPreferences preferences) {
+    _generationPreferencesSaveTimer?.cancel();
+    _generationPreferencesSaveTimer = null;
+    preferences = preferences.copyWith(
+      generationPreferences: Map.of(_generationPreferences),
+    );
     _preferenceRevision += 1;
     final operation = _preferenceWrites.then((_) async {
       try {
-        _apply(await gateway.setPreferences(preferences));
-        await _retryPendingSettingsVaultSync();
+        final saved = await gateway.setPreferences(preferences);
+        if (!_disposed) {
+          _apply(saved);
+          await _retryPendingSettingsVaultSync();
+        }
       } on Object {
         // Mobile and companion Drive tokens are short-lived. The client can
         // still look connected when a preference write (tab selection is one)
         // is the first request to discover expiration. Silently replace the
         // session and retry the idempotent preference write once.
-        if (!await resumeGoogleDrive(force: true)) rethrow;
-        _apply(await gateway.setPreferences(preferences));
-        await _retryPendingSettingsVaultSync();
+        if (_disposed || !await resumeGoogleDrive(force: true)) rethrow;
+        final saved = await gateway.setPreferences(preferences);
+        if (!_disposed) {
+          _apply(saved);
+          await _retryPendingSettingsVaultSync();
+        }
       }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
@@ -4007,6 +4151,7 @@ class AppController extends ChangeNotifier {
           oldName: reference.name,
           newName: clean,
         );
+        _renameCastReference(reference.name, clean);
         form.references = form.references.map((draft) {
           if (draft.savedReferenceId != reference.id) return draft;
           final oldPromptName = referencePromptName(draft);
@@ -4015,6 +4160,7 @@ class AppController extends ChangeNotifier {
             oldName: oldPromptName,
             newName: clean,
           );
+          _renameCastReference(oldPromptName, clean);
           return draft.copyWith(promptName: clean);
         }).toList();
       }
@@ -4513,12 +4659,7 @@ class AppController extends ChangeNotifier {
     final failed = form.references
         .where((item) => item.id == draftId)
         .firstOrNull;
-    if (failed != null) {
-      form.prompt = removeScreenplayReference(
-        form.prompt,
-        referencePromptName(failed),
-      );
-    }
+    if (failed != null) _removeCastReference(referencePromptName(failed));
     final before = form.references.length;
     form.references = form.references
         .where((item) => item.id != draftId)
@@ -4662,8 +4803,14 @@ class AppController extends ChangeNotifier {
   }
 
   void updateForm(void Function(GenerationFormState value) update) {
+    final previousSettings = _generationSettings(_draftTab);
+    final previousPrompt = form.prompt;
     update(form);
-    if (form.prompt.trim().isEmpty) {
+    // Casting lines can only arrive in the editable text now — pasted, or
+    // typed by hand. They belong to the cast, so they move there at once.
+    absorbPromptMappings();
+    final settingsEdited = previousSettings != _generationSettings(_draftTab);
+    if (previousPrompt.trim().isNotEmpty && form.prompt.trim().isEmpty) {
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases.clear();
     }
@@ -4681,6 +4828,7 @@ class AppController extends ChangeNotifier {
     if (!selectedModel.supportsAutoDuration) form.autoDuration = false;
     if (form.requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
+    if (settingsEdited) _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -4755,6 +4903,7 @@ class AppController extends ChangeNotifier {
     providerRetentionAcknowledgements:
         snapshot?.preferences.providerRetentionAcknowledgements ??
         const <String, String>{},
+    generationPreferences: Map.of(_generationPreferences),
   );
 
   int _validDuration(int value) {
@@ -4821,10 +4970,20 @@ class AppController extends ChangeNotifier {
   Future<void> selectProvider(String providerId) async {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
+    final previousKey = generationPreferenceKey(
+      selectedProviderId,
+      selectedModelId,
+    );
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
     selectedModelId = provider.defaultModel.id;
     _selectCompatibleModel();
+    if (generationPreferenceKey(selectedProviderId, selectedModelId) !=
+        previousKey) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     _scheduleComposerTabsSave();
@@ -4834,8 +4993,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> selectModel(String modelId) async {
+    final previousModelId = selectedModelId;
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedModelId = modelById(selectedProviderId, modelId).id;
+    if (selectedModelId != previousModelId) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -4849,12 +5014,18 @@ class AppController extends ChangeNotifier {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
     final providerChanged = selectedProviderId != provider.id;
+    final previousModelId = selectedModelId;
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
     selectedModelId = modelById(provider.id, modelId).id;
     // An unknown model id falls back to the provider default, which must then
     // defer to whichever model accepts the current form.
     if (selectedModelId != modelId) _selectCompatibleModel();
+    if (providerChanged || selectedModelId != previousModelId) {
+      _restoreGenerationPreferences(_draftTab);
+    }
     _normalizeFormForModel();
+    _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     _invalidateProviderEstimate();
     credits = providerAccounts[provider.id]?.balance;
     _scheduleComposerTabsSave();
@@ -4877,7 +5048,7 @@ class AppController extends ChangeNotifier {
     try {
       await _savePreferences(_preferences());
     } on Object catch (error) {
-      showNotice(_message(error));
+      if (!_disposed) showNotice(_message(error));
     }
   }
 
@@ -4892,17 +5063,19 @@ class AppController extends ChangeNotifier {
       form.generateAudio = true;
     }
     if (!model.supportsDraft) form.draft = false;
+    if (form.draft) form.resolution = 'hd';
     if (!model.supportsTimedKeyframes) form.exactTiming = false;
     if (!model.referenceTasks.contains(form.referenceTask)) {
       form.referenceTask = MediaReferenceTask.reference;
     }
     if (!model.supportsSeed) form.seed = null;
-    if (model.upscaleUsesResolutionTargets && form.upscaleCreativity <= 1) {
-      form.upscaleCreativity = 50;
-    } else if (model.isUpscaler &&
-        !model.upscaleUsesResolutionTargets &&
-        form.upscaleCreativity > 1) {
-      form.upscaleCreativity = 1;
+    form.safetyTolerance = form.safetyTolerance.clamp(0, 4);
+    if (model.isUpscaler) {
+      form.upscaleFactor = form.upscaleFactor.clamp(1.5, 3).toDouble();
+      form.upscaleCreativity = form.upscaleCreativity.clamp(
+        0,
+        model.upscaleUsesResolutionTargets ? 100 : 1,
+      );
     }
     if (model.supportsFrameRate) form.frameRate = form.frameRate.clamp(1, 6);
     final resolutions = availableResolutions;
@@ -5736,10 +5909,7 @@ class AppController extends ChangeNotifier {
     if (character.isNotEmpty) {
       form.screenplayLinkedCharacters.add(character);
     }
-    form.prompt = removeScreenplayReference(
-      form.prompt,
-      referencePromptName(removed),
-    );
+    _removeCastReference(referencePromptName(removed));
     form.draftCharacterNames.remove(id);
     form.references = form.references.where((item) => item.id != id).toList();
     _scheduleComposerTabsSave();
@@ -5782,6 +5952,7 @@ class AppController extends ChangeNotifier {
         oldName: oldName,
         newName: clean,
       );
+      _renameCastReference(oldName, clean);
       form.references = form.references.map((reference) {
         return reference.id == id
             ? reference.copyWith(promptName: clean)
@@ -5811,6 +5982,7 @@ class AppController extends ChangeNotifier {
         return frame;
       }).toList();
     }
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5823,6 +5995,7 @@ class AppController extends ChangeNotifier {
           ? frame.copyWith(seconds: form.durationSeconds.toDouble())
           : frame;
     }).toList();
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5836,6 +6009,7 @@ class AppController extends ChangeNotifier {
     if (!value && form.referenceTask == MediaReferenceTask.edit) return;
     if (form.autoDuration == value) return;
     form.autoDuration = value;
+    _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
     _scheduleComposerTabsSave();
     notifyListeners();
@@ -5843,6 +6017,7 @@ class AppController extends ChangeNotifier {
 
   void setFrameRate(int value) {
     form.frameRate = value.clamp(1, 6);
+    _rememberGenerationPreferences(_draftTab);
     _scheduleComposerTabsSave();
     notifyListeners();
   }
@@ -6381,15 +6556,36 @@ class AppController extends ChangeNotifier {
       _driveRefreshTick += 1;
       final everyTicks = pendingDriveUploadCount > 0 ? 2 : 7;
       if (_driveRefreshTick % everyTicks != 0) return;
-      final snapshotRevision = _snapshotRevision;
-      final value = await gateway.load();
-      await _applySnapshotRead(value, startedAtRevision: snapshotRevision);
-      await syncComposerWorkspace();
+      await _readDriveLibrary();
     } on Object {
       // Periodic reconciliation is best-effort; the next tick retries.
     } finally {
       _refreshingDriveLibrary = false;
     }
+  }
+
+  /// Runs one cross-device reconciliation pass, ignoring the periodic
+  /// schedule.
+  @visibleForTesting
+  Future<void> refreshDriveLibraryForTesting() => _refreshDriveLibrary();
+
+  Future<void> _refreshDriveLibrary() async {
+    if (_disposed || _refreshingDriveLibrary) return;
+    _refreshingDriveLibrary = true;
+    try {
+      await _readDriveLibrary();
+    } on Object {
+      // Reconciliation is best-effort; the next pass retries.
+    } finally {
+      _refreshingDriveLibrary = false;
+    }
+  }
+
+  Future<void> _readDriveLibrary() async {
+    final snapshotRevision = _snapshotRevision;
+    final value = await gateway.load();
+    await _applySnapshotRead(value, startedAtRevision: snapshotRevision);
+    await syncComposerWorkspace();
   }
 
   Future<void> pollWorking({bool ignoreSchedule = false}) async {
@@ -7009,11 +7205,12 @@ class AppController extends ChangeNotifier {
   Future<void> connectGoogleDrive(String folderName) async {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       _apply(
         await (gateway as GoogleDriveGateway).connectGoogleDrive(folderName),
-        restorePreferences: true,
+        restorePreferences: _preferenceRevision == preferenceRevision,
       );
       _driveSessionSchedule.renewed();
       await syncComposerWorkspace();
@@ -7030,11 +7227,12 @@ class AppController extends ChangeNotifier {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     _driveSessionSchedule.suspend();
     googleDriveBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       _apply(
         await (gateway as GoogleDriveGateway).disconnectGoogleDrive(),
-        restorePreferences: true,
+        restorePreferences: _preferenceRevision == preferenceRevision,
       );
       showNotice('Drive disconnected on this device. Cloud files were kept.');
     } on Object catch (error) {
@@ -7054,6 +7252,7 @@ class AppController extends ChangeNotifier {
     bool restorePreferences = false,
     int? expectedPreferenceRevision,
   }) async {
+    expectedPreferenceRevision ??= _preferenceRevision;
     if (_disposed ||
         gateway is! GoogleDriveGateway ||
         googleDriveBusy ||
@@ -7081,10 +7280,8 @@ class AppController extends ChangeNotifier {
         value,
         startedAtRevision: snapshotRevision,
         reloadIfSuperseded: true,
-        restorePreferences:
-            restorePreferences &&
-            (expectedPreferenceRevision == null ||
-                _preferenceRevision == expectedPreferenceRevision),
+        restorePreferences: restorePreferences,
+        expectedPreferenceRevision: expectedPreferenceRevision,
       );
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
@@ -7101,6 +7298,7 @@ class AppController extends ChangeNotifier {
     if (gateway is! GoogleDriveGateway || googleDriveBusy) return;
     googleDriveBusy = true;
     final snapshotRevision = _snapshotRevision;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
@@ -7110,6 +7308,7 @@ class AppController extends ChangeNotifier {
         startedAtRevision: snapshotRevision,
         reloadIfSuperseded: true,
         restorePreferences: true,
+        expectedPreferenceRevision: preferenceRevision,
       );
       await syncComposerWorkspace();
       showNotice('Google Drive data refreshed.');
@@ -7124,12 +7323,16 @@ class AppController extends ChangeNotifier {
   Future<String?> setupSettingsVault(String passphrase) async {
     if (gateway is! SettingsVaultGateway || settingsVaultBusy) return null;
     settingsVaultBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
       final result = await (gateway as SettingsVaultGateway).setupSettingsVault(
         passphrase,
       );
-      _apply(result.snapshot, restorePreferences: true);
+      _apply(
+        result.snapshot,
+        restorePreferences: _preferenceRevision == preferenceRevision,
+      );
       showNotice('Encrypted settings sync is ready.');
       return result.recoveryCode;
     } on Object catch (error) {
@@ -7179,9 +7382,13 @@ class AppController extends ChangeNotifier {
   ) async {
     if (gateway is! SettingsVaultGateway || settingsVaultBusy) return false;
     settingsVaultBusy = true;
+    final preferenceRevision = _preferenceRevision;
     notifyListeners();
     try {
-      _apply(await action(), restorePreferences: true);
+      _apply(
+        await action(),
+        restorePreferences: _preferenceRevision == preferenceRevision,
+      );
       showNotice(success);
       return true;
     } on Object catch (error) {
@@ -7560,16 +7767,16 @@ class AppController extends ChangeNotifier {
           selectedModel.referenceTasks.contains(item.config.referenceTask)
           ? item.config.referenceTask
           : MediaReferenceTask.reference;
+      final takesPrompt = includePrompt && item.mode != VideoMode.draftEnhance;
       _disabledReferences.clear();
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases
         ..clear()
         ..addAll(item.config.screenplayCharacterAliases);
       form.draftCharacterNames.clear();
+      if (takesPrompt) form.characterMappings.clear();
       form
-        ..prompt = includePrompt && item.mode != VideoMode.draftEnhance
-            ? item.prompt
-            : form.prompt
+        ..prompt = takesPrompt ? item.prompt : form.prompt
         ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
@@ -7613,6 +7820,9 @@ class AppController extends ChangeNotifier {
                 durableSource?.kind == 'remote'
             ? durableSource!.value
             : '';
+      // A film stores the prompt it was submitted with, casting block and
+      // all; reusing it puts that block back where it is edited.
+      if (takesPrompt) absorbPromptMappings();
       _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
         item,
       );
@@ -7653,7 +7863,11 @@ class AppController extends ChangeNotifier {
       showNotice(_message(error));
     }
     _inComposerTab(tab, () {
-      if (prompt != null) tab.form.prompt = prompt;
+      if (prompt != null) {
+        tab.form.prompt = prompt;
+        // A rewrite echoes the casting block back; it belongs to the cast.
+        absorbPromptMappings();
+      }
       tab.sourceGenerationId = item.localId;
       tab.rewriteSummary = rewriteSummary;
       _adoptGenerationFolder(tab, item);
@@ -7789,6 +8003,16 @@ class AppController extends ChangeNotifier {
     VideoSaveDestination destination = VideoSaveDestination.files,
   }) => saveMedia(item, destination: destination);
 
+  /// The retained asset first, then the provider delivery link while it is
+  /// still live.
+  ///
+  /// A Drive-library record can still name media staged on the device that
+  /// generated it ([Generation.awaitsOriginDeviceUpload]), which no other
+  /// device can open. On web the companion resolves that itself — its
+  /// `/assets` route serves the provider link instead, or answers a 404 that
+  /// says the film is still uploading. On native the resolution failure lands
+  /// here and takes the same fallback; when there is no link left, the player
+  /// surface explains the wait rather than blaming local playback.
   Future<Uri?> generationMediaUri(Generation item) async {
     if (item.resultAsset != null) {
       try {
@@ -7957,6 +8181,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _flushGenerationPreferencesSave();
     _disposed = true;
     _queuedRetentions.clear();
     unawaited(_backgroundActivity.setPendingWork(false));

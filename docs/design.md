@@ -27,8 +27,12 @@ than inventing new colors or sizes.
   mode.
 - **Hardware is honest.** Values are set with real-feeling hardware: a
   machined knob in a recessed groove, metal toggles, counter-window
-  readouts that echo the app icon. No status lamps or ornament beyond the
-  control itself.
+  readouts that echo the app icon. The footer's Generate key and model
+  selector are **1960s command-center hardware** — a matte backlit
+  push-button indicator and a segment-display readout — never glossy
+  web plastic: no specular bands, no bloom, no gradients that only a
+  screen could show. No status lamps or ornament beyond the control
+  itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
@@ -44,7 +48,7 @@ through `TexturePanel` (`flutter/lib/ui/panels.dart`).
 | --- | --- | --- |
 | Walnut burl | `wood_burl.jpg` | Side rail and mobile bottom nav; casework, dark in both modes |
 | Plum leather | `leather_plum.jpg` | Settings feature panel (dark mode), dark canvas grain |
-| Navy leather | `leather_navy.jpg` | Provider plaque (dark mode) |
+| Navy leather | `leather_navy.jpg` | Reserved — the model plaque wore it until the footer became console hardware; no panel uses it today |
 | Baize / hunter felt (solid) | None | Estimated-charge panel; follows the mode |
 | Cream linen | `linen_cream.jpg` | Light-mode canvas, and the tooth on pale content panels |
 
@@ -116,6 +120,7 @@ both its fill and its `on` color explicitly; never rely on defaults.
 | **Fraunces** (500/600 + italic) | `assets/fonts/Fraunces-*` | Display and headlines, stat numerals, wordmark |
 | **Courier Prime** (400/700 + italic) | `assets/fonts/CourierPrime-*` | The Direction/prompt entry — the director's typewriter voice (`promptFontFamily`) |
 | **DM Sans** (400/500/700) | `assets/fonts/DMSans-*` | Everything else |
+| **DSEG14 Classic** (400/700) | `assets/fonts/DSEG14Classic-*` | The model selector's fourteen-segment readout only (`segmentDisplayFontFamily`) — never for prose |
 
 All families are vendored so every platform renders identically offline. They
 are SIL Open Font License 1.1; the license texts ship beside them as
@@ -165,15 +170,40 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
 - **`consoleKeyDecoration`**: selection tiles (ratio strip, resolution pair,
   library filters) read as console keys: a faint raised gradient when idle,
   a lit plum gradient with a soft glow when selected.
+- **`HardwareLitButton`** (`hardware_button.dart`): the Generate key — a
+  1960s command-center **push-button indicator**: a frosted, matte,
+  translucent plum lens seated in a thin charcoal bezel with a dark gap
+  around it, its legend engraved in capitals (DM Sans 700, 12 px, tracked
+  1.9) and white-filled, the claw inked the same. Two incandescent lamps
+  behind the diffuser light it — the lens glows plum-magenta with two soft
+  hot spots — on pointer-down and for as long as a render is in flight
+  (there is no spinner); keyboard focus wears the brass halo. No specular
+  band, no gloss, no bloom: real lenses are matte and spill almost no
+  light. Plum in both modes — a button is allowed to stay dark on paper.
+- **`HardwareSelector`** (`hardware_selector.dart`): the model selector —
+  the console's **alphanumeric readout**: a charcoal bezel held by four
+  slotted screws around a recessed display window, and a separate square
+  satin-metal key with an engraved chevron that steps the selection. The
+  window shows the provider and model on two rows of a fixed eighteen-cell
+  fourteen-segment display (`SegmentReadout`, DSEG14 Classic), with the
+  unlit segments faintly visible behind the lit ones (`ghostRow` mirrors
+  the narrow period and space cells so the rows stay registered). It
+  follows the mode: lit ice-blue segments on smoked glass at night, an
+  unlit liquid-crystal pane with dark segments on pale glass on paper.
+  Text is upper-cased and reduced to what fourteen segments can form
+  (`segmentDisplayText`). It carries no gesture of its own; the wrapping
+  `PopupMenuButton` owns the tap. Both footer controls share
+  `kConsoleControlHeight` (56 px, growing past ~1.25× text scale).
 
 The grooves, wells, and readout windows are recessed into the surface they
 sit on: shadowed warm cream with ink numerals in light mode, warm
 near-black with cream numerals in dark mode, so light mode stays paper and
 cream rather than sprouting reverse-type islands. The same rule covers media
 ghosts (empty frame, reference, and library placeholders): they follow the
-mode instead of always sitting on plum ink. Only the machined metal, the
-navy plaque, the hunter cost panel, and a switch's lit green side stay dark
-in light mode.
+mode instead of always sitting on plum ink. Only the machined metal and
+charcoal bezels, the plum Generate key (a button), and a switch's lit green
+side stay dark in light mode — the selector's display becomes an unlit LCD
+on paper.
 
 ## 6. Shell anatomy
 
@@ -191,7 +221,7 @@ in light mode.
   720/1180 (library 2/3 columns), 620 (gutters), 880 (composer pairs
   the guidance accordions with the settings column, and the cost +
   destination row), 330 (Frame/Finish dropdowns stack instead of
-  sharing a row), 480 (composer footer stacks). A viewport under 950 px
+  sharing a row), 640 (composer footer stacks). A viewport under 950 px
   tall switches the create screen into a dense mode (no first-run
   guidance line, tighter gaps).
 
@@ -205,11 +235,13 @@ reads what you attach; `GenerationFormState.mode` is derived:
 3. any keyframes → **Image to video**
 4. otherwise → **Text to video**
 
-The current inference is always visible as a quiet chip beside the
-Generate button.
+The inference shows in the cost panel's summary line (`Text`, `Image`,
+`Video`…); the footer carries no mode chip and no readiness line — a ready
+console says nothing, and the lit Generate key is the signal.
 
-**Model & Provider plaque:** the navy stitched plaque opens a searchable
-picker. Every model row and provider heading carries a small star (brass
+**Model selector:** the console readout in the footer (`HardwareSelector`:
+charcoal bezel with corner screws, a fourteen-segment display of provider
+and model, a square chevron key) opens a searchable picker. Every model row and provider heading carries a small star (brass
 when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
@@ -224,7 +256,18 @@ Layout order:
    clear control sits directly after the label (disabled while empty) and
    asks before wiping the text; the live counter, copy, and fullscreen
    controls keep the header's far end.
-2. **Keyframes / References accordions**: the two guidance sections are
+2. **Cast row**: a compact strip between the direction and the guidance /
+   settings pair, present only when a character actually holds a
+   reference on a model that accepts creative references. A brass label,
+   then one chip per cast member — up to three overlapping 26-pixel
+   thumbnails of its media, a "+n" spillover, and the name — each opening
+   the mapping editor; a small pencil and × inside each chip recast or
+   uncast that character in place (the media stays in the References
+   tray). A quiet *Add character* ends the row. The casting
+   itself never appears in the prompt box; it is appended silently at
+   submission, so an uncast composer keeps the heading through Generate
+   above the fold.
+3. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny
    thumbnails of what is attached, and a status word (*None* / *n
@@ -243,17 +286,17 @@ Layout order:
    both accordions open, warns in madder, and cannot submit. The
    *Normalize visual references* switch applies to both sections, so it
    sits below the pair.
-3. **"Or start from…"**: two quiet text buttons under the accordions
+4. **"Or start from…"**: two quiet text buttons under the accordions
    disclose the video-continuation and draft-enhance panels. An attached
    source collapses the irrelevant sections and explains what is set
    aside; removing it restores them. Draft enhance hides prompt/frames
    entirely (the original generation owns them) and shows only Finish +
    Safety.
-4. **Frame**: a console-key ratio dropdown whose trigger and menu rows
+5. **Frame**: a console-key ratio dropdown whose trigger and menu rows
    keep the *drawn glyph of the actual shape* plus label and hint; Auto
    uses the free-crop glyph. Frame and Finish share one dropdown row at
    every width above 330 px, so phones stop spending a full row on each.
-5. **Duration**: Manual is the default. Models that support provider-selected
+6. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
    resolution-specific slider range. Auto replaces the slider with the same
@@ -262,21 +305,24 @@ Layout order:
    and it commits clamped to the range on blur/submit; focusing it while
    AUTO is lit drops to Manual, like touching the slider. Layouts that
    require fixed timing lock the switch to Manual and say why.
-6. **Finish**: a console-key resolution dropdown (label + pixel detail
+7. **Finish**: a console-key resolution dropdown (label + pixel detail
    per row; draft mode dims tiers above HD) on the Frame row, then audio
    and fast-draft hardware switches (lit hunter green when on),
    safety-tolerance knob with an `n / 4` readout, and — for models whose
    API takes one — a **Seed** field with a dice button (empty = random),
    all stacked in the single settings column.
-7. **Estimated charge + Save generation to**: side by side in one row at
+8. **Estimated charge + Save generation to**: side by side in one row at
    desktop widths. The stitched hunter-green panel keeps the brass coin,
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-8. Footer: claw + readiness line, mode chip, then the navy **model
-   plaque** (provider + model, opens the picker) directly before the plum
-   **Generate video** — under 480 px the plaque takes its own line above
-   the button.
+9. Footer: the console **model selector** (provider + model on a
+   fourteen-segment readout in a screwed charcoal bezel, chevron key;
+   opens the picker) directly before the backlit **GENERATE VIDEO**
+   push-button indicator, shoulder to shoulder at 56 px.
+   A status line appears only when something blocks a render (API key
+   missing, this device cannot run the local model). Under 640 px the
+   selector and the key stack, each spanning the composer.
 
 **Fold contract:** the heading and the whole composer, Generate button
 included, fit above the fold at 1440×900, with the Recent work header
@@ -298,8 +344,9 @@ continuous with the composer (owner rejected a plum-filled active tab as
 modest hit areas and never stretch the tab past its neighbours.
 Each tab is a complete, independent draft — Direction, provider and model,
 every setting, attachments, and the save-to folder — so several films can be
-worked on side by side. A "+" tab opens a blank draft that inherits only the
-active tab's provider, model, and folder; the × on a tab closes it (the last
+worked on side by side. A "+" tab opens a blank draft using the active tab's
+provider, model, and folder plus the last-used controls for that provider/model;
+the × on a tab closes it (the last
 tab is replaced by a blank one); long-press or double-tap renames. Labels
 derive from the first words of the prompt until renamed. Reuse and Enhance
 fill the active tab when it is still pristine and otherwise open a new tab.
@@ -318,6 +365,18 @@ session-only: the rail identifies them before the app closes. Save failures
 stay visible beneath the rail with a Retry action; an unreadable workspace
 is not overwritten by a new session.
 
+Last-used controls are separate from draft content: ratio, duration and Auto,
+resolution, audio, frame rate, draft quality, safety, timing, and upscale controls
+are remembered per provider/model. Blank tabs leave Direction, format, seed,
+references, aesthetic selection, and source media empty. Editing only an older
+tab's prompt does not replace newer remembered controls. Explicit control edits
+and Generate update defaults; choosing another model restores its own defaults
+and checks them against current capabilities. Settings writes are coalesced while
+dragging controls and flushed on tab actions, backgrounding, and disposal. The
+versioned scalar records travel through the existing preferences and encrypted
+settings sync. Migration reads meaningful older drafts and generation history
+without displacing settings still arriving from another device.
+
 Closing a tab keeps the ten most recent recovery snapshots. The restore
 control beside the new-tab key opens a named list of closed drafts. Recovery
 opens a new tab id, preserving the original close tombstone across devices.
@@ -335,6 +394,28 @@ generation-mode rule above still stands — tabs never select a mode.
   fill with cream icon and text; both modes were verified against the old
   unreadable-active-tab bug. Narrow layouts stack the search above the
   segment row and shrink Select to an icon key.
+- **The References desk is two folder tabs** — *Media* and *Aesthetics*,
+  with facet counts — standing on a hairline rule that closes the pinned
+  heading under *Your creative ingredients.* They are the Create draft
+  rail's construction (`SectionTabRail`, `lib/ui/section_tabs.dart`) cut
+  larger: idle tabs are raised console keys on the rule, the open desk is
+  cut from the surface beneath it with a brass lip and covers the rule,
+  never a lit button. Both tabs keep the same 1440-px column and padding,
+  so switching never shifts the heading. The aesthetic half
+  replaces the folder rail with one scrolling column, which is what keeps a
+  long aesthetic list scrollable instead of growing the pinned heading;
+  dropped files still only ever mean media.
+- **The aesthetic library follows the one-row toolbar pattern**
+  (`lib/ui/aesthetic_library.dart`): All / Starred facet segments, one
+  search field over titles, text, and tags, a **Tags** console key popover
+  (`#tag · count` chips plus *Reset filters*), and the *Add aesthetic* key.
+  Rows are one card of hairline-separated lines — line icon, title, brass
+  star toggle, tag pills (four, then *+n*), two lines of the reference
+  text, and a pencil. Starred entries lead, then titles A→Z. On Create the
+  aesthetic key opens a searchable anchored panel with the same ordering:
+  *No aesthetic*, a **Favorites** group, then **All**, each row starring in
+  place without closing the panel, and a *Manage aesthetics…* footer that
+  opens this tab.
 - **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
   live in an anchored panel instead of stacked chip rows. The key lights
   plum with a count while any of them narrows the view, and the panel

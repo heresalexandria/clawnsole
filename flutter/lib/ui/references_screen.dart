@@ -8,10 +8,11 @@ import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'common_widgets.dart';
-import 'aesthetic_references.dart';
+import 'aesthetic_library.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
+import 'section_tabs.dart';
 import 'library_folders.dart';
 import 'media_thumbnail.dart';
 import 'video_frame_loader.dart';
@@ -45,6 +46,9 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
   static const int _pageSize = 20;
 
   final ScrollController _scrollController = ScrollController();
+
+  /// The aesthetic tab scrolls on its own so the heading can stay pinned.
+  final ScrollController _aestheticScrollController = ScrollController();
   int _itemLimit = _pageSize;
   String? _listingSignature;
   bool _pageAdvancePending = false;
@@ -60,6 +64,7 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _aestheticScrollController.dispose();
     super.dispose();
   }
 
@@ -110,50 +115,127 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
   Widget build(BuildContext context) {
     _syncListingPage();
     final scope = FolderScope.references(controller);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final desktop = constraints.maxWidth >= 960;
-        final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
-        // The whole library is a drop target: local files dropped anywhere on
-        // this screen save into the current folder, sorted into their kind by
-        // MIME type or extension.
-        return ReferenceDropZone(
-          label: 'Drop to save references',
-          onDropFiles: (files) => controller.importDroppedReferenceFiles(
-            files,
-            folderId:
-                controller.referenceFolderView ==
-                        AppController.libraryFolderAll ||
-                    controller.referenceFolderView ==
-                        AppController.libraryFolderUnfiled
-                ? null
-                : controller.referenceFolderView,
-            videoPreviewLoader: _loadReferenceVideoPreview,
-          ),
-          child: FolderRailLayout(
-            heading: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ReferencesHeading(controller: controller),
-                AestheticReferenceLibrary(controller: controller),
-              ],
+    // Which half of the desk is showing is read here, so the screen has to
+    // hear the controller itself rather than relying on the app shell.
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final desktop = constraints.maxWidth >= 960;
+          final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
+          final heading = _ReferencesHeading(controller: controller);
+          // Aesthetics are text-only, so their tab replaces the folder rail
+          // and results with one scrolling column under the same pinned
+          // heading. Dropped files only ever mean media.
+          if (controller.referencesTab == ReferencesTab.aesthetics) {
+            return _AestheticTabLayout(
+              heading: heading,
+              body: AestheticLibraryView(controller: controller),
+              scrollController: _aestheticScrollController,
+              desktop: desktop,
+              padding: padding,
+            );
+          }
+          // The whole library is a drop target: local files dropped anywhere
+          // on this screen save into the current folder, sorted into their
+          // kind by MIME type or extension.
+          return ReferenceDropZone(
+            label: 'Drop to save references',
+            onDropFiles: (files) => controller.importDroppedReferenceFiles(
+              files,
+              folderId:
+                  controller.referenceFolderView ==
+                          AppController.libraryFolderAll ||
+                      controller.referenceFolderView ==
+                          AppController.libraryFolderUnfiled
+                  ? null
+                  : controller.referenceFolderView,
+              videoPreviewLoader: _loadReferenceVideoPreview,
             ),
-            rail: FolderRail(scope: scope),
-            narrowRail: FolderDropdownBar(scope: scope),
-            results: _ReferenceResults(
-              controller: controller,
-              itemLimit: _itemLimit,
-              onLoadMore: _loadMore,
-              dragToFolders: desktop,
+            child: FolderRailLayout(
+              heading: heading,
+              rail: FolderRail(scope: scope),
+              narrowRail: FolderDropdownBar(scope: scope),
+              results: _ReferenceResults(
+                controller: controller,
+                itemLimit: _itemLimit,
+                onLoadMore: _loadMore,
+                dragToFolders: desktop,
+              ),
+              scrollController: _scrollController,
+              desktop: desktop,
+              padding: padding,
             ),
-            scrollController: _scrollController,
-            desktop: desktop,
-            padding: padding,
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
+}
+
+/// The aesthetic tab's page frame. It mirrors `FolderRailLayout`'s width,
+/// padding, and pinned-heading behaviour exactly, so switching tabs never
+/// shifts the heading — and, on desktop, so a long list scrolls on its own
+/// instead of pushing the heading off the top.
+class _AestheticTabLayout extends StatelessWidget {
+  const _AestheticTabLayout({
+    required this.heading,
+    required this.body,
+    required this.scrollController,
+    required this.desktop,
+    required this.padding,
+  });
+
+  final Widget heading;
+  final Widget body;
+  final ScrollController scrollController;
+  final bool desktop;
+  final double padding;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (!desktop || !constraints.hasBoundedHeight) {
+        return SingleChildScrollView(
+          key: const ValueKey('aesthetic-library-scroll'),
+          controller: scrollController,
+          padding: EdgeInsets.all(padding),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[heading, const SizedBox(height: 22), body],
+              ),
+            ),
+          ),
+        );
+      }
+      return Padding(
+        padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1440),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                heading,
+                const SizedBox(height: 22),
+                Expanded(
+                  child: SingleChildScrollView(
+                    key: const ValueKey('aesthetic-library-scroll'),
+                    controller: scrollController,
+                    padding: EdgeInsets.only(bottom: padding),
+                    child: body,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _ReferencesHeading extends StatelessWidget {
@@ -206,6 +288,9 @@ class _ReferencesHeading extends StatelessWidget {
               // Imports run on the background work queue, so the button stays
               // available while earlier files are still processing.
               final uploading = controller.referenceUploadInProgress;
+              // The aesthetic tab's own toolbar carries Add aesthetic, so the
+              // media importer steps aside there instead of competing.
+              final mediaTab = controller.referencesTab == ReferencesTab.media;
               return Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -215,54 +300,87 @@ class _ReferencesHeading extends StatelessWidget {
                       controller: controller,
                       keyPrefix: 'references',
                     ),
-                  PopupMenuButton<MediaReferenceKind>(
-                    tooltip: 'Add references',
-                    onSelected: (kind) => unawaited(() async {
-                      final source = await chooseMediaPickerSource(
-                        context,
-                        kind,
-                      );
-                      if (source == null) return;
-                      await controller.importSavedReferences(
-                        kind,
-                        source: source,
-                        previewLoader: kind == MediaReferenceKind.video
-                            ? _loadReferenceVideoPreview
-                            : null,
-                        folderId:
-                            controller.referenceFolderView ==
-                                    AppController.libraryFolderAll ||
-                                controller.referenceFolderView ==
-                                    AppController.libraryFolderUnfiled
-                            ? null
-                            : controller.referenceFolderView,
-                      );
-                    }()),
-                    itemBuilder: (context) => MediaReferenceKind.values
-                        .map(
-                          (kind) => PopupMenuItem<MediaReferenceKind>(
-                            value: kind,
-                            child: Row(
-                              children: <Widget>[
-                                Icon(mediaKindIcon(kind), size: 18),
-                                const SizedBox(width: 10),
-                                Text('Add ${kind.pluralLabel}'),
-                              ],
+                  if (mediaTab)
+                    PopupMenuButton<MediaReferenceKind>(
+                      tooltip: 'Add references',
+                      onSelected: (kind) => unawaited(() async {
+                        final source = await chooseMediaPickerSource(
+                          context,
+                          kind,
+                        );
+                        if (source == null) return;
+                        await controller.importSavedReferences(
+                          kind,
+                          source: source,
+                          previewLoader: kind == MediaReferenceKind.video
+                              ? _loadReferenceVideoPreview
+                              : null,
+                          folderId:
+                              controller.referenceFolderView ==
+                                      AppController.libraryFolderAll ||
+                                  controller.referenceFolderView ==
+                                      AppController.libraryFolderUnfiled
+                              ? null
+                              : controller.referenceFolderView,
+                        );
+                      }()),
+                      itemBuilder: (context) => MediaReferenceKind.values
+                          .map(
+                            (kind) => PopupMenuItem<MediaReferenceKind>(
+                              value: kind,
+                              child: Row(
+                                children: <Widget>[
+                                  Icon(mediaKindIcon(kind), size: 18),
+                                  const SizedBox(width: 10),
+                                  Text('Add ${kind.pluralLabel}'),
+                                ],
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
-                    child: FilledButtonIconVisual(
-                      icon: Icons.add_rounded,
-                      label: 'Add references',
-                      loading: uploading,
+                          )
+                          .toList(),
+                      child: FilledButtonIconVisual(
+                        icon: Icons.add_rounded,
+                        label: 'Add references',
+                        loading: uploading,
+                      ),
                     ),
-                  ),
                 ],
               );
             },
           ),
         ],
+      ),
+      const SizedBox(height: 18),
+      // The desk's two halves are folder tabs on a rule that closes the
+      // pinned heading, so switching never moves the heading itself.
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => SectionTabRail(
+          semanticLabel: 'References desk',
+          tabs: <SectionTab>[
+            SectionTab(
+              key: const ValueKey('references-tab-media'),
+              label: 'Media',
+              semanticLabel: 'Media references',
+              icon: Icons.perm_media_rounded,
+              count: controller.savedReferences
+                  .where((item) => !item.hidden)
+                  .length,
+              selected: controller.referencesTab == ReferencesTab.media,
+              onTap: () => controller.setReferencesTab(ReferencesTab.media),
+            ),
+            SectionTab(
+              key: const ValueKey('references-tab-aesthetics'),
+              label: 'Aesthetics',
+              semanticLabel: 'Aesthetic references',
+              icon: Icons.palette_outlined,
+              count: controller.aestheticReferences.length,
+              selected: controller.referencesTab == ReferencesTab.aesthetics,
+              onTap: () =>
+                  controller.setReferencesTab(ReferencesTab.aesthetics),
+            ),
+          ],
+        ),
       ),
       ReferenceUploadIndicator(
         controller: controller,
@@ -1693,176 +1811,221 @@ Future<bool> showReferenceMetadataDialog(
   MediaReferenceDraft? draft,
 }) async {
   assert(reference != null || draft != null);
-  final name = TextEditingController(text: reference?.name ?? draft!.label);
-  final tags = TextEditingController(text: reference?.tags.join(', ') ?? '');
-  final character = TextEditingController(
-    text:
-        reference?.characterName ??
-        (draft == null ? '' : controller.characterNameForDraft(draft)),
-  );
+  return await showDialog<bool>(
+        context: context,
+        builder: (context) => _ReferenceMetadataDialog(
+          controller: controller,
+          reference: reference,
+          draft: draft,
+        ),
+      ) ==
+      true;
+}
+
+class _ReferenceMetadataDialog extends StatefulWidget {
+  const _ReferenceMetadataDialog({
+    required this.controller,
+    this.reference,
+    this.draft,
+  });
+
+  final AppController controller;
+  final SavedReference? reference;
+  final MediaReferenceDraft? draft;
+
+  @override
+  State<_ReferenceMetadataDialog> createState() =>
+      _ReferenceMetadataDialogState();
+}
+
+class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
+  late final TextEditingController name;
+  late final TextEditingController tags;
+  late final TextEditingController character;
   String? characterError;
-  var folderId = reference?.folderId;
-  var destination = reference?.storage ?? controller.effectiveStorage;
-  final saved = await showDialog<bool>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: Text(reference == null ? 'Save reference' : 'Edit reference'),
-        content: SingleChildScrollView(
-          child: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (reference == null &&
-                    controller.supportsLocalLibrary &&
-                    controller.supportsGoogleDrive) ...<Widget>[
-                  DropdownButtonFormField<LibraryStorage>(
-                    initialValue: destination,
-                    decoration: const InputDecoration(
-                      labelText: 'Save in',
-                      prefixIcon: Icon(Icons.storage_outlined),
-                    ),
-                    items: LibraryStorage.values
-                        .map(
-                          (value) => DropdownMenuItem(
-                            value: value,
-                            child: Text(value.label),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setState(() {
-                      destination = value ?? destination;
-                      folderId = null;
-                    }),
+  String? folderId;
+  late LibraryStorage destination;
+
+  @override
+  void initState() {
+    super.initState();
+    final reference = widget.reference;
+    final draft = widget.draft;
+    name = TextEditingController(text: reference?.name ?? draft!.label);
+    tags = TextEditingController(text: reference?.tags.join(', ') ?? '');
+    character = TextEditingController(
+      text:
+          reference?.characterName ??
+          (draft == null ? '' : widget.controller.characterNameForDraft(draft)),
+    );
+    folderId = reference?.folderId;
+    destination = reference?.storage ?? widget.controller.effectiveStorage;
+  }
+
+  @override
+  void dispose() {
+    name.dispose();
+    tags.dispose();
+    character.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final reference = widget.reference;
+    final draft = widget.draft;
+    return AlertDialog(
+      title: Text(reference == null ? 'Save reference' : 'Edit reference'),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (reference == null &&
+                  controller.supportsLocalLibrary &&
+                  controller.supportsGoogleDrive) ...<Widget>[
+                DropdownButtonFormField<LibraryStorage>(
+                  initialValue: destination,
+                  decoration: const InputDecoration(
+                    labelText: 'Save in',
+                    prefixIcon: Icon(Icons.storage_outlined),
                   ),
-                  const SizedBox(height: 10),
-                ] else ...<Widget>[
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: StorageBadge(storage: destination),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
-                    null) ...<Widget>[
-                  Text(
-                    'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
-                    style: TextStyle(
-                      color: context.colors.onSurfaceVariant,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                TextField(
-                  controller: name,
-                  autofocus: true,
-                  maxLength: 80,
-                  decoration: const InputDecoration(labelText: 'Name'),
+                  items: LibraryStorage.values
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(value.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => setState(() {
+                    destination = value ?? destination;
+                    folderId = null;
+                  }),
                 ),
                 const SizedBox(height: 10),
-                if ((reference?.kind ?? draft?.kind) !=
-                    MediaReferenceKind.audio) ...[
-                  TextField(
-                    key: const ValueKey('reference-character-name'),
-                    controller: character,
-                    textCapitalization: TextCapitalization.characters,
-                    maxLength: 60,
-                    decoration: InputDecoration(
-                      labelText: 'Character name',
-                      hintText: 'ALEXANDRIA',
-                      errorText: characterError,
-                      helperText:
-                          'Optional, unique. Used to cast this reference in a screenplay.',
-                      helperMaxLines: 2,
-                    ),
+              ] else ...<Widget>[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: StorageBadge(storage: destination),
+                ),
+                const SizedBox(height: 10),
+              ],
+              if ((reference?.durationSeconds ?? draft?.durationSeconds) !=
+                  null) ...<Widget>[
+                Text(
+                  'Duration · ${formatMediaDuration((reference?.durationSeconds ?? draft!.durationSeconds)!)}',
+                  style: TextStyle(
+                    color: context.colors.onSurfaceVariant,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(height: 10),
-                ],
-                DropdownButtonFormField<String?>(
-                  initialValue: folderId,
-                  decoration: const InputDecoration(labelText: 'Folder'),
-                  items: <DropdownMenuItem<String?>>[
-                    const DropdownMenuItem(value: null, child: Text('Unfiled')),
-                    ...controller.referenceFolderTree
-                        .where((folder) => folder.storage == destination)
-                        .map(
-                          (folder) => DropdownMenuItem(
-                            value: folder.id,
-                            child: Text(
-                              controller.folderPath(
-                                folder.id,
-                                collection: LibraryCollection.references,
-                              ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              TextField(
+                controller: name,
+                autofocus: true,
+                maxLength: 80,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 10),
+              if ((reference?.kind ?? draft?.kind) !=
+                  MediaReferenceKind.audio) ...[
+                TextField(
+                  key: const ValueKey('reference-character-name'),
+                  controller: character,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 60,
+                  decoration: InputDecoration(
+                    labelText: 'Character name',
+                    hintText: 'ALEXANDRIA',
+                    errorText: characterError,
+                    helperText:
+                        'Optional, unique. Used to cast this reference in a screenplay.',
+                    helperMaxLines: 2,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              DropdownButtonFormField<String?>(
+                initialValue: folderId,
+                decoration: const InputDecoration(labelText: 'Folder'),
+                items: <DropdownMenuItem<String?>>[
+                  const DropdownMenuItem(value: null, child: Text('Unfiled')),
+                  ...controller.referenceFolderTree
+                      .where((folder) => folder.storage == destination)
+                      .map(
+                        (folder) => DropdownMenuItem(
+                          value: folder.id,
+                          child: Text(
+                            controller.folderPath(
+                              folder.id,
+                              collection: LibraryCollection.references,
                             ),
                           ),
                         ),
-                  ],
-                  onChanged: (value) => setState(() => folderId = value),
+                      ),
+                ],
+                onChanged: (value) => setState(() => folderId = value),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: tags,
+                decoration: const InputDecoration(
+                  labelText: 'Tags',
+                  hintText: 'character, product, motion',
+                  helperText: 'Separate tags with commas',
                 ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: tags,
-                  decoration: const InputDecoration(
-                    labelText: 'Tags',
-                    hintText: 'character, product, motion',
-                    helperText: 'Separate tags with commas',
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final problem = controller.characterNameProblem(
-                character.text,
-                excludeDraftId: draft?.id,
-                excludeSavedReferenceId:
-                    reference?.id ?? draft?.savedReferenceId,
-              );
-              if (problem != null) {
-                setState(() => characterError = problem);
-                return;
-              }
-              final values = tags.text.split(',');
-              final success = reference == null
-                  ? await controller.saveDraftReference(
-                          draft!,
-                          name: name.text,
-                          characterName: character.text,
-                          folderId: folderId,
-                          tags: values,
-                          storage: destination,
-                        ) !=
-                        null
-                  : await controller.updateSavedReference(
-                      reference,
-                      name: name.text,
-                      characterName: character.text,
-                      folderId: folderId,
-                      tags: values,
-                    );
-              if (success && context.mounted) Navigator.pop(context, true);
-            },
-            child: Text(reference == null ? 'Save' : 'Update'),
-          ),
-        ],
       ),
-    ),
-  );
-  name.dispose();
-  tags.dispose();
-  character.dispose();
-  return saved == true;
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            final problem = controller.characterNameProblem(
+              character.text,
+              excludeDraftId: draft?.id,
+              excludeSavedReferenceId: reference?.id ?? draft?.savedReferenceId,
+            );
+            if (problem != null) {
+              setState(() => characterError = problem);
+              return;
+            }
+            final values = tags.text.split(',');
+            final success = reference == null
+                ? await controller.saveDraftReference(
+                        draft!,
+                        name: name.text,
+                        characterName: character.text,
+                        folderId: folderId,
+                        tags: values,
+                        storage: destination,
+                      ) !=
+                      null
+                : await controller.updateSavedReference(
+                    reference,
+                    name: name.text,
+                    characterName: character.text,
+                    folderId: folderId,
+                    tags: values,
+                  );
+            if (success && context.mounted) Navigator.pop(context, true);
+          },
+          child: Text(reference == null ? 'Save' : 'Update'),
+        ),
+      ],
+    );
+  }
 }
 
 Future<bool> showReferenceTrimDialog(
@@ -2725,95 +2888,126 @@ Future<void> showCharacterAssignmentDialog(
   BuildContext context,
   AppController controller,
   MediaReferenceDraft reference,
-) async {
-  final name = TextEditingController(
-    text: controller.characterNameForDraft(reference),
-  );
+) => showDialog<void>(
+  context: context,
+  builder: (context) =>
+      _CharacterAssignmentDialog(controller: controller, reference: reference),
+);
+
+class _CharacterAssignmentDialog extends StatefulWidget {
+  const _CharacterAssignmentDialog({
+    required this.controller,
+    required this.reference,
+  });
+
+  final AppController controller;
+  final MediaReferenceDraft reference;
+
+  @override
+  State<_CharacterAssignmentDialog> createState() =>
+      _CharacterAssignmentDialogState();
+}
+
+class _CharacterAssignmentDialogState
+    extends State<_CharacterAssignmentDialog> {
+  late final TextEditingController name;
   String? error;
   bool saving = false;
-  await showDialog<void>(
-    context: context,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
-        title: const Text('Cast a character'),
-        content: SingleChildScrollView(
-          child: SizedBox(
-            width: 380,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('@${controller.referencePromptName(reference)}'),
-                const SizedBox(height: 16),
-                TextField(
-                  key: const ValueKey('character-name-field'),
-                  controller: name,
-                  autofocus: true,
-                  maxLength: 60,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: 'Character name',
-                    hintText: 'ALEXANDRIA',
-                    errorText: error,
-                    helperText:
-                        'Use this name in your screenplay to link this reference. Clear it to remove the assignment.',
-                    helperMaxLines: 3,
-                  ),
+
+  @override
+  void initState() {
+    super.initState();
+    name = TextEditingController(
+      text: widget.controller.characterNameForDraft(widget.reference),
+    );
+  }
+
+  @override
+  void dispose() {
+    name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final reference = widget.reference;
+    return AlertDialog(
+      title: const Text('Cast a character'),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('@${controller.referencePromptName(reference)}'),
+              const SizedBox(height: 16),
+              TextField(
+                key: const ValueKey('character-name-field'),
+                controller: name,
+                autofocus: true,
+                maxLength: 60,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: 'Character name',
+                  hintText: 'ALEXANDRIA',
+                  errorText: error,
+                  helperText:
+                      'Use this name in your screenplay to link this reference. Clear it to remove the assignment.',
+                  helperMaxLines: 3,
                 ),
-                if (controller.screenplayCharacterNames.isNotEmpty)
-                  Wrap(
-                    spacing: 6,
-                    children: controller.screenplayCharacterNames
-                        .map(
-                          (character) => ActionChip(
-                            label: Text(character),
-                            onPressed: () => name.text = character,
-                          ),
-                        )
-                        .toList(),
-                  ),
-              ],
-            ),
+              ),
+              if (controller.screenplayCharacterNames.isNotEmpty)
+                Wrap(
+                  spacing: 6,
+                  children: controller.screenplayCharacterNames
+                      .map(
+                        (character) => ActionChip(
+                          label: Text(character),
+                          onPressed: () => name.text = character,
+                        ),
+                      )
+                      .toList(),
+                ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: saving ? null : () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const ValueKey('save-character-name'),
-            onPressed: saving
-                ? null
-                : () async {
-                    final problem = controller.characterNameProblem(
-                      name.text,
-                      excludeDraftId: reference.id,
-                      excludeSavedReferenceId: reference.savedReferenceId,
-                    );
-                    if (problem != null) {
-                      setState(() => error = problem);
-                      return;
-                    }
-                    setState(() => saving = true);
-                    final saved = await controller.setDraftCharacterName(
-                      reference.id,
-                      name.text,
-                    );
-                    if (!context.mounted) return;
-                    if (saved) {
-                      Navigator.pop(context);
-                    } else {
-                      setState(() => saving = false);
-                    }
-                  },
-            child: Text(saving ? 'Saving…' : 'Save'),
-          ),
-        ],
       ),
-    ),
-  );
-  // Dialog exit animations retain the field for one more frame.
-  await Future<void>.delayed(const Duration(milliseconds: 250));
-  name.dispose();
+      actions: [
+        TextButton(
+          onPressed: saving ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('save-character-name'),
+          onPressed: saving
+              ? null
+              : () async {
+                  final problem = controller.characterNameProblem(
+                    name.text,
+                    excludeDraftId: reference.id,
+                    excludeSavedReferenceId: reference.savedReferenceId,
+                  );
+                  if (problem != null) {
+                    setState(() => error = problem);
+                    return;
+                  }
+                  setState(() => saving = true);
+                  final saved = await controller.setDraftCharacterName(
+                    reference.id,
+                    name.text,
+                  );
+                  if (!context.mounted) return;
+                  if (saved) {
+                    Navigator.pop(context);
+                  } else {
+                    setState(() => saving = false);
+                  }
+                },
+          child: Text(saving ? 'Saving…' : 'Save'),
+        ),
+      ],
+    );
+  }
 }

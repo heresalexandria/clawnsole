@@ -1,5 +1,6 @@
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/core/composer_tabs.dart';
+import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
@@ -11,6 +12,7 @@ import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/ui/screenplay_input.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -31,17 +33,33 @@ SavedReference actor(String id, String character) => SavedReference(
   createdAt: DateTime.utc(2026),
   updatedAt: DateTime.utc(2026),
 );
-AppController director({List<SavedReference> references = const []}) =>
-    AppController()
-      ..selectedProviderId = 'artcraft'
-      ..selectedModelId = 'seedance_2p5'
-      ..snapshot = LocalSnapshot(
-        generations: const [],
-        preferences: const AppPreferences(),
-        hasApiKey: false,
-        storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
-        savedReferences: references,
-      );
+AppController director({
+  List<SavedReference> references = const [],
+  AppGateway? gateway,
+}) => AppController(gateway: gateway)
+  ..selectedProviderId = 'artcraft'
+  ..selectedModelId = 'seedance_2p5'
+  ..snapshot = LocalSnapshot(
+    generations: const [],
+    preferences: const AppPreferences(),
+    hasApiKey: false,
+    storage: const StorageStats(path: 'memory', bytes: 0, records: 0),
+    savedReferences: references,
+  );
+
+class _ToolbarGateway implements AppGateway {
+  @override
+  bool get usesCompanion => false;
+
+  @override
+  bool get supportsPhotoLibrarySave => false;
+
+  @override
+  String get persistenceDescription => 'Memory';
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   test('only screenplay cues become detected characters', () {
@@ -296,13 +314,14 @@ void main() {
       controller.setScreenplayMode(true);
       controller.updateForm((form) => form.prompt = 'ALEXANDRIA enters.');
       expect(controller.form.references, hasLength(1));
+      expect(controller.form.prompt, 'ALEXANDRIA enters.');
       expect(
-        controller.form.prompt,
+        controller.promptWithCast,
         'ALEXANDRIA enters.\n\nALEXANDRIA: @alx.mp4',
       );
       expect(
         translateReferencePrompt(
-          controller.form.prompt,
+          controller.promptWithCast,
           dialect: ReferencePromptDialect.compactAt,
           available: controller.formPromptReferenceMentions,
         ),
@@ -312,8 +331,10 @@ void main() {
         (form) => form.prompt = 'ALEXANDRIA enters.\n\nALEXANDRIA: @custom',
       );
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA sits.');
-      expect(controller.form.prompt, contains('@custom'));
-      expect(controller.form.prompt, isNot(contains('@alx.mp4')));
+      expect(controller.form.prompt, isNot(contains('@')));
+      expect(controller.form.characterMappings, {
+        'ALEXANDRIA': ['custom'],
+      });
       controller.removeReference(controller.form.references.single.id);
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA leaves.');
       expect(controller.form.references, isEmpty);
@@ -355,13 +376,16 @@ void main() {
         await controller.setDraftCharacterName('one', ' alexandria '),
         isTrue,
       );
-      expect(controller.form.prompt, contains('ALEXANDRIA: @Video 1'));
+      expect(controller.form.characterMappings, {
+        'ALEXANDRIA': ['Video 1'],
+      });
+      expect(controller.form.prompt, 'ALEXANDRIA enters.');
       expect(
         await controller.setDraftCharacterName('two', 'Alexandria'),
         isFalse,
       );
       expect(await controller.setDraftCharacterName('one', ''), isTrue);
-      expect(controller.form.prompt, isNot(contains('ALEXANDRIA: @')));
+      expect(controller.form.characterMappings, isEmpty);
     },
   );
   test('mode and removed-link memory round trip without storing media', () {
@@ -410,8 +434,8 @@ void main() {
         isNull,
       );
       expect(controller.form.references, hasLength(2));
-      expect(controller.form.prompt, contains('ALEXANDRIA turns.'));
-      expect(controller.form.prompt, endsWith('HERO: @alx.mp4 @alt.mp4'));
+      expect(controller.form.prompt, 'ALEXANDRIA turns. ALEXANDRIAN waits.');
+      expect(controller.promptWithCast, endsWith('HERO: @alx.mp4 @alt.mp4'));
       expect(controller.characterMappingReferences('ALEXANDRIA'), [
         'alx.mp4',
         'alt.mp4',
@@ -426,13 +450,10 @@ void main() {
         ),
         isNull,
       );
-      expect(
-        controller.form.prompt,
-        startsWith('HERO turns. ALEXANDRIAN waits.'),
-      );
-      expect(controller.form.prompt, endsWith('HERO: @alt.mp4'));
+      expect(controller.form.prompt, 'HERO turns. ALEXANDRIAN waits.');
+      expect(controller.promptWithCast, endsWith('HERO: @alt.mp4'));
       controller.removeReference(controller.form.references.last.id);
-      expect(screenplayMappings(controller.form.prompt), isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
       expect(
         await controller.saveCharacterMapping(
           scriptName: 'HERO',
@@ -442,7 +463,8 @@ void main() {
         isNull,
       );
       controller.updateForm((form) => form.prompt += '\nMore action.');
-      expect(screenplayMappings(controller.form.prompt), isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
+      expect(controller.promptWithCast, controller.form.prompt);
     },
   );
 
@@ -611,6 +633,224 @@ void main() {
     },
   );
 
+  for (final width in [320.0, 360.0, 520.0, 620.0]) {
+    for (final textScale in [1.0, 1.5]) {
+      testWidgets(
+        'mobile aesthetic stays visible at width $width and scale $textScale',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 900));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final semantics = tester.ensureSemantics();
+          await tester.runAsync(() async {
+            final font = FontLoader('DM Sans')
+              ..addFont(rootBundle.load('assets/fonts/DMSans-400.ttf'))
+              ..addFont(rootBundle.load('assets/fonts/DMSans-700.ttf'));
+            await font.load();
+          });
+          final controller = director(gateway: _ToolbarGateway());
+          addTearDown(controller.dispose);
+          const title =
+              'Golden hour cinematography with soft light and vintage film grain';
+          controller.saveAestheticReference(
+            id: 'golden-hour',
+            title: title,
+            text: 'Warm, soft, cinematic light.',
+            icon: 'sparkles',
+            color: 0xffaf853c,
+          );
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: buildClawnsoleTheme(Brightness.dark),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
+                child: child!,
+              ),
+              home: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) =>
+                    Scaffold(body: CreateScreen(controller: controller)),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          void expectToolbar(Finder editor, String expectedTitle) {
+            Finder control(String key) => find.descendant(
+              of: editor,
+              matching: find.byKey(ValueKey(key)),
+            );
+            final toolbar = control('direction-toolbar');
+            final bounds = tester.getRect(toolbar);
+            final copy = control('prompt-copy-button');
+            final rowY = tester.getCenter(copy).dy;
+            var previousRight = bounds.left;
+            for (final key in [
+              'prompt-copy-button',
+              'prompt-rewrite-button',
+              'prompt-characters-button',
+              'prompt-aesthetic-picker',
+            ]) {
+              final rect = tester.getRect(control(key));
+              expect(rect.center.dy, closeTo(rowY, 1), reason: key);
+              expect(rect.left, greaterThanOrEqualTo(previousRight));
+              expect(rect.right, lessThanOrEqualTo(bounds.right));
+              previousRight = rect.right;
+            }
+            expect(
+              find.descendant(
+                of: toolbar,
+                matching: find.byWidgetPredicate(
+                  (widget) =>
+                      widget is ScrollView &&
+                      widget.scrollDirection == Axis.horizontal,
+                ),
+              ),
+              findsNothing,
+            );
+            final characters = control('prompt-characters-button');
+            expect(
+              find.descendant(
+                of: characters,
+                matching: find.text('Characters'),
+              ),
+              findsNothing,
+            );
+            expect(
+              find.descendant(
+                of: toolbar,
+                matching: find.byTooltip('Characters'),
+              ),
+              findsOneWidget,
+            );
+            for (final action in {
+              'prompt-copy-button': 'Copy prompt',
+              'prompt-characters-button': 'Characters',
+            }.entries) {
+              final data = tester
+                  .getSemantics(control(action.key))
+                  .getSemanticsData();
+              expect(data.label, action.value);
+              expect(data.flagsCollection.isButton, isTrue);
+              expect(data.hasAction(SemanticsAction.tap), isTrue);
+            }
+            final label = control('prompt-aesthetic-label');
+            final text = tester.widget<Text>(label);
+            expect(text.data, expectedTitle);
+            expect(text.maxLines, 1);
+            expect(text.overflow, TextOverflow.ellipsis);
+            expect(tester.getSize(label).width, greaterThan(0));
+            if (expectedTitle == title) {
+              final minimumVisibleTitle = TextPainter(
+                text: TextSpan(text: 'G…', style: text.style),
+                textDirection: TextDirection.ltr,
+                textScaler: TextScaler.linear(textScale),
+              )..layout();
+              expect(
+                tester.getSize(label).width,
+                greaterThanOrEqualTo(minimumVisibleTitle.width),
+              );
+              minimumVisibleTitle.dispose();
+              expect(
+                tester.renderObject<RenderParagraph>(label).didExceedMaxLines,
+                isTrue,
+              );
+              expect(
+                find.descendant(
+                  of: toolbar,
+                  matching: find.byTooltip('Aesthetic: $title'),
+                ),
+                findsOneWidget,
+              );
+            }
+            expect(tester.takeException(), isNull);
+          }
+
+          final inline = find.byType(CreateScreen);
+          expectToolbar(inline, 'Aesthetic');
+          await tester.tap(
+            find.byKey(const ValueKey('prompt-characters-button')),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.widgetWithText(AlertDialog, 'Characters'),
+            findsOneWidget,
+          );
+          await tester.tap(find.widgetWithText(TextButton, 'Done'));
+          await tester.pumpAndSettle();
+
+          await tester.tap(
+            find.byKey(const ValueKey('prompt-aesthetic-picker')),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.byKey(const ValueKey('prompt-aesthetic-option-golden-hour')),
+          );
+          await tester.pumpAndSettle();
+          expect(controller.form.aestheticReferenceId, 'golden-hour');
+          expectToolbar(inline, title);
+
+          await tester.tap(
+            find.byKey(const ValueKey('prompt-fullscreen-button')),
+          );
+          await tester.pumpAndSettle();
+          final fullscreen = find.byKey(
+            const ValueKey('prompt-fullscreen-editor'),
+          );
+          expectToolbar(fullscreen, title);
+
+          await tester.tap(
+            find.descendant(
+              of: fullscreen,
+              matching: find.byKey(const ValueKey('prompt-aesthetic-picker')),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('prompt-aesthetic-none')));
+          await tester.pumpAndSettle();
+          expect(controller.form.aestheticReferenceId, isNull);
+          expectToolbar(fullscreen, 'Aesthetic');
+
+          await tester.tap(
+            find.byKey(const ValueKey('prompt-fullscreen-minimize')),
+          );
+          await tester.pumpAndSettle();
+          expectToolbar(inline, 'Aesthetic');
+          semantics.dispose();
+        },
+      );
+    }
+  }
+
+  testWidgets('desktop toolbar keeps its Characters label', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = director(gateway: _ToolbarGateway());
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.dark),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('prompt-characters-button')),
+        matching: find.text('Characters'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const ValueKey('prompt-aesthetic-label')))
+          .data,
+      'Aesthetic',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'ordinary arrows move and select text with screenplay completions visible',
     (tester) async {
@@ -657,7 +897,10 @@ void main() {
     ) async {
       await tester.binding.setSurfaceSize(Size(width, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      final controller = director(references: [actor('alx', '')]);
+      final controller = director(
+        references: [actor('alx', '')],
+        gateway: _ToolbarGateway(),
+      );
       addTearDown(controller.dispose);
       controller.form.screenplayMode = true;
       controller.form.prompt = '        ALEXANDRIA\n    Hello.';
@@ -681,11 +924,16 @@ void main() {
         find.byKey(const ValueKey('mapping-character-name')),
         'HERO',
       );
+      await tester.ensureVisible(find.text('@alx.mp4'));
       await tester.tap(find.text('@alx.mp4'));
       await tester.tap(find.byKey(const ValueKey('save-character-mapping')));
       await tester.pumpAndSettle();
+      expect(controller.form.prompt, '        ALEXANDRIA\n    Hello.');
+      expect(controller.form.characterMappings, {
+        'HERO': ['alx.mp4'],
+      });
       expect(
-        controller.form.prompt,
+        controller.promptWithCast,
         '        ALEXANDRIA\n    Hello.\n\nHERO: @alx.mp4',
       );
       expect(find.text('HERO'), findsOneWidget);

@@ -14,6 +14,8 @@ import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/video_cache.dart';
 import 'package:clawnsole/core/video_cache_gateway.dart';
+import 'package:clawnsole/ui/common_widgets.dart';
+import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -562,6 +564,64 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets(
+    'a film staged on another device says so, not "playback failed"',
+    (tester) async {
+      final staged = _generation(
+        'staged',
+        status: 'Ready',
+        resultAsset: const AssetReference(
+          kind: 'local',
+          value: 'staged-0001',
+          label: 'film.mp4',
+          contentType: 'video/mp4',
+        ),
+      ).copyWith(storage: LibraryStorage.drive);
+      expect(staged.awaitsOriginDeviceUpload, isTrue);
+      final detail = generationDeliveryUnavailableDetail(staged);
+      expect(detail, contains('still syncing from the device that made it'));
+      expect(
+        detail,
+        isNot(contains('Save video')),
+        reason: 'no export on this device can rescue bytes it does not have',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: DeferredGenerationVideo(
+              uri: Future<Uri?>.value(),
+              onDownload: (_) async {},
+              unavailableDetail: detail,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Delivery unavailable'), findsOneWidget);
+      expect(find.text(detail!), findsOneWidget);
+      expect(
+        find.textContaining('Playback failed on this device'),
+        findsNothing,
+      );
+
+      // A published Drive film keeps the generic copy: nothing is syncing.
+      expect(
+        generationDeliveryUnavailableDetail(
+          staged.copyWith(
+            resultAsset: const AssetReference(
+              kind: 'drive',
+              value: 'drive-0001',
+              label: 'film.mp4',
+            ),
+          ),
+        ),
+        isNull,
+      );
+    },
+  );
 }
 
 LocalSnapshot _snapshot({

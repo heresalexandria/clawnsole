@@ -54,14 +54,48 @@ records contain asset references, never media bytes or base64. Drive-backed
 media is accessible on other devices; device-local media still belongs to its
 original device. Move or copy that media to Drive when it needs to travel.
 
-Aesthetic references are text-only library entries managed under References.
-Choose a title, one of 16 SVG icons, a color, and the reference text. The Aesthetic
-menu immediately to the right of Characters selects one per Create tab, or
-**No aesthetic**. Generation requests append only the reference text after the
-editable prompt, including in Screenplay mode; the title and icon are never
-sent as prompt content. Prompt limits and estimates use the composed prompt.
-Editing an aesthetic updates selected tabs; deleting it removes its effect.
-Aesthetics do not consume media-reference slots or appear in media pickers.
+Aesthetic references are text-only library entries managed on the **Aesthetics**
+tab of the References desk, beside **Media**. Each entry carries a title, one
+SVG line icon, a color, comma-separated tags, a star, and the reference text.
+The editor keeps the icon out of the way: the current icon sits beside a
+**Change icon** action that unfolds a short, scrolling grid grouped by
+subject, and twenty-two colour swatches sit underneath. The tab's toolbar filters by All /
+Starred, a search across titles, text, and tags, and a Tags popover; rows show
+the star and tag pills. The Aesthetic menu immediately to the right of
+Characters selects one per Create tab, or **No aesthetic**; it is a searchable
+panel that lists starred aesthetics first, stars entries in place, and links
+back to the library. Generation requests append only the reference text after
+the editable prompt, including in Screenplay mode; the title, icon, and tags
+are never sent as prompt content. Prompt limits and estimates use the composed
+prompt. Editing an aesthetic updates selected tabs; deleting it removes its
+effect. Aesthetics do not consume media-reference slots or appear in media
+pickers.
+
+## Generation reconciliation
+
+Every device polls a shared generation independently, so `statusCheckCount` is
+a per-device write version, never a cross-device clock — and device clocks
+skew. Reconciliation therefore ranks delivery first: a film published to Drive
+beats one still staged on the device that made it, which beats a live provider
+delivery link, which beats a record with no media. Only an even delivery
+contest falls back to `updatedAt`. This ordering governs the Drive merge, the
+in-memory acceptance of a poll or retention result, and the per-record fold
+that happens when a library read is superseded by a local write while it was
+in flight. Delivered media is never traded away: a receipt cannot retract a
+result asset, and a record that arrives failed but delivered is treated as
+successful everywhere in the UI.
+
+A superseded periodic refresh is folded record by record instead of being
+discarded, so a device with work in flight still adopts films finished
+elsewhere; records only that device knows about (a card just submitted, a
+folder just created) survive the fold untouched.
+
+Media staged for Drive lives on one device until its background upload pass
+publishes it. Until then, other devices see the reference but not the bytes:
+the companion serves the record's provider delivery link instead when one is
+still live, and otherwise answers 404 with "This film is still uploading from
+the device that made it." The player says the same rather than blaming local
+playback.
 
 ## Google Cloud setup
 

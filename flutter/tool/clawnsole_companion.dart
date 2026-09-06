@@ -3022,15 +3022,28 @@ class CompanionApp {
     return null;
   }
 
-  String? _resultFallbackUrl(StoredData data, String assetId) => data
-      .generations
-      .where(
-        (item) =>
-            item.resultAsset?.value == assetId &&
-            item.resultUrl?.trim().isNotEmpty == true,
-      )
-      .firstOrNull
-      ?.resultUrl;
+  /// The generation whose delivered film is [assetId], if any.
+  Generation? _resultOwner(StoredData data, String assetId) => data.generations
+      .where((item) => item.resultAsset?.value == assetId)
+      .firstOrNull;
+
+  String? _resultFallbackUrl(StoredData data, String assetId) {
+    final url = _resultOwner(data, assetId)?.resultUrl?.trim();
+    return url == null || url.isEmpty ? null : url;
+  }
+
+  /// A Drive-tagged record can name media that is still staged on the device
+  /// that generated it, until that device's upload pass publishes the bytes
+  /// and swaps the record to a Drive file. Every other device resolves the
+  /// same reference to a file it simply does not have.
+  Never _missingLocalAsset(StoredData data, String assetId) {
+    throw ProviderException(
+      _resultOwner(data, assetId)?.awaitsOriginDeviceUpload == true
+          ? 'This film is still uploading from the device that made it.'
+          : 'The retained media file is missing on this device.',
+      status: 404,
+    );
+  }
 
   /// Applies the persisted cache-cap preference before any cache use, so a
   /// cap changed on another surface (through the synced preferences) takes
@@ -3090,11 +3103,16 @@ class CompanionApp {
     );
     try {
       if (reference.kind == 'local') {
-        return await _serveAssetFile(
-          request,
-          reference,
-          await _store.localAssetFile(reference),
-        );
+        final file = await _store.localAssetFile(reference);
+        if (await file.exists()) {
+          return await _serveAssetFile(request, reference, file);
+        }
+        // Staged on another device: serve the record's still-live provider
+        // delivery instead, exactly as the Drive 404 path below does, and
+        // otherwise say plainly what the viewer is waiting for.
+        final fallback = _resultFallbackUrl(data, reference.value);
+        if (fallback != null) return await _serveRemoteMedia(request, fallback);
+        _missingLocalAsset(data, reference.value);
       }
       if (reference.kind == 'drive' && _isVideoAsset(reference)) {
         final cache = await _syncedVideoCache(data);
@@ -3133,11 +3151,10 @@ class CompanionApp {
       );
     }
     if (reference.kind != 'drive') {
-      return _serveAssetFile(
-        request,
-        reference,
-        await _store.localAssetFile(reference),
-      );
+      final file = await _store.localAssetFile(reference);
+      // Media staged on another device is a cache miss here, not a fault.
+      if (!await file.exists()) _missingLocalAsset(data, reference.value);
+      return _serveAssetFile(request, reference, file);
     }
     final cache = _isVideoAsset(reference)
         ? await _syncedVideoCache(data)

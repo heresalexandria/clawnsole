@@ -69,14 +69,14 @@ StoredData mergeGoogleDriveData({
 /// delivery link) must win regardless of timestamps. Device clocks skew, so a
 /// plain updatedAt contest would otherwise let one device's routine status
 /// poll deterministically discard the film another device just uploaded.
+///
+/// [Generation.deliveryRank] also separates a film published to Drive from
+/// one still staged on the device that made it: the staged reference names a
+/// file no other device can open, so letting it beat the published swap on a
+/// skewed timestamp would strand the film everywhere else.
 Generation? _preferDeliveredGeneration(Generation next, Generation remote) {
-  int rank(Generation item) => item.resultAsset != null
-      ? 2
-      : item.hasDeliveredMedia
-      ? 1
-      : 0;
-  final nextRank = rank(next);
-  final remoteRank = rank(remote);
+  final nextRank = next.deliveryRank;
+  final remoteRank = remote.deliveryRank;
   if (nextRank == remoteRank) return null;
   return nextRank > remoteRank ? next : remote;
 }

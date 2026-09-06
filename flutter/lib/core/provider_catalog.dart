@@ -210,6 +210,14 @@ class VideoModelDefinition {
   /// Null means the provider does not publish a dependable route limit.
   final int? maxPromptCharacters;
 
+  /// The editor still bounds input when the provider publishes no route limit.
+  /// This fallback is an app limit, not a claimed provider capability.
+  static const int defaultPromptEditorCharacterLimit = 50000;
+  int get promptEditorCharacterLimit =>
+      maxPromptCharacters != null && maxPromptCharacters! > 0
+      ? maxPromptCharacters!
+      : defaultPromptEditorCharacterLimit;
+
   /// Modes whose wire contract permits an empty prompt.
   final List<VideoMode> promptOptionalModes;
   final bool promptOptionalWithFramesOnly;
