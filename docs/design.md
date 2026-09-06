@@ -34,7 +34,9 @@ than inventing new colors or sizes.
   screen could show. No status lamps or ornament beyond the control
   itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
-  ~140 ms; everything else just settles.
+  ~140 ms; everything else just settles. The single exception is physical:
+  the Generate key's incandescent lamps wander a few percent while a
+  submission is in flight, because real filaments do.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
   an input the provider supports. Prefer inference and disclosure over
   hiding features.
@@ -176,10 +178,16 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
   around it, its legend engraved in capitals (DM Sans 700, 12 px, tracked
   1.9) and white-filled, the claw inked the same. Two incandescent lamps
   behind the diffuser light it — the lens glows plum-magenta with two soft
-  hot spots — on pointer-down and for as long as a render is in flight
-  (there is no spinner); keyboard focus wears the brass halo. No specular
-  band, no gloss, no bloom: real lenses are matte and spill almost no
-  light. Plum in both modes — a button is allowed to stay dark on paper.
+  hot spots — on pointer-down and while the **submission** is in flight,
+  i.e. until the provider accepts the job; once the render is running the
+  key returns to its unlit, pressable state (there is no spinner).
+  The lamps behave like lamps: they warm over ~240 ms (ease-out) and cool
+  with a ~420 ms afterglow, and while on the filaments wander a few
+  percent with an occasional brief sag (`HardwareLitButtonState.filament`,
+  0.9–1.05) — the one thing in the app that moves on its own, and it ticks
+  only while lit. Keyboard focus wears the brass halo. No specular band,
+  no gloss, no bloom: real lenses are matte and spill almost no light.
+  Plum in both modes — a button is allowed to stay dark on paper.
 - **`HardwareSelector`** (`hardware_selector.dart`): the model selector —
   the console's **alphanumeric readout**: a charcoal bezel held by four
   slotted screws around a recessed display window, and a separate square
