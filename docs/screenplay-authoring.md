@@ -145,8 +145,10 @@ prose-mode records. Composer schema 6 stores the cast as its own record field
 instead of casting lines inside the prompt; a workspace written by an older
 build has its lines absorbed on restore, and older builds refuse a schema-6
 workspace rather than silently dropping casts.
-Composer schema 4 also syncs tabs and aesthetic selections through Drive,
-retaining compact attachment layouts. Composer schema 3 introduced the mode, handled character names, character aliases,
+Composer schema 4 also carries tabs and aesthetic selections through Drive,
+retaining compact attachment layouts; since per-device drafts, each device
+publishes its own strip and other devices open copies from the
+**Recover a draft** key rather than merging tabs. Composer schema 3 introduced the mode, handled character names, character aliases,
 and saved reference ids with their prompt names. These saved references restore
 into their own tabs, including inactive tabs. Retained assets and HTTPS references reopen with the draft. Local assets
 require their original device unless copied to Drive.

@@ -751,11 +751,20 @@ class CompanionHybridStore {
     return operation;
   }
 
-  Future<void> writeComposerWorkspace(ComposerTabsState state) {
-    final operation = _queue.then((_) => hybrid.writeComposerWorkspace(state));
+  Future<void> writeComposerWorkspace(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) {
+    final operation = _queue.then(
+      (_) => hybrid.writeComposerWorkspace(state, publishNow: publishNow),
+    );
     _queue = operation.then<void>((_) {}, onError: (_) {});
     return operation;
   }
+
+  /// Pushes saved drafts that have not reached Drive yet, outside the write
+  /// queue so a slow upload never holds newer keystrokes behind it.
+  Future<void> publishComposerWorkspace() => hybrid.publishComposerWorkspace();
 
   Future<void> replace(StoredData data) =>
       mutate<void>((_) => StoreChange<void>(data, null));
@@ -1021,7 +1030,16 @@ class CompanionApp {
         final state = ComposerTabsState.fromJson(
           raw.map((key, value) => MapEntry(key.toString(), value)),
         );
-        await _store.writeComposerWorkspace(state);
+        await _store.writeComposerWorkspace(
+          state,
+          publishNow: body['publish'] == 'now',
+        );
+        return await _json(request.response, 200, <String, Object?>{
+          'ok': true,
+        });
+      }
+      if (request.method == 'POST' && path == '/composer-tabs/publish') {
+        await _store.publishComposerWorkspace();
         return await _json(request.response, 200, <String, Object?>{
           'ok': true,
         });

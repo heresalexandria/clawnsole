@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
@@ -23,6 +23,10 @@ class PromptReferenceOption {
   final String label;
 }
 
+/// One line of a screenplay as the highlighter sees it: where it starts and
+/// which element it is. Computed once per text, not once per span.
+typedef _ScreenplayLine = ({int start, int end, ScreenplayElement element});
+
 class _ReferencePromptEditingController extends TextEditingController {
   _ReferencePromptEditingController({
     required super.text,
@@ -32,6 +36,16 @@ class _ReferencePromptEditingController extends TextEditingController {
   List<PromptReferenceMention> _attachedMentions;
   bool screenplayMode = false;
   double screenplayWidth = 720;
+
+  // buildTextSpan runs on every frame the editor rebuilds — each keystroke,
+  // caret move, and parent rebuild. The document scans it needs (mention
+  // matches, one element per screenplay line) depend only on the text and
+  // the attached mentions, so they are kept until either changes.
+  String? _scannedText;
+  List<PromptReferenceMention>? _scannedMentions;
+  bool _scannedScreenplay = false;
+  List<({int start, int end})> _mentionRanges = const [];
+  List<_ScreenplayLine> _lines = const [];
 
   void updateMentions(List<PromptReferenceMention> mentions) {
     final current = _attachedMentions
@@ -45,16 +59,62 @@ class _ReferencePromptEditingController extends TextEditingController {
     notifyListeners();
   }
 
+  void _scan() {
+    if (_scannedText == text &&
+        _scannedScreenplay == screenplayMode &&
+        identical(_scannedMentions, _attachedMentions)) {
+      return;
+    }
+    _scannedText = text;
+    _scannedScreenplay = screenplayMode;
+    _scannedMentions = _attachedMentions;
+    _mentionRanges = promptReferenceMatches(
+      text,
+      available: _attachedMentions,
+    ).map((match) => (start: match.start, end: match.end)).toList();
+    if (!screenplayMode) {
+      _lines = const [];
+      return;
+    }
+    final lines = <_ScreenplayLine>[];
+    var start = 0;
+    while (true) {
+      final newline = text.indexOf('\n', start);
+      final end = newline < 0 ? text.length : newline;
+      lines.add((
+        start: start,
+        end: end,
+        element: screenplayElement(text.substring(start, end)),
+      ));
+      if (newline < 0) break;
+      start = newline + 1;
+    }
+    _lines = lines;
+  }
+
+  /// The line holding [offset], by binary search over the scanned lines.
+  _ScreenplayLine _lineAt(int offset) {
+    var low = 0;
+    var high = _lines.length - 1;
+    while (low < high) {
+      final middle = (low + high + 1) >> 1;
+      if (_lines[middle].start <= offset) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return _lines[low];
+  }
+
   @override
   TextSpan buildTextSpan({
     required BuildContext context,
     TextStyle? style,
     required bool withComposing,
   }) {
-    final mentionRanges = promptReferenceMatches(
-      text,
-      available: _attachedMentions,
-    ).map((match) => (start: match.start, end: match.end)).toList();
+    _scan();
+    final mentionRanges = _mentionRanges;
     if (!screenplayMode && mentionRanges.isEmpty) {
       return super.buildTextSpan(
         context: context,
@@ -69,13 +129,14 @@ class _ReferencePromptEditingController extends TextEditingController {
         !composing.isCollapsed &&
         composing.end <= text.length;
     final boundaries = <int>{
-      if (screenplayMode) ...[
-        ...RegExp(r'\n').allMatches(text).map((match) => match.end),
-        ...RegExp(
-          r'^ +',
-          multiLine: true,
-        ).allMatches(text).map((match) => match.end),
-      ],
+      if (screenplayMode)
+        for (final line in _lines) ...<int>[
+          line.start,
+          // The leading spaces are their own span so only they stretch.
+          if (line.element.indent > 0)
+            line.start + _leadingSpaces(text, line.start, line.end),
+          if (line.end < text.length) line.end + 1,
+        ],
       0,
       text.length,
       for (final range in mentionRanges) ...<int>[range.start, range.end],
@@ -92,18 +153,13 @@ class _ReferencePromptEditingController extends TextEditingController {
       );
       final isComposing =
           hasComposing && start >= composing.start && end <= composing.end;
-      final lineStart = start == 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
-      final lineEnd = text.indexOf('\n', start);
-      final element = screenplayMode
-          ? screenplayElement(
-              text.substring(lineStart, lineEnd < 0 ? text.length : lineEnd),
-            )
-          : null;
+      final line = screenplayMode ? _lineAt(start) : null;
+      final element = line?.element;
       final indent = element?.indent ?? 0;
       final isIndent =
           screenplayMode &&
           indent > 0 &&
-          start == lineStart &&
+          start == line!.start &&
           text.substring(start, end).trim().isEmpty;
       final fraction = switch (element) {
         ScreenplayElement.character => .34,
@@ -133,6 +189,14 @@ class _ReferencePromptEditingController extends TextEditingController {
       );
     }
     return TextSpan(style: style, children: children);
+  }
+
+  static int _leadingSpaces(String text, int start, int end) {
+    var count = 0;
+    while (start + count < end && text.codeUnitAt(start + count) == 0x20) {
+      count += 1;
+    }
+    return count;
   }
 }
 
@@ -186,14 +250,30 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   bool _allowFocusTraversal = false;
   bool _dismissScreenplaySuggestions = false;
 
-  List<String> get _screenplaySuggestions =>
-      !widget.screenplayMode || _dismissScreenplaySuggestions
-      ? const []
-      : screenplayCompletions(
-          _controller.text,
-          screenplayCurrentLine(_controller.value).line,
-          widget.characterNames,
-        );
+  // Completions scan the whole script for character cues. They are read
+  // several times per build and per key event, so they are computed once
+  // per editing value and set of names.
+  TextEditingValue? _suggestionsValue;
+  List<String>? _suggestionsNames;
+  List<String> _screenplaySuggestionsCache = const [];
+
+  List<String> get _screenplaySuggestions {
+    if (!widget.screenplayMode || _dismissScreenplaySuggestions) {
+      return const [];
+    }
+    final value = _controller.value;
+    if (_suggestionsValue != value ||
+        !listEquals(_suggestionsNames, widget.characterNames)) {
+      _suggestionsValue = value;
+      _suggestionsNames = widget.characterNames;
+      _screenplaySuggestionsCache = screenplayCompletions(
+        value.text,
+        screenplayCurrentLine(value).line,
+        widget.characterNames,
+      );
+    }
+    return _screenplaySuggestionsCache;
+  }
 
   @override
   void initState() {

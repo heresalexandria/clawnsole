@@ -971,8 +971,7 @@ class _ComposerState extends State<_Composer> {
               formRevision: controller.formRevision,
               references: _promptReferenceOptions(controller),
               maxLength: controller.promptCharacterLimit,
-              onChanged: (value) =>
-                  controller.updateForm((form) => form.prompt = value),
+              onChanged: controller.updatePrompt,
             ),
             SizedBox(height: short ? 8 : 16),
           ],
@@ -1457,9 +1456,7 @@ class _FullscreenPromptEditor extends StatelessWidget {
                           expands: true,
                           autofocus: true,
                           maxLength: controller.promptCharacterLimit,
-                          onChanged: (value) => controller.updateForm(
-                            (form) => form.prompt = value,
-                          ),
+                          onChanged: controller.updatePrompt,
                         ),
                       ),
                     ],
@@ -1481,7 +1478,12 @@ class _PromptCharacterCounter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
+    // Keystrokes no longer rebuild the studio; the budget follows them
+    // through the controller's per-keystroke prompt listenable instead.
+    listenable: Listenable.merge(<Listenable>[
+      controller,
+      controller.promptEdits,
+    ]),
     builder: (context, _) {
       final model = controller.selectedModel;
       return PromptCharacterCounter(

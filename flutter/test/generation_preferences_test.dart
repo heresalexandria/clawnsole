@@ -937,9 +937,15 @@ class _TabsGateway extends _PreferencesGateway implements ComposerTabsGateway {
   Future<ComposerTabsState?> loadComposerTabs() async => stored;
 
   @override
-  Future<void> saveComposerTabs(ComposerTabsState state) async {
+  Future<void> saveComposerTabs(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) async {
     stored = state;
   }
+
+  @override
+  Future<void> publishComposerTabs() async {}
 }
 
 class _DrivePreferencesGateway extends _TabsGateway

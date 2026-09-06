@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import 'asset_extensions.dart';
+import 'device_identity.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'google_drive_store.dart';
@@ -21,12 +22,33 @@ class HybridDataStore
     GoogleDriveStore? drive,
     this.localLibraryAvailable = true,
     this.deferDriveUploads = true,
+    DateTime Function()? clock,
+    String Function()? newDeviceId,
+    String Function()? deviceName,
+    String Function()? devicePlatform,
   }) : _local = local,
-       _drive = drive ?? GoogleDriveStore();
+       _drive = drive ?? GoogleDriveStore(),
+       _clock = clock ?? DateTime.now,
+       _newDeviceId = newDeviceId ?? _randomDeviceId,
+       _deviceName = deviceName ?? composerDeviceName,
+       _devicePlatform = devicePlatform ?? composerDevicePlatform;
 
   final DurableDataStore _local;
   final GoogleDriveStore _drive;
+  final DateTime Function() _clock;
+  final String Function() _newDeviceId;
+  final String Function() _deviceName;
+  final String Function() _devicePlatform;
   final bool localLibraryAvailable;
+
+  /// How long this device's published drafts may trail its local saves.
+  /// Typing saves locally every pause; one Drive write per this window keeps
+  /// a long writing session from hammering the Drive API.
+  static const Duration workspacePublishInterval = Duration(seconds: 20);
+
+  static String _randomDeviceId() =>
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}-'
+      '${Random.secure().nextInt(1 << 32).toRadixString(16)}';
 
   /// When set, Drive-tagged media writes stage into the local store and are
   /// published to Drive by a background upload pass, so saving media finishes
@@ -68,6 +90,8 @@ class HybridDataStore
         driveFolderId: _drive.connection.folderId,
       ),
     );
+    // Drafts saved while disconnected publish now that Drive is back.
+    if (_workspaceDirty) _scheduleWorkspacePublish(now: true);
     return read();
   }
 
@@ -123,6 +147,7 @@ class HybridDataStore
     _lastRemote = remote;
     final combined = _combine(local, remote);
     await _persistLocalMirrorIfChanged(persisted, combined);
+    _publishWorkspaceIfBehind(persisted.composerTabs, remote.composerTabs);
     return combined;
   }
 
@@ -133,23 +158,87 @@ class HybridDataStore
   Future<void> _workspaceWrites = Future<void>.value();
   Future<void>? _workspacePublish;
   bool _workspaceDirty = false;
+  Timer? _workspacePublishTimer;
+  DateTime? _workspacePublishedAt;
 
+  /// The local write lands first and alone: this device's strip replaces the
+  /// file's (never a merge with another device's tabs), stamped with the
+  /// store-owned identity and save time. Publication follows in the
+  /// background, throttled to one Drive write per [workspacePublishInterval]
+  /// unless [publishNow] asks for it.
   @override
-  Future<void> writeComposerWorkspace(ComposerTabsState state) {
+  Future<void> writeComposerWorkspace(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  }) {
     final operation = _workspaceWrites.then((_) async {
       final current = await _local.read();
-      final merged = mergeComposerWorkspaces(state, current.composerTabs)!;
+      final stamped = stampComposerWorkspace(
+        state,
+        previous: current.composerTabs,
+        now: _clock(),
+        deviceName: _deviceName(),
+        platform: _devicePlatform(),
+        newId: _newDeviceId,
+      );
+      final merged = mergeComposerWorkspaces(stamped, current.composerTabs)!;
       await _local.write(current.copyWith(composerTabs: merged));
       _workspaceDirty = true;
-      unawaited(syncComposerWorkspaceToDrive());
+      _scheduleWorkspacePublish(now: publishNow);
     });
     _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
     return operation;
   }
 
+  @override
+  Future<void> publishComposerWorkspace() => syncComposerWorkspaceToDrive();
+
+  void _scheduleWorkspacePublish({required bool now}) {
+    if (!isDriveConnected) return;
+    final last = _workspacePublishedAt;
+    final wait = now || last == null
+        ? Duration.zero
+        : last.add(workspacePublishInterval).difference(_clock());
+    if (wait <= Duration.zero) {
+      _workspacePublishTimer?.cancel();
+      _workspacePublishTimer = null;
+      unawaited(syncComposerWorkspaceToDrive());
+      return;
+    }
+    if (_workspacePublishTimer?.isActive ?? false) return;
+    _workspacePublishTimer = Timer(wait, () {
+      _workspacePublishTimer = null;
+      unawaited(syncComposerWorkspaceToDrive());
+    });
+  }
+
+  /// A relaunch forgets what was pending, and a device that lost Drive
+  /// mid-session may hold a newer strip than it ever published. Every
+  /// successful Drive read compares the two stamps and republishes when the
+  /// file is ahead, so no draft is ever stranded on its own device.
+  void _publishWorkspaceIfBehind(
+    ComposerTabsState? persisted,
+    ComposerTabsState? remote,
+  ) {
+    if (_workspaceDirty) {
+      // Saved while offline, or the process that knew about it is gone.
+      _scheduleWorkspacePublish(now: false);
+      return;
+    }
+    final own = persisted?.ownDevice;
+    if (own == null) return;
+    final published = remote?.deviceById(own.deviceId);
+    if (published == null || published.updatedAt.isBefore(own.updatedAt)) {
+      _workspaceDirty = true;
+      _scheduleWorkspacePublish(now: false);
+    }
+  }
+
   /// Publishing runs outside the local write queue: a slow connection must
   /// never hold newer keystrokes in memory behind an earlier network request.
   Future<void> syncComposerWorkspaceToDrive() {
+    _workspacePublishTimer?.cancel();
+    _workspacePublishTimer = null;
     if (_workspacePublish != null) return _workspacePublish!;
     if (!isDriveConnected) return Future<void>.value();
     return _workspacePublish = _publishComposerWorkspace().whenComplete(() {
@@ -162,10 +251,22 @@ class HybridDataStore
       while (_workspaceDirty && isDriveConnected) {
         _workspaceDirty = false;
         final current = await _local.read();
+        final own = current.composerTabs?.ownDevice;
+        final published = own == null
+            ? null
+            : _lastRemote?.composerTabs?.deviceById(own.deviceId);
+        if (own != null &&
+            published != null &&
+            !published.updatedAt.isBefore(own.updatedAt)) {
+          // A library write already carried this record up with it.
+          _workspacePublishedAt ??= _clock();
+          continue;
+        }
         final remote = _drivePartition(
           current,
         ).copyWith(driveSyncBase: _asCachedDrive(current));
         await _drive.write(remote);
+        _workspacePublishedAt = _clock();
         _lastRemote = _asDrive(_drive.lastData ?? remote);
         // Serialize the mirror update with new local drafts as well.
         final operation = _workspaceWrites.then((_) async {
@@ -184,7 +285,8 @@ class HybridDataStore
       }
     } on Object {
       _workspaceDirty = true;
-      // Drafts are on disk. A foreground/periodic pass retries publication.
+      // Drafts are on disk. The next save, Drive read, or foreground pass
+      // retries publication.
     }
   }
 
@@ -1098,9 +1200,11 @@ class HybridDataStore
 
   /// Extracts the last successfully reconciled Drive metadata from the local
   /// file. This mirror lets every surface open its library immediately while
-  /// Drive authorization and polling continue in the background.
+  /// Drive authorization and polling continue in the background. Workspaces
+  /// take the Drive shape here so a stored base compares byte-for-byte with
+  /// what a write would publish.
   StoredData _asCachedDrive(StoredData data) => StoredData(
-    composerTabs: data.composerTabs,
+    composerTabs: data.composerTabs?.asDrivePortable(),
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
         .map((item) => item.copyWith(storage: LibraryStorage.drive))
@@ -1116,6 +1220,9 @@ class HybridDataStore
   );
 
   StoredData _asDrive(StoredData data) => data.copyWith(
+    // Older builds publish one merged strip at the top level; it becomes the
+    // legacy device's drafts rather than anything in this device's strip.
+    composerTabs: data.composerTabs?.foldLegacyTabs(),
     generations: data.generations
         .map((item) => item.copyWith(storage: LibraryStorage.drive))
         .toList(),
@@ -1153,7 +1260,7 @@ class HybridDataStore
 
   StoredData _drivePartition(StoredData data) => StoredData(
     driveSyncBase: data.driveSyncBase,
-    composerTabs: data.composerTabs,
+    composerTabs: data.composerTabs?.asDrivePortable(),
     generations: data.generations
         .where((item) => item.storage == LibraryStorage.drive)
         .toList(),

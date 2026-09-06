@@ -13,12 +13,13 @@ const clawnsoleDriveAssetsFolder = 'assets';
 
 /// Removes credentials and preferences before library data is serialized.
 /// Both are synchronized only through the independently encrypted settings
-/// vault; this file remains portable generation and asset metadata.
+/// vault; this file remains portable generation and asset metadata. Create
+/// workspaces travel as per-device records, never as this device's own strip.
 StoredData googleDrivePortableData(StoredData data) => StoredData(
   generations: data.generations,
   folders: data.folders,
   savedReferences: data.savedReferences,
-  composerTabs: data.composerTabs,
+  composerTabs: data.composerTabs?.asDrivePortable(),
 );
 
 /// Applies one device's changes to the latest Drive snapshot. This preserves
@@ -57,9 +58,11 @@ StoredData mergeGoogleDriveData({
     generations: generations,
     folders: folders,
     savedReferences: references,
+    // A remote written by an older build carries one merged strip at the top
+    // level; fold it into the legacy device record so it survives this write.
     composerTabs: mergeComposerWorkspaces(
-      next.composerTabs,
-      remote.composerTabs,
+      next.composerTabs?.asDrivePortable(),
+      remote.composerTabs?.foldLegacyTabs(),
     ),
   );
 }

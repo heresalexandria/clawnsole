@@ -50,7 +50,11 @@ and optional Google Drive sync keep work organized wherever you create.
 - Reload-safe input previews, fullscreen playback, save-as download, and full input reuse
 - Composer tabs on Create: several independent drafts (direction, model,
   settings, attachments) open side by side, persisted on the device; new blank
-  tabs remember the last-used generation controls for each provider/model
+  tabs remember the last-used generation controls for each provider/model.
+  With Drive connected, each device publishes its own strip in the background
+  and the **Recover a draft** key opens copies of the drafts open on your
+  other devices (and the ones closed here); nothing ever syncs into the tab
+  you are typing in
 - AI Rewrite: a finished film's frames, prompt, and your change notes go to
   the OpenAI or Anthropic model you pick (vendor, model, effort) and the
   revised prompt opens in a new tab with the film's full recipe; a wand on

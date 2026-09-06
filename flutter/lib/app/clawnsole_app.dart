@@ -55,6 +55,12 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     with WidgetsBindingObserver {
   late final AppController controller;
   late final UpdateStatus _updateStatus;
+
+  // The controller rebuilds this widget on every notification; the two
+  // themes are pure functions of brightness, so build them once rather than
+  // on every rebuild.
+  static final ThemeData _lightTheme = buildClawnsoleTheme(Brightness.light);
+  static final ThemeData _darkTheme = buildClawnsoleTheme(Brightness.dark);
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
@@ -217,8 +223,8 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       scaffoldMessengerKey: _scaffoldMessengerKey,
-      theme: buildClawnsoleTheme(Brightness.light),
-      darkTheme: buildClawnsoleTheme(Brightness.dark),
+      theme: _lightTheme,
+      darkTheme: _darkTheme,
       themeMode: _materialThemeMode(controller.themeMode),
       // Native mobile Flutter keeps focus on touch taps outside text fields.
       // Override that once so multiline fields never trap the software keyboard.

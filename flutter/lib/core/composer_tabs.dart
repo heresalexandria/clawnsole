@@ -137,6 +137,15 @@ class ComposerTabRecord {
 
   String get label => composerTabTitle(title, prompt);
 
+  /// Nothing worth showing on another device: no text, no name, and no
+  /// retained media. Such tabs stay out of the "on other devices" list.
+  bool get isBlankDraft =>
+      (title?.trim().isEmpty ?? true) &&
+      prompt.trim().isEmpty &&
+      videoUrl.trim().isEmpty &&
+      draftUrl.trim().isEmpty &&
+      !_holdsRetainedAssets(mediaConfig);
+
   ComposerTabRecord copyWith({
     String? id,
     String? title,
@@ -366,7 +375,99 @@ class ComposerTabRecord {
   }
 }
 
+/// The synthetic device that carries tabs published by builds from before
+/// per-device drafts, which wrote one merged strip at the top level.
+const String composerLegacyDeviceId = 'legacy';
+const String composerLegacyDeviceName = 'Another device (older version)';
+
+/// How long a device's published drafts outlive its last save before other
+/// devices stop listing them. Measured against the newest device record, so
+/// the rule needs no wall clock and a lone device never drops itself.
+const Duration composerDeviceDraftsRetention = Duration(days: 30);
+
+/// One device's published strip: the tabs it had open the last time it
+/// saved. Other devices only ever read these — opening one makes a copy —
+/// so a device's own tabs are never rewritten by a sync.
+class ComposerDeviceDrafts {
+  const ComposerDeviceDrafts({
+    required this.deviceId,
+    required this.deviceName,
+    required this.updatedAt,
+    this.platform = '',
+    this.activeTabId,
+    this.tabs = const <ComposerTabRecord>[],
+  });
+
+  final String deviceId;
+  final String deviceName;
+
+  /// `Platform.operatingSystem` on native stores, `web` in a browser, or
+  /// [composerLegacyDeviceId] for tabs folded in from an older build.
+  final String platform;
+  final DateTime updatedAt;
+  final String? activeTabId;
+  final List<ComposerTabRecord> tabs;
+
+  /// Drafts worth offering elsewhere: the one that was in front first, then
+  /// the most recently edited, blank tabs left out.
+  List<ComposerTabRecord> get drafts {
+    final list = tabs.where((tab) => !tab.isBlankDraft).toList()
+      ..sort((a, b) {
+        if (a.id == activeTabId) return -1;
+        if (b.id == activeTabId) return 1;
+        return (b.updatedAt ?? DateTime.utc(1970)).compareTo(
+          a.updatedAt ?? DateTime.utc(1970),
+        );
+      });
+    return list;
+  }
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'deviceId': deviceId,
+    'deviceName': deviceName,
+    if (platform.isNotEmpty) 'platform': platform,
+    'updatedAt': updatedAt.toUtc().toIso8601String(),
+    if (activeTabId != null) 'activeTabId': activeTabId,
+    'tabs': tabs.map((tab) => tab.toJson()).toList(),
+  };
+
+  static ComposerDeviceDrafts? fromJson(Map<String, Object?> json) {
+    final id = json['deviceId'];
+    if (id is! String || id.trim().isEmpty) return null;
+    final name = json['deviceName'];
+    final stamp = json['updatedAt'] is String
+        ? DateTime.tryParse(json['updatedAt']! as String)?.toUtc()
+        : null;
+    final seen = <String>{};
+    final tabs = (json['tabs'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => ComposerTabRecord.fromJson(Map<String, Object?>.from(item)),
+        )
+        .where((tab) => tab.id.isNotEmpty && seen.add(tab.id))
+        .toList();
+    final active = json['activeTabId'];
+    return ComposerDeviceDrafts(
+      deviceId: id.trim(),
+      deviceName: name is String && name.trim().isNotEmpty
+          ? name.trim()
+          : 'Another device',
+      platform: json['platform'] is String ? json['platform']! as String : '',
+      updatedAt: stamp ?? DateTime.utc(1970),
+      activeTabId: active is String && tabs.any((tab) => tab.id == active)
+          ? active
+          : null,
+      tabs: tabs,
+    );
+  }
+}
+
 /// Every persisted tab plus which one was open.
+///
+/// [tabs], [activeTabId], [closedTabs] and [closedTabIds] belong to the device
+/// that wrote them and never merge with another device's. What crosses devices
+/// is [devices] — each device's published strip, read-only elsewhere — and the
+/// text-only aesthetic library with its deletion tombstones.
 class ComposerTabsState {
   const ComposerTabsState({
     this.tabs = const <ComposerTabRecord>[],
@@ -375,11 +476,19 @@ class ComposerTabsState {
     this.closedTabs = const [],
     this.aestheticReferences = const [],
     this.deletedAestheticIds = const {},
+    this.deviceId,
+    this.deviceName,
+    this.devicePlatform,
+    this.updatedAt,
+    this.devices = const <ComposerDeviceDrafts>[],
   });
 
   // Version 1 migrates additively to prose mode with no character links.
   // Version 6 moves cast lines out of the prompt into characterMappings;
   // older builds refuse the workspace rather than silently dropping casts.
+  // Per-device drafts (deviceId, devices) are additive on 6: an older build
+  // ignores them, keeps its own strip, and its top-level tabs are folded in
+  // as the legacy device by [foldLegacyTabs].
   static const int schemaVersion = 6;
 
   final List<ComposerTabRecord> tabs;
@@ -389,6 +498,20 @@ class ComposerTabsState {
   /// Bounded recovery snapshots. Reopening creates a new id so a tombstone
   /// still wins against stale copies of the original tab on another device.
   final List<ComposerTabRecord> closedTabs;
+
+  /// This device's identity, minted by its store on the first save and
+  /// carried in the local file only. Never set on the Drive copy.
+  final String? deviceId;
+  final String? deviceName;
+  final String? devicePlatform;
+
+  /// When this device last saved its strip. Stamped by the store; it dates
+  /// the device's published record so the newest copy wins elsewhere.
+  final DateTime? updatedAt;
+
+  /// Every device's published strip, this one's included once it has
+  /// published, newest first.
+  final List<ComposerDeviceDrafts> devices;
 
   Iterable<Map<String, Object?>> get retainedAssetJson sync* {
     Iterable<Map<String, Object?>> visit(Object? value) sync* {
@@ -407,7 +530,11 @@ class ComposerTabsState {
       }
     }
 
-    for (final tab in [...tabs, ...closedTabs]) {
+    for (final tab in [
+      ...tabs,
+      ...closedTabs,
+      for (final device in devices) ...device.tabs,
+    ]) {
       yield* visit(tab.mediaConfig);
     }
   }
@@ -421,6 +548,110 @@ class ComposerTabsState {
       tabs.where((tab) => tab.id == activeTabId).firstOrNull ??
       tabs.firstOrNull;
 
+  ComposerDeviceDrafts? deviceById(String id) =>
+      devices.where((device) => device.deviceId == id).firstOrNull;
+
+  ComposerTabsState copyWith({
+    List<ComposerTabRecord>? tabs,
+    String? activeTabId,
+    bool clearActiveTabId = false,
+    Set<String>? closedTabIds,
+    List<ComposerTabRecord>? closedTabs,
+    List<AestheticReference>? aestheticReferences,
+    Set<String>? deletedAestheticIds,
+    String? deviceId,
+    String? deviceName,
+    String? devicePlatform,
+    bool clearDevice = false,
+    DateTime? updatedAt,
+    bool clearUpdatedAt = false,
+    List<ComposerDeviceDrafts>? devices,
+  }) => ComposerTabsState(
+    tabs: tabs ?? this.tabs,
+    activeTabId: clearActiveTabId ? null : activeTabId ?? this.activeTabId,
+    closedTabIds: closedTabIds ?? this.closedTabIds,
+    closedTabs: closedTabs ?? this.closedTabs,
+    aestheticReferences: aestheticReferences ?? this.aestheticReferences,
+    deletedAestheticIds: deletedAestheticIds ?? this.deletedAestheticIds,
+    deviceId: clearDevice ? null : deviceId ?? this.deviceId,
+    deviceName: clearDevice ? null : deviceName ?? this.deviceName,
+    devicePlatform: clearDevice ? null : devicePlatform ?? this.devicePlatform,
+    updatedAt: clearUpdatedAt ? null : updatedAt ?? this.updatedAt,
+    devices: devices ?? this.devices,
+  );
+
+  /// This device's strip as one published record, when it has an identity.
+  ComposerDeviceDrafts? get ownDevice {
+    final id = deviceId;
+    if (id == null) return null;
+    return ComposerDeviceDrafts(
+      deviceId: id,
+      deviceName: deviceName ?? 'Another device',
+      platform: devicePlatform ?? '',
+      updatedAt:
+          updatedAt ??
+          tabs
+              .map((tab) => tab.updatedAt)
+              .whereType<DateTime>()
+              .fold<DateTime?>(
+                null,
+                (newest, stamp) =>
+                    newest == null || stamp.isAfter(newest) ? stamp : newest,
+              ) ??
+          DateTime.utc(1970),
+      activeTabId: activeTabId,
+      tabs: tabs,
+    );
+  }
+
+  /// The shape that travels to Google Drive: no strip of its own, no
+  /// identity, only every device's published record (this device's refreshed
+  /// from its strip) and the shared aesthetic library. Idempotent, so the
+  /// change detection that compares a stored base with a new write sees the
+  /// same bytes for the same state.
+  ComposerTabsState asDrivePortable() {
+    final own = ownDevice;
+    return ComposerTabsState(
+      aestheticReferences: aestheticReferences,
+      deletedAestheticIds: deletedAestheticIds,
+      devices: mergeComposerDevices(
+        devices,
+        own == null
+            ? const <ComposerDeviceDrafts>[]
+            : <ComposerDeviceDrafts>[own],
+      ),
+    );
+  }
+
+  /// A Drive file written by an older build holds one merged strip at the
+  /// top level. Read it as the legacy device so its drafts stay reachable
+  /// without ever landing in this device's own strip.
+  ComposerTabsState foldLegacyTabs() {
+    if (tabs.isEmpty) return this;
+    final newest = tabs
+        .map((tab) => tab.updatedAt)
+        .whereType<DateTime>()
+        .fold<DateTime?>(
+          null,
+          (newest, stamp) =>
+              newest == null || stamp.isAfter(newest) ? stamp : newest,
+        );
+    return ComposerTabsState(
+      aestheticReferences: aestheticReferences,
+      deletedAestheticIds: deletedAestheticIds,
+      devices: mergeComposerDevices(devices, <ComposerDeviceDrafts>[
+        ComposerDeviceDrafts(
+          deviceId: composerLegacyDeviceId,
+          deviceName: composerLegacyDeviceName,
+          platform: composerLegacyDeviceId,
+          updatedAt: newest ?? DateTime.utc(1970),
+          activeTabId: activeTabId,
+          tabs: tabs,
+        ),
+      ]),
+    );
+  }
+
   Map<String, Object?> toJson() => <String, Object?>{
     'schemaVersion': schemaVersion,
     'closedTabIds': closedTabIds.toList()..sort(),
@@ -432,6 +663,12 @@ class ComposerTabsState {
     'deletedAestheticIds': deletedAestheticIds.toList()..sort(),
     if (activeTabId != null) 'activeTabId': activeTabId,
     'tabs': tabs.map((tab) => tab.toJson()).toList(),
+    if (deviceId != null) 'deviceId': deviceId,
+    if (deviceName != null) 'deviceName': deviceName,
+    if (devicePlatform != null) 'devicePlatform': devicePlatform,
+    if (updatedAt != null) 'updatedAt': updatedAt!.toUtc().toIso8601String(),
+    if (devices.isNotEmpty)
+      'devices': devices.map((device) => device.toJson()).toList(),
   };
 
   /// Drops records without an id and later duplicates of the same id.
@@ -445,6 +682,12 @@ class ComposerTabsState {
         'This workspace needs a newer version of Clawnsole (schema $version).',
       );
     }
+    String? text(Object? value) {
+      if (value is! String) return null;
+      final clean = value.trim();
+      return clean.isEmpty ? null : clean;
+    }
+
     final seen = <String>{};
     final tabs = (json['tabs'] as List<Object?>? ?? const <Object?>[])
         .whereType<Map<Object?, Object?>>()
@@ -483,53 +726,40 @@ class ComposerTabsState {
       activeTabId: active is String && tabs.any((tab) => tab.id == active)
           ? active
           : tabs.firstOrNull?.id,
+      deviceId: text(json['deviceId']),
+      deviceName: text(json['deviceName']),
+      devicePlatform: text(json['devicePlatform']),
+      updatedAt: json['updatedAt'] is String
+          ? DateTime.tryParse(json['updatedAt']! as String)?.toUtc()
+          : null,
+      devices: mergeComposerDevices(
+        const <ComposerDeviceDrafts>[],
+        (json['devices'] as List? ?? [])
+            .whereType<Map>()
+            .map(
+              (item) => ComposerDeviceDrafts.fromJson(
+                Map<String, Object?>.from(item),
+              ),
+            )
+            .whereType<ComposerDeviceDrafts>()
+            .toList(),
+      ),
     );
   }
 }
 
-/// A union of independently edited records. Explicit tombstones keep an offline
-/// device from reopening closed tabs or resurrecting deleted aesthetics.
+/// Lays [local] over [remote]. The strip (open tabs, selection, closed
+/// drafts) is [local]'s alone — a sync never rewrites the tabs a device is
+/// typing in. Device records unite by id with the newest copy winning, the
+/// aesthetic library unites by id with the newest edit winning, and explicit
+/// tombstones keep an offline device from resurrecting a deleted aesthetic.
 ComposerTabsState? mergeComposerWorkspaces(
   ComposerTabsState? local,
   ComposerTabsState? remote,
 ) {
   if (local == null) return remote;
   if (remote == null) return local;
-  final closed = {...local.closedTabIds, ...remote.closedTabIds};
   final deleted = {...local.deletedAestheticIds, ...remote.deletedAestheticIds};
-  final tabs = <String, ComposerTabRecord>{};
-  for (final tab in [...remote.tabs, ...local.tabs]) {
-    final previous = tabs[tab.id];
-    if (!closed.contains(tab.id) &&
-        (previous == null ||
-            _newer(
-              tab.updatedAt,
-              previous.updatedAt,
-              tab.toJson(),
-              previous.toJson(),
-            ))) {
-      tabs[tab.id] = tab;
-    }
-  }
-  final recoverable = <String, ComposerTabRecord>{};
-  for (final tab in [...remote.closedTabs, ...local.closedTabs]) {
-    final previous = recoverable[tab.id];
-    if (previous == null ||
-        _newer(
-          tab.updatedAt,
-          previous.updatedAt,
-          tab.toJson(),
-          previous.toJson(),
-        )) {
-      recoverable[tab.id] = tab;
-    }
-  }
-  final closedTabs = recoverable.values.toList()
-    ..sort(
-      (a, b) => (b.updatedAt ?? DateTime.utc(1970)).compareTo(
-        a.updatedAt ?? DateTime.utc(1970),
-      ),
-    );
   final aesthetics = <String, AestheticReference>{};
   for (final item in [
     ...remote.aestheticReferences,
@@ -547,26 +777,83 @@ ComposerTabsState? mergeComposerWorkspaces(
       aesthetics[item.id] = item;
     }
   }
-  final ordered = tabs.values.toList()
-    ..sort((a, b) {
-      final comparison = (a.createdAt ?? DateTime.utc(1970)).compareTo(
-        b.createdAt ?? DateTime.utc(1970),
-      );
-      return comparison == 0 ? a.id.compareTo(b.id) : comparison;
-    });
   return ComposerTabsState(
-    tabs: ordered,
-    activeTabId: tabs.containsKey(local.activeTabId)
-        ? local.activeTabId
-        : tabs.containsKey(remote.activeTabId)
-        ? remote.activeTabId
-        : ordered.firstOrNull?.id,
-    closedTabIds: closed,
-    closedTabs: closedTabs.take(10).toList(),
+    tabs: local.tabs,
+    activeTabId: local.activeTabId,
+    closedTabIds: local.closedTabIds,
+    closedTabs: local.closedTabs,
+    deviceId: local.deviceId ?? remote.deviceId,
+    deviceName: local.deviceName ?? remote.deviceName,
+    devicePlatform: local.devicePlatform ?? remote.devicePlatform,
+    updatedAt: local.updatedAt ?? remote.updatedAt,
+    devices: mergeComposerDevices(remote.devices, local.devices),
     aestheticReferences: aesthetics.values.toList()
       ..sort((a, b) => a.id.compareTo(b.id)),
     deletedAestheticIds: deleted,
   );
+}
+
+/// Unites device records by id, the newest copy of each winning, newest
+/// device first, and forgets devices that have not saved within
+/// [composerDeviceDraftsRetention] of the newest one.
+List<ComposerDeviceDrafts> mergeComposerDevices(
+  List<ComposerDeviceDrafts> older,
+  List<ComposerDeviceDrafts> newer,
+) {
+  final byId = <String, ComposerDeviceDrafts>{};
+  for (final device in [...older, ...newer]) {
+    final previous = byId[device.deviceId];
+    if (previous == null ||
+        _newer(
+          device.updatedAt,
+          previous.updatedAt,
+          device.toJson(),
+          previous.toJson(),
+        )) {
+      byId[device.deviceId] = device;
+    }
+  }
+  final devices = byId.values.toList()
+    ..sort((a, b) {
+      final comparison = b.updatedAt.compareTo(a.updatedAt);
+      return comparison == 0 ? a.deviceId.compareTo(b.deviceId) : comparison;
+    });
+  if (devices.isEmpty) return devices;
+  final cutoff = devices.first.updatedAt.subtract(
+    composerDeviceDraftsRetention,
+  );
+  return devices.where((device) => !device.updatedAt.isBefore(cutoff)).toList();
+}
+
+/// Gives [state] the identity and save stamp its store owns before it is
+/// written: the id [previous] already carries (or a fresh one from [newId]),
+/// the store's current [deviceName]/[platform], and [now] as the strip's save
+/// time. The controller never learns these except by reading them back.
+ComposerTabsState stampComposerWorkspace(
+  ComposerTabsState state, {
+  required ComposerTabsState? previous,
+  required DateTime now,
+  required String deviceName,
+  required String platform,
+  required String Function() newId,
+}) => state.copyWith(
+  deviceId: state.deviceId ?? previous?.deviceId ?? newId(),
+  deviceName: deviceName,
+  devicePlatform: platform,
+  updatedAt: now.toUtc(),
+  devices: mergeComposerDevices(
+    previous?.devices ?? const <ComposerDeviceDrafts>[],
+    state.devices,
+  ),
+);
+
+bool _holdsRetainedAssets(Object? value) {
+  if (value is Map) {
+    if (value['kind'] is String && value['value'] is String) return true;
+    return value.values.any(_holdsRetainedAssets);
+  }
+  if (value is List) return value.any(_holdsRetainedAssets);
+  return false;
 }
 
 bool _newer(
@@ -586,5 +873,16 @@ bool _newer(
 /// encrypted settings vault. Sync failures retry on the next reconciliation.
 abstract interface class ComposerWorkspaceStore {
   Future<ComposerTabsState?> readComposerWorkspace();
-  Future<void> writeComposerWorkspace(ComposerTabsState state);
+
+  /// Writes the strip locally at once. Publication of this device's record
+  /// to Drive is throttled in the background unless [publishNow] asks for it
+  /// (the app leaving the foreground, a submission).
+  Future<void> writeComposerWorkspace(
+    ComposerTabsState state, {
+    bool publishNow = false,
+  });
+
+  /// Publishes whatever local saves have not reached Drive yet. A no-op when
+  /// nothing is pending or Drive is not connected.
+  Future<void> publishComposerWorkspace();
 }
