@@ -125,7 +125,7 @@ void main() {
       // The key keeps its place at the right edge even here.
       expect(
         tester.getRect(find.byKey(_chevron)).right,
-        tester.getRect(find.byType(HardwareSelector)).right - 7,
+        tester.getRect(find.byType(HardwareSelector)).right - 10,
       );
     },
   );
@@ -272,12 +272,19 @@ void main() {
     Widget readout() => Builder(
       builder: (context) => HardwareSelector(
         height: consoleControlHeight(context),
+        // The plaque's own two rows, so the test grows with the real thing.
         child: const Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('Black Forest Labs', style: TextStyle(fontSize: 13)),
-            Text('FLUX.3 Video', style: TextStyle(fontSize: 10.5)),
+            SegmentReadout('Black Forest Labs', fontSize: 13, minCells: 18),
+            SizedBox(height: 2),
+            SegmentReadout(
+              'FLUX.3 Video',
+              fontSize: 10.5,
+              primary: false,
+              minCells: 18,
+            ),
           ],
         ),
       ),
@@ -311,5 +318,43 @@ void main() {
       tester.getSize(find.byType(HardwareSelector)).height,
       greaterThan(kConsoleControlHeight),
     );
+  });
+
+  test('the display shows what fourteen segments can form', () {
+    expect(segmentDisplayText('Black Forest Labs'), 'BLACK FOREST LABS');
+    expect(segmentDisplayText('Seedance 2.5 · 1080p'), 'SEEDANCE 2.5 1080P');
+    expect(segmentDisplayText('FLUX.3 Video'), 'FLUX.3 VIDEO');
+    expect(segmentDisplayText('Kling 2.6 — Pro'), 'KLING 2.6 - PRO');
+    expect(segmentDisplayText('  wan  ×  2.7 [beta] '), 'WAN X 2.7 BETA');
+  });
+
+  test(
+    'the ghost row mirrors the narrow cells so the rows stay registered',
+    () {
+      expect(SegmentReadout.ghostRow('FLUX.3 VIDEO'), '~~~~.~ ~~~~~');
+      expect(SegmentReadout.ghostRow('KREA', minCells: 6), '~~~~~~');
+      expect(SegmentReadout.ghostRow('ARTCRAFT', minCells: 4), '~~~~~~~~');
+    },
+  );
+
+  testWidgets('a readout line ghosts its cells behind the lit segments', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(
+        const HardwareSelector(
+          child: SegmentReadout('FLUX.3 Video', fontSize: 13, minCells: 18),
+        ),
+      ),
+    );
+    expect(find.text('FLUX.3 VIDEO'), findsOneWidget);
+    expect(
+      find.text(SegmentReadout.ghostRow('FLUX.3 VIDEO', minCells: 18)),
+      findsOneWidget,
+    );
+    // The ghost row is decoration; only the readout speaks, in plain words.
+    final handle = tester.ensureSemantics();
+    expect(find.bySemanticsLabel('FLUX.3 Video'), findsOneWidget);
+    handle.dispose();
   });
 }

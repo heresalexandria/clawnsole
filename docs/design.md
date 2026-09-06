@@ -27,8 +27,12 @@ than inventing new colors or sizes.
   mode.
 - **Hardware is honest.** Values are set with real-feeling hardware: a
   machined knob in a recessed groove, metal toggles, counter-window
-  readouts that echo the app icon. No status lamps or ornament beyond the
-  control itself.
+  readouts that echo the app icon. The footer's Generate key and model
+  selector are **1960s command-center hardware** — a matte backlit
+  push-button indicator and a segment-display readout — never glossy
+  web plastic: no specular bands, no bloom, no gradients that only a
+  screen could show. No status lamps or ornament beyond the control
+  itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
@@ -116,6 +120,7 @@ both its fill and its `on` color explicitly; never rely on defaults.
 | **Fraunces** (500/600 + italic) | `assets/fonts/Fraunces-*` | Display and headlines, stat numerals, wordmark |
 | **Courier Prime** (400/700 + italic) | `assets/fonts/CourierPrime-*` | The Direction/prompt entry — the director's typewriter voice (`promptFontFamily`) |
 | **DM Sans** (400/500/700) | `assets/fonts/DMSans-*` | Everything else |
+| **DSEG14 Classic** (400/700) | `assets/fonts/DSEG14Classic-*` | The model selector's fourteen-segment readout only (`segmentDisplayFontFamily`) — never for prose |
 
 All families are vendored so every platform renders identically offline. They
 are SIL Open Font License 1.1; the license texts ship beside them as
@@ -166,28 +171,39 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
   library filters) read as console keys: a faint raised gradient when idle,
   a lit plum gradient with a soft glow when selected.
 - **`HardwareLitButton`** (`hardware_button.dart`): the Generate key — a
-  wide translucent plum acrylic push key seated in a dark bezel, like the
-  transport key on a receiver: body gradient, inner lamp, edge vignette,
-  specular crown, a refraction line along the bottom lip, and a fixed
-  grain. It lights on pointer-down and stays lit while a render is in
-  flight (there is no spinner); keyboard focus wears the brass halo. The
-  masked white claw leads the legend. Plum in both modes — a button is
-  allowed to stay dark on paper.
+  1960s command-center **push-button indicator**: a frosted, matte,
+  translucent plum lens seated in a thin charcoal bezel with a dark gap
+  around it, its legend engraved in capitals (DM Sans 700, 12 px, tracked
+  1.9) and white-filled, the claw inked the same. Two incandescent lamps
+  behind the diffuser light it — the lens glows plum-magenta with two soft
+  hot spots — on pointer-down and for as long as a render is in flight
+  (there is no spinner); keyboard focus wears the brass halo. No specular
+  band, no gloss, no bloom: real lenses are matte and spill almost no
+  light. Plum in both modes — a button is allowed to stay dark on paper.
 - **`HardwareSelector`** (`hardware_selector.dart`): the model selector —
-  a brushed-steel bezel framing a recessed readout window (smoked glass
-  with backlit cream at night, the pale counter-window well with ink on
-  paper) and a separate raised chevron key that says "press to choose".
-  It carries no gesture of its own; the wrapping `PopupMenuButton` owns
-  the tap. Both footer controls share `kConsoleControlHeight` (56 px).
+  the console's **alphanumeric readout**: a charcoal bezel held by four
+  slotted screws around a recessed display window, and a separate square
+  satin-metal key with an engraved chevron that steps the selection. The
+  window shows the provider and model on two rows of a fixed eighteen-cell
+  fourteen-segment display (`SegmentReadout`, DSEG14 Classic), with the
+  unlit segments faintly visible behind the lit ones (`ghostRow` mirrors
+  the narrow period and space cells so the rows stay registered). It
+  follows the mode: lit ice-blue segments on smoked glass at night, an
+  unlit liquid-crystal pane with dark segments on pale glass on paper.
+  Text is upper-cased and reduced to what fourteen segments can form
+  (`segmentDisplayText`). It carries no gesture of its own; the wrapping
+  `PopupMenuButton` owns the tap. Both footer controls share
+  `kConsoleControlHeight` (56 px, growing past ~1.25× text scale).
 
 The grooves, wells, and readout windows are recessed into the surface they
 sit on: shadowed warm cream with ink numerals in light mode, warm
 near-black with cream numerals in dark mode, so light mode stays paper and
 cream rather than sprouting reverse-type islands. The same rule covers media
 ghosts (empty frame, reference, and library placeholders): they follow the
-mode instead of always sitting on plum ink. Only the machined metal, the
-plum Generate key (a button), and a switch's lit green side stay dark in
-light mode.
+mode instead of always sitting on plum ink. Only the machined metal and
+charcoal bezels, the plum Generate key (a button), and a switch's lit green
+side stay dark in light mode — the selector's display becomes an unlit LCD
+on paper.
 
 ## 6. Shell anatomy
 
@@ -223,9 +239,9 @@ The inference shows in the cost panel's summary line (`Text`, `Image`,
 `Video`…); the footer carries no mode chip and no readiness line — a ready
 console says nothing, and the lit Generate key is the signal.
 
-**Model selector:** the brushed-steel input selector in the footer
-(`HardwareSelector`: machined bezel, recessed readout with provider and
-model, engraved chevron key) opens a searchable picker. Every model row and provider heading carries a small star (brass
+**Model selector:** the console readout in the footer (`HardwareSelector`:
+charcoal bezel with corner screws, a fourteen-segment display of provider
+and model, a square chevron key) opens a searchable picker. Every model row and provider heading carries a small star (brass
 when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
@@ -300,9 +316,10 @@ Layout order:
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-9. Footer: the brushed-steel **model selector** (provider + model in a
-   recessed readout, chevron key; opens the picker) directly before the
-   lit plum acrylic **Generate video** key, shoulder to shoulder at 56 px.
+9. Footer: the console **model selector** (provider + model on a
+   fourteen-segment readout in a screwed charcoal bezel, chevron key;
+   opens the picker) directly before the backlit **GENERATE VIDEO**
+   push-button indicator, shoulder to shoulder at 56 px.
    A status line appears only when something blocks a render (API key
    missing, this device cannot run the local model). Under 640 px the
    selector and the key stack, each spanning the composer.

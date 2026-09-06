@@ -53,7 +53,9 @@ void main() {
       ),
     );
 
-    expect(find.text('Generate video'), findsOneWidget);
+    // The legend is engraved in capitals; the semantics keep the label.
+    expect(find.text('GENERATE VIDEO'), findsOneWidget);
+    expect(find.text('Generate video'), findsNothing);
     expect(find.byKey(const ValueKey<String>('m')), findsOneWidget);
     // No Material ripple painting over the plastic.
     expect(find.byType(InkWell), findsNothing);
@@ -85,7 +87,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Generate video'));
+      await tester.tap(find.text('GENERATE VIDEO'));
       await tester.pumpAndSettle();
       expect(taps, 1);
       expect(haptics, <String>['HapticFeedbackType.selectionClick']);
@@ -99,7 +101,7 @@ void main() {
       _host(const HardwareLitButton(label: 'Generate video', onPressed: null)),
     );
 
-    await tester.tap(find.text('Generate video'), warnIfMissed: false);
+    await tester.tap(find.text('GENERATE VIDEO'), warnIfMissed: false);
     await tester.pumpAndSettle();
     expect(_state(tester).litAmount, 0);
 

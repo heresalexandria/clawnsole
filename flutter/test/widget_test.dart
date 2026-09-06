@@ -35,6 +35,7 @@ import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/hardware.dart';
+import 'package:clawnsole/ui/hardware_selector.dart';
 import 'package:clawnsole/ui/inline_video.dart';
 import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/media_thumbnail.dart';
@@ -791,7 +792,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final generate = find.text('Generate video');
+      final generate = find.text('GENERATE VIDEO');
       await tester.ensureVisible(generate);
       await tester.tap(generate);
       await tester.pumpAndSettle();
@@ -4376,7 +4377,7 @@ void main() {
 
     // Every generation option through Generate sits above the fold, with
     // the Recent work header peeking in below — all without scrolling.
-    final generate = find.text('Generate video');
+    final generate = find.text('GENERATE VIDEO');
     expect(generate, findsOneWidget);
     expect(tester.getBottomLeft(generate).dy, lessThan(900));
     final recentHeader = find.text('Recent work');
@@ -4512,7 +4513,7 @@ void main() {
     expect(plaque, findsOneWidget);
     expect(
       tester.getTopLeft(plaque).dy,
-      lessThan(tester.getTopLeft(find.text('Generate video')).dy),
+      lessThan(tester.getTopLeft(find.text('GENERATE VIDEO')).dy),
     );
 
     expect(find.text('REFERENCES'), findsOneWidget);
@@ -4955,7 +4956,14 @@ void main() {
           const ValueKey('provider-model-heading-background-bfl'),
         );
         final background = tester.widget<ColoredBox>(backgroundFinder).color;
-        final heading = tester.widget<Text>(find.text('BLACK FOREST LABS'));
+        // The footer readout spells the same name in segment capitals, so
+        // look inside the heading's own background.
+        final heading = tester.widget<Text>(
+          find.descendant(
+            of: backgroundFinder,
+            matching: find.text('BLACK FOREST LABS'),
+          ),
+        );
         final foreground = heading.style!.color!;
         final surface = Theme.of(
           tester.element(backgroundFinder),
@@ -6665,7 +6673,12 @@ void main() {
         tester.widget<Text>(balance).data,
         provider.isLocal ? provider.name : '${provider.name} ↗',
       );
-      expect(find.text(provider.name), findsAtLeastNWidgets(1));
+      // The footer readout shows the whole name as a segment display
+      // would spell it.
+      expect(
+        find.text(segmentDisplayText(provider.name)),
+        findsAtLeastNWidgets(1),
+      );
       expect(
         tester.takeException(),
         isNull,
@@ -8117,7 +8130,7 @@ void main() {
     expect(find.textContaining(r'$0.10 / megapixel-second'), findsOneWidget);
     expect(find.text('791 credits'), findsOneWidget);
     expect(find.textContaining('1920×1080 × 2.0×'), findsOneWidget);
-    expect(find.text('Upscale video'), findsOneWidget);
+    expect(find.text('UPSCALE VIDEO'), findsOneWidget);
     controller.dispose();
   });
 

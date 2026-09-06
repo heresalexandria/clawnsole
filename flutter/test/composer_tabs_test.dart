@@ -1000,7 +1000,7 @@ void main() {
         final plaque = tester.getRect(
           find.byKey(const ValueKey('provider-plaque')),
         );
-        final generate = tester.getRect(find.text('Generate video'));
+        final generate = tester.getRect(find.text('GENERATE VIDEO'));
         expect(add.bottom, lessThan(plaque.top));
         expect(plaque.right, lessThan(generate.left));
         expect(plaque.top, lessThan(generate.bottom));

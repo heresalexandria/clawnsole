@@ -257,7 +257,6 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
   Widget build(BuildContext context) {
     // The plaque is the receiver's input selector: a machined bezel around a
     // lit readout window, with the chevron key that opens the menu.
-    final ink = HardwareSelector.inkOf(context);
     return PopupMenuButton<String>(
       key: const ValueKey('provider-plaque'),
       tooltip: 'Choose provider and model',
@@ -285,54 +284,24 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
       child: HardwareSelector(
         height: consoleControlHeight(context),
         semanticHint: 'Opens the provider and model menu',
-        child: Row(
+        // An eighteen-cell display: provider on the top row, model below.
+        // Flexible bounds the readout on narrow layouts so long names clip
+        // at the window's edge instead of overflowing the plate.
+        child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Container(
-              width: 28,
-              height: 28,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: ink.accent.withValues(alpha: .55),
-                  width: .9,
-                ),
-              ),
-              child: Icon(
-                _providerPlaqueIcon(controller.selectedProvider.id),
-                color: ink.accent,
-                size: 16,
-                semanticLabel: controller.selectedProvider.name,
-              ),
+            SegmentReadout(
+              controller.selectedProvider.name,
+              fontSize: 13,
+              minCells: 18,
             ),
-            const SizedBox(width: 11),
-            // Flexible bounds the names on narrow layouts so long provider or
-            // model labels ellipsize instead of overflowing the card.
-            Flexible(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    controller.selectedProvider.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: ink.on,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      shadows: ink.glow,
-                    ),
-                  ),
-                  Text(
-                    controller.selectedModel.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: ink.onMuted, fontSize: 10.5),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 2),
+            SegmentReadout(
+              controller.selectedModel.label,
+              fontSize: 10.5,
+              primary: false,
+              minCells: 18,
             ),
           ],
         ),
@@ -340,15 +309,6 @@ class _ProviderPlaqueState extends State<_ProviderPlaque> {
     );
   }
 }
-
-IconData _providerPlaqueIcon(String providerId) => switch (providerId) {
-  'artcraft' => Icons.palette_outlined,
-  'atlas' => Icons.cloud_outlined,
-  'bfl' => Icons.forest_outlined,
-  'krea' => Icons.gesture_outlined,
-  'ltx' => Icons.movie_filter_outlined,
-  _ => Icons.auto_awesome_motion_outlined,
-};
 
 class _ProviderSearchMenu extends StatefulWidget {
   const _ProviderSearchMenu({
@@ -5291,7 +5251,8 @@ class _ComposerFooter extends StatelessWidget {
     final generate = HardwareLitButton(
       key: const ValueKey<String>('generate-key'),
       height: consoleControlHeight(context),
-      icon: const ClawMark(size: 18, color: Colors.white),
+      // Inked like the legend: white-filled engraving on the lens.
+      icon: const ClawMark(size: 16),
       label: controller.selectedModel.outputKind == GenerationOutputKind.image
           ? 'Generate image'
           : form.mode == VideoMode.upscale

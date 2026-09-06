@@ -1,78 +1,101 @@
+// The model selector: an alphanumeric readout of the kind a 1960s command
+// center mounted beside its push-button indicators — a smoked-glass display
+// window in a charcoal bezel held by four slotted screws, showing segment
+// characters with the unlit segments faintly visible behind them, and a
+// small square metal key to its right that steps the selection.
+//
+// The control paints itself — no bitmaps — so it matches the Generate key
+// beside it on every platform. The window follows the mode: lit ice-blue
+// segments on smoked glass at night; an unlit liquid-crystal pane, dark
+// segments on pale glass, on paper — so light mode never sprouts a dark
+// island. The bezel and key are metal in both.
+//
+// It carries no gesture of its own. The tap belongs to whatever wraps it —
+// typically a [PopupMenuButton] whose `child` this is — so hover and press
+// are read through [MouseRegion] and [Listener], which do not enter the
+// gesture arena.
+
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-import '../app/app_theme.dart';
 import 'hardware.dart';
 
-/// A receiver's input selector: a machined brushed-steel bezel framing a
-/// recessed readout window, with a small raised key at its right whose
-/// engraved chevron says "press to choose".
-///
-/// The control paints itself — no bitmaps — so it matches the knobs and
-/// switches in [hardware.dart] on every platform. The window follows the
-/// mode: smoked glass with backlit cream at night, a shadowed cream well
-/// with ink on paper, so light mode never sprouts a dark island. The steel
-/// stays steel in both.
-///
-/// It carries no gesture of its own. The tap belongs to whatever wraps it —
-/// typically a [PopupMenuButton] whose `child` this is — so hover and press
-/// are read through [MouseRegion] and [Listener], which do not enter the
-/// gesture arena.
+/// Bezel thickness: the charcoal frame around the window, wide enough to
+/// hold a screw head in each corner.
+const double _bezel = 8;
 
-/// Bezel thickness: the machined lip around the window and the key.
-const double _bezel = 7;
+/// Outer corner radius of the plate and the window's own corners.
+const double _outerRadius = 6;
+const double _windowRadius = 3;
 
-/// Outer and inner corner radii of the faceplate.
-const double _outerRadius = 12;
-const double _windowRadius = 7;
-
-/// Width of the chamfered wall where the window is cut into the plate.
-const double _chamfer = 1.2;
-
-/// The chevron key's drawn size and its gap from the readout window. It is
-/// taller than it is wide, the way a receiver's step key is.
+/// The step key's drawn size, its gap from the window, and its inset from
+/// the plate's right edge (clear of the corner screws).
 const double _keyWidth = 30;
 const double _keyHeight = 38;
-const double _keyGap = 8;
-const double _keyRadius = 6;
+const double _keyGap = 6;
+const double _keyRight = 10;
+const double _keyRadius = 3.5;
 
 /// Padding from the window's edges to the readout content.
-const double _contentLeft = 12;
-const double _contentRight = 11;
+const double _contentLeft = 11;
+const double _contentRight = 9;
+
+/// Screw heads: radius and where they sit in the bezel corners.
+const double _screwRadius = 2.4;
+const double _screwInset = 4.8;
 
 /// How long a hover or press takes to settle. One calm pace.
 const Duration _settle = Duration(milliseconds: 140);
 
-/// The faceplate's base tone: the average of [brushedSteelStops], settled a
-/// little so the plate reads as metal beside paper and does not glare in an
-/// evening room. Neutral in both, never blue-cast.
-/// Fine straight machining. A repeating gradient rather than drawn lines, so
-/// the brushing stays sub-pixel at 1×, 2× and 3× instead of banding into
-/// corrugation. [alongX] runs the strokes vertically, the way a small key is
-/// finished; the faceplate is brushed the long way instead.
-Shader _brushing(Rect rect, {required bool alongX, required double alpha}) {
-  const period = 2.4;
-  return LinearGradient(
-    begin: alongX ? Alignment.centerLeft : Alignment.topCenter,
-    end: alongX ? Alignment.centerRight : Alignment.bottomCenter,
-    tileMode: TileMode.repeated,
-    colors: <Color>[
-      Colors.white.withValues(alpha: alpha),
-      Colors.white.withValues(alpha: 0),
-      Colors.black.withValues(alpha: alpha),
-      Colors.black.withValues(alpha: 0),
-      Colors.white.withValues(alpha: alpha),
-    ],
-    stops: const <double>[0, .25, .5, .75, 1],
-  ).createShader(
-    alongX
-        ? Rect.fromLTWH(rect.left, rect.top, period, rect.height)
-        : Rect.fromLTWH(rect.left, rect.top, rect.width, period),
-  );
-}
+/// The segment display face bundled in `assets/fonts` (DSEG14 Classic).
+const String segmentDisplayFontFamily = 'DSEG14 Classic';
 
-Color _steelBase(Brightness brightness) => brightness == Brightness.dark
-    ? const Color(0xFF7B7A78)
-    : const Color(0xFFC3C4C2);
+// The bezel: matte charcoal, the same stock as the Generate key's frame.
+const _bezelTop = Color(0xFF34302E);
+const _bezelBottom = Color(0xFF211E1C);
+
+// Satin metal for the step key and the screw heads.
+const _metalLight = Color(0xFFC4C1BA);
+const _metalMid = Color(0xFF9B9892);
+const _metalDark = Color(0xFF6A6863);
+
+// Lit segments at night.
+const _segmentLit = Color(0xFFD8F5FF);
+const _segmentLitMuted = Color(0xFFA7DBEE);
+
+// Liquid-crystal segments on paper.
+const _segmentInk = Color(0xFF1F2724);
+const _segmentInkMuted = Color(0xFF465350);
+
+/// Characters DSEG14 can form. Everything else becomes a space.
+final Set<int> _segmentGlyphs = <int>{for (var c = 0x20; c < 0x7F; c++) c}
+  ..removeAll('#;[]{}'.codeUnits);
+
+/// A string as a fourteen-segment display would show it: capitals, and only
+/// the characters the display has segments for. Middle dots and dashes
+/// become spaces and hyphens; anything else the display cannot form is
+/// dropped to a space. Runs of spaces collapse.
+String segmentDisplayText(String text) {
+  final buffer = StringBuffer();
+  var pendingSpace = false;
+  for (final rune in text.toUpperCase().runes) {
+    final char = switch (rune) {
+      0x00B7 || 0x2022 || 0x2027 => ' ', // · • ‧
+      0x2013 || 0x2014 || 0x2212 => '-', // – — −
+      0x00D7 => 'X',
+      _ => _segmentGlyphs.contains(rune) ? String.fromCharCode(rune) : ' ',
+    };
+    if (char == ' ') {
+      pendingSpace = buffer.isNotEmpty;
+      continue;
+    }
+    if (pendingSpace) buffer.write(' ');
+    pendingSpace = false;
+    buffer.write(char);
+  }
+  return buffer.toString();
+}
 
 /// The colors a readout window is written in, resolved for the mode.
 ///
@@ -85,21 +108,112 @@ class HardwareSelectorInk {
     required this.on,
     required this.onMuted,
     required this.accent,
+    required this.ghost,
     required this.glow,
   });
 
-  /// Primary text in the window: backlit cream at night, ink on paper.
+  /// Lit segments: ice-blue at night, liquid-crystal ink on paper.
   final Color on;
 
-  /// Secondary text in the window.
+  /// The second line, a little dimmer.
   final Color onMuted;
 
-  /// Brass, for the small etched mark beside the text.
+  /// Small marks beside the text, such as the provider's glyph.
   final Color accent;
 
-  /// The faint halo backlit text throws. Empty in light mode, where the
-  /// window is a paper well rather than a lamp.
+  /// The segments that are off, faintly visible behind the lit ones.
+  final Color ghost;
+
+  /// The halo lit segments throw. Empty in light mode, where nothing is lit.
   final List<Shadow> glow;
+}
+
+/// One line of a segment display: the text in lit segments over the ghost
+/// of every segment the display has, so the readout reads as hardware
+/// rather than as a typeface.
+class SegmentReadout extends StatelessWidget {
+  const SegmentReadout(
+    this.text, {
+    required this.fontSize,
+    super.key,
+    this.primary = true,
+    this.minCells = 0,
+  });
+
+  final String text;
+  final double fontSize;
+
+  /// The main line is brightest; a secondary line sits a little dimmer.
+  final bool primary;
+
+  /// How many character cells the display has at least: the ghost row runs
+  /// this far even under a short name, the way a real display's unused
+  /// cells stay faintly visible.
+  final int minCells;
+
+  /// The ghost row under [shown]: every letter and digit becomes the
+  /// all-segments-on glyph, while the narrow cells — spaces, periods,
+  /// colons — stay themselves so the two rows keep the same advances and
+  /// the lit segments land exactly on their ghosts.
+  static String ghostRow(String shown, {int minCells = 0}) {
+    final buffer = StringBuffer();
+    for (final rune in shown.runes) {
+      buffer.write(switch (rune) {
+        0x20 || 0x2E || 0x3A || 0x27 || 0x2C => String.fromCharCode(rune),
+        _ => '~',
+      });
+    }
+    var cells = shown.runes.length;
+    while (cells < minCells) {
+      buffer.write('~');
+      cells += 1;
+    }
+    return buffer.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = HardwareSelector.inkOf(context);
+    final shown = segmentDisplayText(text);
+    final style = TextStyle(
+      fontFamily: segmentDisplayFontFamily,
+      fontSize: fontSize,
+      height: 1.2,
+      color: primary ? ink.on : ink.onMuted,
+      shadows: primary
+          ? ink.glow
+          : <Shadow>[
+              for (final shadow in ink.glow)
+                Shadow(
+                  color: shadow.color.withValues(alpha: shadow.color.a * .7),
+                  blurRadius: shadow.blurRadius,
+                ),
+            ],
+    );
+    // `~` is the every-segment-on character; the ghost row mirrors the
+    // text's narrow cells so the two stay registered.
+    return Stack(
+      children: <Widget>[
+        ExcludeSemantics(
+          child: Text(
+            ghostRow(shown, minCells: minCells),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+            style: style.copyWith(color: ink.ghost, shadows: const <Shadow>[]),
+          ),
+        ),
+        Text(
+          shown,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+          semanticsLabel: text,
+          style: style,
+        ),
+      ],
+    );
+  }
 }
 
 class HardwareSelector extends StatefulWidget {
@@ -113,13 +227,13 @@ class HardwareSelector extends StatefulWidget {
   });
 
   /// The readout content, drawn inside the window and vertically centred.
-  /// Let it ellipsize: the window narrows when the composer does.
+  /// Let it clip: the window narrows when the composer does.
   final Widget child;
 
-  /// The faceplate height. Shoulder to shoulder with the Generate key.
+  /// The plate height. Shoulder to shoulder with the Generate key.
   final double height;
 
-  /// The narrowest the faceplate may be when it hugs its content. A tight
+  /// The narrowest the plate may be when it hugs its content. A tight
   /// parent still wins, so a stretched footer can make it any width.
   final double minWidth;
 
@@ -131,32 +245,35 @@ class HardwareSelector extends StatefulWidget {
   /// model menu'.
   final String? semanticHint;
 
-  /// The window's vertical gradient for [brightness]: the pale counter-window
-  /// cream on paper, warm smoked glass with a breath of navy at night.
+  /// The window's vertical gradient for [brightness]: smoked glass at night,
+  /// an unlit liquid-crystal pane on paper.
   @visibleForTesting
   static List<Color> windowGradient(Brightness brightness) =>
       brightness == Brightness.dark
-      ? const <Color>[Color(0xFF17110F), Color(0xFF281F21)]
-      : const <Color>[Color(0xFFE6DBC3), Color(0xFFF6F0E0)];
+      ? const <Color>[Color(0xFF0A0E11), Color(0xFF131A1E)]
+      : const <Color>[Color(0xFFD3D8CB), Color(0xFFE0E4D8)];
 
   /// The ink a readout window is written in under this room's light.
   static HardwareSelectorInk inkOf(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    return HardwareSelectorInk(
-      on: dark ? ClawnsoleColors.cream : context.colors.onSurface,
-      onMuted: dark
-          ? ClawnsoleColors.creamMuted
-          : context.colors.onSurfaceVariant,
-      accent: dark ? ClawnsoleColors.brassBright : context.tokens.brass,
-      glow: dark
-          ? <Shadow>[
-              Shadow(
-                color: ClawnsoleColors.cream.withValues(alpha: .26),
-                blurRadius: 5,
-              ),
-            ]
-          : const <Shadow>[],
-    );
+    return dark
+        ? const HardwareSelectorInk(
+            on: _segmentLit,
+            onMuted: _segmentLitMuted,
+            accent: _segmentLitMuted,
+            ghost: Color(0x16BDEBFF),
+            glow: <Shadow>[
+              Shadow(color: Color(0x8C63D6FF), blurRadius: 5),
+              Shadow(color: Color(0x4D63D6FF), blurRadius: 1.5),
+            ],
+          )
+        : const HardwareSelectorInk(
+            on: _segmentInk,
+            onMuted: _segmentInkMuted,
+            accent: _segmentInkMuted,
+            ghost: Color(0x0E000000),
+            glow: <Shadow>[],
+          );
   }
 
   @override
@@ -189,11 +306,11 @@ class _HardwareSelectorState extends State<HardwareSelector> {
       padding: const EdgeInsets.fromLTRB(
         _bezel + _contentLeft,
         _bezel,
-        _bezel + _keyWidth + _keyGap + _contentRight,
+        _keyRight + _keyWidth + _keyGap + _contentRight,
         _bezel,
       ),
       // Hugs its content when the parent is loose, and keeps the readout
-      // flush left — ellipsizing — when a stretched footer widens it.
+      // flush left — clipping — when a stretched footer widens it.
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[Flexible(child: widget.child)],
@@ -209,16 +326,16 @@ class _HardwareSelectorState extends State<HardwareSelector> {
         duration: _settle,
         curve: Curves.easeOut,
         builder: (context, press, child) => DecoratedBox(
-          // The faceplate stands proud of the composer card, warmly.
+          // The plate stands a little proud of the composer card.
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(_outerRadius),
             boxShadow: <BoxShadow>[
               BoxShadow(
                 color: dark
-                    ? Colors.black.withValues(alpha: .5)
-                    : const Color(0xFF3A2E22).withValues(alpha: .28),
-                blurRadius: 10,
-                offset: const Offset(0, 3),
+                    ? Colors.black.withValues(alpha: .55)
+                    : const Color(0xFF3A2E22).withValues(alpha: .3),
+                blurRadius: 4.5,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
@@ -229,7 +346,7 @@ class _HardwareSelectorState extends State<HardwareSelector> {
               children: <Widget>[
                 child!,
                 Positioned(
-                  right: _bezel,
+                  right: _keyRight,
                   top: (widget.height - _keyHeight) / 2,
                   width: _keyWidth,
                   height: _keyHeight,
@@ -279,8 +396,8 @@ class _HardwareSelectorState extends State<HardwareSelector> {
   }
 }
 
-/// Paints the faceplate: brushed-steel bezel, machined lip, and the recessed
-/// readout window cut into it. The chevron key paints itself, on top.
+/// Paints the plate: charcoal bezel with its bevel and corner screws, and
+/// the display window recessed into it. The step key paints itself, on top.
 class HardwareSelectorFramePainter extends CustomPainter {
   const HardwareSelectorFramePainter({required this.brightness});
 
@@ -295,21 +412,13 @@ class HardwareSelectorFramePainter extends CustomPainter {
     final dark = brightness == Brightness.dark;
     final rect = Offset.zero & size;
     final outer = RRect.fromRectAndRadius(
-      rect.deflate(.5),
+      rect,
       const Radius.circular(_outerRadius),
     );
 
     _paintBezel(canvas, rect, outer, dark: dark);
     _paintWindow(canvas, size, dark: dark);
-
-    // Dark outer keyline: where the plate meets the card.
-    canvas.drawRRect(
-      outer,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..color = Colors.black.withValues(alpha: dark ? .5 : .38),
-    );
+    _paintScrews(canvas, size, dark: dark);
   }
 
   void _paintBezel(
@@ -318,111 +427,60 @@ class HardwareSelectorFramePainter extends CustomPainter {
     RRect outer, {
     required bool dark,
   }) {
-    // Slow variation along the plate's length, from the same steel stock as
-    // the knobs but muted: the machining reads in the hairlines, not here.
-    final base = _steelBase(brightness);
-    final plate = <Color>[
-      for (final Color color in brushedSteelStops(brightness))
-        Color.lerp(color, base, .62)!,
-    ];
     canvas.drawRRect(
       outer,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: plate,
-        ).createShader(rect),
-    );
-
-    // The lip: light falls on the top edge, the bottom turns away.
-    canvas.drawRRect(
-      outer,
-      Paint()
-        ..shader = LinearGradient(
+        ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .14 : .2),
-            Colors.white.withValues(alpha: 0),
-            Colors.black.withValues(alpha: .04),
-            Colors.black.withValues(alpha: dark ? .32 : .18),
-          ],
-          stops: const <double>[0, .16, .74, 1],
+          colors: <Color>[_bezelTop, _bezelBottom],
         ).createShader(rect),
     );
-
-    // Straight horizontal brushing, the long way down the plate.
+    // The bevel: one hairline inside the outer edge, lit at top-left.
     canvas.drawRRect(
-      outer,
-      Paint()..shader = _brushing(rect, alongX: false, alpha: dark ? .06 : .07),
-    );
-
-    // The machined rim, following the corners.
-    canvas.drawRRect(
-      outer.deflate(1),
+      outer.deflate(.6),
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2
+        ..strokeWidth = 1
         ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .24 : .4),
-            Colors.white.withValues(alpha: 0),
-            Colors.black.withValues(alpha: .2),
+            Colors.white.withValues(alpha: dark ? .16 : .24),
+            Colors.white.withValues(alpha: .03),
+            Colors.black.withValues(alpha: .35),
           ],
-          stops: const <double>[0, .45, 1],
+          stops: const <double>[0, .5, 1],
         ).createShader(rect),
+    );
+    // The outer keyline where the plate meets the card.
+    canvas.drawRRect(
+      outer,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = Colors.black.withValues(alpha: dark ? .6 : .42),
     );
   }
 
   void _paintWindow(Canvas canvas, Size size, {required bool dark}) {
     final windowRect = Rect.fromLTRB(
-      _bezel + _chamfer,
-      _bezel + _chamfer,
-      size.width - _bezel - _keyWidth - _keyGap - _chamfer,
-      size.height - _bezel - _chamfer,
+      _bezel,
+      _bezel,
+      size.width - _keyRight - _keyWidth - _keyGap,
+      size.height - _bezel,
     );
     if (windowRect.width <= _windowRadius * 2 || windowRect.height <= 4) return;
     final window = RRect.fromRectAndRadius(
       windowRect,
       const Radius.circular(_windowRadius),
     );
-    final base = _steelBase(brightness);
-    final chamferRect = windowRect.inflate(_chamfer);
-    final chamfer = RRect.fromRectAndRadius(
-      chamferRect,
-      const Radius.circular(_windowRadius + _chamfer),
-    );
 
-    // A whisper of occlusion where the cut meets the plate.
+    // The cut into the plate: a dark line where the glass meets the frame.
     canvas.drawRRect(
-      chamfer.inflate(1),
-      Paint()
-        ..color = Colors.black.withValues(alpha: dark ? .3 : .16)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.8),
+      window.inflate(1),
+      Paint()..color = Colors.black.withValues(alpha: dark ? .7 : .35),
     );
-
-    // The chamfered wall of the cut: its top wall is in shadow, its lower
-    // wall catches one thin line of the room. This is what makes the window
-    // read as milled out of the plate rather than drawn on it.
-    canvas.drawRRect(
-      chamfer,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            Color.lerp(base, Colors.black, dark ? .76 : .6)!,
-            Color.lerp(base, Colors.black, dark ? .46 : .3)!,
-            Color.lerp(base, Colors.black, dark ? .24 : .12)!,
-            Color.lerp(base, Colors.white, dark ? .2 : .2)!,
-          ],
-          stops: const <double>[0, .45, .8, 1],
-        ).createShader(chamferRect),
-    );
-
     canvas.drawRRect(
       window,
       Paint()
@@ -435,8 +493,9 @@ class HardwareSelectorFramePainter extends CustomPainter {
 
     canvas.save();
     canvas.clipRRect(window);
-    final wellShadow = hardwareWellShadowAlpha(brightness);
-    // Recessed: the top edge shades itself, the left a little.
+    // Recessed behind the bezel: the top edge shades itself, the left a
+    // little.
+    final wellShadow = dark ? .55 : hardwareWellShadowAlpha(brightness) + .06;
     canvas.drawRect(
       windowRect,
       Paint()
@@ -447,7 +506,7 @@ class HardwareSelectorFramePainter extends CustomPainter {
             Colors.black.withValues(alpha: wellShadow),
             Colors.black.withValues(alpha: 0),
           ],
-          stops: const <double>[0, .34],
+          stops: const <double>[0, .32],
         ).createShader(windowRect),
     );
     canvas.drawRect(
@@ -460,17 +519,16 @@ class HardwareSelectorFramePainter extends CustomPainter {
             Colors.black.withValues(alpha: wellShadow * .6),
             Colors.black.withValues(alpha: 0),
           ],
-          stops: const <double>[0, .05],
+          stops: const <double>[0, .06],
         ).createShader(windowRect),
     );
-
     if (dark) {
-      // Glass: one shallow reflection across the top, nothing that moves.
+      // Smoked glass: one shallow reflection of the room across the top.
       final glass = Rect.fromLTWH(
         windowRect.left,
         windowRect.top,
         windowRect.width,
-        windowRect.height * .34,
+        windowRect.height * .4,
       );
       canvas.drawRect(
         glass,
@@ -479,34 +537,78 @@ class HardwareSelectorFramePainter extends CustomPainter {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: <Color>[
-              Colors.white.withValues(alpha: .085),
+              Colors.white.withValues(alpha: .05),
               Colors.white.withValues(alpha: 0),
             ],
           ).createShader(glass),
       );
     }
-
-    // The bottom lip catches the room light.
+    // The bottom lip of the cut catches the room light.
     canvas.drawRect(
       Rect.fromLTRB(
         windowRect.left,
-        windowRect.bottom - 1.2,
+        windowRect.bottom - 1,
         windowRect.right,
         windowRect.bottom,
       ),
-      Paint()..color = Colors.white.withValues(alpha: dark ? .05 : .34),
+      Paint()..color = Colors.white.withValues(alpha: dark ? .06 : .4),
     );
     canvas.restore();
+  }
 
-    canvas.drawRRect(
-      window.deflate(.4),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = .8
-        ..color = dark
-            ? Colors.black.withValues(alpha: .5)
-            : const Color(0xFFC5B79E),
-    );
+  // Four slotted screws hold the plate to the panel. Each slot sits at its
+  // own angle — nobody lines them up.
+  void _paintScrews(Canvas canvas, Size size, {required bool dark}) {
+    const angles = <double>[-.35, .6, 1.2, -1.05];
+    final centers = <Offset>[
+      const Offset(_screwInset, _screwInset),
+      Offset(size.width - _screwInset, _screwInset),
+      Offset(_screwInset, size.height - _screwInset),
+      Offset(size.width - _screwInset, size.height - _screwInset),
+    ];
+    for (var i = 0; i < centers.length; i++) {
+      final center = centers[i];
+      // Countersink shadow.
+      canvas.drawCircle(
+        center.translate(0, .4),
+        _screwRadius + .6,
+        Paint()..color = Colors.black.withValues(alpha: dark ? .6 : .4),
+      );
+      // The head: satin metal, lit from the upper left.
+      canvas.drawCircle(
+        center,
+        _screwRadius,
+        Paint()
+          ..shader = RadialGradient(
+            center: const Alignment(-.4, -.45),
+            radius: 1,
+            colors: dark
+                ? const <Color>[_metalMid, _metalDark, Color(0xFF3B3936)]
+                : const <Color>[_metalLight, _metalMid, _metalDark],
+            stops: const <double>[0, .6, 1],
+          ).createShader(Rect.fromCircle(center: center, radius: _screwRadius)),
+      );
+      // The slot, cut straight across.
+      final direction = Offset(math.cos(angles[i]), math.sin(angles[i]));
+      final from = center - direction * (_screwRadius * .78);
+      final to = center + direction * (_screwRadius * .78);
+      canvas.drawLine(
+        from.translate(0, .5),
+        to.translate(0, .5),
+        Paint()
+          ..color = Colors.white.withValues(alpha: dark ? .22 : .5)
+          ..strokeWidth = .9
+          ..strokeCap = StrokeCap.round,
+      );
+      canvas.drawLine(
+        from,
+        to,
+        Paint()
+          ..color = Colors.black.withValues(alpha: .7)
+          ..strokeWidth = .9
+          ..strokeCap = StrokeCap.round,
+      );
+    }
   }
 
   @override
@@ -514,8 +616,8 @@ class HardwareSelectorFramePainter extends CustomPainter {
       oldDelegate.brightness != brightness;
 }
 
-/// The raised key at the right of the faceplate: brushed steel with a chevron
-/// cut into it. Brightens under the cursor, sinks a pixel under the finger.
+/// The square metal step key at the right of the plate: satin metal with a
+/// chevron cut into it. Brightens under the cursor, sinks under the finger.
 class HardwareSelectorKeyPainter extends CustomPainter {
   const HardwareSelectorKeyPainter({
     required this.brightness,
@@ -534,24 +636,34 @@ class HardwareSelectorKeyPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final dark = brightness == Brightness.dark;
-    final base = _steelBase(brightness);
     final keyRect = (Offset.zero & size).translate(0, press * 1.5);
     final key = RRect.fromRectAndRadius(
       keyRect,
       const Radius.circular(_keyRadius),
     );
 
-    // Its own shadow, which shortens as the key sinks.
+    // The cut it sits in, and its own shadow, which shortens as it sinks.
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        keyRect.translate(0, 2.4 - press * 1.6),
+        (Offset.zero & size).inflate(1.2),
+        const Radius.circular(_keyRadius + 1.2),
+      ),
+      Paint()..color = Colors.black.withValues(alpha: dark ? .55 : .35),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        keyRect.translate(0, 2 - press * 1.4),
         const Radius.circular(_keyRadius),
       ),
       Paint()
-        ..color = Colors.black.withValues(alpha: dark ? .55 : .38)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 3.2 - press * 1.4),
+        ..color = Colors.black.withValues(alpha: dark ? .5 : .32)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2.4 - press * 1.2),
     );
 
+    // Satin metal, top-lit.
+    final top = dark ? _metalMid : _metalLight;
+    final mid = dark ? const Color(0xFF807D77) : _metalMid;
+    final bottom = dark ? const Color(0xFF55534F) : _metalDark;
     canvas.drawRRect(
       key,
       Paint()
@@ -559,48 +671,26 @@ class HardwareSelectorKeyPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            Color.lerp(base, Colors.white, dark ? .3 : .42)!,
-            base,
-            Color.lerp(base, Colors.black, dark ? .28 : .22)!,
+            Color.lerp(top, Colors.white, .08 * hover)!,
+            Color.lerp(mid, Colors.white, .08 * hover)!,
+            Color.lerp(bottom, Colors.black, .12 * press)!,
           ],
           stops: const <double>[0, .55, 1],
         ).createShader(keyRect),
     );
-
-    // Vertical brushing, the way a small key is finished across its face.
-    canvas.save();
-    canvas.clipRRect(key);
-    canvas.drawRect(
-      keyRect,
-      Paint()..shader = _brushing(keyRect, alongX: true, alpha: .05),
-    );
-    if (hover > 0) {
-      canvas.drawRect(
-        keyRect,
-        Paint()..color = Colors.white.withValues(alpha: .07 * hover),
-      );
-    }
-    if (press > 0) {
-      canvas.drawRect(
-        keyRect,
-        Paint()..color = Colors.black.withValues(alpha: .09 * press),
-      );
-    }
-    canvas.restore();
-
-    // Machined rim, then the keyline that separates it from the plate.
+    // The bevel and the keyline.
     canvas.drawRRect(
       key.deflate(.6),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
         ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .3 : .44),
+            Colors.white.withValues(alpha: dark ? .3 : .5),
             Colors.white.withValues(alpha: 0),
-            Colors.black.withValues(alpha: .2),
+            Colors.black.withValues(alpha: .25),
           ],
           stops: const <double>[0, .5, 1],
         ).createShader(keyRect),
@@ -610,7 +700,7 @@ class HardwareSelectorKeyPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = Colors.black.withValues(alpha: dark ? .5 : .42),
+        ..color = Colors.black.withValues(alpha: dark ? .55 : .42),
     );
 
     // The chevron is cut into the metal: a dark groove with the light
@@ -628,9 +718,9 @@ class HardwareSelectorKeyPainter extends CustomPainter {
       ..color = color;
     canvas.drawPath(
       chevron(1),
-      cut(Colors.white.withValues(alpha: dark ? .42 : .62)),
+      cut(Colors.white.withValues(alpha: dark ? .38 : .6)),
     );
-    canvas.drawPath(chevron(0), cut(Colors.black.withValues(alpha: .62)));
+    canvas.drawPath(chevron(0), cut(Colors.black.withValues(alpha: .66)));
   }
 
   @override

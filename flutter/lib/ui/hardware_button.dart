@@ -1,11 +1,13 @@
-// The transport key: a wide translucent plum acrylic push key seated in a
-// dark bezel, the way the Play key sits on a 1970s receiver.
+// The Generate key: a backlit push-button indicator of the kind that filled
+// 1960s command-center consoles — a frosted translucent plum lens seated in
+// a thin charcoal bezel, with an engraved uppercase legend, lit from behind
+// by incandescent lamps when the console is working.
 //
-// Everything is drawn in code — body gradient, inner glow, specular cap,
-// refraction line, grain — so it renders identically at 1×, 2× and 3× and on
-// every platform. The plastic is the same plum in both appearance modes (a
-// button is one of the two things allowed to stay dark on paper); only the
-// bezel shadow and the bloom alphas change with the room.
+// Everything is drawn in code — bezel, gap, frosted lens, lamps, grain — so
+// it renders identically at 1×, 2× and 3× and on every platform. The lens is
+// matte: no specular band, no gloss, no bloom. Its plastic is the same plum
+// in both appearance modes (a button is one of the two things allowed to
+// stay dark on paper); only the bezel shadow alphas change with the room.
 
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -15,70 +17,71 @@ import 'package:flutter/material.dart';
 import '../app/app_theme.dart';
 import 'hardware.dart';
 
-/// Radius of the bezel's outer corner.
-const double _outerRadius = 14;
+/// Radius of the bezel's outer corner: nearly square, like the real thing.
+const double _outerRadius = 5;
 
-/// Thickness of the dark bezel ring around the cap.
-const double _bezelWidth = 2.6;
+/// Thickness of the charcoal bezel that seats the lens.
+const double _bezelWidth = 3.2;
 
-/// Radius of the acrylic cap inside the bezel.
-const double _capRadius = 11.4;
+/// The dark gap between bezel and lens, where the cap sits a little recessed.
+const double _gapWidth = 1.3;
 
-/// How far the cap sinks into its bezel while held.
+/// Radius of the lens's own corners.
+const double _lensRadius = 3.4;
+
+/// How far the lens sinks into its bezel while held.
 const double _pressDepth = 1;
 
-/// Narrowest a key ever draws, so a short label still reads as a key.
+/// Narrowest a key ever draws, so a short legend still reads as a key.
 const double _minKeyWidth = 170;
 
 // ---------------------------------------------------------------------------
-// Colour anchors for the plastic. Plum in both modes, never blue.
+// Colour anchors. Plum in both modes, never blue.
 // ---------------------------------------------------------------------------
 
-// Bezel: warm near-black, the moulded frame the key is seated in.
-const _bezelTop = Color(0xFF1A1210);
-const _bezelBottom = Color(0xFF0E0907);
+// The bezel: matte charcoal, a shade warmer than neutral.
+const _bezelTop = Color(0xFF34302E);
+const _bezelBottom = Color(0xFF211E1C);
 
-// Body of the cap, light passing down through the block.
-const _bodyTopIdle = Color(0xFF643760);
-const _bodyMidIdle = Color(0xFF532B4E);
-const _bodyBottomIdle = Color(0xFF341831);
-const _bodyTopLit = Color(0xFF8E3E86);
-const _bodyMidLit = Color(0xFF7A3572);
-const _bodyBottomLit = Color(0xFF5A2A55);
+// The gap between bezel and lens.
+const _gap = Color(0xFF0C0A09);
 
-// The lamp behind the plastic.
-const _glowIdle = Color(0xFF7A4270);
-const _glowLit = Color(0xFFB85AA6);
+// The frosted lens with the lamps off: dusty plum, lit only by the room.
+const _lensTopIdle = Color(0xFF6B4B6A);
+const _lensBottomIdle = Color(0xFF503653);
 
-// Light refracting out along the bottom lip.
-const _refractIdle = Color(0xFF9A4C8C);
-const _refractLit = Color(0xFFE264C9);
+// The lens with the lamps on: the whole block glows plum-magenta.
+const _lensTopLit = Color(0xFF9E4B90);
+const _lensBottomLit = Color(0xFF7E3B76);
 
-// Spill onto the faceplate around a lit key.
-const _bloom = Color(0xFFB85AA6);
+// The incandescent lamps behind the diffuser.
+const _lamp = Color(0xFFEFAFDB);
+
+// What a lit lens throws onto the panel around it: very little.
+const _spill = Color(0xFFC468B2);
 
 // Warm black for edge shading; a neutral black would cool the plum.
 const _shade = Color(0xFF160C13);
 const _keyShadow = Color(0xFF120C08);
 
-/// Cream ink, matching `onPrimary`.
-const _keyInk = Color(0xFFFBF3E6);
+/// Cream ink for the legend: white-filled engraving on a coloured lens.
+const _legendInk = Color(0xFFF3EAD9);
+const _legendInkLit = Color(0xFFFFF8EE);
 
-/// A fixed speckle pattern in unit space, so the moulded plastic has a little
-/// tooth instead of reading as flat vector art. Generated once, mapped onto
-/// whatever size the key ends up.
-final List<Offset> _grain = () {
+/// A fixed speckle pattern in unit space: the frosted diffuser's tooth.
+/// Generated once, mapped onto whatever size the lens ends up.
+final List<Offset> _frost = () {
   final random = math.Random(0x5C0A7);
   return List<Offset>.generate(
-    360,
+    720,
     (_) => Offset(random.nextDouble(), random.nextDouble()),
   );
 }();
 
-/// A wide, lit, translucent plum push key.
+/// A wide backlit push-button indicator with a frosted plum lens.
 ///
-/// [lit] is the studio's "working" signal: the key stays lit while a render is
-/// in flight even though [onPressed] is null, so nothing has to spin.
+/// [lit] is the studio's "working" signal: the lamps stay on while a render
+/// is in flight even though [onPressed] is null, so nothing has to spin.
 class HardwareLitButton extends StatefulWidget {
   const HardwareLitButton({
     required this.label,
@@ -90,23 +93,27 @@ class HardwareLitButton extends StatefulWidget {
     this.semanticLabel,
   });
 
-  /// The engraved legend. Rendered as a plain [Text].
+  /// The legend, engraved in capitals on the lens. Rendered as a plain
+  /// [Text] carrying the upper-cased string; the semantics keep [label].
   final String label;
 
   /// Null disables the key: it dims and stops taking taps and hover.
   final VoidCallback? onPressed;
 
-  /// A leading mark, usually the claw.
+  /// A leading mark, usually the claw, inked like the legend.
   final Widget? icon;
 
-  /// Holds the lamp on regardless of [onPressed].
+  /// Holds the lamps on regardless of [onPressed].
   final bool lit;
 
-  /// Drawn height. Matches the model plaque so the faceplate lines up.
+  /// Drawn height. Matches the model selector so the faceplate lines up.
   final double height;
 
   /// Defaults to [label].
   final String? semanticLabel;
+
+  /// The legend as it is engraved: capitals, letter-spaced.
+  static String engrave(String label) => label.toUpperCase();
 
   @override
   State<HardwareLitButton> createState() => HardwareLitButtonState();
@@ -132,7 +139,7 @@ class HardwareLitButtonState extends State<HardwareLitButton>
 
   bool get _enabled => widget.onPressed != null;
 
-  /// How lit the plastic is right now, 0 (dark) to 1 (full lamp).
+  /// How lit the lens is right now, 0 (lamps off) to 1 (full lamps).
   @visibleForTesting
   double get litAmount => _lamp.value;
 
@@ -190,61 +197,72 @@ class HardwareLitButtonState extends State<HardwareLitButton>
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final label = Text(
-      widget.label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      textAlign: TextAlign.center,
-      style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle())
-          .copyWith(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: .1,
-            height: 1.05,
-            color: _keyInk,
-            // A whisper of shadow so the legend sits *in* the plastic.
-            shadows: const <Shadow>[
-              Shadow(color: Color(0x73170C15), offset: Offset(0, 1)),
-            ],
-          ),
-    );
-
-    final content = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 22),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
-          if (widget.icon != null) ...<Widget>[
-            widget.icon!,
-            const SizedBox(width: 9),
-          ],
-          Flexible(child: label),
-        ],
-      ),
-    );
 
     final face = AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[_lamp, _hoverLift]),
-      builder: (context, child) => CustomPaint(
-        painter: _HardwareKeyPainter(
-          dark: dark,
-          lit: _lamp.value,
-          hover: _hoverLift.value,
-          pressed: _pressed,
-          focusGlow: _focused ? context.tokens.brass : null,
-        ),
-        child: child,
-      ),
-      // widthFactor 1 hugs the legend when the parent leaves room, and still
-      // fills a stretched column, where the incoming width is tight.
-      child: Center(
-        widthFactor: 1,
-        child: Transform.translate(
-          offset: Offset(0, _pressed ? _pressDepth : 0),
-          child: content,
-        ),
-      ),
+      builder: (context, _) {
+        final lit = _lamp.value;
+        final ink = Color.lerp(_legendInk, _legendInkLit, lit)!;
+        final legend = Text(
+          HardwareLitButton.engrave(widget.label),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: (Theme.of(context).textTheme.labelLarge ?? const TextStyle())
+              .copyWith(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.9,
+                height: 1.05,
+                color: ink,
+                // Lit, the white-filled engraving takes a little of the
+                // lamp light itself.
+                shadows: lit > 0
+                    ? <Shadow>[
+                        Shadow(
+                          color: Colors.white.withValues(alpha: .38 * lit),
+                          blurRadius: 4,
+                        ),
+                      ]
+                    : null,
+              ),
+        );
+        final content = Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              if (widget.icon != null) ...<Widget>[
+                IconTheme.merge(
+                  data: IconThemeData(color: ink),
+                  child: widget.icon!,
+                ),
+                const SizedBox(width: 9),
+              ],
+              Flexible(child: legend),
+            ],
+          ),
+        );
+        return CustomPaint(
+          painter: _IndicatorPainter(
+            dark: dark,
+            lit: lit,
+            hover: _hoverLift.value,
+            pressed: _pressed,
+            focusGlow: _focused ? context.tokens.brass : null,
+          ),
+          // widthFactor 1 hugs the legend when the parent leaves room, and
+          // still fills a stretched column, where the incoming width is tight.
+          child: Center(
+            widthFactor: 1,
+            child: Transform.translate(
+              offset: Offset(0, _pressed ? _pressDepth : 0),
+              child: content,
+            ),
+          ),
+        );
+      },
     );
 
     final key = ConstrainedBox(
@@ -311,8 +329,9 @@ class HardwareLitButtonState extends State<HardwareLitButton>
   }
 }
 
-class _HardwareKeyPainter extends CustomPainter {
-  const _HardwareKeyPainter({
+/// Paints the indicator: bezel, gap, and the frosted lens with its lamps.
+class _IndicatorPainter extends CustomPainter {
+  const _IndicatorPainter({
     required this.dark,
     required this.lit,
     required this.hover,
@@ -326,8 +345,8 @@ class _HardwareKeyPainter extends CustomPainter {
   final bool pressed;
   final Color? focusGlow;
 
-  /// Hover is a 5 % lift in the plastic, not a colour change.
-  Color _lift(Color color) => Color.lerp(color, Colors.white, .06 * hover)!;
+  /// Hover is a small lift in the lens, not a colour change.
+  Color _lift(Color color) => Color.lerp(color, Colors.white, .05 * hover)!;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -337,32 +356,39 @@ class _HardwareKeyPainter extends CustomPainter {
       const Radius.circular(_outerRadius),
     );
 
-    _paintFocusHalo(canvas, rect, outer);
+    _paintFocusHalo(canvas, rect);
     _paintSeating(canvas, rect, outer);
     _paintBezel(canvas, rect, outer);
 
-    final capRect = rect
-        .deflate(_bezelWidth)
+    // The gap the lens sits in.
+    final gapRect = rect.deflate(_bezelWidth);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        gapRect,
+        const Radius.circular(_lensRadius + _gapWidth),
+      ),
+      Paint()..color = _gap,
+    );
+
+    final lensRect = gapRect
+        .deflate(_gapWidth)
         .translate(0, pressed ? _pressDepth : 0);
-    final cap = RRect.fromRectAndRadius(
-      capRect,
-      const Radius.circular(_capRadius),
+    final lens = RRect.fromRectAndRadius(
+      lensRect,
+      const Radius.circular(_lensRadius),
     );
     canvas.save();
-    canvas.clipRRect(cap);
-    _paintBody(canvas, capRect);
-    _paintLamp(canvas, capRect);
-    _paintVignette(canvas, capRect);
-    _paintMoulding(canvas, capRect);
-    _paintRefraction(canvas, capRect);
-    _paintGloss(canvas, capRect);
-    _paintGrain(canvas, capRect);
+    canvas.clipRRect(lens);
+    _paintLens(canvas, lensRect);
+    _paintLamps(canvas, lensRect);
+    _paintFrost(canvas, lensRect);
     canvas.restore();
+    _paintLensEdge(canvas, lens, lensRect);
   }
 
   // A brass halo around the bezel, the same lamp-on-metal catch the machined
   // knob uses for keyboard focus.
-  void _paintFocusHalo(Canvas canvas, Rect rect, RRect outer) {
+  void _paintFocusHalo(Canvas canvas, Rect rect) {
     final glow = focusGlow;
     if (glow == null) return;
     canvas.drawRRect(
@@ -386,36 +412,30 @@ class _HardwareKeyPainter extends CustomPainter {
     );
   }
 
-  // The warm shadow the key casts on the composer card, and the plum spill a
-  // lit key throws back onto the faceplate.
+  // The shadow the indicator casts on the panel, and the little light a lit
+  // lens throws back onto it — a real lamp behind a diffuser spills, but
+  // not much.
   void _paintSeating(Canvas canvas, Rect rect, RRect outer) {
     canvas.drawRRect(
-      outer.shift(Offset(0, pressed ? 1.6 : 3.4)),
+      outer.shift(const Offset(0, 2)),
       Paint()
-        ..color = _keyShadow.withValues(alpha: dark ? .5 : .28)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, pressed ? 4.5 : 8),
+        ..color = _keyShadow.withValues(alpha: dark ? .55 : .3)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4.5),
     );
     if (lit <= 0) return;
-    final bloom = (dark ? .5 : .35) * lit;
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        rect.inflate(2),
-        const Radius.circular(_outerRadius + 2),
+        rect.inflate(1.5),
+        const Radius.circular(_outerRadius + 1.5),
       ),
       Paint()
-        ..color = _bloom.withValues(alpha: bloom)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14),
-    );
-    canvas.drawRRect(
-      outer,
-      Paint()
-        ..color = _bloom.withValues(alpha: bloom * .65)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+        ..color = _spill.withValues(alpha: (dark ? .22 : .14) * lit)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
     );
   }
 
-  // The moulded frame: near-black, with a hairline catch along its bottom lip
-  // where the room light grazes it.
+  // Matte charcoal, with the light catching its top and left edges and its
+  // bottom and right edges turning away.
   void _paintBezel(Canvas canvas, Rect rect, RRect outer) {
     canvas.drawRRect(
       outer,
@@ -426,224 +446,135 @@ class _HardwareKeyPainter extends CustomPainter {
           colors: <Color>[_bezelTop, _bezelBottom],
         ).createShader(rect),
     );
+    // The bevel: one hairline inside the outer edge, lit at top-left.
     canvas.drawRRect(
-      outer.deflate(.5),
+      outer.deflate(.6),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
         ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: <Color>[
-            Colors.transparent,
-            Colors.white.withValues(alpha: dark ? .13 : .2),
-          ],
-          stops: const <double>[.62, 1],
-        ).createShader(rect),
-    );
-  }
-
-  // Light passing down through the block: brighter at the top face, deeper at
-  // the bottom where the plastic is thickest.
-  void _paintBody(Canvas canvas, Rect capRect) {
-    canvas.drawRect(
-      capRect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            _lift(Color.lerp(_bodyTopIdle, _bodyTopLit, lit)!),
-            _lift(Color.lerp(_bodyMidIdle, _bodyMidLit, lit)!),
-            _lift(Color.lerp(_bodyBottomIdle, _bodyBottomLit, lit)!),
-          ],
-          stops: const <double>[0, .55, 1],
-        ).createShader(capRect),
-    );
-  }
-
-  // The lamp itself, sitting a little below centre inside the plastic.
-  void _paintLamp(Canvas canvas, Rect capRect) {
-    final color = Color.lerp(_glowIdle, _glowLit, lit)!;
-    final alpha = ui.lerpDouble(.2, .95, lit)! * (1 + .08 * hover);
-    final center = capRect.center.translate(0, capRect.height * .16);
-    final radiusY = capRect.height * .95;
-    final radiusX = math.max(radiusY, capRect.width * .58);
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.scale(radiusX / radiusY, 1);
-    canvas.translate(-center.dx, -center.dy);
-    canvas.drawRect(
-      Rect.fromCenter(center: center, width: 4000, height: 4000),
-      Paint()
-        ..shader = RadialGradient(
-          colors: <Color>[
-            color.withValues(alpha: alpha.clamp(0, 1)),
-            color.withValues(alpha: (alpha * .42).clamp(0, 1)),
-            color.withValues(alpha: 0),
-          ],
-          stops: const <double>[0, .46, 1],
-        ).createShader(Rect.fromCircle(center: center, radius: radiusY)),
-    );
-    canvas.restore();
-  }
-
-  // Edge darkening: the block is thick, so its sides swallow the light, and
-  // the last sliver above the bottom edge falls away before the refraction
-  // line picks the light back up.
-  void _paintVignette(Canvas canvas, Rect capRect) {
-    canvas.drawRect(
-      capRect,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: .3),
-          ],
-          stops: const <double>[0, .84, 1],
-        ).createShader(capRect),
-    );
-    final edge = math.min(.26, 24 / capRect.width);
-    canvas.drawRect(
-      capRect,
-      Paint()
-        ..shader = LinearGradient(
-          colors: <Color>[
-            _shade.withValues(alpha: .46),
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: .46),
-          ],
-          stops: <double>[0, edge, 1 - edge, 1],
-        ).createShader(capRect),
-    );
-  }
-
-  // The inner face of the moulding, a step in from the cap's edge.
-  void _paintMoulding(Canvas canvas, Rect capRect) {
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(capRect.deflate(4.5), const Radius.circular(8.5)),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            Colors.white.withValues(alpha: .09),
-            Colors.white.withValues(alpha: 0),
-            Color.lerp(
-              _refractIdle,
-              _refractLit,
-              lit,
-            )!.withValues(alpha: .12 + .16 * lit),
+            Colors.white.withValues(alpha: dark ? .16 : .24),
+            Colors.white.withValues(alpha: .03),
+            Colors.black.withValues(alpha: .35),
           ],
           stops: const <double>[0, .5, 1],
-        ).createShader(capRect),
+        ).createShader(rect),
+    );
+    // The outer keyline where the frame meets the panel.
+    canvas.drawRRect(
+      outer,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1
+        ..color = Colors.black.withValues(alpha: dark ? .6 : .42),
     );
   }
 
-  // Light finding its way out along the bottom lip and wrapping the corners.
-  void _paintRefraction(Canvas canvas, Rect capRect) {
-    final color = Color.lerp(_refractIdle, _refractLit, lit)!;
-    final alpha = ui.lerpDouble(.5, 1, lit)!;
-    final line = RRect.fromRectAndRadius(
-      capRect.deflate(2.2),
-      const Radius.circular(_capRadius - 2.2),
-    );
-    LinearGradient bottomOnly(double a) => LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: <Color>[
-        color.withValues(alpha: 0),
-        color.withValues(alpha: 0),
-        color.withValues(alpha: a.clamp(0, 1)),
-      ],
-      stops: const <double>[0, .68, 1],
-    );
-    canvas.drawRRect(
-      line,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.4
-        ..shader = bottomOnly(alpha * .32).createShader(capRect)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.2),
-    );
-    canvas.drawRRect(
-      line,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4
-        ..shader = bottomOnly(alpha).createShader(capRect),
-    );
-  }
-
-  // The glossy top face: a soft sheen over the upper third and the hard
-  // white line where the cap's crown catches the room light.
-  void _paintGloss(Canvas canvas, Rect capRect) {
-    final sheenRect = Rect.fromLTWH(
-      capRect.left + 4,
-      capRect.top + .8,
-      capRect.width - 8,
-      capRect.height * .34,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndCorners(
-        sheenRect,
-        topLeft: const Radius.circular(9),
-        topRight: const Radius.circular(9),
-        bottomLeft: const Radius.circular(11),
-        bottomRight: const Radius.circular(11),
-      ),
+  // The frosted block itself: dusty plum lit by the room, or glowing plum-
+  // magenta with the lamps on. A diffuser scatters light evenly, so the
+  // body is a gentle top-to-bottom gradient and nothing more.
+  void _paintLens(Canvas canvas, Rect lensRect) {
+    canvas.drawRect(
+      lensRect,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            Colors.white.withValues(alpha: .42),
-            Colors.white.withValues(alpha: .16),
-            Colors.white.withValues(alpha: .04),
+            _lift(Color.lerp(_lensTopIdle, _lensTopLit, lit)!),
+            _lift(Color.lerp(_lensBottomIdle, _lensBottomLit, lit)!),
+          ],
+        ).createShader(lensRect),
+    );
+    // The diffuser lightens toward the middle even with the lamps off.
+    canvas.drawRect(
+      lensRect,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(0, .1),
+          radius: .9,
+          colors: <Color>[
+            Colors.white.withValues(alpha: .07),
             Colors.white.withValues(alpha: 0),
           ],
-          stops: const <double>[0, .38, .78, 1],
-        ).createShader(sheenRect)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2),
-    );
-
-    // The crown: the hard white line where the moulded top face turns over.
-    final crown = Rect.fromLTWH(
-      capRect.left + 5,
-      capRect.top + .9,
-      capRect.width - 10,
-      1.9,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(crown, const Radius.circular(1)),
-      Paint()
-        ..shader = LinearGradient(
-          colors: <Color>[
-            Colors.white.withValues(alpha: .1),
-            Colors.white.withValues(alpha: .9),
-            Colors.white.withValues(alpha: .96),
-            Colors.white.withValues(alpha: .1),
-          ],
-          stops: const <double>[0, .09, .91, 1],
-        ).createShader(crown)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, .55),
+        ).createShader(lensRect),
     );
   }
 
-  // Moulded plastic has tooth. A fixed speckle keeps it off the vector shelf.
-  void _paintGrain(Canvas canvas, Rect capRect) {
+  // Two incandescent lamps behind the diffuser, a third of the way in from
+  // each end and a little below centre, the way the real caps are lit. Wide
+  // keys space them further apart; a short key shares one.
+  void _paintLamps(Canvas canvas, Rect lensRect) {
+    if (lit <= 0) return;
+    final width = lensRect.width;
+    final height = lensRect.height;
+    final centers = width < height * 2.2
+        ? <Offset>[lensRect.center.translate(0, height * .08)]
+        : <Offset>[
+            Offset(lensRect.left + width * .3, lensRect.top + height * .58),
+            Offset(lensRect.left + width * .7, lensRect.top + height * .58),
+          ];
+    // The lamps' glow, wide and soft.
+    for (final center in centers) {
+      final radius = math.max(height * 1.15, width * .34);
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: <Color>[
+              _lamp.withValues(alpha: .55 * lit),
+              _lamp.withValues(alpha: .2 * lit),
+              _lamp.withValues(alpha: 0),
+            ],
+            stops: const <double>[0, .45, 1],
+          ).createShader(Rect.fromCircle(center: center, radius: radius)),
+      );
+    }
+    // The hot spots where the filaments sit closest to the diffuser.
+    for (final center in centers) {
+      final radius = height * .42;
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: <Color>[
+              const Color(0xFFFCE3F4).withValues(alpha: .42 * lit),
+              _lamp.withValues(alpha: .26 * lit),
+              _lamp.withValues(alpha: 0),
+            ],
+            stops: const <double>[0, .35, 1],
+          ).createShader(Rect.fromCircle(center: center, radius: radius)),
+      );
+    }
+    // The thick edges of the block stay a little darker than its middle.
+    canvas.drawRect(
+      lensRect,
+      Paint()
+        ..shader = LinearGradient(
+          colors: <Color>[
+            _shade.withValues(alpha: .28 * lit),
+            _shade.withValues(alpha: 0),
+            _shade.withValues(alpha: 0),
+            _shade.withValues(alpha: .28 * lit),
+          ],
+          stops: const <double>[0, .18, .82, 1],
+        ).createShader(lensRect),
+    );
+  }
+
+  // Frosted plastic has tooth: a fine, even speckle over the whole lens.
+  void _paintFrost(Canvas canvas, Rect lensRect) {
     final light = <Offset>[];
     final deep = <Offset>[];
-    for (var i = 0; i < _grain.length; i++) {
-      final point = capRect.topLeft.translate(
-        _grain[i].dx * capRect.width,
-        _grain[i].dy * capRect.height,
+    for (var i = 0; i < _frost.length; i++) {
+      final point = lensRect.topLeft.translate(
+        _frost[i].dx * lensRect.width,
+        _frost[i].dy * lensRect.height,
       );
       (i.isEven ? light : deep).add(point);
     }
@@ -651,20 +582,41 @@ class _HardwareKeyPainter extends CustomPainter {
       ui.PointMode.points,
       light,
       Paint()
-        ..color = Colors.white.withValues(alpha: .035)
-        ..strokeWidth = .8,
+        ..color = Colors.white.withValues(alpha: .05 + .03 * lit)
+        ..strokeWidth = .9,
     );
     canvas.drawPoints(
       ui.PointMode.points,
       deep,
       Paint()
-        ..color = _shade.withValues(alpha: .04)
-        ..strokeWidth = .8,
+        ..color = _shade.withValues(alpha: .06)
+        ..strokeWidth = .9,
+    );
+  }
+
+  // The moulded edge of the cap: a small radius that catches the room light
+  // along its top and left and falls into shadow along its bottom and right.
+  void _paintLensEdge(Canvas canvas, RRect lens, Rect lensRect) {
+    canvas.drawRRect(
+      lens.deflate(.6),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1
+        ..shader = LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[
+            Colors.white.withValues(alpha: .26 + .1 * lit),
+            Colors.white.withValues(alpha: .04),
+            _shade.withValues(alpha: .34),
+          ],
+          stops: const <double>[0, .55, 1],
+        ).createShader(lensRect),
     );
   }
 
   @override
-  bool shouldRepaint(_HardwareKeyPainter old) =>
+  bool shouldRepaint(_IndicatorPainter old) =>
       old.dark != dark ||
       old.lit != lit ||
       old.hover != hover ||
