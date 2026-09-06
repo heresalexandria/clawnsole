@@ -44,6 +44,7 @@ const {
   buildApplicationMenuTemplate,
 } = require("./lib/application-menu.cjs");
 const { installRendererRecovery } = require("./lib/renderer-recovery.cjs");
+const { runShellTask, writeLifecycle, writeStartup } = require("./lib/lifecycle-log.cjs");
 const {
   NOTIFY_CHANNEL,
   sanitizeNotification,
@@ -100,6 +101,20 @@ function companionLogger() {
   return companionLog;
 }
 
+// Lazily open the existing capped log after smoke profile isolation. This
+// adapter is used only with fixed lifecycle events and allowlisted metadata.
+const lifecycleLog = { write: (label, entry) => companionLogger().write(label, entry) };
+const runShellAction = (event, action) => runShellTask(lifecycleLog, event, action);
+app.on("child-process-gone", (_event, details) => {
+  writeLifecycle(lifecycleLog, "electron-child-gone", details);
+});
+// Observe fatal JavaScript failures without suppressing Node's normal fatal
+// handling or trying to continue with potentially inconsistent main state.
+process.on("uncaughtExceptionMonitor", (_error, origin) => {
+  writeLifecycle(lifecycleLog, origin === "unhandledRejection"
+    ? "shell-unhandled-rejection" : "shell-uncaught-exception");
+});
+
 // The supervisor owns the bundled companion for the life of the shell: it
 // restarts one unexpected exit or health-check failure by itself, and asks
 // here only when a second failure makes it a crash loop.
@@ -120,7 +135,7 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
     bootstrapLine: companionBootstrapLine(deviceKey, requestToken),
     log: companionLogger(),
     onRestarted: (restart) => adoptCompanionUrl(restart),
-    onFailed: (reason) => void reportCompanionFailure(reason),
+    onFailed: (reason) => reportCompanionFailure(reason),
   });
   return companion.start();
 }
@@ -134,11 +149,11 @@ function stopBundledRenderer() {
 // A restart usually reclaims the same port. When it cannot, the renderer
 // origin moves, so the session header follows it and the window reloads from
 // the new origin rather than the dead one.
-function adoptCompanionUrl({ url, changedUrl }) {
+async function adoptCompanionUrl({ url, changedUrl }) {
   rendererUrl = url;
   companionSession?.rebind(url);
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (changedUrl) void mainWindow.loadURL(url);
+  if (changedUrl) await mainWindow.loadURL(url);
   else mainWindow.webContents.reload();
 }
 
@@ -147,6 +162,7 @@ async function reportCompanionFailure(reason) {
   companionFailurePending = true;
   try {
     for (;;) {
+      if (isQuitting) return;
       const choice = await showMessage({
         type: "error",
         title: "Clawnsole Stopped Working",
@@ -157,6 +173,7 @@ async function reportCompanionFailure(reason) {
         defaultId: 0,
         cancelId: 2,
       });
+      if (isQuitting) return;
       if (choice.response === 1) {
         shell.showItemInFolder(companionLogger().file);
         continue;
@@ -183,8 +200,9 @@ function openSection(section) {
     return;
   }
   if (!rendererUrl) return;
-  void createMainWindow().then(() => {
-    mainWindow?.webContents.send(NAVIGATE_CHANNEL, { section });
+  void runShellAction("open-section-failed", async () => {
+    const window = await createMainWindow();
+    if (!window.isDestroyed()) window.webContents.send(NAVIGATE_CHANNEL, { section });
   });
 }
 
@@ -192,7 +210,7 @@ function openSection(section) {
 // the shell hands to macOS.
 function openMenuUrl(url) {
   if (!isAllowedExternalUrl(url)) return false;
-  void shell.openExternal(url);
+  void runShellAction("open-external-failed", () => shell.openExternal(url));
   return true;
 }
 
@@ -200,7 +218,7 @@ function installApplicationMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
     appName: APP_NAME,
     isPackaged: app.isPackaged,
-    checkForUpdates: () => void checkForUpdates({ manual: true }),
+    checkForUpdates: () => void runShellAction("update-check-failed", () => checkForUpdates({ manual: true })),
     openSettings: () => openSection("settings"),
     openExternalUrl: (url) => openMenuUrl(url),
   })));
@@ -588,11 +606,12 @@ async function createMainWindow() {
   protectRendererNavigation({
     contents: window.webContents,
     getRendererUrl: () => rendererUrl,
-    openExternal: (url) => shell.openExternal(url),
+    openExternal: (url) => runShellAction("open-external-failed", () => shell.openExternal(url)),
   });
   installRendererRecovery({
     window,
-    showMessage,
+    log: lifecycleLog,
+    showMessage: (options) => dialog.showMessageBox(window, options),
     relaunch: () => {
       isQuitting = true;
       app.relaunch();
@@ -600,15 +619,24 @@ async function createMainWindow() {
     },
     quit: () => app.quit(),
   });
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    if (!window.isDestroyed() && !isQuitting) window.show();
+  });
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
   });
   mainWindow = window;
-  await window.loadURL(rendererUrl);
+  try {
+    await window.loadURL(rendererUrl);
+    return window;
+  } catch (error) {
+    if (!window.isDestroyed()) window.destroy();
+    throw error;
+  }
 }
 
 async function startApplication() {
+  writeStartup(lifecycleLog, packageMetadata.version, process.versions.electron);
   let packagedOAuth = {};
   if (app.isPackaged) {
     try {
@@ -690,6 +718,7 @@ async function startApplication() {
     await waitForServer(`${rendererUrl}/health`, { timeoutMs: 60_000 });
   }
   await createMainWindow();
+  writeLifecycle(lifecycleLog, "shell-ready");
   if (IS_SMOKE_TEST) {
     await verifyRendererBridge();
     console.log("Clawnsole packaged smoke test passed.");
@@ -709,7 +738,7 @@ if (!hasSingleInstanceLock) {
   // well as through activate, so both rebuild the window.
   app.on("second-instance", () => {
     if (!mainWindow) {
-      if (rendererUrl) void createMainWindow();
+      if (rendererUrl && !isQuitting) void runShellAction("window-open-failed", createMainWindow);
       return;
     }
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -718,11 +747,14 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("activate", () => {
-    if (!mainWindow && rendererUrl) void createMainWindow();
+    if (!mainWindow && rendererUrl && !isQuitting) {
+      void runShellAction("window-open-failed", createMainWindow);
+    }
   });
 
   app.on("before-quit", () => {
     isQuitting = true;
+    writeLifecycle(lifecycleLog, "shell-before-quit");
     stopBundledRenderer();
   });
 
@@ -734,7 +766,32 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(startApplication).catch((error) => {
+    writeLifecycle(lifecycleLog, "shell-startup-failed");
     console.error(error);
-    app.quit();
+    if (IS_SMOKE_TEST) {
+      stopBundledRenderer();
+      app.exit(1);
+      return;
+    }
+    if (isQuitting) {
+      app.quit();
+      return;
+    }
+    void runShellAction("startup-dialog-failed", async () => {
+      try {
+        await showMessage({
+          type: "error",
+          title: "Clawnsole Could Not Start",
+          message: "Clawnsole could not open its local studio.",
+          detail: "Please reopen Clawnsole. Your saved library and settings remain in place. "
+            + "The Clawnsole log folder contains startup and recovery diagnostics.",
+          buttons: ["Show Logs", "Close"], defaultId: 0, cancelId: 1,
+        }).then((choice) => {
+          if (choice.response === 0) shell.showItemInFolder(companionLogger().file);
+        });
+      } finally {
+        app.quit();
+      }
+    });
   });
 }

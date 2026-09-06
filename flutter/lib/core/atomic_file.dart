@@ -19,30 +19,33 @@ Future<void> writeTextAtomically(
   final temporary = File(
     '${file.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp',
   );
-  await temporary.writeAsString(contents, flush: true);
-  if (keepBackup && await file.exists()) {
-    try {
-      if (prepareBackup == null) {
-        await file.copy(backupPath(file));
-      } else {
-        await writeTextAtomically(
-          File(backupPath(file)),
-          prepareBackup(await file.readAsString()),
-          keepBackup: false,
-        );
-      }
-    } on FileSystemException {
-      // A backup is insurance, never a reason to fail the write itself.
-    }
-  }
   try {
+    await temporary.writeAsString(contents, flush: true);
+    if (keepBackup && await file.exists()) {
+      try {
+        if (prepareBackup == null) {
+          await file.copy(backupPath(file));
+        } else {
+          await writeTextAtomically(
+            File(backupPath(file)),
+            prepareBackup(await file.readAsString()),
+            keepBackup: false,
+          );
+        }
+      } on FileSystemException {
+        // A backup is insurance, never a reason to fail the write itself.
+      }
+    }
+    // If replacement fails (full disk, permissions or a Windows sharing lock),
+    // leave the canonical copy intact. Deleting it to retry creates a data-loss
+    // window, especially when making a backup failed for the same reason.
     await temporary.rename(file.path);
-  } on FileSystemException {
-    // Some filesystems refuse to replace an open target (notably network
-    // and sync-managed folders on Windows). The backup taken above makes the
-    // delete-then-rename fallback recoverable.
-    if (await file.exists()) await file.delete();
-    await temporary.rename(file.path);
+  } finally {
+    try {
+      if (await temporary.exists()) await temporary.delete();
+    } on FileSystemException {
+      // Preserve the original write error; a later sweep can remove leftovers.
+    }
   }
   unawaitedCleanup(file);
 }

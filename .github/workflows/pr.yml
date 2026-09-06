@@ -188,6 +188,20 @@ jobs:
         run: ./flutter/scripts/build_macos
       - name: Smoke test packaged desktop app
         run: electron/dist/release/mac-arm64/Clawnsole.app/Contents/MacOS/Clawnsole --smoke
+      - name: Exercise renderer crash recovery in an isolated profile
+        working-directory: electron
+        run: ./node_modules/.bin/electron scripts/smoke-recovery.cjs
+      - name: Verify smoke failures exit unsuccessfully
+        working-directory: electron
+        shell: bash
+        run: |
+          if env -u CLAWNSOLE_COMPANION_TOKEN ./node_modules/.bin/electron . --smoke; then
+            echo "Startup failure incorrectly passed the smoke test."
+            exit 1
+          else
+            status=$?
+            test "$status" -eq 1
+          fi
 
   windows-package:
     name: Windows package check
