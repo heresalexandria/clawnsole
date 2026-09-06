@@ -247,10 +247,18 @@ The inference shows in the cost panel's summary line (`Text`, `Image`,
 `Video`…); the footer carries no mode chip and no readiness line — a ready
 console says nothing, and the lit Generate key is the signal.
 
-**Model selector:** the console readout in the footer (`HardwareSelector`:
-charcoal bezel with corner screws, a fourteen-segment display of provider
-and model, a square chevron key) opens a searchable picker. Every model row and provider heading carries a small star (brass
-when lit); starred models pin into a **FAVORITES** section at the top of
+**Model selector:** a shared searchable picker — `showProviderModelPicker`
+in `provider_model_picker.dart` — opened as a modal dialog rather than a
+contextual popup, so more than one control can raise the same component:
+the console readout in the footer (`HardwareSelector`: charcoal bezel with
+corner screws, a fourteen-segment display of provider and model, a square
+chevron key) and the text trigger in the Direction header both open it,
+and they share one memory of which provider sections are folded. The
+search field is the header — it takes focus on desktop, where the director
+can type at once, and not on iOS or Android, where the keyboard would
+cover the list — with a small close key beside it for the platforms that
+have no Escape. Every model row and provider heading carries a small star
+(brass when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
 same starred providers under a *Favorites* eyebrow. Stars live in
@@ -263,7 +271,15 @@ Layout order:
    Prime — the typewriter voice for anything the director types. A quiet
    clear control sits directly after the label (disabled while empty) and
    asks before wiping the text; the live counter, copy, and fullscreen
-   controls keep the header's far end.
+   controls keep the header's far end. Right of the clear key a quiet
+   text trigger reads *model · provider* with a small chevron and opens
+   the same picker modal as the footer's selector — header type, not the
+   machined plaque, so the model can be changed without leaving the
+   prompt. The model name comes first so it survives the ellipsis on a
+   narrow row; under 480 px of header width the row cannot hold a model
+   name at all, so the trigger drops to its own line directly beneath the
+   clear key and reads in full. It rides along into the fullscreen
+   editor.
 2. **Cast row**: a compact strip between the direction and the guidance /
    settings pair, present only when a character actually holds a
    reference on a model that accepts creative references. A brass label,
@@ -326,8 +342,8 @@ Layout order:
    chips, the folder dropdown, and a new-folder icon button.
 9. Footer: the console **model selector** (provider + model on a
    fourteen-segment readout in a screwed charcoal bezel, chevron key;
-   opens the picker) directly before the backlit **GENERATE VIDEO**
-   push-button indicator, shoulder to shoulder at 56 px.
+   opens the shared picker dialog) directly before the backlit
+   **GENERATE VIDEO** push-button indicator, shoulder to shoulder at 56 px.
    A status line appears only when something blocks a render (API key
    missing, this device cannot run the local model). Under 640 px the
    selector and the key stack, each spanning the composer.
