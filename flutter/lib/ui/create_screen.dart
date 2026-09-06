@@ -1301,58 +1301,87 @@ class _DirectionToolbar extends StatelessWidget {
                 ),
               ),
         ),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            spacing: 2,
-            children: [
-              Tooltip(
-                message: 'Copy prompt',
-                child: TextButton.icon(
-                  key: const ValueKey('prompt-copy-button'),
-                  onPressed: onCopy,
-                  icon: const Icon(Icons.copy_rounded, size: 17),
-                  label: constraints.maxWidth < 440
-                      ? const SizedBox.shrink()
-                      : const Text('Copy'),
-                ),
+        child: Row(
+          spacing: 2,
+          children: [
+            _DirectionToolbarAction(
+              buttonKey: const ValueKey('prompt-copy-button'),
+              tooltip: 'Copy prompt',
+              label: 'Copy',
+              compact: _compact(context, constraints),
+              onPressed: onCopy,
+              icon: Icons.copy_rounded,
+            ),
+            _DirectionToolbarAction(
+              buttonKey: const ValueKey('prompt-rewrite-button'),
+              tooltip: 'AI rewrite',
+              label: 'AI rewrite',
+              compact: _compact(context, constraints),
+              onPressed: controller.canRewriteDirection
+                  ? () => unawaited(
+                      showPromptRewriteDialog(context, controller: controller),
+                    )
+                  : null,
+              icon: Icons.auto_fix_high_rounded,
+            ),
+            if (controller.selectedModel.supportsCharacterReferences)
+              _DirectionToolbarAction(
+                buttonKey: const ValueKey('prompt-characters-button'),
+                tooltip: 'Characters',
+                label: 'Characters',
+                compact: _compact(context, constraints),
+                onPressed: () =>
+                    unawaited(showCharactersDialog(context, controller)),
+                icon: Icons.people_outline_rounded,
               ),
-              Tooltip(
-                message: 'AI rewrite',
-                child: TextButton.icon(
-                  key: const ValueKey('prompt-rewrite-button'),
-                  onPressed: controller.canRewriteDirection
-                      ? () => unawaited(
-                          showPromptRewriteDialog(
-                            context,
-                            controller: controller,
-                          ),
-                        )
-                      : null,
-                  icon: const Icon(Icons.auto_fix_high_rounded, size: 17),
-                  label: constraints.maxWidth < 440
-                      ? const SizedBox.shrink()
-                      : const Text('AI rewrite'),
-                ),
-              ),
-              if (controller.selectedModel.supportsCharacterReferences)
-                TextButton.icon(
-                  key: const ValueKey('prompt-characters-button'),
-                  onPressed: () =>
-                      unawaited(showCharactersDialog(context, controller)),
-                  icon: const Icon(Icons.people_outline_rounded, size: 17),
-                  label: const Text('Characters'),
-                ),
-              AestheticReferencePicker(
-                controller: controller,
-                compact: constraints.maxWidth < 440,
-              ),
-            ],
-          ),
+            Flexible(child: AestheticReferencePicker(controller: controller)),
+          ],
         ),
       ),
     ),
+  );
+
+  bool _compact(BuildContext context, BoxConstraints constraints) =>
+      constraints.maxWidth <
+      440 * MediaQuery.textScalerOf(context).scale(12) / 12;
+}
+
+class _DirectionToolbarAction extends StatelessWidget {
+  const _DirectionToolbarAction({
+    required this.buttonKey,
+    required this.tooltip,
+    required this.label,
+    required this.compact,
+    required this.onPressed,
+    required this.icon,
+  });
+
+  final Key buttonKey;
+  final String tooltip;
+  final String label;
+  final bool compact;
+  final VoidCallback? onPressed;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    excludeFromSemantics: compact,
+    child: compact
+        ? SizedBox(
+            width: 44,
+            child: TextButton(
+              key: buttonKey,
+              onPressed: onPressed,
+              child: Icon(icon, size: 17, semanticLabel: tooltip),
+            ),
+          )
+        : TextButton.icon(
+            key: buttonKey,
+            onPressed: onPressed,
+            icon: Icon(icon, size: 17),
+            label: Text(label),
+          ),
   );
 }
 

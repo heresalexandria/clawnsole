@@ -7,9 +7,13 @@ at 95%, with a gray unused track. The count includes added aesthetic direction.
 Its tooltip and accessibility label give the remaining or exceeded allowance;
 when a provider publishes no maximum, the editor's 50,000-character cap is shown
 and explicitly identified as an editor limit.
-Below the header, a single-line toolbar contains Copy, AI rewrite, and, on
-compatible models, Characters.
-It can scroll horizontally at large accessibility text sizes. In screenplay mode
+Below the header, a single-line toolbar contains Copy, AI rewrite, Characters
+on compatible models, and the aesthetic picker. Compact layouts use labelled
+tooltips with icon-only actions, reserving room for the selected aesthetic's
+name. The picker reads "Aesthetic" when none is selected; long names truncate
+with an ellipsis and remain available in full through its tooltip and menu.
+The same layout adapts to larger accessibility text without horizontal scrolling.
+In screenplay mode
 the element selector, Prev, and Next sit directly below the editor, followed by
 the suggestion tags.
 The Enter / Tab hint sits directly above the text entry area. The expanded editor
