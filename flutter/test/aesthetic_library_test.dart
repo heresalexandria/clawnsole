@@ -397,6 +397,10 @@ void main() {
       find.byKey(const ValueKey('aesthetic-text')),
       'Soft monochrome grain.',
     );
+    // Eight icon groups make the dialog scroll; the star sits back at the top.
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('aesthetic-favorite-toggle')),
+    );
     await tester.tap(find.byKey(const ValueKey('aesthetic-favorite-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('aesthetic-save')));

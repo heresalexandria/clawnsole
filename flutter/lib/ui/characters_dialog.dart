@@ -342,6 +342,9 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
                 TextField(
                   key: const ValueKey('mapping-character-name'),
                   controller: _name,
+                  // A new character starts with its name; an existing one
+                  // usually opens to recast, so it keeps the focus quiet.
+                  autofocus: widget.character.isEmpty,
                   enabled: !_saving,
                   textCapitalization: TextCapitalization.characters,
                   maxLength: 60,
