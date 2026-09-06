@@ -19,6 +19,10 @@ String providerCredentialAcknowledgementId(
 
 enum AppSection { create, library, references, providers, settings }
 
+/// The two halves of the References desk: saved media, and the text-only
+/// aesthetic library.
+enum ReferencesTab { media, aesthetics }
+
 enum LibraryFilter { all, working, ready, failed }
 
 enum GenerationViewMode { compact, mini, full }

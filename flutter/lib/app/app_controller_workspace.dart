@@ -14,20 +14,29 @@ extension AppControllerWorkspace on AppController {
     updateForm((form) => form.aestheticReferenceId = id);
   }
 
+  /// Creates or updates an aesthetic. Omitted [tags]/[favorite] keep the
+  /// existing record's values so an edit never silently unstars or untags.
   void saveAestheticReference({
     String? id,
     required String title,
     required String text,
     required String icon,
     required int color,
+    List<String>? tags,
+    bool? favorite,
   }) {
     if (title.trim().isEmpty || text.trim().isEmpty) return;
+    final existing = id == null
+        ? null
+        : _aestheticReferences.where((item) => item.id == id).firstOrNull;
     final record = AestheticReference(
       id: id ?? _uid(),
       title: title.trim(),
       text: text.trim(),
       icon: icon,
       color: color,
+      tags: tags ?? existing?.tags ?? const <String>[],
+      favorite: favorite ?? existing?.favorite ?? false,
       updatedAt: DateTime.now().toUtc(),
     );
     _aestheticReferences.removeWhere((item) => item.id == record.id);

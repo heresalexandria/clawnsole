@@ -51,6 +51,7 @@ class ComposerTabRecord {
     this.screenplayLinkedCharacters = const [],
     this.screenplayReferenceNames = const {},
     this.screenplayCharacterAliases = const {},
+    this.characterMappings = const {},
     this.providerId,
     this.modelId,
     this.aspectRatio = '16:9',
@@ -92,6 +93,11 @@ class ComposerTabRecord {
   /// Saved reference ids and their authoring names, never media or secrets.
   final Map<String, String> screenplayReferenceNames;
   final Map<String, String> screenplayCharacterAliases;
+
+  /// Cast lines kept out of the editable prompt: cast name to the prompt
+  /// names of the media references playing that character. Appended to the
+  /// prompt at submission (schema 6).
+  final Map<String, List<String>> characterMappings;
   final String? providerId;
   final String? modelId;
   final String aspectRatio;
@@ -144,6 +150,7 @@ class ComposerTabRecord {
     List<String>? screenplayLinkedCharacters,
     Map<String, String>? screenplayReferenceNames,
     Map<String, String>? screenplayCharacterAliases,
+    Map<String, List<String>>? characterMappings,
     String? providerId,
     String? modelId,
     String? aspectRatio,
@@ -189,6 +196,7 @@ class ComposerTabRecord {
         screenplayReferenceNames ?? this.screenplayReferenceNames,
     screenplayCharacterAliases:
         screenplayCharacterAliases ?? this.screenplayCharacterAliases,
+    characterMappings: characterMappings ?? this.characterMappings,
     providerId: providerId ?? this.providerId,
     modelId: modelId ?? this.modelId,
     aspectRatio: aspectRatio ?? this.aspectRatio,
@@ -238,6 +246,11 @@ class ComposerTabRecord {
       'screenplayReferenceNames': screenplayReferenceNames,
     if (screenplayCharacterAliases.isNotEmpty)
       'screenplayCharacterAliases': screenplayCharacterAliases,
+    if (characterMappings.isNotEmpty)
+      'characterMappings': <String, Object?>{
+        for (final entry in characterMappings.entries)
+          if (entry.value.isNotEmpty) entry.key: entry.value,
+      },
     if (providerId != null) 'provider': providerId,
     if (modelId != null) 'model': modelId,
     'aspectRatio': aspectRatio,
@@ -312,6 +325,17 @@ class ComposerTabRecord {
                   entry.key as String: entry.value as String,
             }
           : const {},
+      characterMappings: json['characterMappings'] is Map
+          ? {
+              for (final entry in (json['characterMappings']! as Map).entries)
+                if (entry.key is String &&
+                    entry.value is List &&
+                    (entry.value as List).whereType<String>().isNotEmpty)
+                  entry.key as String: (entry.value as List)
+                      .whereType<String>()
+                      .toList(),
+            }
+          : const {},
       providerId: text(json['provider']),
       modelId: text(json['model']),
       aspectRatio: text(json['aspectRatio']) ?? '16:9',
@@ -354,7 +378,9 @@ class ComposerTabsState {
   });
 
   // Version 1 migrates additively to prose mode with no character links.
-  static const int schemaVersion = 5;
+  // Version 6 moves cast lines out of the prompt into characterMappings;
+  // older builds refuse the workspace rather than silently dropping casts.
+  static const int schemaVersion = 6;
 
   final List<ComposerTabRecord> tabs;
   final String? activeTabId;

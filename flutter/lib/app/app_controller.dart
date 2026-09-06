@@ -300,6 +300,11 @@ class GenerationFormState {
   final Set<String> screenplayLinkedCharacters = {};
   final Map<String, String> screenplayCharacterAliases = {};
   final Map<String, String> draftCharacterNames = {};
+
+  /// Cast lines ("HERO: @a @b") kept out of the editable prompt. Keys are the
+  /// cast (mapping) names; values are prompt names of attached references.
+  /// They are appended to the prompt at submission, like the aesthetic text.
+  final Map<String, List<String>> characterMappings = {};
   String aspectRatio = '16:9';
   bool autoDuration = false;
   int durationSeconds = 8;
@@ -440,6 +445,7 @@ class ComposerTab {
       form.prompt.trim().isEmpty &&
       !form.screenplayMode &&
       form.aestheticReferenceId == null &&
+      form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
       form.references.isEmpty &&
       disabledReferences.isEmpty &&
@@ -548,6 +554,14 @@ class AppController extends ChangeNotifier {
   String libraryFolderView = libraryFolderAll;
   String? libraryTag;
   String referenceSearch = '';
+
+  /// Which half of the References desk is showing (session-only).
+  ReferencesTab referencesTab = ReferencesTab.media;
+
+  /// Aesthetic library filters on the References desk (session-only).
+  String aestheticSearch = '';
+  String? aestheticTag;
+  bool aestheticFavoritesOnly = false;
   String referenceFolderView = libraryFolderAll;
   String? referenceTag;
   MediaReferenceKind? referenceKind;
@@ -865,6 +879,10 @@ class AppController extends ChangeNotifier {
     aestheticReferenceId: tab.form.aestheticReferenceId,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
+    characterMappings: {
+      for (final entry in tab.form.characterMappings.entries)
+        if (entry.value.isNotEmpty) entry.key: List.of(entry.value),
+    },
     screenplayReferenceNames: {
       for (final reference in tab.form.references)
         if (reference.savedReferenceId != null)
@@ -1096,6 +1114,12 @@ class AppController extends ChangeNotifier {
       tab.providerId = provider;
       tab.modelId = modelById(provider, record.modelId ?? '').id;
     }
+    tab.form.characterMappings
+      ..clear()
+      ..addAll({
+        for (final entry in record.characterMappings.entries)
+          if (entry.value.isNotEmpty) entry.key: List.of(entry.value),
+      });
     tab.form
       ..prompt = record.prompt
       ..screenplayMode = record.screenplayMode

@@ -4970,19 +4970,31 @@ class _CostPreview extends StatelessWidget {
                   ),
                 ],
               ),
-              if (calculation != null) ...<Widget>[
-                const SizedBox(height: 6),
-                Text(
-                  calculation,
-                  style: TextStyle(
-                    color: tokens.onMoneyMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+              // The basis sentence lives in the Rate card tooltip only, so
+              // the felt stays short; the Rate card sits level with the
+              // calculation line right under the charge.
+              if (calculation != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          calculation,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: tokens.onMoneyMuted,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      rateCard,
+                    ],
                   ),
                 ),
-              ],
-              // Without a numeric balance the divider row has nothing to
-              // carry, so the Rate card joins the basis caption instead.
               if (afterValue != null) ...<Widget>[
                 const SizedBox(height: 7),
                 Divider(
@@ -4999,31 +5011,11 @@ class _CostPreview extends StatelessWidget {
                         vertical: true,
                       ),
                     ),
-                    rateCard,
+                    if (calculation == null) rateCard,
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  basis,
-                  style: TextStyle(color: tokens.onMoneyMuted, fontSize: 9.5),
-                ),
-              ] else ...<Widget>[
-                const SizedBox(height: 4),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        basis,
-                        style: TextStyle(
-                          color: tokens.onMoneyMuted,
-                          fontSize: 9.5,
-                        ),
-                      ),
-                    ),
-                    rateCard,
-                  ],
-                ),
-              ],
+              ] else if (calculation == null)
+                Align(alignment: Alignment.centerRight, child: rateCard),
             ],
           );
         },
