@@ -61,15 +61,23 @@ extension AiRewriteController on AppController {
     final rewritten = tab.form.screenplayMode
         ? formatScreenplay(result.prompt)
         : result.prompt;
-    _directionRewriteUndo = (
-      tabId: tab.id,
-      previous: tab.form.prompt,
-      rewritten: rewritten,
-    );
+    final previous = tab.form.prompt;
+    final cast = <String, List<String>>{
+      for (final entry in tab.form.characterMappings.entries)
+        entry.key: List<String>.of(entry.value),
+    };
     _inComposerTab(tab, () {
       tab.form.prompt = rewritten;
+      // The brief carried the casting block, so the answer usually does too.
+      absorbPromptMappings();
       tab.formRevision += 1;
     });
+    _directionRewriteUndo = (
+      tabId: tab.id,
+      previous: previous,
+      rewritten: tab.form.prompt,
+      cast: cast,
+    );
     _scheduleComposerTabsSave(touched: tab);
     notifyListeners();
     final summary = result.summary.trim();
@@ -94,6 +102,9 @@ extension AiRewriteController on AppController {
     }
     _inComposerTab(tab, () {
       tab.form.prompt = undo.previous;
+      tab.form.characterMappings
+        ..clear()
+        ..addAll(undo.cast);
       tab.formRevision += 1;
     });
     _scheduleComposerTabsSave(touched: tab);

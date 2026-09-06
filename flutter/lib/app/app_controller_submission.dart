@@ -25,6 +25,10 @@ extension AppControllerSubmission on AppController {
       ..screenplayLinkedCharacters.addAll(value.screenplayLinkedCharacters)
       ..screenplayCharacterAliases.addAll(value.screenplayCharacterAliases)
       ..draftCharacterNames.addAll(value.draftCharacterNames)
+      ..characterMappings.addAll({
+        for (final entry in value.characterMappings.entries)
+          entry.key: List.of(entry.value),
+      })
       ..aspectRatio = value.aspectRatio
       ..autoDuration = value.autoDuration
       ..durationSeconds = value.durationSeconds

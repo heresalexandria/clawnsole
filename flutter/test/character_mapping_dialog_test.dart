@@ -144,7 +144,11 @@ void main() {
         controller.form.references.single.savedReferenceId,
         'portrait.png',
       );
-      expect(controller.form.prompt, contains('HERO: @portrait.png'));
+      expect(controller.form.characterMappings, {
+        'HERO': ['portrait.png'],
+      });
+      expect(controller.form.prompt, isNot(contains('@')));
+      expect(controller.promptWithCast, endsWith('HERO: @portrait.png'));
       await tester.tap(find.widgetWithText(ListTile, 'HERO'));
       await tester.pumpAndSettle();
       expect(_selected(tester, 'portrait.png'), isTrue);
@@ -250,7 +254,8 @@ void main() {
     await _toggle(tester, 'portrait.png');
     await _save(tester);
     expect(controller.characterMappingReferences('EXTRA'), ['portrait.png']);
-    expect(controller.form.prompt, contains('EXTRA: @portrait.png'));
+    expect(controller.form.prompt, isEmpty);
+    expect(controller.promptWithCast, 'EXTRA: @portrait.png');
     expect(tester.takeException(), isNull);
   });
 
@@ -267,7 +272,10 @@ void main() {
       );
       await _openDialog(tester, controller);
       expect(controller.form.references.single.savedReferenceId, 'Hero.png');
-      expect(controller.form.prompt, contains('HERO: @Hero.png'));
+      expect(controller.form.prompt, script);
+      expect(controller.form.characterMappings, {
+        'HERO': ['Hero.png'],
+      });
       expect(find.widgetWithText(ListTile, 'HERO'), findsOneWidget);
       await tester.tap(find.widgetWithText(ListTile, 'HERO'));
       await tester.pumpAndSettle();

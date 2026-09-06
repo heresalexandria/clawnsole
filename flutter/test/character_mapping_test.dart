@@ -32,6 +32,10 @@ void main() {
         'portrait.png',
       );
       expect(screenplayCharacters(controller.form.prompt), isEmpty);
+      // The casting never enters the editable text; it is appended on the way
+      // out, where it counts toward the prompt limit.
+      expect(controller.form.prompt, isEmpty);
+      expect(controller.promptWithCast, 'QUIET OBSERVER: @portrait.png');
     },
   );
 
@@ -181,42 +185,56 @@ void main() {
     },
   );
 
-  test('case-insensitive action matching inserts an editable mapping once', () {
-    final controller = _controller(references: [_reference('Alice.png')]);
-    addTearDown(controller.dispose);
-    controller.setScreenplayMode(true);
-
-    controller.updateForm((form) => form.prompt = 'Alice turns.');
-    expect(controller.form.references, hasLength(1));
-    expect(controller.form.prompt, 'Alice turns.\n\nALICE: @Alice.png');
-    controller.updateForm(
-      (form) => form.prompt = 'Alice turns.\n\nALICE: @other',
-    );
-    controller.updateForm((form) => form.prompt += '\nAlice sits.');
-    expect(controller.characterMappingReferences('ALICE'), ['other']);
-    controller.updateForm((form) => form.prompt = 'Alice turns.');
-    expect(controller.characterMappingReferences('ALICE'), isEmpty);
-    controller.updateForm((form) => form.prompt += '\nAlice sits.');
-    expect(screenplayMappings(controller.form.prompt), isEmpty);
-  });
-
   test(
-    'an existing editable footer overrides defaults without attaching them',
-    () {
+    'case-insensitive action matching casts once, out of the text',
+    () async {
       final controller = _controller(references: [_reference('Alice.png')]);
       addTearDown(controller.dispose);
-      controller.form
-        ..screenplayMode = true
-        ..prompt = 'Alice turns.\n\nAlice: @custom';
+      controller.setScreenplayMode(true);
 
-      expect(controller.characterMappingReferences('ALICE'), ['custom']);
-      controller.updateForm((form) => form.prompt += '\nAlice sits.');
-      expect(controller.form.references, isEmpty);
       controller.updateForm((form) => form.prompt = 'Alice turns.');
+      expect(controller.form.references, hasLength(1));
+      expect(controller.form.prompt, 'Alice turns.');
+      expect(controller.form.characterMappings, {
+        'ALICE': ['Alice.png'],
+      });
+      expect(controller.promptWithCast, 'Alice turns.\n\nALICE: @Alice.png');
+      // A pasted casting line is absorbed rather than left in the direction.
+      controller.updateForm(
+        (form) => form.prompt = 'Alice turns.\n\nALICE: @other',
+      );
+      expect(controller.form.prompt, 'Alice turns.');
+      controller.updateForm((form) => form.prompt += '\nAlice sits.');
+      expect(controller.characterMappingReferences('ALICE'), ['other']);
+      // Clearing the cast is done in the editor, and it sticks through typing.
+      await controller.saveCharacterMapping(
+        scriptName: 'ALICE',
+        name: 'ALICE',
+        referenceNames: [],
+      );
+      controller.updateForm((form) => form.prompt += '\nAlice waits.');
       expect(controller.characterMappingReferences('ALICE'), isEmpty);
-      expect(controller.form.references, isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
     },
   );
+
+  test('an absorbed cast line overrides defaults without attaching them', () {
+    final controller = _controller(references: [_reference('Alice.png')]);
+    addTearDown(controller.dispose);
+    controller.form.screenplayMode = true;
+    controller.updateForm(
+      (form) => form.prompt = 'Alice turns.\n\nAlice: @custom',
+    );
+
+    expect(controller.form.prompt, 'Alice turns.');
+    expect(controller.characterMappingReferences('ALICE'), ['custom']);
+    controller.updateForm((form) => form.prompt += '\nAlice sits.');
+    expect(controller.form.references, isEmpty);
+    // Rewriting the direction leaves the cast alone; it is not prompt text.
+    controller.updateForm((form) => form.prompt = 'Alice turns.');
+    expect(controller.characterMappingReferences('ALICE'), ['custom']);
+    expect(controller.form.references, isEmpty);
+  });
 
   test(
     'explicit clearing and a different-reference override beat defaults',
@@ -247,7 +265,7 @@ void main() {
       );
       controller.updateForm((form) => form.prompt += '\nAlice turns.');
       expect(controller.characterMappingReferences('ALICE'), isEmpty);
-      expect(screenplayMappings(controller.form.prompt), isEmpty);
+      expect(controller.form.characterMappings, isEmpty);
     },
   );
 
@@ -293,7 +311,7 @@ void main() {
       expect(controller.activeComposerTab, same(next));
       expect(controller.form.prompt, 'A different scene.');
       expect(controller.form.references, isEmpty);
-      expect(screenplayMappings(original.form.prompt), {
+      expect(original.form.characterMappings, {
         'OBSERVER': ['Alice.png'],
       });
       expect(original.form.references.single.asset!.bytes, [1, 2, 3]);
@@ -321,7 +339,7 @@ void main() {
       expect(controller.form.prompt, 'Another scene.');
       expect(controller.form.references, isEmpty);
       expect(original.form.references, isEmpty);
-      expect(screenplayMappings(original.form.prompt), isEmpty);
+      expect(original.form.characterMappings, isEmpty);
       controller.activateComposerTab(original.id);
       expect(controller.characterMappingReferences('ALICE'), isEmpty);
     },
@@ -336,9 +354,10 @@ void main() {
     controller.syncScreenplayCharacterMappings();
 
     expect(controller.form.references.single.savedReferenceId, 'Alice.png');
-    expect(screenplayMappings(controller.form.prompt), {
+    expect(controller.form.characterMappings, {
       'ALICE': ['Alice.png'],
     });
+    expect(controller.form.prompt, 'Alice waits without speaking.');
     final prompt = controller.form.prompt;
     controller.syncScreenplayCharacterMappings();
     expect(controller.form.prompt, prompt);
@@ -363,8 +382,9 @@ void main() {
 
       expect(
         controller.form.prompt,
-        'HERO greets HERO and HERO. ALICEA watches @Alice.png.\n\nHERO: @Alice.png',
+        'HERO greets HERO and HERO. ALICEA watches @Alice.png.',
       );
+      expect(controller.promptWithCast, endsWith('\n\nHERO: @Alice.png'));
       expect(controller.scriptCharacterNames, ['HERO']);
       expect(controller.characterMappingReferences('HERO'), ['Alice.png']);
     },

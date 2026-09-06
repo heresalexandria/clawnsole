@@ -7,27 +7,169 @@ extension AppControllerWorkspace on AppController {
   AestheticReference? get selectedAestheticReference => _aestheticReferences
       .where((item) => item.id == form.aestheticReferenceId)
       .firstOrNull;
+
+  /// What is actually sent: the direction, then its casting block, then the
+  /// aesthetic text. None of the two appended parts is in the editable prompt.
   String get generationPrompt =>
-      appendAestheticPrompt(form.prompt, selectedAestheticReference);
+      appendAestheticPrompt(promptWithCast, selectedAestheticReference);
 
   void selectAestheticReference(String? id) {
     updateForm((form) => form.aestheticReferenceId = id);
   }
 
+  /// Which half of the References desk is showing. Session-only: the desk
+  /// always opens on media after a relaunch.
+  void setReferencesTab(ReferencesTab value) {
+    if (referencesTab == value) return;
+    referencesTab = value;
+    notifyListeners();
+  }
+
+  /// Opens the References desk on its aesthetic half, for the Create
+  /// picker's "Manage aesthetics…" action.
+  Future<void> openAestheticLibrary() async {
+    referencesTab = ReferencesTab.aesthetics;
+    await navigate(AppSection.references);
+  }
+
+  void setAestheticSearch(String value) {
+    if (aestheticSearch == value) return;
+    aestheticSearch = value;
+    notifyListeners();
+  }
+
+  void setAestheticTag(String? value) {
+    if (aestheticTag == value) return;
+    aestheticTag = value;
+    notifyListeners();
+  }
+
+  void setAestheticFavoritesOnly(bool value) {
+    if (aestheticFavoritesOnly == value) return;
+    aestheticFavoritesOnly = value;
+    notifyListeners();
+  }
+
+  void resetAestheticFilters() {
+    if (!hasAestheticFilters) return;
+    aestheticSearch = '';
+    aestheticTag = null;
+    aestheticFavoritesOnly = false;
+    notifyListeners();
+  }
+
+  /// Whether anything is narrowing the aesthetic library right now.
+  bool get hasAestheticFilters =>
+      aestheticSearch.trim().isNotEmpty ||
+      aestheticTag != null ||
+      aestheticFavoritesOnly;
+
+  /// Stars or unstars one aesthetic. Starred entries lead every list, so the
+  /// change is durable rather than a view preference.
+  void toggleAestheticFavorite(String id) {
+    final index = _aestheticReferences.indexWhere((item) => item.id == id);
+    if (index < 0) return;
+    final item = _aestheticReferences[index];
+    _aestheticReferences[index] = item.copyWith(
+      favorite: !item.favorite,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    _flushComposerTabsSave();
+    notifyListeners();
+  }
+
+  /// Every tag in the library, de-duplicated case-insensitively (the first
+  /// spelling wins) and sorted case-insensitively.
+  List<String> get aestheticTags {
+    final names = <String, String>{};
+    for (final item in _aestheticReferences) {
+      for (final tag in item.tags) {
+        names.putIfAbsent(tag.toLowerCase(), () => tag);
+      }
+    }
+    final tags = names.values.toList();
+    tags.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return tags;
+  }
+
+  int aestheticTagCount(String tag) =>
+      _aestheticReferences.where((item) => item.hasTag(tag)).length;
+
+  /// How many aesthetics the search and tag filters keep, optionally limited
+  /// to starred ones. The starred facet is ignored so the All and Starred
+  /// keys can both describe the same search.
+  int aestheticCount({bool favoritesOnly = false}) => _aestheticReferences
+      .where(
+        (item) =>
+            _matchesAestheticSearch(item) &&
+            _matchesAestheticTag(item) &&
+            (!favoritesOnly || item.favorite),
+      )
+      .length;
+
+  /// Favorites first, then title A→Z, then the most recently edited.
+  List<AestheticReference> get sortedAestheticReferences =>
+      _sortAesthetics(_aestheticReferences.toList());
+
+  /// [sortedAestheticReferences] narrowed by the desk's search, tag, and
+  /// starred filters.
+  List<AestheticReference> get filteredAestheticReferences => _sortAesthetics(
+    _aestheticReferences
+        .where(
+          (item) =>
+              _matchesAestheticSearch(item) &&
+              _matchesAestheticTag(item) &&
+              (!aestheticFavoritesOnly || item.favorite),
+        )
+        .toList(),
+  );
+
+  List<AestheticReference> _sortAesthetics(List<AestheticReference> values) {
+    values.sort((a, b) {
+      if (a.favorite != b.favorite) return a.favorite ? -1 : 1;
+      final title = a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      if (title != 0) return title;
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+    return values;
+  }
+
+  bool _matchesAestheticSearch(AestheticReference item) {
+    final needle = aestheticSearch.trim().toLowerCase();
+    if (needle.isEmpty) return true;
+    return item.title.toLowerCase().contains(needle) ||
+        item.text.toLowerCase().contains(needle) ||
+        item.tags.any((tag) => tag.toLowerCase().contains(needle));
+  }
+
+  bool _matchesAestheticTag(AestheticReference item) {
+    final tag = aestheticTag;
+    return tag == null || item.hasTag(tag);
+  }
+
+  /// Creates or updates an aesthetic. Omitted [tags]/[favorite] keep the
+  /// existing record's values so an edit never silently unstars or untags.
   void saveAestheticReference({
     String? id,
     required String title,
     required String text,
     required String icon,
     required int color,
+    List<String>? tags,
+    bool? favorite,
   }) {
     if (title.trim().isEmpty || text.trim().isEmpty) return;
+    final existing = id == null
+        ? null
+        : _aestheticReferences.where((item) => item.id == id).firstOrNull;
     final record = AestheticReference(
       id: id ?? _uid(),
       title: title.trim(),
       text: text.trim(),
       icon: icon,
       color: color,
+      tags: tags ?? existing?.tags ?? const <String>[],
+      favorite: favorite ?? existing?.favorite ?? false,
       updatedAt: DateTime.now().toUtc(),
     );
     _aestheticReferences.removeWhere((item) => item.id == record.id);

@@ -101,12 +101,37 @@ extension _AppControllerDelivery on AppController {
   Generation? _currentGeneration(String localId) =>
       generations.where((item) => item.localId == localId).firstOrNull;
 
+  /// Accepts a gateway work result into memory unless it is strictly stale.
+  ///
+  /// [Generation.statusCheckCount] is the compare-and-save version for this
+  /// device's own writes, but it is *not* a cross-device clock: every device
+  /// sharing a Drive library advances it independently, so the copy carrying
+  /// the delivered film routinely has the lower count. Refusing on the
+  /// counter alone left a device that had polled a record more often unable
+  /// to ever adopt the film another device published — until a relaunch read
+  /// the (already correct) library from disk.
+  ///
+  /// So an update lands when it delivers more of the film, or when it is
+  /// simply newer. Only an update that is both older and no more delivered is
+  /// refused, and media that arrived is never dropped.
   bool _applyGenerationWorkUpdate(Generation updated) {
     if (_disposed) return false;
     final current = _currentGeneration(updated.localId);
-    if (current == null ||
-        current.statusCheckCount > updated.statusCheckCount ||
-        (current.resultAsset != null && updated.resultAsset == null)) {
+    if (current == null) return false;
+    // Delivered media is ground truth: no receipt retracts it, and a film
+    // published to Drive is never traded back for the staged copy it
+    // replaced. Releasing a lapsed delivery link stays the library read's
+    // job, which purges and persists it in one step.
+    if (updated.deliveryRank < current.deliveryRank) return false;
+    if (updated.deliveryRank > current.deliveryRank) {
+      _replaceInMemory(updated);
+      return true;
+    }
+    // Equal delivery: statusCheckCount is this device's own write version, so
+    // a receipt behind it is a stale in-flight response — unless it is
+    // plainly newer, which is how another device's copy arrives.
+    if (current.statusCheckCount > updated.statusCheckCount &&
+        !updated.updatedAt.isAfter(current.updatedAt)) {
       return false;
     }
     _replaceInMemory(updated);
@@ -122,7 +147,11 @@ extension _AppControllerDelivery on AppController {
       }
     } else if (!before.isReady && after.isReady) {
       showNotice('Your film is ready. Saving its media now.');
-    } else if (!before.isFailed && after.isFailed) {
+    } else if (!before.isFailed && after.isFailed && !after.hasDeliveredMedia) {
+      // A record that arrives failed but delivered — a provider forgetting a
+      // task whose film another device already retained — is not a problem
+      // the director has to act on, and every surface already reads the media
+      // as proof of success.
       showNotice(
         'Generation needs attention: ${after.error ?? after.statusLabel}',
       );

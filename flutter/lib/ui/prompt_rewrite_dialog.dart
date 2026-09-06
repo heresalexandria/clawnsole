@@ -109,7 +109,9 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
     super.initState();
     final controller = widget.controller;
     _draftTabId = controller.activeComposerTabId;
-    _originalPrompt = _film?.prompt ?? controller.form.prompt;
+    // The cast goes over the wire with the direction, so the model keeps the
+    // casting context a film's stored prompt would have carried anyway.
+    _originalPrompt = _film?.prompt ?? controller.promptWithCast;
     _provider =
         controller.preferredRewriteProvider ??
         _connected.firstOrNull ??

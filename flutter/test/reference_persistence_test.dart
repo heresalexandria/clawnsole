@@ -49,10 +49,12 @@ void main() {
       addTearDown(controller.dispose);
       controller.setScreenplayMode(true);
       controller.updateForm((form) => form.prompt = 'ALEXANDRIA enters.');
-      expect(controller.form.prompt, contains('ALEXANDRIA: @missing.mp4'));
+      expect(controller.form.characterMappings, {
+        'ALEXANDRIA': ['missing.mp4'],
+      });
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(controller.form.references, isEmpty);
-      expect(controller.form.prompt, isNot(contains('@missing.mp4')));
+      expect(controller.form.characterMappings, isEmpty);
       controller.updateForm((form) => form.prompt += ' Then pauses.');
       expect(controller.form.references, isEmpty);
     },

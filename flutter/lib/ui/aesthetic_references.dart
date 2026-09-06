@@ -1,188 +1,413 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../app/app_controller.dart';
+import '../app/app_theme.dart';
 import '../core/aesthetic_reference.dart';
-import '../core/models.dart';
+import 'aesthetic_icons.dart';
+import 'hardware.dart';
 
-// Small original SVG line drawings, stored by stable names in the library.
-const aestheticIconPaths = <String, String>{
-  'sparkles': '<path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z"/>',
-  'sun':
-      '<circle cx="12" cy="12" r="4"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/>',
-  'moon': '<path d="M20 15A9 9 0 0 1 9 3a9 9 0 1 0 11 12Z"/>',
-  'star': '<path d="m12 2 3 6 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1Z"/>',
-  'camera':
-      '<rect x="2" y="6" width="20" height="15" rx="3"/><circle cx="12" cy="13" r="4"/><path d="m7 6 2-4h6l2 4"/>',
-  'film':
-      '<rect x="3" y="2" width="18" height="20" rx="2"/><path d="M7 2v20M17 2v20M3 7h4m-4 5h4m-4 5h4M17 7h4m-4 5h4m-4 5h4"/>',
-  'mountain': '<path d="m2 21 8-17 5 10 3-6 5 13Zm5-10 3 2 3-2"/>',
-  'leaf': '<path d="M3 21 18 6M4 17C-2 6 12 2 22 2c0 10-3 20-14 17"/>',
-  'flower':
-      '<circle cx="12" cy="12" r="3"/><path d="M9 9C1 2 12-2 12 7c0-9 11-5 3 2 8-7 12 4 3 3 9 0 5 11-3 3 8 8-3 12-3 3 0 9-11 5-3-3-8 8-12-3-3-3-9 1-5-10 3-3Z"/>',
-  'waves':
-      '<path d="M2 6q5-5 10 0t10 0M2 12q5-5 10 0t10 0M2 18q5-5 10 0t10 0"/>',
-  'flame':
-      '<path d="M13 2c2 8-7 7-5 13 3 0 5-4 5-6 10 9 4 14-2 13C0 21 3 11 7 8c0 5 2 5 2 5-2-5 3-7 4-11Z"/>',
-  'cloud': '<path d="M6 19a5 5 0 0 1-1-10 7 7 0 0 1 13-1 6 6 0 0 1 0 11Z"/>',
-  'diamond': '<path d="m2 8 5-6h10l5 6-10 14Zm0 0h20M7 2l5 20 5-20"/>',
-  'eye':
-      '<path d="M1 12Q12-3 23 12 12 27 1 12Z"/><circle cx="12" cy="12" r="3"/>',
-  'palette':
-      '<path d="M12 2a10 10 0 1 0 0 20c5 0-2-6 3-6 9 0 9-14-3-14Z"/><circle cx="7" cy="9" r="1"/><circle cx="12" cy="6" r="1"/><circle cx="17" cy="9" r="1"/>',
-  'bolt': '<path d="m14 1-12 13h9l-1 9L22 9h-9Z"/>',
-};
+export 'aesthetic_icons.dart';
 
-class AestheticIcon extends StatelessWidget {
-  const AestheticIcon({
-    super.key,
-    required this.name,
-    required this.color,
-    this.size = 22,
-  });
-  final String name;
-  final int color;
-  final double size;
+/// The swatches an aesthetic can wear, in picker order: the original ten
+/// mid-tones first, then a second dozen that stay legible on both paper and
+/// espresso.
+const aestheticSwatches = <int>[
+  0xffaf853c,
+  0xffd64c4c,
+  0xffd97732,
+  0xff738936,
+  0xff258573,
+  0xff3689bb,
+  0xff6262c9,
+  0xffaa55b5,
+  0xffc35c90,
+  0xff737373,
+  0xffcfa32b,
+  0xffb85a32,
+  0xffe0705a,
+  0xffb3304f,
+  0xff946243,
+  0xff8c8c34,
+  0xff4faa7f,
+  0xff2f8f8f,
+  0xff3f5b8f,
+  0xff6f7d94,
+  0xff9384d6,
+  0xff7b4a7b,
+];
+
+/// A small brass eyebrow used inside the picker panel and the editor, where
+/// the shared `Eyebrow` widget's letter spacing is a touch too generous.
+class AestheticEyebrow extends StatelessWidget {
+  const AestheticEyebrow(this.label, {super.key});
+
+  final String label;
+
   @override
-  Widget build(BuildContext context) => SvgPicture.string(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${aestheticIconPaths[name] ?? aestheticIconPaths['sparkles']}</svg>',
-    width: size,
-    height: size,
-    colorFilter: ColorFilter.mode(Color(color), BlendMode.srcIn),
+  Widget build(BuildContext context) => Text(
+    label.toUpperCase(),
+    style: TextStyle(
+      color: context.tokens.brass,
+      fontSize: 10,
+      letterSpacing: 1.5,
+      fontWeight: FontWeight.w800,
+    ),
   );
 }
 
-class AestheticReferencePicker extends StatelessWidget {
+/// The Create toolbar's aesthetic key: the current choice as icon + title,
+/// opening a searchable anchored panel that lists starred aesthetics first.
+class AestheticReferencePicker extends StatefulWidget {
   const AestheticReferencePicker({super.key, required this.controller});
+
   final AppController controller;
+
+  @override
+  State<AestheticReferencePicker> createState() =>
+      _AestheticReferencePickerState();
+}
+
+class _AestheticReferencePickerState extends State<AestheticReferencePicker> {
+  final MenuController _menu = MenuController();
+
+  void _toggle() => _menu.isOpen ? _menu.close() : _menu.open();
+
   @override
   Widget build(BuildContext context) {
-    final selected = controller.selectedAestheticReference;
-    return PopupMenuButton<String>(
+    final selected = widget.controller.selectedAestheticReference;
+    final message = selected == null
+        ? 'Choose aesthetic reference'
+        : 'Aesthetic: ${selected.title}';
+    return MenuAnchor(
       key: const ValueKey('prompt-aesthetic-picker'),
-      tooltip: selected == null
-          ? 'Choose aesthetic reference'
-          : 'Aesthetic: ${selected.title}',
-      onSelected: (id) {
-        if (id == 'manage') {
-          controller.navigate(AppSection.references);
-        } else {
-          controller.selectAestheticReference(id.isEmpty ? null : id);
-        }
-      },
-      itemBuilder: (context) => [
-        CheckedPopupMenuItem(
-          value: '',
-          checked: selected == null,
-          child: const Text('No aesthetic'),
+      controller: _menu,
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll<Color>(context.colors.surface),
+        elevation: const WidgetStatePropertyAll<double>(10),
+        padding: const WidgetStatePropertyAll<EdgeInsetsGeometry>(
+          EdgeInsets.zero,
         ),
-        for (final item in controller.aestheticReferences)
-          CheckedPopupMenuItem(
-            value: item.id,
-            checked: selected?.id == item.id,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AestheticIcon(name: item.icon, color: item.color),
-                const SizedBox(width: 10),
-                Flexible(child: Text(item.title)),
-              ],
-            ),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: context.colors.outlineVariant),
           ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: 'manage', child: Text('Manage aesthetics…')),
+        ),
+      ),
+      menuChildren: <Widget>[
+        _AestheticPickerPanel(controller: widget.controller, menu: _menu),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AestheticIcon(
-              name: selected?.icon ?? 'palette',
-              color:
-                  selected?.color ??
-                  Theme.of(context).colorScheme.primary.toARGB32(),
-              size: 18,
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 150),
-                child: Text(
-                  selected?.title ?? 'Aesthetic',
-                  key: const ValueKey('prompt-aesthetic-label'),
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium,
+      // Exactly one tooltip: the toolbar tests find this key by tooltip.
+      builder: (context, menu, _) => Tooltip(
+        message: message,
+        child: Semantics(
+          container: true,
+          button: true,
+          label: message,
+          child: InkWell(
+            onTap: _toggle,
+            child: ExcludeSemantics(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 12,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    AestheticIcon(
+                      name: selected?.icon ?? 'palette',
+                      color:
+                          selected?.color ?? context.colors.primary.toARGB32(),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 150),
+                        child: Text(
+                          selected?.title ?? 'Aesthetic',
+                          key: const ValueKey('prompt-aesthetic-label'),
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 18),
+                  ],
                 ),
               ),
             ),
-            const Icon(Icons.arrow_drop_down, size: 18),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class AestheticReferenceLibrary extends StatelessWidget {
-  const AestheticReferenceLibrary({super.key, required this.controller});
+/// The anchored panel behind the Create toolbar's aesthetic key. Its search
+/// and tag choice are per-open: the overlay builds this state fresh each
+/// time the menu opens.
+class _AestheticPickerPanel extends StatefulWidget {
+  const _AestheticPickerPanel({required this.controller, required this.menu});
+
   final AppController controller;
+  final MenuController menu;
+
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
-    builder: (context, _) => Card(
-      margin: const EdgeInsets.symmetric(vertical: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 12,
-              children: [
-                Text(
-                  'Aesthetic references',
-                  style: Theme.of(context).textTheme.titleMedium,
+  State<_AestheticPickerPanel> createState() => _AestheticPickerPanelState();
+}
+
+class _AestheticPickerPanelState extends State<_AestheticPickerPanel> {
+  final TextEditingController _search = TextEditingController();
+  String? _tag;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  bool _matches(AestheticReference item) {
+    final needle = _search.text.trim().toLowerCase();
+    final tag = _tag;
+    if (tag != null && !item.hasTag(tag)) return false;
+    if (needle.isEmpty) return true;
+    return item.title.toLowerCase().contains(needle) ||
+        item.text.toLowerCase().contains(needle) ||
+        item.tags.any((value) => value.toLowerCase().contains(needle));
+  }
+
+  void _choose(String? id) {
+    controller.selectAestheticReference(id);
+    widget.menu.close();
+  }
+
+  Widget _note(BuildContext context, String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+    child: Text(
+      text,
+      style: TextStyle(fontSize: 12.5, color: context.colors.onSurfaceVariant),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 340,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 460),
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final all = controller.sortedAestheticReferences;
+          final tags = controller.aestheticTags;
+          final matches = all.where(_matches).toList();
+          final favorites = matches.where((item) => item.favorite).toList();
+          final rest = matches.where((item) => !item.favorite).toList();
+          final grouped = favorites.isNotEmpty && rest.isNotEmpty;
+          final selectedId = controller.selectedAestheticReference?.id;
+          Widget option(AestheticReference item) => _AestheticPickerRow(
+            rowKey: ValueKey('prompt-aesthetic-option-${item.id}'),
+            label: item.title,
+            reference: item,
+            selected: selectedId == item.id,
+            onTap: () => _choose(item.id),
+            onStar: () => controller.toggleAestheticFavorite(item.id),
+          );
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (all.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                  child: TextField(
+                    key: const ValueKey('prompt-aesthetic-search'),
+                    controller: _search,
+                    autofocus: true,
+                    style: const TextStyle(fontSize: 13),
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded, size: 18),
+                      hintText: 'Search aesthetics',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
                 ),
-                TextButton.icon(
-                  key: const ValueKey('add-aesthetic-reference'),
-                  onPressed: () => showAestheticEditor(context, controller),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add aesthetic'),
+              if (tags.isNotEmpty)
+                SingleChildScrollView(
+                  key: const ValueKey('prompt-aesthetic-tags'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                  child: Row(
+                    children: <Widget>[
+                      FilterChip(
+                        label: const Text('All tags'),
+                        selected: _tag == null,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => setState(() => _tag = null),
+                      ),
+                      for (final tag in tags) ...<Widget>[
+                        const SizedBox(width: 6),
+                        FilterChip(
+                          label: Text('#$tag'),
+                          selected: _tag == tag,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) =>
+                              setState(() => _tag = _tag == tag ? null : tag),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ],
-            ),
-            const Text(
-              'Reusable style direction. Choose one beside Characters in Create to append its text to your prompt.',
-            ),
-            for (final item in controller.aestheticReferences)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: AestheticIcon(name: item.icon, color: item.color),
-                title: Text(item.title),
-                subtitle: Text(
-                  item.text,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () =>
-                    showAestheticEditor(context, controller, reference: item),
-                trailing: IconButton(
-                  tooltip: 'Edit ${item.title}',
-                  onPressed: () =>
-                      showAestheticEditor(context, controller, reference: item),
-                  icon: const Icon(Icons.edit_outlined),
+              Flexible(
+                child: SingleChildScrollView(
+                  primary: false,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      if (all.isEmpty)
+                        _note(context, 'No aesthetics yet.')
+                      else ...<Widget>[
+                        _AestheticPickerRow(
+                          rowKey: const ValueKey('prompt-aesthetic-none'),
+                          label: 'No aesthetic',
+                          selected: selectedId == null,
+                          onTap: () => _choose(null),
+                        ),
+                        if (matches.isEmpty)
+                          _note(context, 'No aesthetics match.'),
+                        if (grouped)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
+                            child: AestheticEyebrow('Favorites'),
+                          ),
+                        ...favorites.map(option),
+                        if (grouped)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
+                            child: AestheticEyebrow('All'),
+                          ),
+                        ...rest.map(option),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-          ],
-        ),
+              Divider(height: 1, color: context.colors.outlineVariant),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                  child: TextButton.icon(
+                    key: const ValueKey('prompt-aesthetic-manage'),
+                    onPressed: () {
+                      widget.menu.close();
+                      unawaited(controller.openAestheticLibrary());
+                    },
+                    icon: const Icon(Icons.tune_rounded, size: 16),
+                    label: const Text('Manage aesthetics…'),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     ),
   );
+}
+
+class _AestheticPickerRow extends StatelessWidget {
+  const _AestheticPickerRow({
+    required this.rowKey,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.reference,
+    this.onStar,
+  });
+
+  final Key rowKey;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// The aesthetic this row stands for; null on the "No aesthetic" row.
+  final AestheticReference? reference;
+  final VoidCallback? onStar;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = reference;
+    return InkWell(
+      key: rowKey,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: isHardwareTouchPlatform ? kHardwareTouchTarget : 36,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: <Widget>[
+              if (item == null)
+                Icon(
+                  Icons.block_rounded,
+                  size: 18,
+                  color: context.colors.onSurfaceVariant,
+                )
+              else
+                AestheticIcon(name: item.icon, color: item.color, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, height: 1.2),
+                ),
+              ),
+              if (item != null && onStar != null)
+                IconButton(
+                  key: ValueKey('prompt-aesthetic-star-${item.id}'),
+                  tooltip: item.favorite ? 'Unstar' : 'Star',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  onPressed: onStar,
+                  icon: Icon(
+                    item.favorite
+                        ? Icons.star_rounded
+                        : Icons.star_outline_rounded,
+                    color: item.favorite
+                        ? context.tokens.brass
+                        : context.colors.onSurfaceVariant,
+                  ),
+                ),
+              if (selected)
+                Icon(
+                  Icons.check_rounded,
+                  size: 17,
+                  color: context.colors.primary,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 Future<void> showAestheticEditor(
@@ -197,8 +422,10 @@ Future<void> showAestheticEditor(
 
 class _AestheticEditor extends StatefulWidget {
   const _AestheticEditor({required this.controller, this.reference});
+
   final AppController controller;
   final AestheticReference? reference;
+
   @override
   State<_AestheticEditor> createState() => _AestheticEditorState();
 }
@@ -207,138 +434,411 @@ class _AestheticEditorState extends State<_AestheticEditor> {
   final _form = GlobalKey<FormState>();
   late final _title = TextEditingController(text: widget.reference?.title);
   late final _text = TextEditingController(text: widget.reference?.text);
+  late final _tags = TextEditingController(
+    text: widget.reference?.tags.join(', ') ?? '',
+  );
   late String _icon = widget.reference?.icon ?? 'sparkles';
-  late int _color = widget.reference?.color ?? 0xffaf853c;
+  late int _color = widget.reference?.color ?? aestheticSwatches.first;
+  late bool _favorite = widget.reference?.favorite ?? false;
+
+  /// The icon grid is a finder's aid, not the point of an aesthetic, so it
+  /// stays folded until asked for and never grows past a few rows.
+  bool _iconPickerOpen = false;
+
   @override
   void dispose() {
     _title.dispose();
     _text.dispose();
+    _tags.dispose();
+    super.dispose();
+  }
+
+  void _appendTag(String tag) {
+    final tags = <String>[...parseAestheticTags(_tags.text), tag];
+    setState(() => _tags.text = normalizeAestheticTags(tags).join(', '));
+  }
+
+  Future<void> _confirmDelete() async {
+    final reference = widget.reference;
+    if (reference == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete aesthetic?'),
+        content: Text(
+          '“${reference.title}” leaves every tab that uses it. Prompts keep '
+          'whatever you already typed.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            key: const ValueKey('aesthetic-delete-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    widget.controller.deleteAestheticReference(reference.id);
+    if (mounted) Navigator.pop(context);
+  }
+
+  Widget _section(String label, Widget child) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      AestheticEyebrow(label),
+      const SizedBox(height: 8),
+      child,
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final typed = parseAestheticTags(
+      _tags.text,
+    ).map((tag) => tag.toLowerCase()).toSet();
+    final suggestions = widget.controller.aestheticTags
+        .where((tag) => !typed.contains(tag.toLowerCase()))
+        .toList();
+    return AlertDialog(
+      title: Text(
+        widget.reference == null
+            ? 'Add aesthetic reference'
+            : 'Edit aesthetic reference',
+      ),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _form,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      child: TextFormField(
+                        key: const ValueKey('aesthetic-title'),
+                        controller: _title,
+                        decoration: const InputDecoration(labelText: 'Title'),
+                        maxLength: 80,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                            ? 'Enter a title.'
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: IconButton(
+                        key: const ValueKey('aesthetic-favorite-toggle'),
+                        tooltip: _favorite ? 'Unstar' : 'Star',
+                        isSelected: _favorite,
+                        onPressed: () => setState(() => _favorite = !_favorite),
+                        icon: Icon(
+                          _favorite
+                              ? Icons.star_rounded
+                              : Icons.star_outline_rounded,
+                          color: _favorite
+                              ? context.tokens.brass
+                              : context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                _section(
+                  'Icon & color',
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Tooltip(
+                            message: _iconPickerOpen
+                                ? 'Hide icons'
+                                : 'Choose an icon',
+                            child: InkWell(
+                              key: const ValueKey('aesthetic-icon-picker'),
+                              borderRadius: BorderRadius.circular(10),
+                              onTap: () => setState(
+                                () => _iconPickerOpen = !_iconPickerOpen,
+                              ),
+                              child: Container(
+                                width: 40,
+                                height: 40,
+                                alignment: Alignment.center,
+                                decoration: consoleKeyDecoration(
+                                  context,
+                                  selected: _iconPickerOpen,
+                                  radius: 10,
+                                ),
+                                child: AestheticIcon(
+                                  name: _icon,
+                                  color: _iconPickerOpen
+                                      ? context.colors.onPrimary.toARGB32()
+                                      : _color,
+                                  size: 22,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          TextButton(
+                            key: const ValueKey('aesthetic-icon-toggle'),
+                            onPressed: () => setState(
+                              () => _iconPickerOpen = !_iconPickerOpen,
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              textStyle: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            child: Text(
+                              _iconPickerOpen ? 'Hide icons' : 'Change icon',
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_iconPickerOpen) ...<Widget>[
+                        const SizedBox(height: 8),
+                        _IconGrid(
+                          selected: _icon,
+                          color: _color,
+                          onSelected: (name) => setState(() {
+                            _icon = name;
+                            _iconPickerOpen = false;
+                          }),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: <Widget>[
+                          for (final color in aestheticSwatches)
+                            Tooltip(
+                              message:
+                                  'Color #${color.toRadixString(16).substring(2)}',
+                              child: InkWell(
+                                key: ValueKey(
+                                  'aesthetic-color-${color.toRadixString(16).substring(2)}',
+                                ),
+                                customBorder: const CircleBorder(),
+                                onTap: () => setState(() => _color = color),
+                                child: Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    color: Color(color),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _color == color
+                                          ? context.colors.onSurface
+                                          : Colors.transparent,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: _color == color
+                                      ? const Icon(
+                                          Icons.check,
+                                          size: 14,
+                                          color: Colors.white,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  key: const ValueKey('aesthetic-tags'),
+                  controller: _tags,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Tags',
+                    hintText: 'noir, 1970s, handheld',
+                    helperText:
+                        'Comma-separated. Filter the library and the Create picker by tag.',
+                  ),
+                ),
+                if (suggestions.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      for (final tag in suggestions)
+                        ActionChip(
+                          key: ValueKey('aesthetic-tag-suggestion-$tag'),
+                          label: Text('#$tag'),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => _appendTag(tag),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+                TextFormField(
+                  key: const ValueKey('aesthetic-text'),
+                  controller: _text,
+                  minLines: 4,
+                  maxLines: 10,
+                  decoration: const InputDecoration(
+                    labelText: 'Reference text',
+                    helperText:
+                        'Only this text is appended to the generation prompt.',
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Enter aesthetic direction.'
+                      : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        if (widget.reference != null)
+          TextButton(
+            key: const ValueKey('aesthetic-delete'),
+            onPressed: () => unawaited(_confirmDelete()),
+            child: const Text('Delete'),
+          ),
+        TextButton(
+          key: const ValueKey('aesthetic-cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('aesthetic-save'),
+          onPressed: () {
+            if (!_form.currentState!.validate()) return;
+            widget.controller.saveAestheticReference(
+              id: widget.reference?.id,
+              title: _title.text,
+              text: _text.text,
+              icon: _icon,
+              color: _color,
+              tags: parseAestheticTags(_tags.text),
+              favorite: _favorite,
+            );
+            Navigator.pop(context);
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The folded icon grid: every icon by group, capped at a few rows and
+/// scrolling within itself so the dialog never grows to fit all of them.
+class _IconGrid extends StatefulWidget {
+  const _IconGrid({
+    required this.selected,
+    required this.color,
+    required this.onSelected,
+  });
+
+  final String selected;
+  final int color;
+  final ValueChanged<String> onSelected;
+
+  @override
+  State<_IconGrid> createState() => _IconGridState();
+}
+
+class _IconGridState extends State<_IconGrid> {
+  /// The grid owns its scroll position so the scrollbar can stay visible —
+  /// the one hint that more icons wait below the fold.
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(
-      widget.reference == null
-          ? 'Add aesthetic reference'
-          : 'Edit aesthetic reference',
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: context.colors.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: context.colors.outlineVariant),
     ),
-    content: SizedBox(
-      width: 480,
-      child: SingleChildScrollView(
-        child: Form(
-          key: _form,
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 190),
+      child: Scrollbar(
+        controller: _scroll,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          key: const ValueKey('aesthetic-icon-sheet'),
+          controller: _scroll,
+          primary: false,
+          padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                key: const ValueKey('aesthetic-title'),
-                controller: _title,
-                decoration: const InputDecoration(labelText: 'Title'),
-                maxLength: 80,
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter a title.'
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              const Text('Icon'),
-              Wrap(
-                children: [
-                  for (final name in aestheticIconPaths.keys)
-                    IconButton(
-                      tooltip: name,
-                      isSelected: name == _icon,
-                      style: IconButton.styleFrom(
-                        backgroundColor: name == _icon
-                            ? Theme.of(context).colorScheme.secondaryContainer
-                            : null,
-                      ),
-                      onPressed: () => setState(() => _icon = name),
-                      icon: AestheticIcon(name: name, color: _color),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Text('Color'),
-              Wrap(
-                children: [
-                  for (final color in const [
-                    0xffaf853c,
-                    0xffd64c4c,
-                    0xffd97732,
-                    0xff738936,
-                    0xff258573,
-                    0xff3689bb,
-                    0xff6262c9,
-                    0xffaa55b5,
-                    0xffc35c90,
-                    0xff737373,
-                  ])
-                    IconButton(
-                      tooltip: 'Color #${color.toRadixString(16).substring(2)}',
-                      onPressed: () => setState(() => _color = color),
-                      icon: CircleAvatar(
-                        radius: 14,
-                        backgroundColor: Color(color),
-                        child: _color == color
-                            ? const Icon(
-                                Icons.check,
-                                size: 18,
-                                color: Colors.white,
-                              )
-                            : null,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                key: const ValueKey('aesthetic-text'),
-                controller: _text,
-                minLines: 4,
-                maxLines: 10,
-                decoration: const InputDecoration(
-                  labelText: 'Reference text',
-                  helperText:
-                      'Only this text is appended to the generation prompt.',
+            children: <Widget>[
+              for (final group in aestheticIconGroups.entries) ...<Widget>[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 5, top: 3),
+                  child: AestheticEyebrow(group.key),
                 ),
-                validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter aesthetic direction.'
-                    : null,
-              ),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: <Widget>[
+                    for (final name in group.value)
+                      Tooltip(
+                        message: name,
+                        child: InkWell(
+                          key: ValueKey('aesthetic-icon-$name'),
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => widget.onSelected(name),
+                          child: Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: consoleKeyDecoration(
+                              context,
+                              selected: name == widget.selected,
+                              radius: 8,
+                            ),
+                            child: AestheticIcon(
+                              name: name,
+                              color: name == widget.selected
+                                  ? context.colors.onPrimary.toARGB32()
+                                  : widget.color,
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+              ],
             ],
           ),
         ),
       ),
     ),
-    actions: [
-      if (widget.reference != null)
-        TextButton(
-          onPressed: () {
-            widget.controller.deleteAestheticReference(widget.reference!.id);
-            Navigator.pop(context);
-          },
-          child: const Text('Delete'),
-        ),
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: () {
-          if (!_form.currentState!.validate()) return;
-          widget.controller.saveAestheticReference(
-            id: widget.reference?.id,
-            title: _title.text,
-            text: _text.text,
-            icon: _icon,
-            color: _color,
-          );
-          Navigator.pop(context);
-        },
-        child: const Text('Save'),
-      ),
-    ],
   );
 }
