@@ -44,6 +44,15 @@ ten minutes of healthy operation. Health checks do not overlap for one child.
 Failed startup, broken bootstrap pipes, early process exit and callback failure
 have explicit owners. Stopping is terminal for that supervisor instance.
 
+That budget only covers a companion that fails for its own reasons, so a stray
+asynchronous error no longer ends the isolate: an abandoned download whose
+client was closed, or any error delivered to a reader that has already given
+up, is logged with its stack trace and costs its own request. Two such exits
+inside the restart budget would otherwise reach the user as a companion that
+"stopped and could not be restarted". A companion that cannot finish starting
+still exits, because the shell can relaunch a failed launch but not a server
+that is listening on nothing.
+
 The renderer reloads once automatically, then asks on a repeated crash. Five
 minutes between crashes restores its automatic budget. Successful document load
 invalidates obsolete dialogs without resetting that budget. Saved drafts and

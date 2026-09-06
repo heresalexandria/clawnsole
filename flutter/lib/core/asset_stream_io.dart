@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'asset_stream_base.dart';
+import 'stream_discard.dart';
 
 const _stagingPrefix = '.clawnsole-retain-';
 const _stagingLeaseName = 'stage.lock';
@@ -164,13 +165,7 @@ Future<StagedAsset> stageAssetStream(
     sink = null;
     return _FileStagedAsset(file, staging, lease, result.length, result.sha256);
   } on Object {
-    if (!ownsSource) {
-      try {
-        await source.listen(null).cancel();
-      } on Object {
-        /* Cancellation must not skip file/lease cleanup. */
-      }
-    }
+    if (!ownsSource) await discardStream(source);
     try {
       await sink?.close();
     } on Object {
