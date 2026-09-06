@@ -115,49 +115,45 @@ class _EditorHarness {
 
 void main() {
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
-    testWidgets(
-      'touch suggestion completes reference on ${platform.name}',
-      (tester) async {
-        final harness = _EditorHarness();
-        await harness.mount(tester, platform: platform);
-        await harness.input(tester, 'Follow @Ca');
-        final option = find.text('@Camera move');
-        expect(option.hitTestable(), findsOneWidget);
-        final touch = await tester.startGesture(tester.getCenter(option));
-        await tester.pump(const Duration(milliseconds: 100));
-        expect(harness.editor(tester).focusNode.hasFocus, isTrue);
-        expect(tester.testTextInput.isVisible, isTrue);
-        await touch.up();
-        await tester.pumpAndSettle();
-        harness.expectCompleted(tester, 'Follow @Camera move');
-        expect(harness.changes, ['Follow @Ca', 'Follow @Camera move']);
-      },
-      variant: TargetPlatformVariant({platform}),
-    );
+    testWidgets('touch suggestion completes reference on ${platform.name}', (
+      tester,
+    ) async {
+      final harness = _EditorHarness();
+      await harness.mount(tester, platform: platform);
+      await harness.input(tester, 'Follow @Ca');
+      final option = find.text('@Camera move');
+      expect(option.hitTestable(), findsOneWidget);
+      final touch = await tester.startGesture(tester.getCenter(option));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(harness.editor(tester).focusNode.hasFocus, isTrue);
+      expect(tester.testTextInput.isVisible, isTrue);
+      await touch.up();
+      await tester.pumpAndSettle();
+      harness.expectCompleted(tester, 'Follow @Camera move');
+      expect(harness.changes, ['Follow @Ca', 'Follow @Camera move']);
+    }, variant: TargetPlatformVariant({platform}));
   }
 
   for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
-    testWidgets(
-      'mouse suggestion completes reference on ${platform.name}',
-      (tester) async {
-        final harness = _EditorHarness();
-        await harness.mount(tester, platform: platform);
-        await harness.input(tester, 'Follow @He');
-        final option = find.text('@Hero portrait');
-        expect(option.hitTestable(), findsOneWidget);
-        final mouse = await tester.startGesture(
-          tester.getCenter(option),
-          kind: PointerDeviceKind.mouse,
-        );
-        await tester.pump(const Duration(milliseconds: 100));
-        expect(harness.editor(tester).focusNode.hasFocus, isTrue);
-        await mouse.up();
-        await tester.pumpAndSettle();
-        harness.expectCompleted(tester, 'Follow @Hero portrait');
-        expect(harness.changes, ['Follow @He', 'Follow @Hero portrait']);
-      },
-      variant: TargetPlatformVariant({platform}),
-    );
+    testWidgets('mouse suggestion completes reference on ${platform.name}', (
+      tester,
+    ) async {
+      final harness = _EditorHarness();
+      await harness.mount(tester, platform: platform);
+      await harness.input(tester, 'Follow @He');
+      final option = find.text('@Hero portrait');
+      expect(option.hitTestable(), findsOneWidget);
+      final mouse = await tester.startGesture(
+        tester.getCenter(option),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(harness.editor(tester).focusNode.hasFocus, isTrue);
+      await mouse.up();
+      await tester.pumpAndSettle();
+      harness.expectCompleted(tester, 'Follow @Hero portrait');
+      expect(harness.changes, ['Follow @He', 'Follow @Hero portrait']);
+    }, variant: TargetPlatformVariant({platform}));
   }
 
   for (final key in [
@@ -186,36 +182,30 @@ void main() {
     }
   }
 
-  testWidgets(
-    'touch completion preserves text after the caret',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester);
-      await harness.input(tester, 'Follow @Ca through the door.', caret: 10);
-      await tester.tap(find.text('@Camera move'));
-      await tester.pumpAndSettle();
-      harness.expectCompleted(
-        tester,
-        'Follow @Camera move through the door.',
-        caret: 19,
-      );
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+  testWidgets('touch completion preserves text after the caret', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester);
+    await harness.input(tester, 'Follow @Ca through the door.', caret: 10);
+    await tester.tap(find.text('@Camera move'));
+    await tester.pumpAndSettle();
+    harness.expectCompleted(
+      tester,
+      'Follow @Camera move through the door.',
+      caret: 19,
+    );
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
-  testWidgets(
-    'Enter accepts the arrow-selected reference',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester, platform: TargetPlatform.windows);
-      await harness.input(tester, 'Follow @');
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      harness.expectCompleted(tester, 'Follow @Camera move');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.windows}),
-  );
+  testWidgets('Enter accepts the arrow-selected reference', (tester) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester, platform: TargetPlatform.windows);
+    await harness.input(tester, 'Follow @');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    harness.expectCompleted(tester, 'Follow @Camera move');
+  }, variant: TargetPlatformVariant({TargetPlatform.windows}));
 
   for (final screenplay in [false, true]) {
     testWidgets(
@@ -236,112 +226,100 @@ void main() {
     );
   }
 
-  testWidgets(
-    'Shift Return keeps an intentional newline with an open menu',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester, platform: TargetPlatform.macOS);
-      await harness.input(tester, 'Follow @Ca');
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await harness.input(tester, 'Follow @Ca\n');
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.pumpAndSettle();
-      harness.expectCompleted(tester, 'Follow @Ca\n');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.macOS}),
-  );
+  testWidgets('Shift Return keeps an intentional newline with an open menu', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester, platform: TargetPlatform.macOS);
+    await harness.input(tester, 'Follow @Ca');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await harness.input(tester, 'Follow @Ca\n');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pumpAndSettle();
+    harness.expectCompleted(tester, 'Follow @Ca\n');
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS}));
 
-  testWidgets(
-    'pasting several lines does not trigger reference completion',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester);
-      await harness.input(tester, 'Follow @Ca');
-      await harness.input(tester, 'Follow @Ca\nThe next scene begins.');
-      harness.expectCompleted(tester, 'Follow @Ca\nThe next scene begins.');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+  testWidgets('pasting several lines does not trigger reference completion', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester);
+    await harness.input(tester, 'Follow @Ca');
+    await harness.input(tester, 'Follow @Ca\nThe next scene begins.');
+    harness.expectCompleted(tester, 'Follow @Ca\nThe next scene begins.');
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
-  testWidgets(
-    'same reference can be selected again while preserving tags',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester);
-      await harness.input(tester, 'Follow @Ca');
-      await tester.tap(find.text('@Camera move'));
-      await tester.pumpAndSettle();
-      harness.expectCompleted(tester, 'Follow @Camera move');
-      await harness.input(tester, 'Follow @Camera move then repeat @Ca');
-      await tester.tap(find.text('@Camera move'));
-      await tester.pumpAndSettle();
-      harness.expectCompleted(
-        tester,
-        'Follow @Camera move then repeat @Camera move',
-      );
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+  testWidgets('same reference can be selected again while preserving tags', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester);
+    await harness.input(tester, 'Follow @Ca');
+    await tester.tap(find.text('@Camera move'));
+    await tester.pumpAndSettle();
+    harness.expectCompleted(tester, 'Follow @Camera move');
+    await harness.input(tester, 'Follow @Camera move then repeat @Ca');
+    await tester.tap(find.text('@Camera move'));
+    await tester.pumpAndSettle();
+    harness.expectCompleted(
+      tester,
+      'Follow @Camera move then repeat @Camera move',
+    );
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
-  testWidgets(
-    'Return preserves newlines when no suggestion is available',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester);
-      await harness.input(tester, 'Follow @unknown');
-      await harness.input(tester, 'Follow @unknown\n');
-      harness.expectCompleted(tester, 'Follow @unknown\n');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+  testWidgets('Return preserves newlines when no suggestion is available', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester);
+    await harness.input(tester, 'Follow @unknown');
+    await harness.input(tester, 'Follow @unknown\n');
+    harness.expectCompleted(tester, 'Follow @unknown\n');
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
-  testWidgets(
-    'composition stays intact and does not accept a reference',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester);
-      await harness.input(
-        tester,
-        'Follow @Ca',
-        composing: const TextRange(start: 8, end: 10),
-      );
-      expect(
-        find.byKey(const ValueKey('prompt-reference-suggestions')),
-        findsNothing,
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pump();
-      expect(harness.prompt, 'Follow @Ca');
-      expect(
-        harness.editor(tester).controller.value.composing,
-        const TextRange(start: 8, end: 10),
-      );
-      await harness.input(tester, 'Follow @Ca');
-      await tester.tap(find.text('@Camera move'));
-      await tester.pumpAndSettle();
-      harness.expectCompleted(tester, 'Follow @Camera move');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.iOS}),
-  );
+  testWidgets('composition stays intact and does not accept a reference', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester);
+    await harness.input(
+      tester,
+      'Follow @Ca',
+      composing: const TextRange(start: 8, end: 10),
+    );
+    expect(
+      find.byKey(const ValueKey('prompt-reference-suggestions')),
+      findsNothing,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(harness.prompt, 'Follow @Ca');
+    expect(
+      harness.editor(tester).controller.value.composing,
+      const TextRange(start: 8, end: 10),
+    );
+    await harness.input(tester, 'Follow @Ca');
+    await tester.tap(find.text('@Camera move'));
+    await tester.pumpAndSettle();
+    harness.expectCompleted(tester, 'Follow @Camera move');
+  }, variant: TargetPlatformVariant({TargetPlatform.iOS}));
 
-  testWidgets(
-    'Escape leaves reference text editable without completion',
-    (tester) async {
-      final harness = _EditorHarness();
-      await harness.mount(tester, platform: TargetPlatform.macOS);
-      await harness.input(tester, 'Follow @Ca');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('prompt-reference-suggestions')),
-        findsNothing,
-      );
-      await harness.input(tester, 'Follow @Ca\n');
-      harness.expectCompleted(tester, 'Follow @Ca\n');
-    },
-    variant: TargetPlatformVariant({TargetPlatform.macOS}),
-  );
+  testWidgets('Escape leaves reference text editable without completion', (
+    tester,
+  ) async {
+    final harness = _EditorHarness();
+    await harness.mount(tester, platform: TargetPlatform.macOS);
+    await harness.input(tester, 'Follow @Ca');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('prompt-reference-suggestions')),
+      findsNothing,
+    );
+    await harness.input(tester, 'Follow @Ca\n');
+    harness.expectCompleted(tester, 'Follow @Ca\n');
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS}));
 
   testWidgets(
     'outside tap dismisses the menu and keyboard without changing the prompt',
