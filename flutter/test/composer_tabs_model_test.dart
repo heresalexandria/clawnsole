@@ -202,73 +202,68 @@ void main() {
     expect(const ComposerTabsState().activeTab, isNull);
   });
 
-  test(
-    'a merge keeps the local strip whole and unites device records',
-    () {
-      final first = ComposerTabRecord(
-        id: 'first',
-        prompt: 'old',
-        updatedAt: DateTime.utc(2026),
-      );
-      final desktop = ComposerTabsState(
-        tabs: [
-          first.copyWith(
-            prompt: 'desktop edit',
-            updatedAt: DateTime.utc(2026, 2),
-          ),
-        ],
-        closedTabIds: {'closed'},
-        activeTabId: 'first',
-        deviceId: 'desktop',
-        deviceName: 'Desk',
-        devices: [
-          ComposerDeviceDrafts(
-            deviceId: 'phone',
-            deviceName: 'Phone',
-            updatedAt: DateTime.utc(2026, 1, 5),
-            tabs: const [ComposerTabRecord(id: 'second', prompt: 'phone')],
-          ),
-        ],
-      );
-      // The other side holds a later-stamped copy of the same tab: it is
-      // never laid over the strip being typed in.
-      final remote = ComposerTabsState(
-        tabs: [
-          first.copyWith(prompt: 'echo', updatedAt: DateTime.utc(2030)),
-          const ComposerTabRecord(id: 'closed'),
-        ],
-        activeTabId: 'closed',
-        devices: [
-          ComposerDeviceDrafts(
-            deviceId: 'phone',
-            deviceName: 'Phone',
-            updatedAt: DateTime.utc(2026, 1, 6),
-            tabs: const [
-              ComposerTabRecord(id: 'second', prompt: 'phone, later'),
-            ],
-          ),
-          ComposerDeviceDrafts(
-            deviceId: 'tablet',
-            deviceName: 'Tablet',
-            updatedAt: DateTime.utc(2026, 1, 1),
-          ),
-        ],
-      );
-      final merged = mergeComposerWorkspaces(desktop, remote)!;
-      expect(merged.tabs.map((item) => item.id), ['first']);
-      expect(merged.tabs.single.prompt, 'desktop edit');
-      expect(merged.activeTabId, 'first');
-      expect(merged.closedTabIds, {'closed'});
-      expect(merged.deviceId, 'desktop');
-      expect(merged.devices.map((d) => d.deviceId), ['phone', 'tablet']);
-      expect(merged.devices.first.tabs.single.prompt, 'phone, later');
-      final reread = ComposerTabsState.fromJson(
-        jsonDecode(jsonEncode(merged.toJson())) as Map<String, Object?>,
-      );
-      expect(reread.deviceName, 'Desk');
-      expect(reread.devices.map((d) => d.deviceId), ['phone', 'tablet']);
-    },
-  );
+  test('a merge keeps the local strip whole and unites device records', () {
+    final first = ComposerTabRecord(
+      id: 'first',
+      prompt: 'old',
+      updatedAt: DateTime.utc(2026),
+    );
+    final desktop = ComposerTabsState(
+      tabs: [
+        first.copyWith(
+          prompt: 'desktop edit',
+          updatedAt: DateTime.utc(2026, 2),
+        ),
+      ],
+      closedTabIds: {'closed'},
+      activeTabId: 'first',
+      deviceId: 'desktop',
+      deviceName: 'Desk',
+      devices: [
+        ComposerDeviceDrafts(
+          deviceId: 'phone',
+          deviceName: 'Phone',
+          updatedAt: DateTime.utc(2026, 1, 5),
+          tabs: const [ComposerTabRecord(id: 'second', prompt: 'phone')],
+        ),
+      ],
+    );
+    // The other side holds a later-stamped copy of the same tab: it is
+    // never laid over the strip being typed in.
+    final remote = ComposerTabsState(
+      tabs: [
+        first.copyWith(prompt: 'echo', updatedAt: DateTime.utc(2030)),
+        const ComposerTabRecord(id: 'closed'),
+      ],
+      activeTabId: 'closed',
+      devices: [
+        ComposerDeviceDrafts(
+          deviceId: 'phone',
+          deviceName: 'Phone',
+          updatedAt: DateTime.utc(2026, 1, 6),
+          tabs: const [ComposerTabRecord(id: 'second', prompt: 'phone, later')],
+        ),
+        ComposerDeviceDrafts(
+          deviceId: 'tablet',
+          deviceName: 'Tablet',
+          updatedAt: DateTime.utc(2026, 1, 1),
+        ),
+      ],
+    );
+    final merged = mergeComposerWorkspaces(desktop, remote)!;
+    expect(merged.tabs.map((item) => item.id), ['first']);
+    expect(merged.tabs.single.prompt, 'desktop edit');
+    expect(merged.activeTabId, 'first');
+    expect(merged.closedTabIds, {'closed'});
+    expect(merged.deviceId, 'desktop');
+    expect(merged.devices.map((d) => d.deviceId), ['phone', 'tablet']);
+    expect(merged.devices.first.tabs.single.prompt, 'phone, later');
+    final reread = ComposerTabsState.fromJson(
+      jsonDecode(jsonEncode(merged.toJson())) as Map<String, Object?>,
+    );
+    expect(reread.deviceName, 'Desk');
+    expect(reread.devices.map((d) => d.deviceId), ['phone', 'tablet']);
+  });
 
   test('device records project to Drive and fold legacy strips back', () {
     final local = ComposerTabsState(
@@ -331,16 +326,13 @@ void main() {
     );
 
     // Devices that have not saved in a month drop away behind the newest.
-    final stale = mergeComposerDevices(
-      [
-        ComposerDeviceDrafts(
-          deviceId: 'forgotten',
-          deviceName: 'Old laptop',
-          updatedAt: DateTime.utc(2025, 12, 1),
-        ),
-      ],
-      portable.devices,
-    );
+    final stale = mergeComposerDevices([
+      ComposerDeviceDrafts(
+        deviceId: 'forgotten',
+        deviceName: 'Old laptop',
+        updatedAt: DateTime.utc(2025, 12, 1),
+      ),
+    ], portable.devices);
     expect(stale.map((d) => d.deviceId), ['desk', 'phone']);
 
     final stamped = stampComposerWorkspace(

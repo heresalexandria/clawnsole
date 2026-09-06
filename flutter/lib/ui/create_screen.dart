@@ -1480,7 +1480,10 @@ class _PromptCharacterCounter extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     // Keystrokes no longer rebuild the studio; the budget follows them
     // through the controller's per-keystroke prompt listenable instead.
-    listenable: Listenable.merge(<Listenable>[controller, controller.promptEdits]),
+    listenable: Listenable.merge(<Listenable>[
+      controller,
+      controller.promptEdits,
+    ]),
     builder: (context, _) {
       final model = controller.selectedModel;
       return PromptCharacterCounter(

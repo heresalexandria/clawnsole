@@ -313,7 +313,10 @@ void main() {
     controller.addComposerTab();
     await _settle();
     expect(gateway.saves.last.tabs.first.prompt, 'A slow pan.');
-    expect(gateway.saves.last.tabs.first.characterMappings.keys, contains('MARA'));
+    expect(
+      gateway.saves.last.tabs.first.characterMappings.keys,
+      contains('MARA'),
+    );
   });
 
   test('leaving the foreground publishes the strip at once', () async {
