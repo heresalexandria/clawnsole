@@ -29,6 +29,7 @@ import 'media_thumbnail.dart';
 import 'panels.dart';
 import 'prompt_character_counter.dart';
 import 'prompt_rewrite_dialog.dart';
+import 'provider_model_picker.dart';
 import 'reference_prompt_field.dart';
 import 'references_screen.dart';
 import 'visual_reference_viewer.dart';
@@ -216,605 +217,55 @@ class _CreateHeading extends StatelessWidget {
   }
 }
 
-class _ProviderPlaque extends StatefulWidget {
+/// The footer's model selector: the console readout, with the tap that opens
+/// the shared picker wrapped around it.
+class _ProviderPlaque extends StatelessWidget {
   const _ProviderPlaque({required this.controller});
 
   final AppController controller;
 
   @override
-  State<_ProviderPlaque> createState() => _ProviderPlaqueState();
-}
-
-class _ProviderPlaqueState extends State<_ProviderPlaque> {
-  final Set<String> _collapsedProviders = <String>{};
-
-  AppController get controller => widget.controller;
-
-  @override
-  void initState() {
-    super.initState();
-    // Starred providers open expanded: they are pinned for quick reach.
-    _collapsedProviders.addAll(
-      controller.providers
-          .where(
-            (provider) =>
-                provider.id != controller.selectedProviderId &&
-                !controller.isFavoriteProvider(provider.id),
-          )
-          .map((provider) => provider.id),
-    );
-  }
-
-  Future<void> _select(String value) async {
-    final divider = value.indexOf('|');
-    final provider = value.substring(0, divider);
-    final model = value.substring(divider + 1);
-    if (mounted) setState(() => _collapsedProviders.remove(provider));
-    await controller.selectProviderModel(provider, model);
-  }
-
-  @override
   Widget build(BuildContext context) {
     // The plaque is the receiver's input selector: a machined bezel around a
-    // lit readout window, with the chevron key that opens the menu.
-    return PopupMenuButton<String>(
+    // lit readout window, with the chevron key that opens the picker. The
+    // selector paints itself and carries no gesture, so the tap lives here.
+    return Tooltip(
       key: const ValueKey('provider-plaque'),
-      tooltip: 'Choose provider and model',
-      padding: EdgeInsets.zero,
-      borderRadius: BorderRadius.circular(12),
-      onSelected: (value) => unawaited(_select(value)),
-      constraints: const BoxConstraints(minWidth: 340, maxWidth: 420),
-      itemBuilder: (context) => <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: _ProviderSearchMenu(
-            controller: controller,
-            collapsedProviders: _collapsedProviders,
-            onExpandedChanged: (providerId, expanded) {
-              if (expanded) {
-                _collapsedProviders.remove(providerId);
-              } else {
-                _collapsedProviders.add(providerId);
-              }
-            },
-          ),
-        ),
-      ],
-      child: HardwareSelector(
-        height: consoleControlHeight(context),
-        semanticHint: 'Opens the provider and model menu',
-        // An eighteen-cell display: provider on the top row, model below.
-        // Flexible bounds the readout on narrow layouts so long names clip
-        // at the window's edge instead of overflowing the plate.
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            SegmentReadout(
-              controller.selectedProvider.name,
-              fontSize: 13,
-              minCells: 18,
-            ),
-            const SizedBox(height: 2),
-            SegmentReadout(
-              controller.selectedModel.label,
-              fontSize: 10.5,
-              primary: false,
-              minCells: 18,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProviderSearchMenu extends StatefulWidget {
-  const _ProviderSearchMenu({
-    required this.controller,
-    required this.collapsedProviders,
-    required this.onExpandedChanged,
-  });
-
-  final AppController controller;
-  final Set<String> collapsedProviders;
-  final void Function(String providerId, bool expanded) onExpandedChanged;
-
-  @override
-  State<_ProviderSearchMenu> createState() => _ProviderSearchMenuState();
-}
-
-class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
-  final TextEditingController _search = TextEditingController();
-
-  @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
-  }
-
-  void _toggleProviderFavorite(String providerId) {
-    // A freshly starred provider opens so its models are in reach at once.
-    if (!widget.controller.isFavoriteProvider(providerId)) {
-      widget.onExpandedChanged(providerId, true);
-    }
-    unawaited(widget.controller.toggleFavoriteProvider(providerId));
-  }
-
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller,
-    builder: (context, _) => _buildMenu(context),
-  );
-
-  Widget _buildMenu(BuildContext context) {
-    final controller = widget.controller;
-    final query = _search.text.trim().toLowerCase();
-    final terms = query.split(RegExp(r'\s+')).where((term) => term.isNotEmpty);
-    bool containsAll(String value) {
-      final haystack = value.toLowerCase();
-      return terms.every(haystack.contains);
-    }
-
-    final matches =
-        <
-          ({
-            VideoProviderDefinition provider,
-            List<VideoModelDefinition> models,
-          })
-        >[];
-    // Starred providers lead the list; a search keeps that order too.
-    for (final provider in controller.providersByPreference) {
-      final providerIdentity = '${provider.name} ${provider.id}';
-      final providerMatches = query.isNotEmpty && containsAll(providerIdentity);
-      final models = query.isEmpty || providerMatches
-          ? provider.models
-          : provider.models
-                .where(
-                  (model) => containsAll(
-                    '$providerIdentity ${model.label} ${model.id} ${model.canonicalId}',
-                  ),
-                )
-                .toList();
-      if (models.isNotEmpty) matches.add((provider: provider, models: models));
-    }
-    // Favorites sit above the provider sections while browsing; a search
-    // already narrows the list, so it speaks for itself.
-    final favorites = query.isEmpty
-        ? controller.favoriteModels
-        : const <FavoriteModel>[];
-    final menuHeight = (MediaQuery.sizeOf(context).height * .68)
-        .clamp(320.0, 560.0)
-        .toDouble();
-    return SizedBox(
-      width: 400,
-      height: menuHeight,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-            child: TextField(
-              key: const ValueKey('provider-model-search'),
-              controller: _search,
-              onChanged: (_) => setState(() {}),
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Search models or providers',
-                prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        onPressed: () {
-                          _search.clear();
-                          setState(() {});
-                        },
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                      ),
-                isDense: true,
-              ),
-            ),
-          ),
-          Divider(height: 1, color: context.colors.outlineVariant),
-          Expanded(
-            child: matches.isEmpty
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        'No models or providers match.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: context.colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  )
-                : ListView(
-                    padding: EdgeInsets.zero,
-                    children: <Widget>[
-                      if (favorites.isNotEmpty)
-                        _FavoriteModelsSection(
-                          key: const ValueKey('provider-model-favorites'),
-                          favorites: favorites,
-                          selectedProviderId: controller.selectedProviderId,
-                          selectedModelId: controller.selectedModel.id,
-                          onUnstar: (favorite) => unawaited(
-                            controller.toggleFavoriteModel(
-                              favorite.provider.id,
-                              favorite.model.id,
-                            ),
-                          ),
-                        ),
-                      ...matches.map(
-                        (match) => _ProviderMenuSection(
-                          key: ValueKey(
-                            'provider-model-section-${match.provider.id}',
-                          ),
-                          provider: match.provider,
-                          models: match.models,
-                          forceExpanded: query.isNotEmpty,
-                          initiallyExpanded: !widget.collapsedProviders
-                              .contains(match.provider.id),
-                          selectedProviderId: controller.selectedProviderId,
-                          selectedModelId: controller.selectedModel.id,
-                          favorite: controller.isFavoriteProvider(
-                            match.provider.id,
-                          ),
-                          isModelFavorite: (model) => controller
-                              .isFavoriteModel(match.provider.id, model.id),
-                          onProviderFavoriteToggle: () =>
-                              _toggleProviderFavorite(match.provider.id),
-                          onModelFavoriteToggle: (model) => unawaited(
-                            controller.toggleFavoriteModel(
-                              match.provider.id,
-                              model.id,
-                            ),
-                          ),
-                          onExpandedChanged: (expanded) => widget
-                              .onExpandedChanged(match.provider.id, expanded),
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProviderMenuSection extends StatefulWidget {
-  const _ProviderMenuSection({
-    required this.provider,
-    required this.models,
-    required this.forceExpanded,
-    required this.initiallyExpanded,
-    required this.selectedProviderId,
-    required this.selectedModelId,
-    required this.favorite,
-    required this.isModelFavorite,
-    required this.onProviderFavoriteToggle,
-    required this.onModelFavoriteToggle,
-    required this.onExpandedChanged,
-    super.key,
-  });
-
-  final VideoProviderDefinition provider;
-  final List<VideoModelDefinition> models;
-  final bool forceExpanded;
-  final bool initiallyExpanded;
-  final String selectedProviderId;
-  final String selectedModelId;
-  final bool favorite;
-  final bool Function(VideoModelDefinition model) isModelFavorite;
-  final VoidCallback onProviderFavoriteToggle;
-  final ValueChanged<VideoModelDefinition> onModelFavoriteToggle;
-  final ValueChanged<bool> onExpandedChanged;
-
-  @override
-  State<_ProviderMenuSection> createState() => _ProviderMenuSectionState();
-}
-
-class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
-  late bool _expanded = widget.initiallyExpanded;
-
-  @override
-  void didUpdateWidget(covariant _ProviderMenuSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // The host changes this while the menu is open (starring a provider
-    // opens it), so follow the change instead of freezing the first value.
-    if (widget.initiallyExpanded != oldWidget.initiallyExpanded) {
-      _expanded = widget.initiallyExpanded;
-    }
-  }
-
-  void _toggle() {
-    setState(() => _expanded = !_expanded);
-    widget.onExpandedChanged(_expanded);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final expanded = widget.forceExpanded || _expanded;
-    final headingBackground = Theme.of(context).brightness == Brightness.dark
-        ? context.colors.surfaceContainerLowest
-        : context.colors.surfaceContainerHighest;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ColoredBox(
-          key: ValueKey(
-            'provider-model-heading-background-${widget.provider.id}',
-          ),
-          color: headingBackground,
-          child: InkWell(
-            key: ValueKey('provider-model-heading-${widget.provider.id}'),
-            onTap: widget.forceExpanded ? null : _toggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      widget.provider.name.toUpperCase(),
-                      style: TextStyle(
-                        color: context.colors.onSurface,
-                        fontSize: 10,
-                        letterSpacing: 1.1,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  _FavoriteStar(
-                    key: ValueKey('provider-favorite-${widget.provider.id}'),
-                    starred: widget.favorite,
-                    subject: widget.provider.name,
-                    onPressed: widget.onProviderFavoriteToggle,
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    '${widget.models.length}',
-                    style: TextStyle(
-                      color: context.colors.onSurface.withValues(alpha: .72),
-                      fontSize: 10,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: context.colors.onSurface.withValues(alpha: .72),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          alignment: Alignment.topCenter,
-          child: expanded
-              ? Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: widget.models.map((model) {
-                    final selected =
-                        widget.provider.id == widget.selectedProviderId &&
-                        model.id == widget.selectedModelId;
-                    return InkWell(
-                      key: ValueKey(
-                        'provider-model-option-${widget.provider.id}-${model.id}',
-                      ),
-                      onTap: () => Navigator.of(
-                        context,
-                      ).pop('${widget.provider.id}|${model.id}'),
-                      child: Container(
-                        color: selected
-                            ? context.colors.primaryContainer.withValues(
-                                alpha: .5,
-                              )
-                            : null,
-                        padding: const EdgeInsets.fromLTRB(24, 6, 10, 6),
-                        child: Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: Text(
-                                model.label,
-                                style: TextStyle(
-                                  color: context.colors.onSurface,
-                                  fontSize: 13,
-                                  fontWeight: selected
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                            if (selected)
-                              Icon(
-                                Icons.check_rounded,
-                                size: 17,
-                                color: context.colors.primary,
-                              ),
-                            const SizedBox(width: 4),
-                            _FavoriteStar(
-                              key: ValueKey(
-                                'provider-model-star-${widget.provider.id}-${model.id}',
-                              ),
-                              starred: widget.isModelFavorite(model),
-                              subject: model.label,
-                              onPressed: () =>
-                                  widget.onModelFavoriteToggle(model),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                )
-              : const SizedBox.shrink(),
-        ),
-        Divider(height: 1, color: context.colors.outlineVariant),
-      ],
-    );
-  }
-}
-
-/// The starred models pinned above the provider sections of the picker.
-class _FavoriteModelsSection extends StatelessWidget {
-  const _FavoriteModelsSection({
-    required this.favorites,
-    required this.selectedProviderId,
-    required this.selectedModelId,
-    required this.onUnstar,
-    super.key,
-  });
-
-  final List<FavoriteModel> favorites;
-  final String selectedProviderId;
-  final String selectedModelId;
-  final ValueChanged<FavoriteModel> onUnstar;
-
-  @override
-  Widget build(BuildContext context) {
-    final headingBackground = Theme.of(context).brightness == Brightness.dark
-        ? context.colors.surfaceContainerLowest
-        : context.colors.surfaceContainerHighest;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ColoredBox(
-          color: headingBackground,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
-            child: Row(
+      message: 'Choose provider and model',
+      child: Semantics(
+        button: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => unawaited(showProviderModelPicker(context, controller)),
+          child: HardwareSelector(
+            height: consoleControlHeight(context),
+            semanticHint: 'Opens the provider and model picker',
+            // An eighteen-cell display: provider on the top row, model below.
+            // Flexible bounds the readout on narrow layouts so long names clip
+            // at the window's edge instead of overflowing the plate.
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Icon(Icons.star_rounded, size: 14, color: context.tokens.brass),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'FAVORITES',
-                    style: TextStyle(
-                      color: context.colors.onSurface,
-                      fontSize: 10,
-                      letterSpacing: 1.1,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                SegmentReadout(
+                  controller.selectedProvider.name,
+                  fontSize: 13,
+                  minCells: 18,
                 ),
-                Text(
-                  '${favorites.length}',
-                  style: TextStyle(
-                    color: context.colors.onSurface.withValues(alpha: .72),
-                    fontSize: 10,
-                  ),
+                const SizedBox(height: 2),
+                SegmentReadout(
+                  controller.selectedModel.label,
+                  fontSize: 10.5,
+                  primary: false,
+                  minCells: 18,
                 ),
               ],
             ),
           ),
         ),
-        ...favorites.map((favorite) {
-          final selected =
-              favorite.provider.id == selectedProviderId &&
-              favorite.model.id == selectedModelId;
-          return InkWell(
-            key: ValueKey(
-              'provider-model-favorite-${favorite.provider.id}-${favorite.model.id}',
-            ),
-            onTap: () => Navigator.of(
-              context,
-            ).pop('${favorite.provider.id}|${favorite.model.id}'),
-            child: Container(
-              color: selected
-                  ? context.colors.primaryContainer.withValues(alpha: .5)
-                  : null,
-              padding: const EdgeInsets.fromLTRB(24, 6, 10, 6),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          favorite.model.label,
-                          style: TextStyle(
-                            color: context.colors.onSurface,
-                            fontSize: 13,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                          ),
-                        ),
-                        Text(
-                          favorite.provider.name,
-                          style: TextStyle(
-                            color: context.colors.onSurfaceVariant,
-                            fontSize: 10.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (selected)
-                    Icon(
-                      Icons.check_rounded,
-                      size: 17,
-                      color: context.colors.primary,
-                    ),
-                  const SizedBox(width: 4),
-                  _FavoriteStar(
-                    starred: true,
-                    subject: favorite.model.label,
-                    onPressed: () => onUnstar(favorite),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-        Divider(height: 1, color: context.colors.outlineVariant),
-      ],
+      ),
     );
   }
-}
-
-/// A compact star toggle: brass when lit, quiet outline otherwise. Brass is
-/// jewelry here, never a fill.
-class _FavoriteStar extends StatelessWidget {
-  const _FavoriteStar({
-    required this.starred,
-    required this.subject,
-    required this.onPressed,
-    super.key,
-  });
-
-  final bool starred;
-  final String subject;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => IconButton(
-    tooltip: starred
-        ? 'Remove $subject from favorites'
-        : 'Add $subject to favorites',
-    onPressed: onPressed,
-    isSelected: starred,
-    visualDensity: VisualDensity.compact,
-    padding: EdgeInsets.zero,
-    constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-    iconSize: 17,
-    selectedIcon: Icon(Icons.star_rounded, color: context.tokens.brass),
-    icon: Icon(
-      Icons.star_border_rounded,
-      color: context.colors.onSurface.withValues(alpha: .45),
-    ),
-  );
 }
 
 class _Composer extends StatefulWidget {
@@ -1147,95 +598,218 @@ class _DirectionHeader extends StatelessWidget {
   final ValueChanged<bool> onModeChanged;
   final bool expanded;
 
+  /// Below this header width the row cannot hold a readable model name
+  /// beside the format dropdown and the counter (a phone shows three
+  /// letters and an ellipsis), so the trigger takes a line of its own
+  /// directly under the clear key instead.
+  static const double _stackedTriggerWidth = 480;
+
   @override
   Widget build(BuildContext context) {
     final iconExtent = MediaQuery.sizeOf(context).width >= 1000 ? 36.0 : 40.0;
     return LayoutBuilder(
-      builder: (context, constraints) => Row(
-        key: const ValueKey('direction-header'),
-        children: [
-          SizedBox(
-            width: ((constraints.maxWidth - iconExtent * 2 - 4) * .6).clamp(
-              0.0,
-              120.0,
-            ),
-            child: Semantics(
-              label: upscaling ? 'Detail guidance format' : 'Direction format',
-              child: DropdownButton<bool>(
-                key: const ValueKey('prompt-format-picker'),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                borderRadius: BorderRadius.circular(8),
-                value: controller.form.screenplayMode,
-                isDense: true,
-                isExpanded: true,
-                underline: const SizedBox.shrink(),
-                style: Theme.of(context).textTheme.labelMedium,
-                selectedItemBuilder: (context) => [
-                  for (final label in ['Plaintext', 'Screenplay'])
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(label),
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < _stackedTriggerWidth;
+        // Widths are resolved here rather than left to Flex, which can only
+        // split space proportionally. The header's priority is ordered: the two
+        // keys and the format dropdown keep their size, the model trigger takes
+        // what its label needs (72px at least, so the model name starts to
+        // read), and the counter keeps the remainder — 64px at least. Below the
+        // width where both minimums fit, the two share what is left evenly
+        // rather than the counter collapsing on its own.
+        final shared = math.max(0.0, constraints.maxWidth - iconExtent * 2 - 4);
+        final formatWidth = math.min(120.0, shared * .45);
+        final available = math.max(0.0, shared - formatWidth);
+        final triggerCap = math.min(
+          available,
+          math.max(math.min(72.0, available * .5), available - 64.0),
+        );
+        final triggerWidth = math.min(
+          _DirectionModelTrigger.naturalWidth(context, controller),
+          triggerCap,
+        );
+        final trigger = _DirectionModelTrigger(
+          controller: controller,
+          extent: stacked ? 36 : iconExtent,
+        );
+        final row = Row(
+          key: const ValueKey('direction-header'),
+          children: [
+            SizedBox(
+              width: formatWidth,
+              child: Semantics(
+                label: upscaling
+                    ? 'Detail guidance format'
+                    : 'Direction format',
+                child: DropdownButton<bool>(
+                  key: const ValueKey('prompt-format-picker'),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  borderRadius: BorderRadius.circular(8),
+                  value: controller.form.screenplayMode,
+                  isDense: true,
+                  isExpanded: true,
+                  underline: const SizedBox.shrink(),
+                  style: Theme.of(context).textTheme.labelMedium,
+                  selectedItemBuilder: (context) => [
+                    for (final label in ['Plaintext', 'Screenplay'])
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(label),
+                        ),
                       ),
-                    ),
-                ],
-                items: const [
-                  DropdownMenuItem(value: false, child: Text('Plaintext')),
-                  DropdownMenuItem(value: true, child: Text('Screenplay')),
-                ],
-                onChanged: (value) {
-                  if (value != null) onModeChanged(value);
-                },
+                  ],
+                  items: const [
+                    DropdownMenuItem(value: false, child: Text('Plaintext')),
+                    DropdownMenuItem(value: true, child: Text('Screenplay')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onModeChanged(value);
+                  },
+                ),
               ),
             ),
-          ),
-          IconButton(
-            key: const ValueKey('prompt-clear-button'),
-            tooltip: 'Clear prompt',
-            constraints: BoxConstraints.tightFor(
-              width: iconExtent,
-              height: iconExtent,
+            IconButton(
+              key: const ValueKey('prompt-clear-button'),
+              tooltip: 'Clear prompt',
+              constraints: BoxConstraints.tightFor(
+                width: iconExtent,
+                height: iconExtent,
+              ),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: controller.form.prompt.isEmpty ? null : onClear,
+              icon: const Icon(Icons.backspace_outlined, size: 18),
             ),
-            style: IconButton.styleFrom(
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: controller.form.prompt.isEmpty ? null : onClear,
-            icon: const Icon(Icons.backspace_outlined, size: 18),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: _PromptCharacterCounter(controller: controller),
+            if (!stacked) SizedBox(width: triggerWidth, child: trigger),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _PromptCharacterCounter(controller: controller),
+                ),
               ),
             ),
-          ),
-          IconButton(
-            key: ValueKey(
-              expanded
-                  ? 'prompt-fullscreen-minimize'
-                  : 'prompt-fullscreen-button',
+            IconButton(
+              key: ValueKey(
+                expanded
+                    ? 'prompt-fullscreen-minimize'
+                    : 'prompt-fullscreen-button',
+              ),
+              tooltip: expanded ? 'Minimize prompt' : 'Expand prompt',
+              constraints: BoxConstraints.tightFor(
+                width: iconExtent,
+                height: iconExtent,
+              ),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: onExpand,
+              icon: Icon(
+                expanded
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.fullscreen_rounded,
+                size: 20,
+              ),
             ),
-            tooltip: expanded ? 'Minimize prompt' : 'Expand prompt',
-            constraints: BoxConstraints.tightFor(
-              width: iconExtent,
-              height: iconExtent,
+          ],
+        );
+        if (!stacked) return row;
+        // The stacked trigger keeps the header's left edge, its own padding
+        // lining the text up under the format dropdown's label, and may take
+        // the whole width before its label has to ellipsize.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            row,
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+              child: trigger,
             ),
-            style: IconButton.styleFrom(
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// The quiet way to change model while writing: the current model and provider
+/// as plain header text with a chevron, opening the same picker as the
+/// console footer's selector. Deliberately unmachined — the Direction header
+/// is paper, and the hardware register belongs to the footer plaque.
+class _DirectionModelTrigger extends StatelessWidget {
+  const _DirectionModelTrigger({
+    required this.controller,
+    required this.extent,
+  });
+
+  final AppController controller;
+
+  /// Minimum height, matched to the header's icon keys so the row stays level.
+  final double extent;
+
+  static const double _horizontalPadding = 8;
+  static const double _chevronExtent = 20;
+
+  static String _label(AppController controller) =>
+      '${controller.selectedModel.label} · ${controller.selectedProvider.name}';
+
+  /// Width the trigger wants before the label has to ellipsize.
+  static double naturalWidth(BuildContext context, AppController controller) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: _label(controller),
+        style: Theme.of(context).textTheme.labelMedium,
+      ),
+      maxLines: 1,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width + _chevronExtent + _horizontalPadding * 2;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelMedium;
+    return Tooltip(
+      message: 'Change model',
+      child: TextButton(
+        key: const ValueKey('direction-model-trigger'),
+        onPressed: () =>
+            unawaited(showProviderModelPicker(context, controller)),
+        style: TextButton.styleFrom(
+          foregroundColor: context.colors.onSurface,
+          textStyle: style,
+          padding: const EdgeInsets.symmetric(horizontal: _horizontalPadding),
+          minimumSize: Size(0, extent),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Flexible(
+              child: Text(
+                _label(controller),
+                style: style,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+              ),
             ),
-            onPressed: onExpand,
-            icon: Icon(
-              expanded
-                  ? Icons.fullscreen_exit_rounded
-                  : Icons.fullscreen_rounded,
-              size: 20,
+            Icon(
+              Icons.arrow_drop_down_rounded,
+              size: _chevronExtent,
+              color: context.colors.onSurfaceVariant,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
