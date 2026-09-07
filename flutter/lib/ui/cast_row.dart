@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'characters_dialog.dart';
 import 'hardware.dart';
 import 'media_thumbnail.dart';
@@ -271,14 +272,14 @@ class _CastChip extends StatelessWidget {
                       icon: Icons.edit_outlined,
                       tooltip: 'Recast $name',
                       semanticLabel: 'Recast $name',
-                      onTap: () => unawaited(_edit(context)),
+                      onTap: () async => unawaited(_edit(context)),
                     ),
                     _CastChipControl(
                       key: ValueKey<String>('cast-remove-$name'),
                       icon: Icons.close_rounded,
                       tooltip: 'Remove $name from the cast',
                       semanticLabel: 'Remove $name from the cast',
-                      onTap: () => unawaited(_remove()),
+                      onTap: _remove,
                     ),
                   ],
                 ),
@@ -293,7 +294,13 @@ class _CastChip extends StatelessWidget {
 
 /// The pencil and × inside a cast chip: their own button nodes, with a hit
 /// area that lands a finger without stretching the chip.
-class _CastChipControl extends StatelessWidget {
+///
+/// The control owns the loader for its own [onTap]: while that future is
+/// pending the icon becomes the busy mark and every gesture path goes inert,
+/// so a slow removal cannot be tapped twice or look like nothing happened.
+/// A control that only opens a dialog returns straight away and so never
+/// shows the mark.
+class _CastChipControl extends StatefulWidget {
   const _CastChipControl({
     required this.icon,
     required this.tooltip,
@@ -305,32 +312,60 @@ class _CastChipControl extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final String semanticLabel;
-  final VoidCallback onTap;
+  final Future<void> Function() onTap;
 
   static const double _hit = 22;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    button: true,
-    label: semanticLabel,
-    onTap: onTap,
-    child: HardwareTouchTarget(
-      onTap: onTap,
-      minWidth: _hit,
-      minHeight: _hit,
-      child: Tooltip(
-        message: tooltip,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 14,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-            child: Icon(icon, size: 13, color: context.colors.onSurfaceVariant),
+  State<_CastChipControl> createState() => _CastChipControlState();
+}
+
+class _CastChipControlState extends State<_CastChipControl> {
+  bool _busy = false;
+
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onTap();
+    } finally {
+      // The work can outlive the chip — a removal rebuilds the cast row
+      // without it — so clear the flag without touching a dead element.
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tap = _busy ? null : () => unawaited(_run());
+    return Semantics(
+      button: true,
+      label: widget.semanticLabel,
+      onTap: tap,
+      child: HardwareTouchTarget(
+        onTap: tap,
+        minWidth: _CastChipControl._hit,
+        minHeight: _CastChipControl._hit,
+        child: Tooltip(
+          message: widget.tooltip,
+          child: InkResponse(
+            onTap: tap,
+            radius: 14,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+              child: _busy
+                  ? const BusySpinner()
+                  : Icon(
+                      widget.icon,
+                      size: 13,
+                      color: context.colors.onSurfaceVariant,
+                    ),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _AddCastAction extends StatelessWidget {

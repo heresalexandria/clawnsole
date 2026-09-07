@@ -12,6 +12,7 @@ import '../core/aesthetic_reference.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'app_intents.dart';
+import 'busy_button.dart';
 import 'cast_row.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
@@ -2966,10 +2967,9 @@ class _ReferenceTile extends StatelessWidget {
           ),
         if (controller.canUseReferenceAsFirstFrame(reference)) ...<Widget>[
           const SizedBox(height: 4),
-          TextButton.icon(
+          BusyTextButton.icon(
             key: ValueKey('use-reference-as-first-frame-${reference.id}'),
-            onPressed: () =>
-                unawaited(controller.useReferenceAsFirstFrame(reference.id)),
+            onPressed: () => controller.useReferenceAsFirstFrame(reference.id),
             icon: const Icon(Icons.filter_1_rounded, size: 14),
             label: const Text('Use as first frame'),
             style: TextButton.styleFrom(

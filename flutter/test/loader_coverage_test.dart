@@ -5,6 +5,9 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/busy_button.dart';
+import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/generation_detail_modal.dart';
+import 'package:clawnsole/ui/generation_view_widgets.dart';
 import 'package:clawnsole/ui/library_folders.dart';
 import 'package:clawnsole/ui/library_screen.dart';
 import 'package:clawnsole/ui/providers_screen.dart';
@@ -162,6 +165,21 @@ class _SlowGateway
       _answer(() => snapshot.copyWith(generations: const []));
 
   @override
+  Future<LocalSnapshot> deleteGeneration(String localId) => _answer(
+    () => snapshot.copyWith(
+      generations: snapshot.generations
+          .where((item) => item.localId != localId)
+          .toList(),
+    ),
+  );
+
+  /// Reuse ends in a navigation and a first-frame promotion ends in a model
+  /// change; both land here, so holding this open holds them open.
+  @override
+  Future<LocalSnapshot> setPreferences(AppPreferences preferences) =>
+      _answer(() => snapshot.copyWith(preferences: preferences));
+
+  @override
   Future<ProviderAccountStatus> verifyProviderKey(
     String provider, [
     String? candidate,
@@ -217,6 +235,31 @@ Future<void> _pump(
     ),
   );
   await tester.pump();
+}
+
+/// Like [_pump], but rebuilds [body] on every controller notice — screens that
+/// do not listen for themselves (Create, a bare card) need that to show work
+/// the controller started.
+Future<void> _pumpLive(
+  WidgetTester tester,
+  AppController controller,
+  Widget Function() body, {
+  Size size = const Size(1500, 1800),
+}) async {
+  await tester.binding.setSurfaceSize(size);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => body(),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -642,6 +685,196 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.descendant(of: tile, matching: _spinner), findsNothing);
     expect(controller.generations, isEmpty);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('the first-frame key owns a loader and still promotes', (
+    tester,
+  ) async {
+    final gateway = _SlowGateway(_empty);
+    final controller = _controller(gateway)
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'seedance_2p5';
+    addTearDown(controller.dispose);
+    controller
+      ..addUrlReference(MediaReferenceKind.image)
+      ..form.prompt =
+          '@Image 1 is the first frame, a sloth leans in near the drink.';
+    final reference = controller.form.references.single;
+    controller.updateReference(reference.id, 'https://cdn.test/portrait.png');
+    await _pumpLive(
+      tester,
+      controller,
+      () => SingleChildScrollView(child: CreateScreen(controller: controller)),
+      size: const Size(1400, 1600),
+    );
+    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    await tester.pumpAndSettle();
+
+    final action = find.byKey(
+      ValueKey('use-reference-as-first-frame-${reference.id}'),
+    );
+    // The control carries its own loader now, so a promotion that has to
+    // write a model change can never sit there looking untapped. The
+    // promotion itself rewrites the tray before it awaits anything, so this
+    // key is gone by the next frame — the mark it would show lives in
+    // BusyButton, which busy_button_test covers.
+    expect(tester.widget<BusyTextButton>(action).onPressed, isNotNull);
+
+    final gate = gateway.block();
+    await tester.tap(action);
+    await tester.pump();
+    expect(action, findsNothing);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(controller.form.references, isEmpty);
+    expect(controller.form.keyframes.single.role, KeyframeRole.start);
+    expect(_spinner, findsNothing);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('a cast chip removes behind its own control, dialog aside', (
+    tester,
+  ) async {
+    final gateway = _SlowGateway(_empty);
+    final controller = _controller(gateway)
+      ..selectedProviderId = 'artcraft'
+      ..selectedModelId = 'seedance_2p5';
+    addTearDown(controller.dispose);
+    // Two names, so the row survives the first removal and the chip that did
+    // not do the work is still there to look at.
+    controller.form.characterMappings
+      ..['HERO'] = <String>['IMG_1234.png']
+      ..['VILLAIN'] = <String>['villain.png'];
+    await _pumpLive(
+      tester,
+      controller,
+      () => SingleChildScrollView(child: CreateScreen(controller: controller)),
+      size: const Size(1400, 1600),
+    );
+
+    // The pencil opens a dialog, and the dialog is the feedback: awaiting the
+    // editor here would strand a spinner on the chip behind it for as long as
+    // it stayed open.
+    final edit = find.byKey(const ValueKey('cast-edit-HERO'));
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
+    expect(find.text('Edit character'), findsOneWidget);
+    expect(_spinner, findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // The × is the real work: it owns the loader, and the flag clears even
+    // though finishing rebuilds the chip away.
+    await tester.tap(find.byKey(const ValueKey('cast-remove-HERO')));
+    await tester.pumpAndSettle();
+    expect(controller.form.characterMappings.keys, <String>['VILLAIN']);
+    expect(find.byKey(const ValueKey('cast-remove-HERO')), findsNothing);
+    expect(find.byKey(const ValueKey('cast-remove-VILLAIN')), findsOneWidget);
+    expect(_spinner, findsNothing);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('a card row marks the reuse its own menu started', (
+    tester,
+  ) async {
+    final gateway = _SlowGateway(_empty.copyWith(generations: [_film()]));
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    await _pumpLive(
+      tester,
+      controller,
+      () => CompactGenerationRow(
+        controller: controller,
+        item: controller.generations.single,
+      ),
+      size: const Size(1200, 900),
+    );
+
+    final menu = find.byTooltip('Generation actions');
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+
+    // Reuse ends in a navigation whose preference write the gateway holds.
+    final gate = gateway.block();
+    await tester.tap(find.byKey(const ValueKey('generation-action-reuse')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // The menu is gone by now, so the ⋯ slot it left behind is the only
+    // place the work can show.
+    expect(controller.busy.isBusy('generation', 'film'), isTrue);
+    expect(menu, findsNothing);
+    expect(
+      find.descendant(
+        of: find.byType(GenerationActionsMenu),
+        matching: _spinner,
+      ),
+      findsOneWidget,
+    );
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(controller.busy.isBusy('generation', 'film'), isFalse);
+    expect(menu, findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
+  testWidgets('the film modal shows the delete it is waiting on', (
+    tester,
+  ) async {
+    final gateway = _SlowGateway(_empty.copyWith(generations: [_film()]));
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    await tester.binding.setSurfaceSize(const Size(1500, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => unawaited(
+                showGenerationDetailModal(
+                  context,
+                  controller: controller,
+                  item: controller.generations.single,
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    final menu = find.byType(GenerationActionsMenu);
+    await tester.ensureVisible(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(menu, warnIfMissed: false);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('generation-action-delete')));
+    await tester.pumpAndSettle();
+
+    final gate = gateway.block();
+    await tester.tap(find.text('Remove'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // The modal stays open until the record is really gone, and its own ⋯
+    // slot says why.
+    expect(controller.busy.isBusy('generation', 'film'), isTrue);
+    expect(find.byTooltip('Generation actions'), findsNothing);
+    expect(find.descendant(of: menu, matching: _spinner), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(controller.generations, isEmpty);
+    expect(menu, findsNothing);
+    expect(find.text('open'), findsOneWidget);
     await tester.pump(const Duration(seconds: 6));
   });
 }
