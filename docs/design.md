@@ -438,6 +438,10 @@ Layout order:
    fourteen-segment readout in a screwed charcoal bezel, chevron key;
    opens the shared picker dialog) directly before the backlit
    **GENERATE VIDEO** push-button indicator, shoulder to shoulder at 56 px.
+   While a submission is in flight the key reads **SUBMITTING** — still
+   lit, still inert, still no spinner — and the call site reserves the
+   wider of its two readings so the key cannot shrink under the finger
+   that just pressed it.
    A status line appears only when something blocks a render (API key
    missing, this device cannot run the local model). Under 640 px the
    selector and the key stack, each spanning the composer.

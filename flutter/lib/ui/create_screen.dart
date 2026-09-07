@@ -5135,24 +5135,35 @@ class _ComposerFooter extends StatelessWidget {
             ],
           )
         : null;
-    // The transport key. While a render is in flight it simply stays lit and
-    // inert — the lit key is the signal, so there is no spinner.
-    final generate = HardwareLitButton(
-      key: const ValueKey<String>('generate-key'),
-      height: consoleControlHeight(context),
-      // Inked like the legend: white-filled engraving on the lens.
-      icon: const ClawMark(size: 16),
-      label: controller.selectedModel.outputKind == GenerationOutputKind.image
-          ? 'Generate image'
-          : form.mode == VideoMode.upscale
-          ? 'Upscale video'
-          : 'Generate video',
-      lit: controller.submitting,
-      onPressed: controller.submitting
-          ? null
-          : () => unawaited(
-              _submitWithProviderRetentionWarning(context, controller),
-            ),
+    // The transport key. While a render is in flight it stays lit and inert
+    // — the lit key is the signal, so there is no spinner — and its legend
+    // reads SUBMITTING, so the console says what it is doing.
+    final restLabel =
+        controller.selectedModel.outputKind == GenerationOutputKind.image
+        ? 'Generate image'
+        : form.mode == VideoMode.upscale
+        ? 'Upscale video'
+        : 'Generate video';
+    final generate = ConstrainedBox(
+      // The key hugs its own legend, so swapping in the shorter SUBMITTING
+      // would shrink the transport key under the finger that just pressed
+      // it. Reserving the wider of its two readings holds it still.
+      constraints: BoxConstraints(
+        minWidth: _keyWidthFor(context, <String>[restLabel, _submittingLabel]),
+      ),
+      child: HardwareLitButton(
+        key: const ValueKey<String>('generate-key'),
+        height: consoleControlHeight(context),
+        // Inked like the legend: white-filled engraving on the lens.
+        icon: const ClawMark(size: 16),
+        label: controller.submitting ? _submittingLabel : restLabel,
+        lit: controller.submitting,
+        onPressed: controller.submitting
+            ? null
+            : () => unawaited(
+                _submitWithProviderRetentionWarning(context, controller),
+              ),
+      ),
     );
     // The model plaque sits in the footer, directly before Generate: the
     // last thing the eye checks before rendering, inside the draft it
@@ -5189,6 +5200,38 @@ class _ComposerFooter extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// The legend the transport key wears while a submission is in flight.
+  static const String _submittingLabel = 'Submitting';
+
+  /// How wide a [HardwareLitButton] has to be to engrave the widest of
+  /// [labels] without clipping. The metrics mirror the key's own layout:
+  /// 22 px of padding either side, the 16 px claw and its 9 px gap, and the
+  /// legend in letter-spaced capitals. Reserved as a *minimum* width, so a
+  /// composer too narrow to grant it simply clamps it away.
+  static double _keyWidthFor(BuildContext context, List<String> labels) {
+    final style = DefaultTextStyle.of(context).style.merge(
+      (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.9,
+        height: 1.05,
+      ),
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    var widest = .0;
+    for (final label in labels) {
+      final painter = TextPainter(
+        text: TextSpan(text: HardwareLitButton.engrave(label), style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+        textScaler: scaler,
+      )..layout();
+      if (painter.width > widest) widest = painter.width;
+      painter.dispose();
+    }
+    return widest + 22 * 2 + 16 + 9;
   }
 }
 
