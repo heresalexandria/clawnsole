@@ -30,6 +30,7 @@ import '../core/settings_vault_gateway.dart';
 import '../core/screenplay.dart';
 import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
+import 'busy_registry.dart';
 
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
@@ -625,6 +626,11 @@ class AppController extends ChangeNotifier {
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
+
+  /// Per-item work in flight, keyed by kind and id, so a card or row can show
+  /// a loader for an action started somewhere else — a closed menu, a
+  /// snackbar's recovery button, a drop on a folder.
+  final BusyRegistry busy = BusyRegistry();
   int _referenceUploadDepth = 0;
   String? referenceUploadStatus;
   int get formRevision => _draftTab.formRevision;
@@ -8774,6 +8780,7 @@ class AppController extends ChangeNotifier {
     _composerSaveRetry?.cancel();
     _promptSettleTimer?.cancel();
     _promptEditRevision.dispose();
+    busy.dispose();
     super.dispose();
   }
 }
