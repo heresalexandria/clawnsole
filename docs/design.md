@@ -35,8 +35,11 @@ than inventing new colors or sizes.
   itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles. The single exception is physical:
-  the Generate key's incandescent lamps wander a few percent while a
-  submission is in flight, because real filaments do.
+  the Generate key's incandescent lamps breathe, flicker and sag while a
+  submission is in flight, because a real lamp on a real supply does. It is
+  the only thing in the app that moves on its own, it is a property of the
+  hardware rather than an attention-getter, and it stops the moment the
+  console stops working.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
   an input the provider supports. Prefer inference and disclosure over
   hiding features.
@@ -181,11 +184,24 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
   hot spots — on pointer-down and while the **submission** is in flight,
   i.e. until the provider accepts the job; once the render is running the
   key returns to its unlit, pressable state (there is no spinner).
-  The lamps behave like lamps: they warm over ~240 ms (ease-out) and cool
-  with a ~420 ms afterglow, and while on the filaments wander a few
-  percent with an occasional brief sag (`HardwareLitButtonState.filament`,
-  0.9–1.05) — the one thing in the app that moves on its own, and it ticks
-  only while lit. Keyboard focus wears the brass halo. No specular band,
+  The lamps behave like lamps, and two lights live in the cap that are not
+  the same light. A finger on the key raises only the cap's own dim
+  **contact glow** (30 % of full, 120 ms); the **lamps** answer `lit`
+  alone, so the whole warm-up is still ahead of them when the job goes out
+  and a press that never becomes a submission never moves them. The
+  filament warms over ~340 ms, flaring ~7 % past its working brightness at
+  ~185 ms — a cold wire is a poor resistor — before settling exactly on it;
+  switched off it loses half its light in 50 ms and three quarters by
+  100 ms, then hangs on as an ember out to ~600 ms. While lit it
+  **breathes**: about 1.2 a second, eased so it dwells at the top and the
+  bottom, down to roughly three quarters of steady and back
+  (`HardwareLitButtonState.filament`, ~0.71–1.03), with the fine wander of
+  an imperfect supply over it and a deeper sag now and again. The two hot
+  spots lead and the whole block follows ~55 ms behind them
+  (`filamentBody`), because that is the order light reaches a diffuser in.
+  The filament ticks only while there is light in the lens, so a dark
+  console schedules no frames. Keyboard focus wears the brass halo. No
+  specular band,
   no gloss, no bloom: real lenses are matte and spill almost no light.
   Plum in both modes — a button is allowed to stay dark on paper.
 - **`HardwareSelector`** (`hardware_selector.dart`): the model selector —
@@ -212,6 +228,29 @@ mode instead of always sitting on plum ink. Only the machined metal and
 charcoal bezels, the plum Generate key (a button), and a switch's lit green
 side stay dark in light mode — the selector's display becomes an unlit LCD
 on paper.
+
+### Busy states (`flutter/lib/ui/busy_button.dart`)
+
+Every action that is not instant says so, and always the same way: a **14 px
+ring with a 2 px stroke** in the control's own foreground colour. `BusyButton`
+and its Material-shaped variants (`BusyFilledButton`, `.tonal`, `.icon`,
+`BusyOutlinedButton`, `BusyTextButton`, `BusyIconButton`) take an async
+`onPressed` and own the loader for it: while the work runs the key is
+disabled, the mark takes the icon slot — reserved, so nothing shifts — or
+leads the label, and `busyLabel` swaps the word ('Saving…'). Siblings inside
+a dialog read the same state through `BusyGate` / `BusyGateBuilder` (Cancel,
+the fields, and `PopScope`), and `BusySpinner` carries the mark into rows and
+tiles that are not buttons. Work started away from the thing it changes — a
+menu that has already closed, a snackbar's recovery key, a card dropped on a
+folder — runs through `AppController.busy` (`BusyRegistry`, keyed
+`kind:id`), so the card or row shows the loader wherever it is drawn. Two
+rules keep it honest: a key that only opens a dialog or a picker is **not**
+busy (the modal's own primary key carries the loader for the work it starts),
+and optimistic one-tap toggles — favorite stars, a single Hide, preference
+switches — stay optimistic with no mark at all. A notice is never a
+start-of-work signal: `showNotice` reports what happened, after the fact.
+Determinate work keeps its own bar (`LinearProgressIndicator`, the upload
+rings), and media placeholders keep their own sizes.
 
 ## 6. Shell anatomy
 
@@ -257,7 +296,22 @@ and they share one memory of which provider sections are folded. The
 search field is the header — it takes focus on desktop, where the director
 can type at once, and not on iOS or Android, where the keyboard would
 cover the list — with a small close key beside it for the platforms that
-have no Escape. Every model row and provider heading carries a small star
+have no Escape. Each **provider heading is a burlwood facing** —
+`BurlwoodSlice` / `BurlwoodCut` in `panels.dart` — 50 px tall, its name in
+12.5 px w800 capitals tracked 1.2, cut from its own patch of the sheet: the
+patches are handed out from a stable hash of the provider id and no two
+touching headings may come off patches within two rows of each other, so
+the figure breaks at every joint instead of running through it (a hairline
+kerf and its lit edge mark the cut). The FAVORITES heading is faced from
+the same run — it is the same kind of thing, and one pale bar among wooden
+ones would read as a slip — while the model rows beneath keep the dialog
+surface. This is casework, so **the headings stay dark in light mode**: the
+owner asked for the rail's wood here specifically, which makes them a
+sanctioned exception to "in light mode the only dark backgrounds are
+buttons and the rail / tab bar". Their content takes
+`PanelSurface.burlwood.ink(tokens)`, and the tappable heading brings its own
+transparent `Material` so the ripple lands on the wood rather than behind
+it. Every model row and provider heading carries a small star
 (brass when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
@@ -282,7 +336,12 @@ Layout order:
    needs and clips it only when a row truly cannot hold it, and on a
    phone row the character counter takes a compact reading (`0 / 50k`,
    exact figures in its tooltip) so the name is spelled whole at 390 pt.
-   It rides along into the fullscreen editor.
+   It rides along into the fullscreen editor. Once a character is cast
+   or written into a script, typing the first letters of its name
+   suggests the cast in the same menu the `@` mentions use — Up/Down to
+   choose, Return, Tab or a tap to take it — and writes the name as
+   plain text, with no tag and no highlight. Escape dismisses it for
+   that word, and a screenplay cue line keeps its own completions.
 2. **Cast row**: a compact strip between the direction and the guidance /
    settings pair, present only when a character actually holds a
    reference on a model that accepts creative references. A brass label,
@@ -294,7 +353,39 @@ Layout order:
    itself never appears in the prompt box; it is appended silently at
    submission, so an uncast composer keeps the heading through Generate
    above the fold.
-3. **Keyframes / References accordions**: the two guidance sections are
+3. **Aesthetic Definition accordion**: present only when a draft has an
+   aesthetic — one chosen, or a custom definition of its own. A collapsible
+   row in the guidance construction (`aesthetic-accordion-toggle`) sitting
+   between the cast and the keyframes/references pair, with the aesthetic's
+   icon, one flat line of its words, and its name as the status word. The
+   body is the definition itself in an editable field. **Editing it never
+   touches the saved aesthetic**: the draft becomes **Custom** — the
+   Aesthetic key in the Direction toolbar says so on its single row, and the
+   picker adds a *Custom* entry naming what it was edited from. Three ways
+   out sit under the field: *Save as new…* (the aesthetic editor, prefilled,
+   and the draft switches to the new aesthetic), *Update “name”* (writes the
+   words back over the original after asking, so every draft using it moves
+   together), and *Revert*. Choosing another aesthetic while a custom
+   definition is open asks once before replacing it; *No aesthetic* clears
+   both. The custom text is part of the draft — it persists per tab, crosses
+   a relaunch, and makes an otherwise empty tab count as occupied. Typing
+   here follows the Direction field's contract: no keystroke rebuilds the
+   studio.
+
+   **Reuse restores the aesthetic as a choice, never as prompt text.** A
+   generation records what it appended (`aestheticReferenceId`,
+   `aestheticTitle`, `aestheticText`), so reopening it lifts that block back
+   out of the prompt and puts the choice where it was made: the same words
+   select the aesthetic again; words the library has changed since come back
+   as a **Custom** definition with the original aesthetic still selected; a
+   deleted aesthetic leaves the definition alone in the accordion. A film
+   rendered before this was recorded is only read that way when its last
+   paragraph is still, word for word, a saved aesthetic — anything else stays
+   in the prompt exactly as it was sent. Reuse into a new tab and the film
+   modal's Reuse take the same door. An AI Rewrite answers with the whole
+   prompt, aesthetic and all: the choice survives only when those words come
+   back word for word, so nothing is ever appended to a rewrite twice.
+4. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny
    thumbnails of what is attached, and a status word (*None* / *n
@@ -310,20 +401,34 @@ Layout order:
    but never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
    family) say so inside the body; attaching one side quietly sets the
    other aside, and a conflicted form (via reuse or a model switch) pins
-   both accordions open, warns in madder, and cannot submit. The
+   both accordions open, warns in madder, and cannot submit. Reference
+   video and audio are budgeted in **seconds as well as slots**: under a
+   kind's count gauge runs a second gauge of the same shape reading
+   `12 s / 30 s`, `?` in place of the used figure (with a tooltip) while a
+   clip's duration is still being measured, quiet until nine tenths of the
+   budget is spent, brass past that, madder over. The limit line names the
+   cap too. Every add path asks
+   `AppController.checkReferenceBudget` before any upload or persistence,
+   so a clip that would overrun the budget is refused with the reason and
+   a multi-file drop or pick takes the ones that fit and reports the rest
+   in one notice; a local file has no duration until the metadata loader
+   reads it, so that overrun is named the moment the figure lands. A
+   duration measured after the add, or a model switch that shrinks the
+   budget under an attached set, leaves the section warning in madder and
+   Generate blocked with the same sentence. The
    *Normalize visual references* switch applies to both sections, so it
    sits below the pair.
-4. **"Or start from…"**: two quiet text buttons under the accordions
+5. **"Or start from…"**: two quiet text buttons under the accordions
    disclose the video-continuation and draft-enhance panels. An attached
    source collapses the irrelevant sections and explains what is set
    aside; removing it restores them. Draft enhance hides prompt/frames
    entirely (the original generation owns them) and shows only Finish +
    Safety.
-5. **Frame**: a console-key ratio dropdown whose trigger and menu rows
+6. **Frame**: a console-key ratio dropdown whose trigger and menu rows
    keep the *drawn glyph of the actual shape* plus label and hint; Auto
    uses the free-crop glyph. Frame and Finish share one dropdown row at
    every width above 330 px, so phones stop spending a full row on each.
-6. **Duration**: Manual is the default. Models that support provider-selected
+7. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
    resolution-specific slider range. Auto replaces the slider with the same
@@ -332,21 +437,25 @@ Layout order:
    and it commits clamped to the range on blur/submit; focusing it while
    AUTO is lit drops to Manual, like touching the slider. Layouts that
    require fixed timing lock the switch to Manual and say why.
-7. **Finish**: a console-key resolution dropdown (label + pixel detail
+8. **Finish**: a console-key resolution dropdown (label + pixel detail
    per row; draft mode dims tiers above HD) on the Frame row, then audio
    and fast-draft hardware switches (lit hunter green when on),
    safety-tolerance knob with an `n / 4` readout, and — for models whose
    API takes one — a **Seed** field with a dice button (empty = random),
    all stacked in the single settings column.
-8. **Estimated charge + Save generation to**: side by side in one row at
+9. **Estimated charge + Save generation to**: side by side in one row at
    desktop widths. The stitched hunter-green panel keeps the brass coin,
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-9. Footer: the console **model selector** (provider + model on a
+10. Footer: the console **model selector** (provider + model on a
    fourteen-segment readout in a screwed charcoal bezel, chevron key;
    opens the shared picker dialog) directly before the backlit
    **GENERATE VIDEO** push-button indicator, shoulder to shoulder at 56 px.
+   While a submission is in flight the key reads **SUBMITTING** — still
+   lit, still inert, still no spinner — and the call site reserves the
+   wider of its two readings so the key cannot shrink under the finger
+   that just pressed it.
    A status line appears only when something blocks a render (API key
    missing, this device cannot run the local model). Under 640 px the
    selector and the key stack, each spanning the composer.
@@ -381,7 +490,7 @@ Attachments, pending picks, a name, aesthetic selection, and settings edits
 make a draft occupied even before any direction is typed. A tab born from AI Rewrite wears a small brass
 `auto_awesome` mark whose tooltip is the model's one-line summary of what
 changed. The model plaque is not in the heading at all: it sits in the
-composer footer directly before Generate (see item 8), inside the draft it
+composer footer directly before Generate (see item 10), inside the draft it
 belongs to. Phones drop the eyebrow and keep just the rail; the first-run
 bring-your-own-key line sits under the rail when no provider is set up.
 Tabs persist locally and sync with the Drive workspace when connected;
@@ -421,8 +530,8 @@ generation-mode rule above still stands — tabs never select a mode.
   fill with cream icon and text; both modes were verified against the old
   unreadable-active-tab bug. Narrow layouts stack the search above the
   segment row and shrink Select to an icon key.
-- **The References desk is two folder tabs** — *Media* and *Aesthetics*,
-  with facet counts — standing on a hairline rule that closes the pinned
+- **The References desk is three folder tabs** — *Media*, *Aesthetics*,
+  and *Characters*, with facet counts — standing on a hairline rule that closes the pinned
   heading under *Your creative ingredients.* They are the Create draft
   rail's construction (`SectionTabRail`, `lib/ui/section_tabs.dart`) cut
   larger: idle tabs are raised console keys on the rule, the open desk is
@@ -442,7 +551,30 @@ generation-mode rule above still stands — tabs never select a mode.
   aesthetic key opens a searchable anchored panel with the same ordering:
   *No aesthetic*, a **Favorites** group, then **All**, each row starring in
   place without closing the panel, and a *Manage aesthetics…* footer that
-  opens this tab.
+  opens this tab. A draft whose definition was edited in the composer leads
+  the panel with a **Custom** row naming the aesthetic it grew out of (see
+  §7, item 3); the library itself is never edited from Create without
+  being asked.
+- **The Characters tab manages the name→media mappings Create casts**
+  (`lib/ui/character_library.dart`, `lib/app/app_controller_characters.dart`).
+  A character *is* saved media: the reference carrying a `characterName`
+  assignment, plus any saved file already called that name, which Create casts
+  beside it — so a row shows overlapping cast thumbnails, the cue-style name, a
+  reference count, and a ⋯ menu (*Edit character*, *Release @card*, *Delete
+  character*). The toolbar keeps the one-row pattern: All / Unassigned facet
+  segments, one search over character and reference names, and a **New
+  character** key. The editing sheet names the character and picks the
+  reference that carries the name; because an assignment is unique across
+  references, choosing another moves it rather than failing at the storage
+  boundary, and the sheet names the files that will be cast alongside it. An
+  **Unassigned** section lists media no character has claimed, each row
+  offering the name its own file implies. *Delete character* only clears the
+  assignment — the media never leaves References. Every write goes through
+  `updateSavedReference`, so Drive, the local store, prompt tags, and the
+  composer stay in step, and a batch speaks once (“VINCE renamed to VINNIE
+  across 1 reference.”). Per-draft casting is untouched: the Cast row and the
+  Characters modal on **Create** still own that draft's `characterMappings`,
+  and a library rename leaves an open draft's cast exactly as it was.
 - **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
   live in an anchored panel instead of stacked chip rows. The key lights
   plum with a count while any of them narrows the view, and the panel
@@ -486,13 +618,29 @@ generation-mode rule above still stands — tabs never select a mode.
 - Card actions stay light: the primary verbs (**Save**, **Reuse/Retry**,
   **Check status**, and — once an AI Rewrite key is saved — **AI Rewrite**
   on delivered films) are buttons; everything else (Organize, Enhance,
-  Copy to Drive, View details, Delete) folds into the shared
+  **Extend**, Copy to Drive, View details, Delete) folds into the shared
   `GenerationActionsMenu` (⋯), which also lists AI Rewrite for the dense
   card sizes. The cost readout is a compact amount chip
   (`GenerationCostChip`) on the same row — just the credit or dollar
   figure at a glance, with the realized/estimated wording, USD
   conversion, balance trail, and quote-vs-realized lines in a small
   anchored popover on tap.
+- **Extend writes the next scene.** On a delivered film whose model takes a
+  reference video, the ⋯ menu offers *Extend*: it opens the film the way
+  Reuse does — same model, settings, folder, and aesthetic — but attaches the
+  film itself as the first creative reference and clears the direction back
+  to `Extend @name.`, plus the script's first scene heading when the film was
+  written as a screenplay. Nothing else of the old direction is kept; the
+  point is to write what happens next. The reference is named after the film
+  (the tab name it was rendered from, else its first words), and the
+  references the film was rendered with come back — the cast first, then the
+  rest, each group in its original order — for as long as the model has room
+  beside the film: counted per kind, against the total, and against the
+  reference-video seconds, with the extended film counting first. Anything
+  that will not fit is left out, cast or not, and said so in one flash
+  notice; an extension of an extension already carries the earlier
+  references baked into its footage. Keyframes are not carried over: the
+  film itself is the guidance now.
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
   keyframes.

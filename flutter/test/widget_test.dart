@@ -3578,9 +3578,13 @@ void main() {
     controller.updateReference(audio.id, 'https://cdn.test/brief.mp3');
 
     controller.rememberReferenceDuration(audio.id, 2);
-    expect(controller.validate(), contains('at least 3 seconds'));
+    expect(controller.validate(), contains('at least 3 s'));
     controller.rememberReferenceDuration(audio.id, 16);
-    expect(controller.validate(), contains('up to 15 seconds'));
+    expect(
+      controller.validate(),
+      'Grok Imagine 1.5 accepts up to 15 s of reference audio; the attached '
+      'clips come to 16 s.',
+    );
     controller.rememberReferenceDuration(audio.id, 10);
     expect(controller.validate(), isNull);
     controller.dispose();
@@ -4965,9 +4969,6 @@ void main() {
           ),
         );
         final foreground = heading.style!.color!;
-        final surface = Theme.of(
-          tester.element(backgroundFinder),
-        ).colorScheme.surface;
         final lighter =
             foreground.computeLuminance() > background.computeLuminance()
             ? foreground
@@ -4977,10 +4978,9 @@ void main() {
             (lighter.computeLuminance() + .05) /
             (darker.computeLuminance() + .05);
 
-        expect(
-          background.computeLuminance(),
-          lessThan(surface.computeLuminance()),
-        );
+        // The headings are burlwood casework: dark in both modes on their
+        // own account, rather than merely darker than the room behind them.
+        expect(background.computeLuminance(), lessThan(.05));
         expect(contrast, greaterThanOrEqualTo(4.5));
         Navigator.of(tester.element(backgroundFinder)).pop();
         await tester.pumpAndSettle();

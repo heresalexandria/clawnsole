@@ -12,6 +12,7 @@ import '../core/shell_bridge.dart';
 import '../core/store_update.dart';
 import '../core/update_status.dart';
 import '../ui/app_intents.dart';
+import '../ui/busy_button.dart';
 import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
 import '../ui/formatters.dart';
@@ -69,6 +70,11 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   bool _requiredUpdateDialogOpen = false;
   String? _lastNotifiedUpdateVersion;
   int _lastNoticeSequence = 0;
+
+  /// Whether the current notice's recovery action is still running. The
+  /// snackbar's own key cannot hold a loader, so the line beside the message
+  /// carries it: a Drive retry is visibly under way, not ignored.
+  final ValueNotifier<bool> _noticeActionRunning = ValueNotifier<bool>(false);
   StreamSubscription<String>? _shellNavigation;
 
   @override
@@ -118,8 +124,19 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     unawaited(_shellUpdates?.cancel());
     unawaited(_shellNavigation?.cancel());
     _updateStatus.removeListener(_handleUpdateStatus);
+    _noticeActionRunning.dispose();
     controller.dispose();
     super.dispose();
+  }
+
+  /// Runs a notice's recovery action with the snackbar showing the work.
+  Future<void> _runNoticeAction(AppNoticeAction action, int sequence) async {
+    _noticeActionRunning.value = true;
+    try {
+      await controller.performNoticeAction(action: action, sequence: sequence);
+    } finally {
+      if (mounted) _noticeActionRunning.value = false;
+    }
   }
 
   @override
@@ -279,9 +296,21 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
                   SnackBar(
                     content: Row(
                       children: <Widget>[
-                        const ClawMark(
-                          size: 19,
-                          color: ClawnsoleColors.brassBright,
+                        ValueListenableBuilder<bool>(
+                          valueListenable: _noticeActionRunning,
+                          builder: (context, running, _) => running
+                              ? const SizedBox.square(
+                                  dimension: 19,
+                                  child: Center(
+                                    child: BusySpinner(
+                                      color: ClawnsoleColors.brassBright,
+                                    ),
+                                  ),
+                                )
+                              : const ClawMark(
+                                  size: 19,
+                                  color: ClawnsoleColors.brassBright,
+                                ),
                         ),
                         const SizedBox(width: 11),
                         Expanded(child: Text(controller.notice!)),
@@ -292,10 +321,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
                         : SnackBarAction(
                             label: actionLabel,
                             onPressed: () => unawaited(
-                              controller.performNoticeAction(
-                                action: action,
-                                sequence: actionSequence,
-                              ),
+                              _runNoticeAction(action, actionSequence),
                             ),
                           ),
                   ),

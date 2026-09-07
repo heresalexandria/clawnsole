@@ -14,6 +14,16 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/provider_catalog.dart';
 import 'hardware.dart';
+import 'panels.dart';
+
+/// How tall a section heading stands. The picker's headings are casework
+/// facings rather than tinted bars, so they carry the weight of one: room
+/// for 12.5 px capitals and a star without either crowding the other.
+const double _headingHeight = 50;
+
+/// The favorites section's key in the veneer run. Not a provider id, and
+/// no provider id can look like it.
+const String _favoritesSliceKey = '#favorites';
 
 /// Which provider sections this studio has folded away, remembered for the
 /// life of the controller so both triggers open the list as the user left it.
@@ -166,6 +176,16 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
     final favorites = query.isEmpty
         ? controller.favoriteModels
         : const <FavoriteModel>[];
+    // The headings are burlwood facings, cut in the order they are laid so
+    // that no two touching ones come off the same part of the sheet.
+    final sliceKeys = <String>[
+      if (favorites.isNotEmpty) _favoritesSliceKey,
+      for (final match in matches) match.provider.id,
+    ];
+    final cuts = <String, BurlwoodCut>{
+      for (final (index, cut) in BurlwoodCut.run(sliceKeys).indexed)
+        sliceKeys[index]: cut,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -231,6 +251,7 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                     if (favorites.isNotEmpty)
                       _FavoriteModelsSection(
                         key: const ValueKey('provider-model-favorites'),
+                        cut: cuts[_favoritesSliceKey]!,
                         favorites: favorites,
                         selectedProviderId: controller.selectedProviderId,
                         selectedModelId: controller.selectedModel.id,
@@ -246,6 +267,7 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                         key: ValueKey(
                           'provider-model-section-${match.provider.id}',
                         ),
+                        cut: cuts[match.provider.id]!,
                         provider: match.provider,
                         models: match.models,
                         forceExpanded: query.isNotEmpty,
@@ -283,6 +305,7 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
 
 class _ProviderMenuSection extends StatefulWidget {
   const _ProviderMenuSection({
+    required this.cut,
     required this.provider,
     required this.models,
     required this.forceExpanded,
@@ -297,6 +320,8 @@ class _ProviderMenuSection extends StatefulWidget {
     super.key,
   });
 
+  /// Which patch of the burl sheet this heading is faced with.
+  final BurlwoodCut cut;
   final VideoProviderDefinition provider;
   final List<VideoModelDefinition> models;
   final bool forceExpanded;
@@ -334,59 +359,67 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
   @override
   Widget build(BuildContext context) {
     final expanded = widget.forceExpanded || _expanded;
-    final headingBackground = Theme.of(context).brightness == Brightness.dark
-        ? context.colors.surfaceContainerLowest
-        : context.colors.surfaceContainerHighest;
+    final ink = PanelSurface.burlwood.ink(context.tokens);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ColoredBox(
-          key: ValueKey(
+        BurlwoodSlice(
+          cut: widget.cut,
+          groundKey: ValueKey(
             'provider-model-heading-background-${widget.provider.id}',
           ),
-          color: headingBackground,
-          child: InkWell(
-            key: ValueKey('provider-model-heading-${widget.provider.id}'),
-            onTap: widget.forceExpanded ? null : _toggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      widget.provider.name.toUpperCase(),
-                      style: TextStyle(
-                        color: context.colors.onSurface,
-                        fontSize: 10,
-                        letterSpacing: 1.1,
-                        fontWeight: FontWeight.w800,
+          // The veneer is opaque, so the key brings its own Material and
+          // the ripple lands on the wood instead of behind it.
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              key: ValueKey('provider-model-heading-${widget.provider.id}'),
+              onTap: widget.forceExpanded ? null : _toggle,
+              splashColor: ink.on.withValues(alpha: .12),
+              highlightColor: ink.on.withValues(alpha: .06),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: _headingHeight),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          widget.provider.name.toUpperCase(),
+                          style: TextStyle(
+                            color: ink.on,
+                            fontSize: 12.5,
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
                       ),
-                    ),
+                      _FavoriteStar(
+                        key: ValueKey(
+                          'provider-favorite-${widget.provider.id}',
+                        ),
+                        starred: widget.favorite,
+                        subject: widget.provider.name,
+                        onPressed: widget.onProviderFavoriteToggle,
+                        ink: ink,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '${widget.models.length}',
+                        style: TextStyle(color: ink.onMuted, fontSize: 11),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        expanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 19,
+                        color: ink.onMuted,
+                      ),
+                    ],
                   ),
-                  _FavoriteStar(
-                    key: ValueKey('provider-favorite-${widget.provider.id}'),
-                    starred: widget.favorite,
-                    subject: widget.provider.name,
-                    onPressed: widget.onProviderFavoriteToggle,
-                  ),
-                  const SizedBox(width: 2),
-                  Text(
-                    '${widget.models.length}',
-                    style: TextStyle(
-                      color: context.colors.onSurface.withValues(alpha: .72),
-                      fontSize: 10,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Icon(
-                    expanded
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: context.colors.onSurface.withValues(alpha: .72),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -463,6 +496,7 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
 /// The starred models pinned above the provider sections of the picker.
 class _FavoriteModelsSection extends StatelessWidget {
   const _FavoriteModelsSection({
+    required this.cut,
     required this.favorites,
     required this.selectedProviderId,
     required this.selectedModelId,
@@ -470,6 +504,7 @@ class _FavoriteModelsSection extends StatelessWidget {
     super.key,
   });
 
+  final BurlwoodCut cut;
   final List<FavoriteModel> favorites;
   final String selectedProviderId;
   final String selectedModelId;
@@ -477,40 +512,40 @@ class _FavoriteModelsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final headingBackground = Theme.of(context).brightness == Brightness.dark
-        ? context.colors.surfaceContainerLowest
-        : context.colors.surfaceContainerHighest;
+    final ink = PanelSurface.burlwood.ink(context.tokens);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ColoredBox(
-          color: headingBackground,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 11, 12, 9),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.star_rounded, size: 14, color: context.tokens.brass),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'FAVORITES',
-                    style: TextStyle(
-                      color: context.colors.onSurface,
-                      fontSize: 10,
-                      letterSpacing: 1.1,
-                      fontWeight: FontWeight.w800,
+        // Cut from the same sheet as the provider headings: it is the same
+        // kind of thing, and one pale bar among them would read as a slip.
+        BurlwoodSlice(
+          cut: cut,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: _headingHeight),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+              child: Row(
+                children: <Widget>[
+                  Icon(Icons.star_rounded, size: 15, color: ink.accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'FAVORITES',
+                      style: TextStyle(
+                        color: ink.on,
+                        fontSize: 12.5,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  '${favorites.length}',
-                  style: TextStyle(
-                    color: context.colors.onSurface.withValues(alpha: .72),
-                    fontSize: 10,
+                  Text(
+                    '${favorites.length}',
+                    style: TextStyle(color: ink.onMuted, fontSize: 11),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -587,27 +622,39 @@ class _FavoriteStar extends StatelessWidget {
     required this.subject,
     required this.onPressed,
     super.key,
+    this.ink,
   });
 
   final bool starred;
   final String subject;
   final VoidCallback onPressed;
 
+  /// Set when the star sits on a panel rather than on the dialog surface —
+  /// casework keeps cream ink and its own brass in both modes.
+  final PanelInk? ink;
+
   @override
-  Widget build(BuildContext context) => IconButton(
-    tooltip: starred
-        ? 'Remove $subject from favorites'
-        : 'Add $subject to favorites',
-    onPressed: onPressed,
-    isSelected: starred,
-    visualDensity: VisualDensity.compact,
-    padding: EdgeInsets.zero,
-    constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-    iconSize: 17,
-    selectedIcon: Icon(Icons.star_rounded, color: context.tokens.brass),
-    icon: Icon(
-      Icons.star_border_rounded,
-      color: context.colors.onSurface.withValues(alpha: .45),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final panel = ink;
+    return IconButton(
+      tooltip: starred
+          ? 'Remove $subject from favorites'
+          : 'Add $subject to favorites',
+      onPressed: onPressed,
+      isSelected: starred,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+      iconSize: 17,
+      selectedIcon: Icon(
+        Icons.star_rounded,
+        color: panel?.accent ?? context.tokens.brass,
+      ),
+      icon: Icon(
+        Icons.star_border_rounded,
+        color:
+            panel?.onMuted ?? context.colors.onSurface.withValues(alpha: .45),
+      ),
+    );
+  }
 }

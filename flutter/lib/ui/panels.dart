@@ -216,6 +216,203 @@ class _StitchPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.borderRadius != borderRadius;
 }
 
+/// One cut of the burlwood veneer.
+///
+/// A cabinetmaker taking facings out of one sheet of burl does not lay them
+/// end to end — the figure would run straight through the joint and the
+/// pieces would read as one board. The sheet is instead thought of as a grid
+/// of patches, and each facing is taken from its own patch: [BurlwoodCut.run]
+/// hands out patches from a stable hash of each key, and never lets a facing
+/// take a patch within one row of the one above it, so the grain always
+/// breaks at the joint.
+///
+/// The patch is expressed as a [DecorationImage] alignment against the
+/// unscaled photograph, so a short row shows a genuinely different region
+/// rather than the same region at a different zoom.
+@immutable
+class BurlwoodCut {
+  const BurlwoodCut({
+    required this.column,
+    required this.row,
+    required this.flipped,
+  });
+
+  /// The cut for a single key, with nothing above it to avoid.
+  factory BurlwoodCut.of(String key) => run(<String>[key]).single;
+
+  /// How the sheet is divided. Rows carry the variety: at the natural size
+  /// of the photograph two neighbouring rows are ~139 px apart, well clear
+  /// of any row of console height, while the columns only slide a wide
+  /// facing along the sheet.
+  static const int columns = 4;
+  static const int rows = 8;
+  static const int patches = columns * rows;
+
+  final int column;
+  final int row;
+
+  /// Whether the cutter turned the facing over before laying it down.
+  final bool flipped;
+
+  /// Which patch of the sheet this is, 0 to [patches] - 1.
+  int get patch => column * rows + row;
+
+  /// Where the patch sits on the sheet, as a [DecorationImage] alignment.
+  Alignment get alignment =>
+      Alignment(-1 + 2 * column / (columns - 1), -1 + 2 * row / (rows - 1));
+
+  /// Cuts for [keys] in the order the facings will be laid, so that no two
+  /// touching facings come off the same part of the sheet.
+  static List<BurlwoodCut> run(Iterable<String> keys) {
+    final cuts = <BurlwoodCut>[];
+    int? above;
+    for (final key in keys) {
+      final hash = _hash(key);
+      var patch = hash % patches;
+      // An odd stride is coprime with a thirty-two patch sheet, so walking
+      // by it always finds a clear patch rather than giving up.
+      final stride = 1 + 2 * (hash ~/ patches % (patches ~/ 2));
+      for (var guard = 0; guard < patches; guard++) {
+        if (above == null || !_touches(patch, above)) break;
+        patch = (patch + stride) % patches;
+      }
+      cuts.add(
+        BurlwoodCut(
+          column: patch ~/ rows,
+          row: patch % rows,
+          flipped: hash & 0x20 != 0,
+        ),
+      );
+      above = patch;
+    }
+    return cuts;
+  }
+
+  /// Whether two patches would show continuous grain if laid together.
+  static bool _touches(int a, int b) => (a % rows - b % rows).abs() < 2;
+
+  /// A stable string hash. Deliberately not [String.hashCode], which the
+  /// language does not promise to keep the same between runs.
+  static int _hash(String key) {
+    var h = 0x1505;
+    for (var i = 0; i < key.length; i++) {
+      h = ((h * 33) ^ key.codeUnitAt(i)) & 0x3fffffff;
+    }
+    return h;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is BurlwoodCut &&
+      other.column == column &&
+      other.row == row &&
+      other.flipped == flipped;
+
+  @override
+  int get hashCode => Object.hash(column, row, flipped);
+
+  @override
+  String toString() =>
+      'BurlwoodCut(column: $column, row: $row, flipped: $flipped)';
+}
+
+/// A facing of burlwood casework cut at [cut], with [child] laid over it.
+///
+/// Casework is the cabinet the app is built into, so this stays dark in both
+/// appearance modes; take content colors from
+/// `PanelSurface.burlwood.ink(tokens)`. The flat finish underneath carries
+/// [groundKey] — it is what shows while the photograph decodes, and it is
+/// the color the facing reads as.
+///
+/// Anything tappable inside must bring its own transparent [Material]: the
+/// veneer is opaque, and a splash painted by an ancestor would be lost
+/// behind it.
+class BurlwoodSlice extends StatelessWidget {
+  const BurlwoodSlice({
+    required this.cut,
+    required this.child,
+    super.key,
+    this.groundKey,
+    this.jointed = true,
+  });
+
+  final BurlwoodCut cut;
+  final Widget child;
+
+  /// Goes on the flat stand-in beneath the photograph.
+  final Key? groundKey;
+
+  /// Draws the saw line along the top edge, where this facing was parted
+  /// from its neighbour.
+  final bool jointed;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget veneer = DecoratedBox(
+      decoration: BoxDecoration(
+        image: DecorationImage(
+          image: const AssetImage(ClawnsoleTextures.burlwood),
+          // Unscaled, so the alignment picks a region of the sheet rather
+          // than the same region seen closer or further away, and at the
+          // same grain as the rail's own veneer.
+          fit: BoxFit.none,
+          alignment: cut.alignment,
+          // Facings are meant to be smaller than the 1024 px sheet, which
+          // every row in the app is; a larger one gets wood with a seam
+          // rather than a band of flat finish.
+          repeat: ImageRepeat.repeat,
+          filterQuality: FilterQuality.medium,
+        ),
+      ),
+    );
+    if (cut.flipped) {
+      veneer = Transform.scale(scaleX: -1, child: veneer);
+    }
+    return ColoredBox(
+      key: groundKey,
+      color: PanelSurface.burlwood.ground(context.tokens),
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(child: veneer),
+          // A whisper of shade so cream ink clears the bright figure
+          // wherever the cut happens to land.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    Colors.black.withValues(alpha: .1),
+                    Colors.black.withValues(alpha: .26),
+                  ],
+                ),
+                border: jointed
+                    ? Border(
+                        top: BorderSide(
+                          color: Colors.black.withValues(alpha: .5),
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+          ),
+          // The fresh edge just under the kerf, catching the room.
+          if (jointed)
+            Positioned(
+              top: 1,
+              left: 0,
+              right: 0,
+              height: 1,
+              child: ColoredBox(color: Colors.white.withValues(alpha: .07)),
+            ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 /// Screen backdrop: the theme's canvas color under a faint material texture.
 class AppBackdrop extends StatelessWidget {
   const AppBackdrop({required this.child, super.key});

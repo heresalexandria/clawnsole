@@ -17,6 +17,7 @@ import '../core/generation_timing.dart';
 import '../core/generation_preferences.dart';
 import '../core/google_drive.dart';
 import '../core/google_drive_session.dart';
+import '../core/google_drive_upload_pump.dart';
 import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
@@ -29,6 +30,7 @@ import '../core/settings_vault_gateway.dart';
 import '../core/screenplay.dart';
 import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
+import 'busy_registry.dart';
 
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
@@ -294,10 +296,30 @@ class ReferenceCandidate {
   final double? durationSeconds;
 }
 
+/// The answer to "may one more reference join this form?". Every add path
+/// asks [AppController.checkReferenceBudget] before it does any upload or
+/// persistence work, so a refusal costs the director nothing but a notice.
+class ReferenceBudgetVerdict {
+  const ReferenceBudgetVerdict.allowed() : refusal = null;
+
+  const ReferenceBudgetVerdict.refused(String this.refusal);
+
+  /// The sentence to show when the reference cannot be added; null when it
+  /// can.
+  final String? refusal;
+
+  bool get allowed => refusal == null;
+}
+
 class GenerationFormState {
   String prompt = '';
   bool screenplayMode = false;
   String? aestheticReferenceId;
+
+  /// The aesthetic definition edited in place on this draft. Null follows the
+  /// selected aesthetic; anything else is the "Custom" definition that is
+  /// appended at submission instead.
+  String? aestheticCustomText;
   final Set<String> screenplayLinkedCharacters = {};
   final Map<String, String> screenplayCharacterAliases = {};
   final Map<String, String> draftCharacterNames = {};
@@ -446,6 +468,7 @@ class ComposerTab {
       form.prompt.trim().isEmpty &&
       !form.screenplayMode &&
       form.aestheticReferenceId == null &&
+      form.aestheticCustomText == null &&
       form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
       form.references.isEmpty &&
@@ -484,6 +507,7 @@ class AppController extends ChangeNotifier {
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
+    _watchDriveUploadStatus();
     final first = ComposerTab(
       id: _uid(),
       providerId: 'bfl',
@@ -617,6 +641,11 @@ class AppController extends ChangeNotifier {
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
+
+  /// Per-item work in flight, keyed by kind and id, so a card or row can show
+  /// a loader for an action started somewhere else — a closed menu, a
+  /// snackbar's recovery button, a drop on a folder.
+  final BusyRegistry busy = BusyRegistry();
   int _referenceUploadDepth = 0;
   String? referenceUploadStatus;
   int get formRevision => _draftTab.formRevision;
@@ -681,6 +710,7 @@ class AppController extends ChangeNotifier {
   bool _pendingWorkCache = false;
   LocalSnapshot? _pendingDriveUploadSnapshot;
   int _pendingDriveUploadCache = 0;
+  Set<String> _pendingDriveUploadIds = const <String>{};
   final Set<String> _statusChecks = <String>{};
 
   /// Generations whose submission call this process is still running, by
@@ -964,6 +994,7 @@ class AppController extends ChangeNotifier {
     prompt: tab.form.prompt,
     screenplayMode: tab.form.screenplayMode,
     aestheticReferenceId: tab.form.aestheticReferenceId,
+    aestheticCustomText: tab.form.aestheticCustomText,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
     characterMappings: {
@@ -1219,6 +1250,7 @@ class AppController extends ChangeNotifier {
       ..prompt = record.prompt
       ..screenplayMode = record.screenplayMode
       ..aestheticReferenceId = record.aestheticReferenceId
+      ..aestheticCustomText = record.aestheticCustomText
       ..aspectRatio = record.aspectRatio
       ..autoDuration = record.autoDuration
       ..durationSeconds = record.durationSeconds
@@ -1574,6 +1606,31 @@ class AppController extends ChangeNotifier {
     return _pendingWorkCache;
   }
 
+  /// Mirrors this device's Drive upload queue into the record helpers the
+  /// storage chips read, so a staged file can say whether *this* device is
+  /// publishing it or is only waiting for the device that made it.
+  ///
+  /// A gateway without a local pump (the Electron renderer publishes through
+  /// the companion's) installs nothing, and those chips fall back to the
+  /// truthful "Awaiting upload" rather than claiming a sync.
+  void _watchDriveUploadStatus() {
+    resetDriveUploadQueue();
+    if (gateway case final DriveUploadStatusSource source) {
+      installDriveUploadQueue(source.driveUploadStatus);
+      source.onDriveUploadStatus = () {
+        if (_disposed) return;
+        installDriveUploadQueue(source.driveUploadStatus);
+        notifyListeners();
+      };
+    }
+  }
+
+  /// What this device's upload pass last said about its own queue.
+  DriveUploadQueueReport get driveUploadStatus => switch (gateway) {
+    final DriveUploadStatusSource source => source.driveUploadStatus,
+    _ => DriveUploadQueueReport.unknown,
+  };
+
   /// Media staged on this device that a background pass still needs to
   /// publish to Google Drive: Drive-tagged records whose assets are still
   /// local-kind. Drives the non-blocking "backing up to Drive" indicators.
@@ -1582,12 +1639,28 @@ class AppController extends ChangeNotifier {
     if (current == null) return 0;
     if (!identical(current, _pendingDriveUploadSnapshot)) {
       _pendingDriveUploadSnapshot = current;
-      _pendingDriveUploadCache = pendingDriveUploadAssets(
+      _pendingDriveUploadIds = pendingDriveUploadAssets(
         current.generations,
         current.savedReferences,
-      ).map((reference) => reference.value).toSet().length;
+      ).map((reference) => reference.value).toSet();
+      _pendingDriveUploadCache = _pendingDriveUploadIds.length;
     }
     return _pendingDriveUploadCache;
+  }
+
+  /// Whether staged media is waiting on *this* device. Media another device
+  /// owes is not this device's work: counting it kept iOS reporting pending
+  /// background work — and the studio polling Drive at the faster pending
+  /// cadence — for as long as the other device stayed away.
+  ///
+  /// A staged file this device's pass has not classified yet counts as ours,
+  /// so a film saved a moment ago never loses its background window while
+  /// the first pass is still settling.
+  bool get hasOutgoingDriveUploads {
+    if (pendingDriveUploadCount == 0) return false;
+    final report = driveUploadStatus;
+    if (!report.reported) return true;
+    return _pendingDriveUploadIds.any((id) => !report.foreign.contains(id));
   }
 
   @override
@@ -1599,7 +1672,7 @@ class AppController extends ChangeNotifier {
     if (!_disposed) {
       unawaited(
         _backgroundActivity.setPendingWork(
-          hasPendingProviderWork || pendingDriveUploadCount > 0,
+          hasPendingProviderWork || hasOutgoingDriveUploads,
         ),
       );
     }
@@ -2553,11 +2626,16 @@ class AppController extends ChangeNotifier {
       // Test status also gates the compiled mobile credential. Refresh the
       // snapshot now so provider UI cannot retain the key after an unlock.
       try {
-        _apply(await gateway.load());
+        final revision = _snapshotRevision;
+        await _applySnapshotRead(
+          await gateway.load(),
+          startedAtRevision: revision,
+        );
       } on Object {
         // Request routing consults the active catalog directly; foreground
         // reconciliation can repair this best-effort UI snapshot later.
       }
+      if (_disposed) return;
       _resetPublishedProviderPrices();
       _reconcileProviderCatalogSelection();
       notifyListeners();
@@ -2699,7 +2777,11 @@ class AppController extends ChangeNotifier {
       // provider retention estimate lapsed while the app was suspended, and a
       // link just past that estimate deserves one recovery attempt first.
       if (hasAnyApiKey) await pollWorking(ignoreSchedule: true);
-      _apply(await gateway.load());
+      final revision = _snapshotRevision;
+      await _applySnapshotRead(
+        await gateway.load(),
+        startedAtRevision: revision,
+      );
       // Drive reconnection can stall on sockets the platform killed during
       // suspension; a bounded wait keeps this reconcile hook responsive for
       // the next foreground return.
@@ -3086,24 +3168,31 @@ class AppController extends ChangeNotifier {
       generationPreferences: Map.of(_generationPreferences),
     );
     _preferenceRevision += 1;
+    // A preference write answers with the store's whole library, read before
+    // the call returned. Applying that wholesale would drop any record another
+    // code path put in memory while the write was open (a delivery just
+    // imported, an organization edit whose write is still queued), so it goes
+    // through the same superseded-read merge every other asynchronous library
+    // read uses. The studio's live preferences still win over the response —
+    // this call is what just wrote them — so restorePreferences stays off.
+    Future<void> writePreferences() async {
+      final revision = _snapshotRevision;
+      final saved = await gateway.setPreferences(preferences);
+      if (_disposed) return;
+      await _applySnapshotRead(saved, startedAtRevision: revision);
+      await _retryPendingSettingsVaultSync();
+    }
+
     final operation = _preferenceWrites.then((_) async {
       try {
-        final saved = await gateway.setPreferences(preferences);
-        if (!_disposed) {
-          _apply(saved);
-          await _retryPendingSettingsVaultSync();
-        }
+        await writePreferences();
       } on Object {
         // Mobile and companion Drive tokens are short-lived. The client can
         // still look connected when a preference write (tab selection is one)
         // is the first request to discover expiration. Silently replace the
         // session and retry the idempotent preference write once.
         if (_disposed || !await resumeGoogleDrive(force: true)) rethrow;
-        final saved = await gateway.setPreferences(preferences);
-        if (!_disposed) {
-          _apply(saved);
-          await _retryPendingSettingsVaultSync();
-        }
+        await writePreferences();
       }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
@@ -4685,11 +4774,30 @@ class AppController extends ChangeNotifier {
     Iterable<ReferenceCandidate> candidates,
   ) async {
     final tab = _draftTab;
-    final available = referenceLimit(kind) - form.referenceCount(kind);
-    final selected = candidates
-        .where((item) => item.kind == kind)
-        .take(available < 0 ? 0 : available)
-        .toList();
+    // Saved and generated candidates carry their measured duration, so the
+    // seconds budget is decided here — before any media is read or hydrated.
+    // Candidates are walked in order: the ones that fit are taken, and the
+    // ones left out are reported together in one notice.
+    final selected = <ReferenceCandidate>[];
+    final refusals = <String>[];
+    var claimedCount = 0;
+    var claimedSeconds = .0;
+    for (final candidate in candidates.where((item) => item.kind == kind)) {
+      final verdict = checkReferenceBudget(
+        kind,
+        durationSeconds: candidate.durationSeconds,
+        pendingCount: claimedCount,
+        pendingSeconds: claimedSeconds,
+      );
+      if (!verdict.allowed) {
+        refusals.add(verdict.refusal!);
+        continue;
+      }
+      selected.add(candidate);
+      claimedCount += 1;
+      claimedSeconds += candidate.durationSeconds ?? 0;
+    }
+    _noteReferenceRefusals(refusals);
     if (selected.isEmpty) return;
     // Drafts appear immediately; media bytes hydrate on the background work
     // queue so choosing saved references never blocks further adds — even
@@ -5473,11 +5581,12 @@ class AppController extends ChangeNotifier {
       (role == KeyframeRole.middle ||
           !form.keyframes.any((frame) => frame.role == role));
 
+  /// Whether the add buttons for [kind] are live at all. The same budget
+  /// [checkReferenceBudget] enforces, asked without a particular candidate:
+  /// a seconds budget cannot close the buttons, because whether the next
+  /// clip fits depends on how long it turns out to be.
   bool canAddReference(MediaReferenceKind kind) =>
-      !referencesBlockedByFrames &&
-      form.referenceCount(kind) < referenceLimit(kind) &&
-      (selectedModel.maxTotalReferences == null ||
-          form.references.length < selectedModel.maxTotalReferences!);
+      checkReferenceBudget(kind).allowed;
 
   VideoModelDefinition? _modelForReferenceAsFirstFrame(
     MediaReferenceDraft reference,
@@ -5585,6 +5694,142 @@ class AppController extends ChangeNotifier {
           form.referenceTask != MediaReferenceTask.reference
       ? selectedModel.maxVideoReferences.clamp(0, 1)
       : selectedModel.maxReferences(kind, form.mode);
+
+  /// Total seconds of reference media of [kind] the selected model accepts,
+  /// resolved for the form's current resolution. Null when the model
+  /// publishes no seconds budget for that kind; images never carry one.
+  int? referenceSecondsLimit(MediaReferenceKind kind) =>
+      referenceLimit(kind) <= 0
+      ? null
+      : selectedModel.maxReferenceSeconds(kind, form.resolution);
+
+  /// Seconds of reference media of [kind] already attached. A reference
+  /// whose duration has not been measured yet counts as zero; how many are
+  /// still being read is [referenceSecondsPending].
+  double referenceSecondsUsed(MediaReferenceKind kind) => form.references
+      .where((item) => item.kind == kind)
+      .map((item) => item.durationSeconds)
+      .whereType<double>()
+      .fold<double>(0, (sum, seconds) => sum + seconds);
+
+  /// Attached references of [kind] whose duration is still being measured.
+  /// Their seconds are missing from [referenceSecondsUsed], so the gauge
+  /// reads `?` rather than a figure that is quietly too small.
+  int referenceSecondsPending(MediaReferenceKind kind) => form.references
+      .where((item) => item.kind == kind && item.durationSeconds == null)
+      .length;
+
+  /// The attached references of [kind] already exceed the model's seconds
+  /// budget — after a model switch shrank it, or once a measured duration
+  /// landed. [validate] blocks Generate with the reason while this holds.
+  bool referenceSecondsOverBudget(MediaReferenceKind kind) {
+    final budget = referenceSecondsLimit(kind);
+    return budget != null && referenceSecondsUsed(kind) > budget + _secondSlack;
+  }
+
+  /// Whether one more reference of [kind] fits every budget the selected
+  /// model publishes: the per-kind count, the total count, and — when the
+  /// candidate's [durationSeconds] is already known — the seconds budget.
+  ///
+  /// [pendingCount] and [pendingSeconds] carry what earlier candidates of
+  /// the same batch have claimed, so a multi-file drop or pick walks its
+  /// candidates in order and takes the ones that fit.
+  ///
+  /// A candidate whose duration is not measured yet passes the seconds test
+  /// here: a local pick or drop has no duration until the metadata loader
+  /// reads it. [rememberReferenceDuration] says so the moment the figure
+  /// lands, [validate] blocks Generate meanwhile, and the accordion's
+  /// seconds gauge shows the overrun.
+  ReferenceBudgetVerdict checkReferenceBudget(
+    MediaReferenceKind kind, {
+    double? durationSeconds,
+    int pendingCount = 0,
+    double pendingSeconds = 0,
+  }) {
+    final model = selectedModel;
+    if (referencesBlockedByFrames) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} takes pinned frames or creative references, not both.',
+      );
+    }
+    final maximum = referenceLimit(kind);
+    if (maximum <= 0) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} does not accept reference ${kind.pluralLabel}.',
+      );
+    }
+    if (form.referenceCount(kind) + pendingCount >= maximum) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} accepts up to $maximum ${kind.pluralLabel}.',
+      );
+    }
+    final total = model.maxTotalReferences;
+    if (total != null && form.references.length + pendingCount >= total) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} accepts up to $total creative references total.',
+      );
+    }
+    if (durationSeconds != null && durationSeconds > 0) {
+      final minimum = kind == MediaReferenceKind.audio
+          ? model.minReferenceAudioSeconds
+          : null;
+      if (minimum != null && durationSeconds + _secondSlack < minimum) {
+        return ReferenceBudgetVerdict.refused(
+          _referenceMinimumSecondsProblem(model, minimum),
+        );
+      }
+      final budget = referenceSecondsLimit(kind);
+      if (budget != null) {
+        final projected =
+            referenceSecondsUsed(kind) + pendingSeconds + durationSeconds;
+        if (projected > budget + _secondSlack) {
+          return ReferenceBudgetVerdict.refused(
+            '${_referenceSecondsBudgetPhrase(model, kind, budget)}; that clip '
+            'would bring it to ${_secondsLabel(projected)}.',
+          );
+        }
+      }
+    }
+    return const ReferenceBudgetVerdict.allowed();
+  }
+
+  /// One notice for a whole batch: the first reason, plus how many
+  /// candidates were left out when more than one did not fit.
+  void _noteReferenceRefusals(List<String> refusals) {
+    if (refusals.isEmpty) return;
+    showNotice(
+      refusals.length == 1
+          ? refusals.first
+          : '${refusals.first} ${refusals.length} files were left out.',
+    );
+  }
+
+  /// `Seedance 2.5 accepts up to 30 s of reference video`.
+  static String _referenceSecondsBudgetPhrase(
+    VideoModelDefinition model,
+    MediaReferenceKind kind,
+    int budget,
+  ) =>
+      '${model.label} accepts up to ${_secondsLabel(budget.toDouble())} of '
+      'reference ${kind == MediaReferenceKind.audio ? 'audio' : 'video'}';
+
+  static String _referenceMinimumSecondsProblem(
+    VideoModelDefinition model,
+    int minimum,
+  ) =>
+      '${model.label} needs each reference audio clip to be at least '
+      '${_secondsLabel(minimum.toDouble())}.';
+
+  /// A budget reading: `30 s`, `42.5 s`. Whole seconds wherever the figure
+  /// is whole, so a published cap reads exactly as the provider states it.
+  static String _secondsLabel(double seconds) {
+    final tenths = (seconds * 10).round();
+    return tenths % 10 == 0 ? '${tenths ~/ 10} s' : '${tenths / 10} s';
+  }
+
+  /// Rounding slack for seconds comparisons, so a 15.0004 s clip measured
+  /// off a container header is not refused by a 15 s budget.
+  static const double _secondSlack = .001;
 
   void setReferenceTask(MediaReferenceTask task) {
     if (!selectedModel.referenceTasks.contains(task)) return;
@@ -5756,21 +6001,23 @@ class AppController extends ChangeNotifier {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
     final attached = _inComposerTab(target, () {
-      final available = referenceLimit(kind) - form.referenceCount(kind);
-      final totalAvailable = selectedModel.maxTotalReferences == null
-          ? available
-          : selectedModel.maxTotalReferences! - form.references.length;
-      final accepted = available < totalAvailable ? available : totalAvailable;
-      final uploads = picked.take(accepted < 0 ? 0 : accepted).toList();
-      if (picked.length > uploads.length) {
-        final totalLimit = selectedModel.maxTotalReferences;
-        showNotice(
-          totalLimit != null && totalAvailable <= available
-              ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
-              : '${selectedModel.label} accepts up to '
-                    '${referenceLimit(kind)} ${kind.pluralLabel}.',
+      // A local pick carries no duration yet — the metadata loader reads it
+      // once the tile mounts — so only the count budgets can be judged here.
+      // [rememberReferenceDuration] takes over for the seconds budget.
+      final uploads = <PickedAsset>[];
+      final refusals = <String>[];
+      for (final asset in picked) {
+        final verdict = checkReferenceBudget(
+          kind,
+          pendingCount: uploads.length,
         );
+        if (!verdict.allowed) {
+          refusals.add(verdict.refusal!);
+          continue;
+        }
+        uploads.add(asset);
       }
+      _noteReferenceRefusals(refusals);
       final added = <(String, PickedAsset)>[];
       for (final asset in uploads) {
         final draftId = _appendReference(kind, label: asset.name, asset: asset);
@@ -5994,12 +6241,24 @@ class AppController extends ChangeNotifier {
     if (index < 0 || form.references[index].durationSeconds == seconds) {
       return;
     }
+    final kind = form.references[index].kind;
+    final wasOverBudget = referenceSecondsOverBudget(kind);
     form.references = form.references
         .map(
           (item) =>
               item.id == id ? item.copyWith(durationSeconds: seconds) : item,
         )
         .toList();
+    // A local pick or drop reaches the form without a duration, so this is
+    // the first moment its seconds can be judged. Say so once, when the set
+    // crosses the budget; [validate] keeps Generate blocked afterwards.
+    if (!wasOverBudget && referenceSecondsOverBudget(kind)) {
+      showNotice(
+        '${_referenceSecondsBudgetPhrase(selectedModel, kind, referenceSecondsLimit(kind)!)}; '
+        'the attached clips come to '
+        '${_secondsLabel(referenceSecondsUsed(kind))}.',
+      );
+    }
     final savedReferenceId = form.references[index].savedReferenceId;
     final saved = savedReferences
         .where((item) => item.id == savedReferenceId)
@@ -6554,17 +6813,21 @@ class AppController extends ChangeNotifier {
           ? model.minReferenceAudioSeconds
           : null;
       if (minimum != null &&
-          knownDurations.any((seconds) => seconds + .001 < minimum)) {
-        return '${model.label} needs each reference audio clip to be at least $minimum seconds.';
+          knownDurations.any((seconds) => seconds + _secondSlack < minimum)) {
+        return _referenceMinimumSecondsProblem(model, minimum);
       }
       final maximum = model.maxReferenceSeconds(kind, form.resolution);
       final total = knownDurations.fold<double>(
         0,
         (sum, seconds) => sum + seconds,
       );
-      if (maximum != null && total > maximum + .001) {
-        final media = kind == MediaReferenceKind.video ? 'video' : 'audio';
-        return '${model.label} accepts up to $maximum seconds of reference $media in total.';
+      // A model switch can shrink the budget under a set that already fit,
+      // and a duration measured after the add can push the set over it. Both
+      // land here, so the reason Generate is dark is the same sentence the
+      // add path would have shown.
+      if (maximum != null && total > maximum + _secondSlack) {
+        return '${_referenceSecondsBudgetPhrase(model, kind, maximum)}; '
+            'the attached clips come to ${_secondsLabel(total)}.';
       }
     }
     return null;
@@ -7507,13 +7770,52 @@ class AppController extends ChangeNotifier {
         expectedPreferenceRevision: preferenceRevision,
       );
       await syncComposerWorkspace();
-      showNotice('Google Drive data refreshed.');
+      showNotice('Google Drive data refreshed.${await _driveUploadNotice()}');
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
       googleDriveBusy = false;
       notifyListeners();
     }
+  }
+
+  /// How long a manual refresh waits for the upload pass it kicks before it
+  /// reports from the queue instead. A large film can take minutes; the
+  /// refresh spinner must not.
+  static const Duration _driveRefreshUploadWait = Duration(seconds: 3);
+
+  /// The tail of the refresh notice: what the manual refresh found staged.
+  ///
+  /// A refresh is the director asking why something still says it is not on
+  /// Drive, so it re-kicks this device's upload pass and then says what that
+  /// pass is doing — including when the answer is "nothing here can publish
+  /// these; the device that made them has to".
+  Future<String> _driveUploadNotice() async {
+    if (gateway case final DriveUploadStatusSource source) {
+      try {
+        await source.flushDriveUploads().timeout(_driveRefreshUploadWait);
+      } on Object {
+        // A pass that fails or outruns the wait still reports its queue
+        // below; the pump keeps retrying it either way.
+      }
+      if (_disposed) return '';
+      final status = source.driveUploadStatus;
+      final parts = <String>[
+        if (status.queued.isNotEmpty)
+          status.isStalled
+              ? '${status.queued.length} upload(s) stalled on this device'
+              : '${status.queued.length} upload(s) still in progress',
+        if (status.foreign.isNotEmpty)
+          '${status.foreign.length} file(s) waiting on the device that '
+              'made them',
+      ];
+      if (parts.isEmpty) return '';
+      final detail = status.isStalled && status.stalledDetail != null
+          ? ' ${status.stalledDetail}'
+          : '';
+      return ' ${parts.join('; ')}.$detail';
+    }
+    return '';
   }
 
   Future<String?> setupSettingsVault(String passphrase) async {
@@ -7794,6 +8096,51 @@ class AppController extends ChangeNotifier {
 
   /// Rehydrates [tab] (the tab in front by default) from [item]: retained
   /// keyframes, references, and source media plus every scalar setting.
+  /// What a film's aesthetic means for the draft it reopens in: the direction
+  /// with the appended aesthetic block lifted back out, the aesthetic to
+  /// select, and the definition to carry as Custom when the library has moved
+  /// on since the render.
+  ///
+  /// Films rendered before the aesthetic travelled with the record carry only
+  /// the merged prompt. The one safe reading there is a trailing paragraph
+  /// that is still, word for word, a saved aesthetic; anything else stays in
+  /// the prompt exactly as it was sent.
+  ({String prompt, String? referenceId, String? customText}) _restoredAesthetic(
+    Generation item,
+  ) {
+    var text = item.aestheticText?.trim() ?? '';
+    var recordedId = item.aestheticReferenceId;
+    if (text.isEmpty) {
+      final tail = trailingPromptParagraph(item.prompt);
+      final legacy = tail.isEmpty
+          ? null
+          : _aestheticReferences
+                .where((entry) => entry.text.trim() == tail)
+                .firstOrNull;
+      if (legacy == null) {
+        return (prompt: item.prompt, referenceId: null, customText: null);
+      }
+      text = legacy.text.trim();
+      recordedId = legacy.id;
+    }
+    final prompt = stripAestheticText(item.prompt, text);
+    final same = _aestheticReferences
+        .where((entry) => entry.text.trim() == text)
+        .toList();
+    // The aesthetic it was rendered from, if it still says the same thing;
+    // otherwise any aesthetic that does; otherwise the words themselves.
+    final matched =
+        same.where((entry) => entry.id == recordedId).firstOrNull ??
+        same.firstOrNull;
+    if (matched != null) {
+      return (prompt: prompt, referenceId: matched.id, customText: null);
+    }
+    final base = _aestheticReferences
+        .where((entry) => entry.id == recordedId)
+        .firstOrNull;
+    return (prompt: prompt, referenceId: base?.id, customText: text);
+  }
+
   Future<void> _restoreGenerationSettings(
     Generation item, {
     bool includePrompt = false,
@@ -7964,6 +8311,8 @@ class AppController extends ChangeNotifier {
           ? item.config.referenceTask
           : MediaReferenceTask.reference;
       final takesPrompt = includePrompt && item.mode != VideoMode.draftEnhance;
+      // The aesthetic goes back to being a choice, not prompt text.
+      final aesthetic = takesPrompt ? _restoredAesthetic(item) : null;
       _disabledReferences.clear();
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases
@@ -7971,8 +8320,13 @@ class AppController extends ChangeNotifier {
         ..addAll(item.config.screenplayCharacterAliases);
       form.draftCharacterNames.clear();
       if (takesPrompt) form.characterMappings.clear();
+      if (takesPrompt) {
+        form
+          ..aestheticReferenceId = aesthetic!.referenceId
+          ..aestheticCustomText = aesthetic.customText;
+      }
       form
-        ..prompt = takesPrompt ? item.prompt : form.prompt
+        ..prompt = takesPrompt ? aesthetic!.prompt : form.prompt
         ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
@@ -8060,7 +8414,17 @@ class AppController extends ChangeNotifier {
     }
     _inComposerTab(tab, () {
       if (prompt != null) {
-        tab.form.prompt = prompt;
+        // A rewrite answers with the whole prompt, the aesthetic block
+        // included. The aesthetic stays a choice only when those words came
+        // back word for word; otherwise the rewrite owns the text, and
+        // nothing gets appended to it a second time.
+        final stripped = stripAestheticText(prompt, effectiveAestheticText);
+        if (stripped == prompt) {
+          form
+            ..aestheticReferenceId = null
+            ..aestheticCustomText = null;
+        }
+        tab.form.prompt = stripped;
         // A rewrite echoes the casting block back; it belongs to the cast.
         absorbPromptMappings();
       }
@@ -8104,6 +8468,216 @@ class AppController extends ChangeNotifier {
     }
     await navigate(AppSection.create);
     showNotice('Prompt, settings, and retained references copied.');
+  }
+
+  /// Whether [item] can seed the next scene: a delivered film, on a provider
+  /// and model this build still has, whose model takes a reference video.
+  bool canExtend(Generation item) =>
+      canReuse(item) &&
+      !item.isImage &&
+      item.isReady &&
+      item.hasDeliveredMedia &&
+      modelById(item.provider, item.model).maxVideoReferences > 0;
+
+  /// The name the extended film answers to in the prompt: the tab it was
+  /// rendered from, else the first words of its direction, else its id.
+  /// Unique among what is attached and what the References library holds.
+  String _extendReferenceName(Generation item) {
+    final title = item.title?.trim() ?? '';
+    var base =
+        (title.isNotEmpty ? title : composerTabTitle(null, item.displayPrompt))
+            .replaceAll(RegExp(r'[@:\n\r]'), ' ')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim()
+            .replaceAll(RegExp(r'[.…]+$'), '')
+            .trim();
+    if (base.length > 60) base = base.substring(0, 60).trim();
+    if (base.isEmpty ||
+        base == composerTabUntitled ||
+        isReservedReferenceName(base)) {
+      final id = item.localId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+      final short = id.isEmpty
+          ? 'film'
+          : id.substring(0, id.length < 6 ? id.length : 6);
+      base = 'scene-$short';
+    }
+    var name = base;
+    for (var attempt = 2; attempt <= 30; attempt += 1) {
+      if (referenceNameProblem(name, allowReserved: true) == null) break;
+      name = '$base $attempt';
+    }
+    return name;
+  }
+
+  /// The delivered film as a creative reference, without going through the
+  /// library listing: an extend is always about this one record.
+  ReferenceCandidate? _extendCandidate(Generation item, String name) {
+    final asset =
+        item.resultAsset ??
+        (item.resultUrl == null
+            ? null
+            : AssetReference(
+                kind: 'remote',
+                value: item.resultUrl!,
+                label: name,
+                contentType: 'video/mp4',
+              ));
+    if (asset == null) return null;
+    return ReferenceCandidate(
+      id: item.localId,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      thumbnailAsset: item.thumbnailAsset,
+      createdAt: item.createdAt,
+      folderId: item.folderId,
+      tags: item.tags,
+      generated: true,
+      storage: item.storage,
+      durationSeconds: item.config.duration is num
+          ? (item.config.duration as num).toDouble()
+          : null,
+    );
+  }
+
+  /// Why the reference just appended does not fit, or null when it does. Read
+  /// against the live form, so each answer counts what is already attached —
+  /// the extended film first.
+  String? _extendCapacityProblem(MediaReferenceKind kind) {
+    final model = selectedModel;
+    final limit = referenceLimit(kind);
+    if (form.referenceCount(kind) > limit) {
+      return limit == 0
+          ? '${model.label} does not accept reference ${kind.pluralLabel}.'
+          : '${model.label} accepts up to $limit ${kind.pluralLabel}.';
+    }
+    final total = model.maxTotalReferences;
+    if (total != null && form.references.length > total) {
+      return '${model.label} accepts up to $total creative references total.';
+    }
+    final seconds = model.maxReferenceSeconds(kind, form.resolution);
+    if (seconds != null) {
+      final used = form.references
+          .where((item) => item.kind == kind)
+          .map((item) => item.durationSeconds)
+          .whereType<double>()
+          .fold<double>(0, (sum, value) => sum + value);
+      if (used > seconds + .001) {
+        final media = kind == MediaReferenceKind.video ? 'video' : 'audio';
+        return '${model.label} accepts up to $seconds seconds of reference '
+            '$media in total.';
+      }
+    }
+    return null;
+  }
+
+  /// Opens the next scene of [item]: the film itself becomes the reference to
+  /// extend, the direction is cleared back to `Extend @name.` (plus the scene
+  /// heading, in a screenplay), and everything else — model, settings,
+  /// aesthetic, and as many of the film's own references as the model still
+  /// has room for beside it, cast first — carries over. Whatever no longer
+  /// fits is dropped rather than squeezed in: an extension of an extension
+  /// already carries the earlier references baked into its footage. The old
+  /// direction is deliberately not kept: the point is to write what happens
+  /// next.
+  Future<void> extend(Generation item) async {
+    if (!canExtend(item)) {
+      showNotice('That film cannot be extended with this provider or model.');
+      return;
+    }
+    // A tab with direction already typed in it is somebody's work.
+    final tab = activeComposerTab.isBlank
+        ? activeComposerTab
+        : addComposerTab();
+    try {
+      await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return;
+    }
+    final name = _inComposerTab(tab, () => _extendReferenceName(item));
+    final candidate = _extendCandidate(item, name);
+    if (candidate == null) {
+      showNotice('That film has no video to extend yet.');
+      return;
+    }
+    // Everything the film was rendered with, the cast first and each group in
+    // the order it was attached. Each comes back only while the model still
+    // has room beside the film itself; the rest is dropped, since the film
+    // already carries them in its footage.
+    final castNames = <String>{};
+    final carried = _inComposerTab(tab, () {
+      castNames.addAll(<String>{
+        for (final entry in form.characterMappings.values)
+          for (final value in entry) value.toLowerCase(),
+      });
+      bool isCast(MediaReferenceDraft draft) =>
+          castNames.contains(referencePromptName(draft).toLowerCase());
+      final previous = form.references;
+      final ordered = <MediaReferenceDraft>[
+        ...previous.where(isCast),
+        ...previous.where((draft) => !isCast(draft)),
+      ];
+      form
+        ..keyframes = <KeyframeDraft>[]
+        ..references = <MediaReferenceDraft>[];
+      return ordered;
+    });
+    await _inComposerTab(
+      tab,
+      () => addReferenceCandidates(MediaReferenceKind.video, [candidate]),
+    );
+    if (_disposed) return;
+    final dropped = <String>[];
+    String? reason;
+    _inComposerTab(tab, () {
+      form.references = form.references
+          .map(
+            (draft) =>
+                draft.savedReferenceId == null && draft.promptName != name
+                ? draft.copyWith(promptName: name)
+                : draft,
+          )
+          .toList();
+      for (final draft in carried) {
+        final kept = form.references;
+        form.references = <MediaReferenceDraft>[...kept, draft];
+        final problem = _extendCapacityProblem(draft.kind);
+        if (problem == null) continue;
+        form.references = kept;
+        reason ??= problem;
+        final droppedName = draft.promptName ?? draft.label;
+        dropped.add(droppedName);
+        // A dropped cast member leaves the casting block too; a script that
+        // names someone who is no longer attached would only mislead.
+        if (castNames.contains(referencePromptName(draft).toLowerCase())) {
+          _removeCastReference(droppedName);
+        }
+      }
+      final heading = form.screenplayMode
+          ? firstScreenplaySceneHeading(form.prompt)
+          : null;
+      form.prompt = <String>[
+        'Extend @$name.',
+        if (heading != null) heading,
+      ].join('\n');
+      tab.sourceGenerationId = item.localId;
+      _adoptGenerationFolder(tab, item);
+      _selectCompatibleModel();
+      _normalizeFormForModel();
+      _invalidateProviderEstimate();
+      formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
+    notifyListeners();
+    await navigate(AppSection.create);
+    showNotice(
+      dropped.isEmpty
+          ? 'Ready to extend “$name”.'
+          : 'Extend attached “$name”; ${dropped.length} '
+                '${dropped.length == 1 ? 'reference' : 'references'} left '
+                'out — ${reason ?? 'the model has no room for them.'}',
+    );
   }
 
   void enhance(Generation item) {
@@ -8379,6 +8953,10 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _flushGenerationPreferencesSave();
     _disposed = true;
+    if (gateway case final DriveUploadStatusSource source) {
+      source.onDriveUploadStatus = null;
+      resetDriveUploadQueue();
+    }
     _queuedRetentions.clear();
     unawaited(_backgroundActivity.setPendingWork(false));
     _providerCatalogClient.close();
@@ -8391,6 +8969,7 @@ class AppController extends ChangeNotifier {
     _composerSaveRetry?.cancel();
     _promptSettleTimer?.cancel();
     _promptEditRevision.dispose();
+    busy.dispose();
     super.dispose();
   }
 }

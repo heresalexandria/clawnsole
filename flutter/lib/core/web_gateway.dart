@@ -8,8 +8,10 @@ import 'composer_tabs.dart';
 import 'data_location.dart';
 import 'data_location_shell.dart';
 import 'gateway.dart';
+import 'asset_extensions.dart';
 import 'google_drive.dart';
 import 'google_drive_auth.dart';
+import 'google_drive_upload_pump.dart';
 import 'media_cache_gateway.dart';
 import 'models.dart';
 import 'prompt_rewrite.dart';
@@ -46,7 +48,8 @@ class WebGateway
         SettingsVaultGateway,
         DataLocationGateway,
         MediaCacheGateway,
-        VideoCacheGateway {
+        VideoCacheGateway,
+        DriveUploadStatusSource {
   WebGateway({
     http.Client? client,
     Uri? baseUrl,
@@ -133,9 +136,55 @@ class WebGateway
         rawDrive.map((key, value) => MapEntry(key.toString(), value)),
       );
     }
+    _adoptDriveUploadStatus(payload['driveUploads']);
     final snapshot = LocalSnapshot.fromJson(payload);
     _settingsVaultStatus = snapshot.settingsVault;
     return snapshot;
+  }
+
+  DriveUploadQueueReport _driveUploadStatus = DriveUploadQueueReport.unknown;
+  void Function()? _onDriveUploadStatus;
+
+  /// Takes the companion's queue as this renderer's own.
+  ///
+  /// Nothing here publishes to Drive: the companion process beside this
+  /// renderer holds the staged bytes and runs the pump, so its report *is*
+  /// what this device is doing. A response that carries no report — an older
+  /// companion — leaves the queue unknown, which the chips read as the
+  /// truthful "Awaiting upload" rather than as an empty queue.
+  void _adoptDriveUploadStatus(Object? raw) {
+    final next = raw is Map<Object?, Object?>
+        ? driveUploadQueueReportFromJson(
+            raw.map((key, value) => MapEntry(key.toString(), value)),
+          )
+        : DriveUploadQueueReport.unknown;
+    if (sameDriveUploadQueueReport(_driveUploadStatus, next)) return;
+    _driveUploadStatus = next;
+    _onDriveUploadStatus?.call();
+  }
+
+  @override
+  DriveUploadQueueReport get driveUploadStatus => _driveUploadStatus;
+
+  @override
+  set onDriveUploadStatus(void Function()? listener) =>
+      _onDriveUploadStatus = listener;
+
+  @override
+  Future<bool> flushDriveUploads() async {
+    try {
+      final payload = _map(
+        await _read(await _client.post(_url('/drive/uploads/flush'))),
+      );
+      _adoptDriveUploadStatus(payload['driveUploads']);
+      return payload['settled'] == true;
+    } on Object {
+      // A companion without the route, or one whose pass failed, has told us
+      // nothing new; the queue keeps whatever `/state` last reported and the
+      // pump on the far side keeps retrying. The native pump swallows a
+      // failed pass the same way rather than surfacing it as an error.
+      return false;
+    }
   }
 
   @override
@@ -426,6 +475,9 @@ class WebGateway
         rawDrive.map((key, value) => MapEntry(key.toString(), value)),
       );
     }
+    // A transfer stages everything it moved, so its snapshot is exactly when
+    // the queue changes most.
+    _adoptDriveUploadStatus(snapshotMap['driveUploads']);
     return GoogleDriveCopyResult(
       snapshot: LocalSnapshot.fromJson(snapshotMap),
       generations: (payload['generations'] as num?)?.toInt() ?? 0,

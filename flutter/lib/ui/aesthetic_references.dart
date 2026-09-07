@@ -77,7 +77,15 @@ class _AestheticReferencePickerState extends State<AestheticReferencePicker> {
   @override
   Widget build(BuildContext context) {
     final selected = widget.controller.selectedAestheticReference;
-    final message = selected == null
+    final custom = widget.controller.hasCustomAestheticText;
+    // A custom definition is named on one line like every other choice; the
+    // aesthetic it grew out of is in the tooltip and in the panel, so the
+    // toolbar keeps its single row at every width.
+    final message = custom
+        ? selected == null
+              ? 'Aesthetic: Custom definition'
+              : 'Aesthetic: Custom definition, edited from ${selected.title}'
+        : selected == null
         ? 'Choose aesthetic reference'
         : 'Aesthetic: ${selected.title}';
     return MenuAnchor(
@@ -117,18 +125,27 @@ class _AestheticReferencePickerState extends State<AestheticReferencePicker> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    AestheticIcon(
-                      name: selected?.icon ?? 'palette',
-                      color:
-                          selected?.color ?? context.colors.primary.toARGB32(),
-                      size: 18,
-                    ),
+                    if (custom)
+                      Icon(
+                        Icons.edit_note_rounded,
+                        size: 18,
+                        color: context.tokens.brass,
+                      )
+                    else
+                      AestheticIcon(
+                        name: selected?.icon ?? 'palette',
+                        color:
+                            selected?.color ??
+                            context.colors.primary.toARGB32(),
+                        size: 18,
+                      ),
                     const SizedBox(width: 6),
                     Flexible(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 150),
                         child: Text(
-                          selected?.title ?? 'Aesthetic',
+                          widget.controller.aestheticDefinitionLabel ??
+                              'Aesthetic',
                           key: const ValueKey('prompt-aesthetic-label'),
                           maxLines: 1,
                           softWrap: false,
@@ -184,7 +201,45 @@ class _AestheticPickerPanelState extends State<_AestheticPickerPanel> {
         item.tags.any((value) => value.toLowerCase().contains(needle));
   }
 
-  void _choose(String? id) {
+  Future<void> _choose(String? id) async {
+    // An edited definition is somebody's writing; replacing it with another
+    // aesthetic's text asks once, and only when it would actually be lost.
+    if (controller.hasCustomAestheticText &&
+        id != null &&
+        (controller.effectiveAestheticText ?? '').isNotEmpty) {
+      final replacement = controller.aestheticReferences
+          .where((item) => item.id == id)
+          .firstOrNull;
+      // The panel goes away with the menu, so the question is asked from the
+      // navigator that outlives it.
+      final navigator = Navigator.of(context, rootNavigator: true);
+      widget.menu.close();
+      if (replacement == null) return;
+      final confirmed = await showDialog<bool>(
+        context: navigator.context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Replace your custom definition?'),
+          content: Text(
+            'The definition you edited is replaced by '
+            '“${replacement.title}”. Save it as its own aesthetic first if '
+            'you want to keep it.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Keep editing'),
+            ),
+            FilledButton(
+              key: const ValueKey('aesthetic-replace-confirm'),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text('Use ${replacement.title}'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) controller.selectAestheticReference(id);
+      return;
+    }
     controller.selectAestheticReference(id);
     widget.menu.close();
   }
@@ -216,8 +271,9 @@ class _AestheticPickerPanelState extends State<_AestheticPickerPanel> {
             rowKey: ValueKey('prompt-aesthetic-option-${item.id}'),
             label: item.title,
             reference: item,
-            selected: selectedId == item.id,
-            onTap: () => _choose(item.id),
+            selected:
+                !controller.hasCustomAestheticText && selectedId == item.id,
+            onTap: () => unawaited(_choose(item.id)),
             onStar: () => controller.toggleAestheticFavorite(item.id),
           );
           return Column(
@@ -281,11 +337,25 @@ class _AestheticPickerPanelState extends State<_AestheticPickerPanel> {
                       if (all.isEmpty)
                         _note(context, 'No aesthetics yet.')
                       else ...<Widget>[
+                        if (controller.hasCustomAestheticText)
+                          _AestheticPickerRow(
+                            rowKey: const ValueKey('prompt-aesthetic-custom'),
+                            label: 'Custom',
+                            note: controller.selectedAestheticReference == null
+                                ? 'Edited in the composer'
+                                : 'Edited from '
+                                      '${controller.selectedAestheticReference!.title}',
+                            leading: Icons.edit_note_rounded,
+                            selected: true,
+                            onTap: widget.menu.close,
+                          ),
                         _AestheticPickerRow(
                           rowKey: const ValueKey('prompt-aesthetic-none'),
                           label: 'No aesthetic',
-                          selected: selectedId == null,
-                          onTap: () => _choose(null),
+                          selected:
+                              selectedId == null &&
+                              !controller.hasCustomAestheticText,
+                          onTap: () => unawaited(_choose(null)),
                         ),
                         if (matches.isEmpty)
                           _note(context, 'No aesthetics match.'),
@@ -338,12 +408,20 @@ class _AestheticPickerRow extends StatelessWidget {
     required this.onTap,
     this.reference,
     this.onStar,
+    this.note,
+    this.leading,
   });
 
   final Key rowKey;
   final String label;
   final bool selected;
   final VoidCallback onTap;
+
+  /// A quiet second line: what a Custom definition was edited from.
+  final String? note;
+
+  /// Replaces the aesthetic swatch for rows that stand for no saved record.
+  final IconData? leading;
 
   /// The aesthetic this row stands for; null on the "No aesthetic" row.
   final AestheticReference? reference;
@@ -363,7 +441,9 @@ class _AestheticPickerRow extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
           child: Row(
             children: <Widget>[
-              if (item == null)
+              if (leading != null)
+                Icon(leading, size: 18, color: context.tokens.brass)
+              else if (item == null)
                 Icon(
                   Icons.block_rounded,
                   size: 18,
@@ -373,11 +453,28 @@ class _AestheticPickerRow extends StatelessWidget {
                 AestheticIcon(name: item.icon, color: item.color, size: 18),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13, height: 1.2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, height: 1.2),
+                    ),
+                    if (note != null)
+                      Text(
+                        note!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          height: 1.2,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               if (item != null && onStar != null)
@@ -410,21 +507,34 @@ class _AestheticPickerRow extends StatelessWidget {
   }
 }
 
-Future<void> showAestheticEditor(
+/// Opens the aesthetic editor, returning the id it saved (null when it was
+/// cancelled or deleted). [initialText] seeds a brand-new aesthetic with a
+/// definition written somewhere else — the Create composer's Aesthetic
+/// Definition accordion.
+Future<String?> showAestheticEditor(
   BuildContext context,
   AppController controller, {
   AestheticReference? reference,
-}) => showDialog<void>(
+  String? initialText,
+}) => showDialog<String>(
   context: context,
-  builder: (_) =>
-      _AestheticEditor(controller: controller, reference: reference),
+  builder: (_) => _AestheticEditor(
+    controller: controller,
+    reference: reference,
+    initialText: initialText,
+  ),
 );
 
 class _AestheticEditor extends StatefulWidget {
-  const _AestheticEditor({required this.controller, this.reference});
+  const _AestheticEditor({
+    required this.controller,
+    this.reference,
+    this.initialText,
+  });
 
   final AppController controller;
   final AestheticReference? reference;
+  final String? initialText;
 
   @override
   State<_AestheticEditor> createState() => _AestheticEditorState();
@@ -433,7 +543,9 @@ class _AestheticEditor extends StatefulWidget {
 class _AestheticEditorState extends State<_AestheticEditor> {
   final _form = GlobalKey<FormState>();
   late final _title = TextEditingController(text: widget.reference?.title);
-  late final _text = TextEditingController(text: widget.reference?.text);
+  late final _text = TextEditingController(
+    text: widget.reference?.text ?? widget.initialText,
+  );
   late final _tags = TextEditingController(
     text: widget.reference?.tags.join(', ') ?? '',
   );
@@ -730,7 +842,7 @@ class _AestheticEditorState extends State<_AestheticEditor> {
           key: const ValueKey('aesthetic-save'),
           onPressed: () {
             if (!_form.currentState!.validate()) return;
-            widget.controller.saveAestheticReference(
+            final saved = widget.controller.saveAestheticReference(
               id: widget.reference?.id,
               title: _title.text,
               text: _text.text,
@@ -739,7 +851,7 @@ class _AestheticEditorState extends State<_AestheticEditor> {
               tags: parseAestheticTags(_tags.text),
               favorite: _favorite,
             );
-            Navigator.pop(context);
+            Navigator.pop(context, saved);
           },
           child: const Text('Save'),
         ),

@@ -8,9 +8,11 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/aesthetic_reference.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'app_intents.dart';
+import 'busy_button.dart';
 import 'cast_row.dart';
 import 'common_widgets.dart';
 import 'claw_mark.dart';
@@ -431,6 +433,19 @@ class _ComposerState extends State<_Composer> {
           // carries it. Absent entirely until a character holds a reference.
           if (CastRow.visibleFor(controller)) ...<Widget>[
             CastRow(controller: controller),
+            SizedBox(height: short ? 8 : 12),
+          ],
+          // The chosen aesthetic's own words, between the cast and the
+          // guidance sections. Present only when there is a definition to
+          // read: an aesthetic is selected, or one was edited into a custom
+          // definition of its own.
+          if (!enhancing && controller.hasAestheticDefinition) ...<Widget>[
+            _AestheticDefinitionAccordion(
+              key: ValueKey(
+                'aesthetic-definition-${controller.activeComposerTabId}',
+              ),
+              controller: controller,
+            ),
             SizedBox(height: short ? 8 : 12),
           ],
           if (draftActive)
@@ -1373,6 +1388,240 @@ List<PromptReferenceOption> _promptReferenceOptions(AppController controller) {
       .toList();
 }
 
+/// The chosen aesthetic's definition, open to reading and editing in place.
+///
+/// Editing here never rewrites the saved aesthetic: the draft carries a
+/// **Custom** definition until it is saved as a new aesthetic, written back
+/// over the one it came from, or reverted. Typing follows the Direction
+/// field's contract — the text lands on the draft at once and the studio
+/// settles when typing pauses, so no keystroke rebuilds the composer.
+class _AestheticDefinitionAccordion extends StatefulWidget {
+  const _AestheticDefinitionAccordion({required this.controller, super.key});
+
+  final AppController controller;
+
+  @override
+  State<_AestheticDefinitionAccordion> createState() =>
+      _AestheticDefinitionAccordionState();
+}
+
+class _AestheticDefinitionAccordionState
+    extends State<_AestheticDefinitionAccordion> {
+  final TextEditingController _field = TextEditingController();
+  late String _seen = widget.controller.aestheticDefinitionText;
+  bool _open = false;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _field.text = _seen;
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  /// One flat line of the definition for the collapsed header.
+  String get _preview => _field.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  Future<void> _saveAsNew() async {
+    final text = _field.text.trim();
+    if (text.isEmpty) return;
+    final id = await showAestheticEditor(
+      context,
+      controller,
+      initialText: text,
+    );
+    if (id == null || !mounted) return;
+    controller.selectAestheticReference(id);
+  }
+
+  Future<void> _updateBase(AestheticReference base) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update this aesthetic?'),
+        content: Text(
+          '“${base.title}” keeps the definition you just wrote. Every draft '
+          'that uses it renders with the new words.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('aesthetic-update-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    controller.applyAestheticCustomTextToSelection();
+  }
+
+  Widget _action({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+  }) => TextButton.icon(
+    key: key,
+    onPressed: onPressed,
+    icon: Icon(icon, size: 16),
+    label: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 210),
+      child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    ),
+    style: TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    // An outside change — Revert, another aesthetic, a restored film — is the
+    // only thing that moves the field's text out from under the director.
+    final text = controller.aestheticDefinitionText;
+    if (text != _seen) {
+      _seen = text;
+      if (_field.text.trim() != text.trim()) {
+        _field.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+      }
+    }
+    final base = controller.selectedAestheticReference;
+    final custom = controller.hasCustomAestheticText;
+    final typed = _field.text.trim();
+    final differs = base != null && typed != base.text.trim();
+    return LayoutBuilder(
+      builder: (context, constraints) => _accordion(
+        context,
+        base: base,
+        custom: custom,
+        typed: typed,
+        differs: differs,
+        // Narrow columns keep the section word alone so the aesthetic's own
+        // name still fits beside it.
+        label: constraints.maxWidth < 620
+            ? 'Aesthetic'
+            : 'Aesthetic definition',
+      ),
+    );
+  }
+
+  Widget _accordion(
+    BuildContext context, {
+    required AestheticReference? base,
+    required bool custom,
+    required String typed,
+    required bool differs,
+    required String label,
+  }) {
+    return _GuidanceAccordion(
+      toggleKey: const ValueKey('aesthetic-accordion-toggle'),
+      icon: Icons.palette_outlined,
+      label: label,
+      expanded: _open,
+      onToggle: () => setState(() => _open = !_open),
+      previews: <Widget>[
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (custom)
+              Icon(
+                Icons.edit_note_rounded,
+                size: 15,
+                color: context.tokens.brass,
+              )
+            else if (base != null)
+              AestheticIcon(name: base.icon, color: base.color, size: 15),
+            const SizedBox(width: 6),
+            Text(
+              _preview.isEmpty ? 'No definition yet' : _preview,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ],
+      summary: controller.aestheticDefinitionLabel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextField(
+            key: const ValueKey('aesthetic-definition-field'),
+            controller: _field,
+            minLines: 3,
+            maxLines: 8,
+            style: const TextStyle(fontSize: 12.5, height: 1.4),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'The words appended to every render from this draft.',
+              helperText: custom
+                  ? base == null
+                        ? 'A custom definition, saved with this draft only.'
+                        : 'Edited from “${base.title}”. The saved aesthetic '
+                              'is unchanged.'
+                  : 'Editing this makes a custom definition for this draft.',
+              helperMaxLines: 2,
+            ),
+            onChanged: (value) {
+              _seen = value;
+              controller.updateAestheticCustomText(value);
+              // A local rebuild only: the action row follows the text, and
+              // the studio around it stays where it is.
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            children: <Widget>[
+              _action(
+                key: const ValueKey('aesthetic-save-as-new'),
+                icon: Icons.add_rounded,
+                label: 'Save as new…',
+                onPressed: typed.isEmpty ? null : () => unawaited(_saveAsNew()),
+              ),
+              if (differs && base != null)
+                _action(
+                  key: const ValueKey('aesthetic-update-base'),
+                  icon: Icons.save_outlined,
+                  label: 'Update “${base.title}”',
+                  onPressed: typed.isEmpty
+                      ? null
+                      : () => unawaited(_updateBase(base)),
+                ),
+              if (custom && base != null)
+                _action(
+                  key: const ValueKey('aesthetic-revert'),
+                  icon: Icons.undo_rounded,
+                  label: 'Revert',
+                  onPressed: controller.revertAestheticCustomText,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Pairs the guidance accordions with the Frame/Finish/Duration settings
 /// column: side by side at desktop widths, stacked with a divider between
 /// them on narrow layouts.
@@ -1732,13 +1981,17 @@ class _GuidanceAccordion extends StatelessWidget {
                 children: <Widget>[
                   Icon(icon, size: 15, color: context.tokens.brass),
                   const SizedBox(width: 7),
-                  Text(
-                    label.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w700,
-                      color: colors.onSurface.withValues(alpha: .82),
+                  Flexible(
+                    child: Text(
+                      label.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w700,
+                        color: colors.onSurface.withValues(alpha: .82),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1763,7 +2016,9 @@ class _GuidanceAccordion extends StatelessWidget {
                                 ),
                                 if (summaryText != null) ...<Widget>[
                                   const SizedBox(width: 8),
-                                  summaryText,
+                                  // A long aesthetic name gives way here
+                                  // rather than pushing the row over.
+                                  Flexible(child: summaryText),
                                 ],
                               ],
                             ),
@@ -2076,19 +2331,19 @@ class _ReferencesSection extends StatelessWidget {
                   MediaReferenceKind.audio => 'audio clip',
                 }
               : kind.pluralLabel;
-          final seconds = model.maxReferenceSeconds(kind, form.resolution);
+          final seconds = controller.referenceSecondsLimit(kind);
           final minimum = kind == MediaReferenceKind.audio
               ? model.minReferenceAudioSeconds
               : null;
           final duration = seconds == null
               ? ''
               : minimum != null && maximum == 1
-              ? ' ($minimum–${seconds}s)'
+              ? ' ($minimum–$seconds s)'
               : minimum != null
-              ? ' (${minimum}s min each · ${seconds}s total)'
+              ? ' ($minimum s min each · $seconds s total)'
               : maximum == 1
-              ? ' (up to ${seconds}s)'
-              : ' (${seconds}s total)';
+              ? ' (up to $seconds s)'
+              : ' ($seconds s total)';
           return '$maximum $label$duration';
         })
         .join(' · ');
@@ -2119,6 +2374,24 @@ class _ReferencesSection extends StatelessWidget {
                 .toList(),
           )
         : null;
+    // A model switch can shrink a seconds budget under a set that already
+    // fit, and a duration measured after the add can push the set over it.
+    // Either way the section says, in madder, why Generate is dark.
+    final overBudget = <(MediaReferenceKind, String)>[
+      if (!setAside)
+        for (final kind in const <MediaReferenceKind>[
+          MediaReferenceKind.video,
+          MediaReferenceKind.audio,
+        ])
+          if (controller.referenceSecondsOverBudget(kind))
+            (
+              kind,
+              '${model.label} accepts up to '
+                  '${controller.referenceSecondsLimit(kind)} s of reference '
+                  '${kind == MediaReferenceKind.audio ? 'audio' : 'video'} — '
+                  'remove or trim a clip before generating.',
+            ),
+    ];
     final notes = <String>[
       if (!setAside && model.maxImageReferences > 0)
         'Creative images can guide the opening, subject, identity, or style; use First frame for stricter frame-0 conditioning.',
@@ -2183,6 +2456,19 @@ class _ReferencesSection extends StatelessWidget {
             height: 1.4,
           ),
         ),
+        for (final warning in overBudget) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            warning.$2,
+            key: ValueKey('reference-seconds-over-budget-${warning.$1.name}'),
+            style: TextStyle(
+              color: context.colors.error,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+        ],
         if (!setAside) ...<Widget>[
           const SizedBox(height: 10),
           _ReferenceCapacityGauges(controller: controller),
@@ -2252,22 +2538,32 @@ class _ReferenceCapacityGauges extends StatelessWidget {
           valueLabel: '${attached.length} / $maximum added',
         ),
       );
-      final maximumSeconds = model.maxReferenceSeconds(kind, form.resolution);
+      // Under the count, the same gauge again for the seconds a model
+      // publishes for this kind: 12 s / 30 s, with the bar reading the
+      // budget the same way.
+      final maximumSeconds = controller.referenceSecondsLimit(kind);
       if (maximumSeconds == null) continue;
-      final known = attached
-          .map((reference) => reference.durationSeconds)
-          .whereType<double>()
-          .toList();
-      final used = known.fold<double>(0, (sum, seconds) => sum + seconds);
-      final unknown = attached.length - known.length;
+      final used = controller.referenceSecondsUsed(kind);
+      final unknown = controller.referenceSecondsPending(kind);
       gauges.add(
         _ReferenceCapacityGauge(
           key: ValueKey('reference-capacity-${kind.name}-duration'),
-          label: '$kindLabel duration',
+          label:
+              '${kind == MediaReferenceKind.audio ? 'Audio' : 'Video'} '
+              'duration',
           value: used / maximumSeconds,
-          valueLabel:
-              '${formatMediaDuration(used)} / ${formatMediaDuration(maximumSeconds.toDouble())}'
-              '${unknown == 0 ? '' : ' · measuring $unknown'}',
+          // A clip whose duration is still being read leaves the figure
+          // unknowable rather than merely small, so the used reading says
+          // so outright instead of quietly under-counting.
+          valueLabel: unknown > 0
+              ? '? / ${formatMediaDuration(maximumSeconds.toDouble())}'
+              : '${formatMediaDuration(used)} / '
+                    '${formatMediaDuration(maximumSeconds.toDouble())}',
+          tooltip: unknown == 0
+              ? null
+              : unknown == 1
+              ? 'Reading one clip’s duration…'
+              : 'Reading $unknown clips’ durations…',
         ),
       );
     }
@@ -2290,6 +2586,7 @@ class _ReferenceCapacityGauge extends StatelessWidget {
     required this.label,
     required this.value,
     required this.valueLabel,
+    this.tooltip,
     super.key,
   });
 
@@ -2297,11 +2594,32 @@ class _ReferenceCapacityGauge extends StatelessWidget {
   final double value;
   final String valueLabel;
 
+  /// Explains an unknowable reading, e.g. a duration still being measured.
+  final String? tooltip;
+
+  /// A gauge runs quiet until the budget is nearly spent, warns in brass
+  /// over nine tenths, and reads madder once it is past full — the same
+  /// three tones for a count and for a duration.
+  Color? _tone(BuildContext context) => !value.isFinite || value <= .9
+      ? null
+      : value > 1.0001
+      ? context.colors.error
+      : context.tokens.brass;
+
   @override
   Widget build(BuildContext context) {
     final progress = value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+    final tone = _tone(context);
+    final reading = Text(
+      valueLabel,
+      style: TextStyle(
+        color: tone ?? context.colors.onSurfaceVariant,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    );
     return Semantics(
-      label: '$label, $valueLabel',
+      label: '$label, $valueLabel${tooltip == null ? '' : ', $tooltip'}',
       value: '${(progress * 100).round()}%',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2311,20 +2629,17 @@ class _ReferenceCapacityGauge extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
+                    color: tone,
                   ),
                 ),
               ),
-              Text(
-                valueLabel,
-                style: TextStyle(
-                  color: context.colors.onSurfaceVariant,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              if (tooltip == null)
+                reading
+              else
+                Tooltip(message: tooltip!, child: reading),
             ],
           ),
           const SizedBox(height: 4),
@@ -2335,6 +2650,7 @@ class _ReferenceCapacityGauge extends StatelessWidget {
               child: LinearProgressIndicator(
                 minHeight: 7,
                 value: progress,
+                color: tone,
                 backgroundColor: context.colors.surfaceContainerHighest,
               ),
             ),
@@ -2651,10 +2967,9 @@ class _ReferenceTile extends StatelessWidget {
           ),
         if (controller.canUseReferenceAsFirstFrame(reference)) ...<Widget>[
           const SizedBox(height: 4),
-          TextButton.icon(
+          BusyTextButton.icon(
             key: ValueKey('use-reference-as-first-frame-${reference.id}'),
-            onPressed: () =>
-                unawaited(controller.useReferenceAsFirstFrame(reference.id)),
+            onPressed: () => controller.useReferenceAsFirstFrame(reference.id),
             icon: const Icon(Icons.filter_1_rounded, size: 14),
             label: const Text('Use as first frame'),
             style: TextButton.styleFrom(
@@ -2808,15 +3123,21 @@ class _AddReferenceButton extends StatelessWidget {
   Widget build(BuildContext context) {
     // Uploads never lock the buttons: adds append instantly and persistence
     // continues on the controller's background work queue.
-    final enabled = controller.canAddReference(kind);
+    final verdict = controller.checkReferenceBudget(kind);
+    final enabled = verdict.allowed;
     final count = controller.form.referenceCount(kind);
     final maximum = controller.referenceLimit(kind);
+    // A seconds budget never closes the button — whether the next clip fits
+    // depends on how long it is — so the tooltip carries the cap instead.
+    final budget = controller.referenceSecondsLimit(kind);
     return PopupMenuButton<String>(
       key: ValueKey('add-${kind.name}-reference'),
       enabled: enabled,
-      tooltip: enabled
+      tooltip: !enabled
+          ? verdict.refusal!
+          : budget == null
           ? 'Add reference ${kind.pluralLabel}'
-          : '$maximum ${kind.pluralLabel} attached',
+          : 'Add reference ${kind.pluralLabel} · $budget s total',
       onSelected: (choice) {
         if (choice == 'saved') {
           unawaited(() async {
@@ -4881,24 +5202,35 @@ class _ComposerFooter extends StatelessWidget {
             ],
           )
         : null;
-    // The transport key. While a render is in flight it simply stays lit and
-    // inert — the lit key is the signal, so there is no spinner.
-    final generate = HardwareLitButton(
-      key: const ValueKey<String>('generate-key'),
-      height: consoleControlHeight(context),
-      // Inked like the legend: white-filled engraving on the lens.
-      icon: const ClawMark(size: 16),
-      label: controller.selectedModel.outputKind == GenerationOutputKind.image
-          ? 'Generate image'
-          : form.mode == VideoMode.upscale
-          ? 'Upscale video'
-          : 'Generate video',
-      lit: controller.submitting,
-      onPressed: controller.submitting
-          ? null
-          : () => unawaited(
-              _submitWithProviderRetentionWarning(context, controller),
-            ),
+    // The transport key. While a render is in flight it stays lit and inert
+    // — the lit key is the signal, so there is no spinner — and its legend
+    // reads SUBMITTING, so the console says what it is doing.
+    final restLabel =
+        controller.selectedModel.outputKind == GenerationOutputKind.image
+        ? 'Generate image'
+        : form.mode == VideoMode.upscale
+        ? 'Upscale video'
+        : 'Generate video';
+    final generate = ConstrainedBox(
+      // The key hugs its own legend, so swapping in the shorter SUBMITTING
+      // would shrink the transport key under the finger that just pressed
+      // it. Reserving the wider of its two readings holds it still.
+      constraints: BoxConstraints(
+        minWidth: _keyWidthFor(context, <String>[restLabel, _submittingLabel]),
+      ),
+      child: HardwareLitButton(
+        key: const ValueKey<String>('generate-key'),
+        height: consoleControlHeight(context),
+        // Inked like the legend: white-filled engraving on the lens.
+        icon: const ClawMark(size: 16),
+        label: controller.submitting ? _submittingLabel : restLabel,
+        lit: controller.submitting,
+        onPressed: controller.submitting
+            ? null
+            : () => unawaited(
+                _submitWithProviderRetentionWarning(context, controller),
+              ),
+      ),
     );
     // The model plaque sits in the footer, directly before Generate: the
     // last thing the eye checks before rendering, inside the draft it
@@ -4935,6 +5267,38 @@ class _ComposerFooter extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// The legend the transport key wears while a submission is in flight.
+  static const String _submittingLabel = 'Submitting';
+
+  /// How wide a [HardwareLitButton] has to be to engrave the widest of
+  /// [labels] without clipping. The metrics mirror the key's own layout:
+  /// 22 px of padding either side, the 16 px claw and its 9 px gap, and the
+  /// legend in letter-spaced capitals. Reserved as a *minimum* width, so a
+  /// composer too narrow to grant it simply clamps it away.
+  static double _keyWidthFor(BuildContext context, List<String> labels) {
+    final style = DefaultTextStyle.of(context).style.merge(
+      (Theme.of(context).textTheme.labelLarge ?? const TextStyle()).copyWith(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.9,
+        height: 1.05,
+      ),
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    var widest = .0;
+    for (final label in labels) {
+      final painter = TextPainter(
+        text: TextSpan(text: HardwareLitButton.engrave(label), style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+        textScaler: scaler,
+      )..layout();
+      if (painter.width > widest) widest = painter.width;
+      painter.dispose();
+    }
+    return widest + 22 * 2 + 16 + 9;
   }
 }
 

@@ -10,6 +10,7 @@ import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'hardware.dart';
 
@@ -90,6 +91,18 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
     }
   }
 
+  Future<void> _removeKey(String providerId) async {
+    setState(() {
+      _busyProviders.add(providerId);
+      _results.remove(providerId);
+    });
+    try {
+      await widget.controller.removeProviderKey(providerId);
+    } finally {
+      if (mounted) setState(() => _busyProviders.remove(providerId));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 620 ? 16 : 28),
@@ -138,9 +151,7 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
                                 _verifyOrSave(provider.id, save: false),
                             onSave: () =>
                                 _verifyOrSave(provider.id, save: true),
-                            onRemove: () => unawaited(
-                              widget.controller.removeProviderKey(provider.id),
-                            ),
+                            onRemove: () => _removeKey(provider.id),
                           ),
                         ),
                       )
@@ -230,7 +241,7 @@ class _ProviderCard extends StatelessWidget {
   final VoidCallback onToggleKey;
   final Future<void> Function() onVerify;
   final Future<void> Function() onSave;
-  final VoidCallback onRemove;
+  final Future<void> Function() onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -397,22 +408,23 @@ class _ProviderCard extends StatelessWidget {
               spacing: 7,
               runSpacing: 7,
               children: <Widget>[
-                FilledButton(
-                  onPressed: busy ? null : () => unawaited(onSave()),
-                  child: busy
-                      ? const SizedBox.square(
-                          dimension: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(connected ? 'Replace key' : 'Verify & save'),
+                BusyFilledButton(
+                  key: ValueKey('provider-key-save-${provider.id}'),
+                  onPressed: busy ? null : onSave,
+                  busyLabel: connected ? 'Replacing…' : 'Verifying…',
+                  child: Text(connected ? 'Replace key' : 'Verify & save'),
                 ),
-                TextButton(
-                  onPressed: busy ? null : () => unawaited(onVerify()),
+                BusyTextButton(
+                  key: ValueKey('provider-key-test-${provider.id}'),
+                  onPressed: busy ? null : onVerify,
+                  busyLabel: 'Testing…',
                   child: const Text('Test'),
                 ),
                 if (connected)
-                  TextButton(
-                    onPressed: onRemove,
+                  BusyTextButton(
+                    key: ValueKey('provider-key-remove-${provider.id}'),
+                    onPressed: busy ? null : onRemove,
+                    busyLabel: 'Removing…',
                     child: Text(
                       'Remove',
                       style: TextStyle(color: context.colors.error),

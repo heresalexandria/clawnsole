@@ -751,9 +751,20 @@ class CompanionHybridStore {
     ),
     restage: restageMissingResult,
     log: stderr.writeln,
+    onReport: (report) => _driveUploadStatus = report,
   );
 
   final DriveUploadLedger _uploadLedger = DriveUploadLedger();
+
+  DriveUploadQueueReport _driveUploadStatus = DriveUploadQueueReport.unknown;
+
+  /// What this companion's upload pass last said about its own queue.
+  ///
+  /// The renderer beside it runs no pump — its films are published here — so
+  /// it has nothing of its own to describe. Serving this is what lets the Mac
+  /// say "Syncing…" about its own uploads instead of describing them as work
+  /// some other device owes.
+  DriveUploadQueueReport get driveUploadStatus => _driveUploadStatus;
 
   /// Fetches a ready result again from its provider link when the staged
   /// copy this device was about to publish has gone missing. Installed by
@@ -766,8 +777,19 @@ class CompanionHybridStore {
   AssetReference? publishedAssetFor(String stagedId) =>
       _uploadLedger.resolve(stagedId);
 
-  /// Runs one upload pass now, outside the pump's schedule.
-  Future<bool> flushDriveUploads() => _flushDriveUploads();
+  /// Runs one upload pass now, outside the pump's schedule, joining the pass
+  /// already in flight when there is one. Going through the pump rather than
+  /// straight to the pass is what keeps a manual flush from racing the
+  /// background one into a duplicate upload of the same bytes.
+  Future<bool> flushDriveUploads() => _driveUploadPump.flushNow();
+
+  /// Makes sure a pass is coming when one is not already scheduled. A staged
+  /// file no pass has looked at cannot be described honestly, and the
+  /// renderer's poll is the only thing that notices media a cross-device
+  /// merge brought in. `ensureScheduled`, not `schedule`: that poll arrives
+  /// every few seconds and must not collapse a failing pass's backoff into a
+  /// tight retry loop.
+  void ensureDriveUploadPass() => _driveUploadPump.ensureScheduled();
 
   /// Stops the background upload pump. The production store lives for the
   /// whole process; tests call this so retry timers do not outlive them.
@@ -1187,6 +1209,9 @@ class CompanionApp {
           'generations': copied.generations,
           'references': copied.references,
         });
+      }
+      if (request.method == 'POST' && path == '/drive/uploads/flush') {
+        return await _json(request.response, 200, await _driveUploadFlush());
       }
       if (request.method == 'POST' && path == '/drive/migrate') {
         final moved = await _store.moveLocalToDrive();
@@ -2225,10 +2250,51 @@ class CompanionApp {
     );
   }
 
-  Future<Map<String, Object?>> _snapshotPayload() async => <String, Object?>{
-    ...(await _snapshot()).toJson(),
-    'driveConnection': _store.connection.toJson(),
-  };
+  Future<Map<String, Object?>> _snapshotPayload() async {
+    final snapshot = await _snapshot();
+    // Staged media that no pass has classified cannot be described honestly,
+    // so a read that finds some makes sure a pass is coming — the same thing
+    // the native gateway does on its own library reads.
+    if (pendingDriveUploadAssets(
+      snapshot.generations,
+      snapshot.savedReferences,
+    ).isNotEmpty) {
+      _store.ensureDriveUploadPass();
+    }
+    return <String, Object?>{
+      ...snapshot.toJson(),
+      'driveConnection': _store.connection.toJson(),
+      // Beside the connection rather than inside the library: this is what
+      // this process is doing right now, not something to persist. The
+      // renderer polls `/state` anyway, so its chips ride along for free.
+      'driveUploads': driveUploadQueueReportToJson(_store.driveUploadStatus),
+    };
+  }
+
+  /// How long the flush route waits for the pass it kicks before answering
+  /// from the queue instead. A large film takes minutes to upload and a
+  /// refresh spinner must not; the studio caps its own wait the same way.
+  static const Duration _driveUploadFlushWait = Duration(seconds: 3);
+
+  /// Runs one upload pass now and answers with the queue as it stands.
+  ///
+  /// The pass outlives the cap — the pump owns it either way — and what the
+  /// renderer needs back is the report, which the pass publishes as it
+  /// starts. So a film this companion is pushing reads as syncing on the Mac
+  /// from its first frame instead of only once the upload lands.
+  Future<Map<String, Object?>> _driveUploadFlush() async {
+    var settled = false;
+    try {
+      settled = await _store.flushDriveUploads().timeout(_driveUploadFlushWait);
+    } on Object {
+      // A pass that fails or outruns the wait still reports its queue below,
+      // and the pump keeps retrying it either way.
+    }
+    return <String, Object?>{
+      'settled': settled,
+      'driveUploads': driveUploadQueueReportToJson(_store.driveUploadStatus),
+    };
+  }
 
   Future<Generation> _upsert(Generation generation) async {
     return _store.mutate<Generation>((current) {

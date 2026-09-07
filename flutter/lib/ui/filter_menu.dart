@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'hardware.dart';
 
@@ -588,15 +589,16 @@ class StorageSidebarSection extends StatelessWidget {
         selected: value == LibraryStorageFilter.drive,
         onTap: () => onChanged(LibraryStorageFilter.drive),
         trailing: controller.googleDriveBusy
-            ? const SizedBox.square(
-                dimension: 13,
-                child: CircularProgressIndicator(strokeWidth: 1.6),
-              )
+            ? const BusySpinner()
             : _driveSignedOut
             ? InkWell(
                 key: const ValueKey('storage-drive-reconnect'),
                 borderRadius: BorderRadius.circular(999),
-                onTap: () => unawaited(controller.refreshGoogleDrive()),
+                // Dead while Drive is working, whatever the host rebuilt:
+                // the row shows the mark instead of a live target.
+                onTap: controller.googleDriveBusy
+                    ? null
+                    : () => unawaited(controller.refreshGoogleDrive()),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 6,
@@ -741,17 +743,13 @@ class DriveReconnectNotice extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          if (busy)
-            const SizedBox.square(
-              dimension: 15,
-              child: CircularProgressIndicator(strokeWidth: 1.8),
-            )
-          else
-            FilledButton.tonal(
-              key: ValueKey('drive-reconnect-$subject'),
-              onPressed: () => unawaited(controller.refreshGoogleDrive()),
-              child: const Text('Reconnect'),
-            ),
+          BusyFilledButton.tonal(
+            key: ValueKey('drive-reconnect-$subject'),
+            busy: busy,
+            busyLabel: 'Reconnecting…',
+            onPressed: controller.refreshGoogleDrive,
+            child: const Text('Reconnect'),
+          ),
         ],
       ),
     );

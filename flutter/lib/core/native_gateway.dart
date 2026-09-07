@@ -91,6 +91,7 @@ class NativeGateway extends DirectGateway
         VideoCacheGateway,
         LocalGenerationAvailabilityGateway,
         GenerationNotificationGateway,
+        DriveUploadStatusSource,
         MediaShareGateway {
   // The public constructor preserves the existing injectable native API while
   // also preparing iOS review-key state before the superclass is initialized.
@@ -292,6 +293,7 @@ class NativeGateway extends DirectGateway
         read: _vault.read,
         write: _vault.write,
         log: (message) => developer.log(message, name: 'clawnsole.drive'),
+        onReport: _publishDriveUploadStatus,
       ),
     );
     _hybrid.onDeferredDriveUpload = _driveUploadPump.schedule;
@@ -353,6 +355,16 @@ class NativeGateway extends DirectGateway
     // splash-screen critical path. setMaxBytes adopts each cap immediately;
     // any LRU sweep finishes after first paint.
     unawaited(_applyVideoCachePreference(snapshot.preferences));
+    // Staged media that no pass has looked at yet cannot be described
+    // honestly, so any read that finds some makes sure a pass is coming.
+    // ensureScheduled, not schedule: a read happens every few seconds and
+    // must not collapse a failing pass's backoff into a tight retry loop.
+    if (pendingDriveUploadAssets(
+      snapshot.generations,
+      snapshot.savedReferences,
+    ).isNotEmpty) {
+      _driveUploadPump.ensureScheduled();
+    }
     return snapshot;
   }
 
@@ -467,9 +479,30 @@ class NativeGateway extends DirectGateway
     }
   }
 
+  DriveUploadQueueReport _driveUploadStatus = DriveUploadQueueReport.unknown;
+  void Function()? _onDriveUploadStatus;
+
+  void _publishDriveUploadStatus(DriveUploadQueueReport report) {
+    _driveUploadStatus = report;
+    _onDriveUploadStatus?.call();
+  }
+
+  @override
+  DriveUploadQueueReport get driveUploadStatus => _driveUploadStatus;
+
+  @override
+  set onDriveUploadStatus(void Function()? listener) =>
+      _onDriveUploadStatus = listener;
+
+  @override
+  Future<bool> flushDriveUploads() => _driveUploadPump.flushNow();
+
   /// Stops the background Drive upload pump. Production gateways live for
   /// the whole process; tests call this to avoid leaking retry timers.
-  void dispose() => _driveUploadPump.dispose();
+  void dispose() {
+    _onDriveUploadStatus = null;
+    _driveUploadPump.dispose();
+  }
 
   @override
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async {

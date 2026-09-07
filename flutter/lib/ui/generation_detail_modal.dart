@@ -12,6 +12,7 @@ import '../core/generation_timing.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
@@ -116,7 +117,11 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
   /// there is nothing left to show.
   Future<void> _delete(Generation item) async {
     if (!await confirmGenerationRecordRemoval(context)) return;
-    await _controller.deleteGeneration(item.localId);
+    await _controller.busy.run(
+      'generation',
+      item.localId,
+      () => _controller.deleteGeneration(item.localId),
+    );
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -690,10 +695,7 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
                 ),
                 onPressed: _saving ? null : () => unawaited(_save(item)),
                 icon: _saving
-                    ? const SizedBox.square(
-                        dimension: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const BusySpinner()
                     : const Icon(Icons.download_rounded, size: 16),
                 label: const Text('Save'),
               ),
@@ -704,8 +706,15 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
                   minimumSize: const Size(88, 44),
                   padding: const EdgeInsets.symmetric(horizontal: 15),
                 ),
-                onPressed: () =>
-                    _leaveFor(() => unawaited(_controller.reuse(item))),
+                onPressed: () => _leaveFor(
+                  () => unawaited(
+                    _controller.busy.run(
+                      'generation',
+                      item.localId,
+                      () => _controller.reuse(item),
+                    ),
+                  ),
+                ),
                 icon: const Icon(Icons.replay_rounded, size: 16),
                 label: Text(
                   item.isFailed && !item.hasDeliveredMedia ? 'Retry' : 'Reuse',

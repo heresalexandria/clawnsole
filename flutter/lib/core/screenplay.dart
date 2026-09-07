@@ -138,6 +138,17 @@ Set<String> screenplayCharacters(String text) {
   return result;
 }
 
+/// The first scene heading in [text] — "INT. NYC APARTMENT - NIGHT" — or null
+/// when the script never sets one. Extending a film carries it into the next
+/// scene so the setting does not have to be typed again.
+String? firstScreenplaySceneHeading(String text) {
+  for (final line in text.split('\n')) {
+    final clean = line.trim();
+    if (clean.isNotEmpty && _scene.hasMatch(clean)) return clean;
+  }
+  return null;
+}
+
 bool screenplayMentionsCharacter(
   String script,
   String character, {

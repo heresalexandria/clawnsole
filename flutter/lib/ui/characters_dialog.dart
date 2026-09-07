@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/app_controller.dart';
 import '../core/models.dart';
 import '../core/screenplay.dart';
+import 'busy_button.dart';
 import 'cast_row.dart';
 import 'filter_menu.dart';
 
@@ -492,34 +493,34 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
             onPressed: _saving ? null : () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          BusyFilledButton(
             key: const ValueKey('save-character-mapping'),
-            onPressed: _saving
-                ? null
-                : () async {
-                    setState(() {
-                      _saving = true;
-                      _error = null;
-                    });
-                    final error = await controller.saveCharacterMapping(
-                      scriptName: widget.character.isEmpty
-                          ? _name.text.trim().toUpperCase()
-                          : widget.character,
-                      name: _name.text,
-                      referenceNames: _selected.toList(),
-                      renameInScript: _renameScript,
-                    );
-                    if (!context.mounted) return;
-                    if (error == null) {
-                      Navigator.pop(context);
-                    } else {
-                      setState(() {
-                        _saving = false;
-                        _error = error;
-                      });
-                    }
-                  },
-            child: Text(_saving ? 'Saving…' : 'Save mapping'),
+            busy: _saving,
+            busyLabel: 'Saving…',
+            onPressed: () async {
+              setState(() {
+                _saving = true;
+                _error = null;
+              });
+              final error = await controller.saveCharacterMapping(
+                scriptName: widget.character.isEmpty
+                    ? _name.text.trim().toUpperCase()
+                    : widget.character,
+                name: _name.text,
+                referenceNames: _selected.toList(),
+                renameInScript: _renameScript,
+              );
+              if (!context.mounted) return;
+              if (error == null) {
+                Navigator.pop(context);
+              } else {
+                setState(() {
+                  _saving = false;
+                  _error = error;
+                });
+              }
+            },
+            child: const Text('Save mapping'),
           ),
         ],
       ),

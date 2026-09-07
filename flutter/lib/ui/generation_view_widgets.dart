@@ -7,6 +7,7 @@ import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_detail_modal.dart';
@@ -446,6 +447,7 @@ enum _DenseGenerationAction {
   save,
   enhance,
   reuse,
+  extend,
   rewrite,
   copyToDrive,
   checkStatus,
@@ -465,6 +467,7 @@ class GenerationActionsMenu extends StatelessWidget {
     this.onCopyToDrive,
     this.includeSave = true,
     this.includeReuse = true,
+    this.includeExtend = true,
     this.includeRewrite = true,
     this.includeCheckStatus = true,
     this.includeDetails = true,
@@ -479,6 +482,10 @@ class GenerationActionsMenu extends StatelessWidget {
   final VoidCallback? onCopyToDrive;
   final bool includeSave;
   final bool includeReuse;
+
+  /// Extend is only ever a menu verb, so even the surfaces that lift Reuse
+  /// onto their action row keep it here.
+  final bool includeExtend;
   final bool includeRewrite;
   final bool includeCheckStatus;
 
@@ -493,6 +500,8 @@ class GenerationActionsMenu extends StatelessWidget {
       _DenseGenerationAction.save,
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
     if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
+    if (includeExtend && controller.canExtend(item))
+      _DenseGenerationAction.extend,
     if (includeRewrite && controller.canRewrite(item))
       _DenseGenerationAction.rewrite,
     if (onCopyToDrive != null) _DenseGenerationAction.copyToDrive,
@@ -512,79 +521,109 @@ class GenerationActionsMenu extends StatelessWidget {
     if (actions.isEmpty) return const SizedBox.shrink();
     return SizedBox.square(
       dimension: 32,
-      child: PopupMenuButton<_DenseGenerationAction>(
-        tooltip: 'Generation actions',
-        padding: EdgeInsets.zero,
-        iconSize: 19,
-        onSelected: (action) {
-          switch (action) {
-            case _DenseGenerationAction.move:
-              onMove?.call();
-            case _DenseGenerationAction.tag:
-              onTag?.call();
-            case _DenseGenerationAction.visibility:
-              onVisibility?.call();
-            case _DenseGenerationAction.save:
-              unawaited(saveGenerationVideo(context, controller, item));
-            case _DenseGenerationAction.enhance:
-              controller.enhance(item);
-            case _DenseGenerationAction.reuse:
-              unawaited(controller.reuse(item));
-            case _DenseGenerationAction.rewrite:
-              unawaited(
-                showPromptRewriteDialog(
-                  context,
-                  controller: controller,
-                  item: item,
-                ),
-              );
-            case _DenseGenerationAction.copyToDrive:
-              onCopyToDrive?.call();
-            case _DenseGenerationAction.checkStatus:
-              unawaited(controller.checkStatus(item));
-            case _DenseGenerationAction.details:
-              unawaited(
-                showGenerationDetailModal(
-                  context,
-                  controller: controller,
-                  item: item,
-                ),
-              );
-            case _DenseGenerationAction.delete:
-              onDelete?.call();
-          }
-        },
-        itemBuilder: (context) => actions.map((action) {
-          final copying =
-              action == _DenseGenerationAction.copyToDrive &&
-              controller.isCopyingGeneration(item.localId);
-          return PopupMenuItem<_DenseGenerationAction>(
-            value: action,
-            enabled: !copying,
-            child: Row(
-              children: <Widget>[
-                if (copying)
-                  const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else
-                  Icon(_denseGenerationActionIcon(action), size: 18),
-                const SizedBox(width: 10),
-                // The popup caps itself at 256 px; a long verb has to give
-                // way there rather than overflow its own row.
-                Flexible(
-                  child: Text(
-                    copying
-                        ? 'Copying to Drive…'
-                        : _denseGenerationActionLabel(action, item),
-                    overflow: TextOverflow.ellipsis,
+      // The menu is gone by the time the provider answers, so the ⋯ slot it
+      // left behind carries the loader for the work it started.
+      child: ListenableBuilder(
+        listenable: controller.busy,
+        builder: (context, child) =>
+            controller.busy.isBusy('generation', item.localId)
+            ? const Center(child: BusySpinner())
+            : child!,
+        child: PopupMenuButton<_DenseGenerationAction>(
+          tooltip: 'Generation actions',
+          padding: EdgeInsets.zero,
+          iconSize: 19,
+          onSelected: (action) {
+            switch (action) {
+              case _DenseGenerationAction.move:
+                onMove?.call();
+              case _DenseGenerationAction.tag:
+                onTag?.call();
+              case _DenseGenerationAction.visibility:
+                onVisibility?.call();
+              case _DenseGenerationAction.save:
+                unawaited(saveGenerationVideo(context, controller, item));
+              case _DenseGenerationAction.enhance:
+                controller.enhance(item);
+              case _DenseGenerationAction.reuse:
+                unawaited(
+                  controller.busy.run(
+                    'generation',
+                    item.localId,
+                    () => controller.reuse(item),
                   ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
+                );
+              case _DenseGenerationAction.extend:
+                unawaited(
+                  controller.busy.run(
+                    'generation',
+                    item.localId,
+                    () => controller.extend(item),
+                  ),
+                );
+              case _DenseGenerationAction.rewrite:
+                unawaited(
+                  showPromptRewriteDialog(
+                    context,
+                    controller: controller,
+                    item: item,
+                  ),
+                );
+              case _DenseGenerationAction.copyToDrive:
+                onCopyToDrive?.call();
+              case _DenseGenerationAction.checkStatus:
+                unawaited(
+                  controller.busy.run(
+                    'generation',
+                    item.localId,
+                    () => controller.checkStatus(item),
+                  ),
+                );
+              case _DenseGenerationAction.details:
+                unawaited(
+                  showGenerationDetailModal(
+                    context,
+                    controller: controller,
+                    item: item,
+                  ),
+                );
+              case _DenseGenerationAction.delete:
+                onDelete?.call();
+            }
+          },
+          itemBuilder: (context) => actions.map((action) {
+            final copying =
+                action == _DenseGenerationAction.copyToDrive &&
+                controller.isCopyingGeneration(item.localId);
+            return PopupMenuItem<_DenseGenerationAction>(
+              key: ValueKey('generation-action-${action.name}'),
+              value: action,
+              enabled: !copying,
+              child: Row(
+                children: <Widget>[
+                  if (copying)
+                    const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(_denseGenerationActionIcon(action), size: 18),
+                  const SizedBox(width: 10),
+                  // The popup caps itself at 256 px; a long verb has to give
+                  // way there rather than overflow its own row.
+                  Flexible(
+                    child: Text(
+                      copying
+                          ? 'Copying to Drive…'
+                          : _denseGenerationActionLabel(action, item),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -598,6 +637,7 @@ IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
       _DenseGenerationAction.save => Icons.download_rounded,
       _DenseGenerationAction.enhance => Icons.auto_fix_high_rounded,
       _DenseGenerationAction.reuse => Icons.replay_rounded,
+      _DenseGenerationAction.extend => Icons.fast_forward_rounded,
       _DenseGenerationAction.rewrite => Icons.auto_awesome_outlined,
       _DenseGenerationAction.copyToDrive => Icons.cloud_upload_outlined,
       _DenseGenerationAction.checkStatus => Icons.sync_rounded,
@@ -615,6 +655,7 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.save => item.isImage ? 'Save image' : 'Save video',
   _DenseGenerationAction.enhance => 'Enhance',
   _DenseGenerationAction.reuse => item.isFailed ? 'Retry generation' : 'Reuse',
+  _DenseGenerationAction.extend => 'Extend',
   _DenseGenerationAction.rewrite => 'AI Rewrite',
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
   _DenseGenerationAction.checkStatus => 'Check status',

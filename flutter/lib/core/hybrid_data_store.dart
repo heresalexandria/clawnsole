@@ -531,11 +531,19 @@ class HybridDataStore
   /// Drive id, so the swap to a `drive` reference never costs a download of
   /// bytes that were on this disk a moment ago. Best effort; returns how many
   /// files were adopted.
-  Future<int> adoptPublishedAssets(DriveUploadPassResult result) async {
+  ///
+  /// [keepStaged] names staged ids some other record still points at — a
+  /// Drive generation and a local-library reference can share one asset,
+  /// because persisting an input reuses the file already on disk. Adopting is
+  /// a rename, so moving those bytes would empty the record that kept them.
+  Future<int> adoptPublishedAssets(
+    DriveUploadPassResult result, {
+    Set<String> keepStaged = const <String>{},
+  }) async {
     var adopted = 0;
     for (final entry in result.replacements.entries) {
       final source = result.staged[entry.key];
-      if (source == null) continue;
+      if (source == null || keepStaged.contains(entry.key)) continue;
       try {
         final uri = await _local.assetUri(source);
         if (uri.scheme != 'file') continue;

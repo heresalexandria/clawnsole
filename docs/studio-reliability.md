@@ -38,6 +38,18 @@ other reader (a second device, the next launch) still sees the uncertain state.
 
 ## Library preservation
 
+Every asynchronous library read the studio applies goes through the superseded
+read merge, not a wholesale replacement of the in-memory library. A read notes
+the snapshot revision before it starts; if any other code path has written the
+library by the time it answers, the response is adopted record by record — the
+store wins except where the in-memory copy carries more of the film or is
+plainly newer — and records only this device knows about are carried across.
+That covers the manual Drive refresh, the periodic cross-device pass, the
+delivery paths, the preference write's returning snapshot, the foreground
+reconcile, and the provider-catalog refresh. A film delivered while one of
+those reads was open therefore stays on screen, and a stale copy of a record
+cannot undo a published Drive swap the studio is already showing.
+
 Drive writes carry the immutable snapshot on which their edits were based.
 Vault reads and background refreshes cannot redefine an operation's deletions.
 Deletion wins over a stale edit when the record existed in that base; durable

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'asset_extensions.dart';
 import 'hybrid_data_store.dart';
 import 'models.dart';
 
@@ -32,10 +33,84 @@ class DriveUploadLedger {
   /// the wait is logged once per episode rather than on every retry.
   bool waitingForDrive = false;
 
+  /// Staged ids a pass found no bytes for on this device: another device's
+  /// media in transit. Remembered across passes so the chip does not flip
+  /// back to "Syncing…" between them.
+  final Set<String> foreign = <String>{};
+
+  /// Consecutive passes that failed to publish everything this device holds.
+  int consecutiveFailures = 0;
+
   /// The Drive file a staged local id turned into, if this process
   /// published it.
   AssetReference? resolve(String stagedId) => resolved[stagedId];
 }
+
+/// A gateway that runs this device's Drive upload pump and can say what its
+/// queue is doing. The studio installs the report so record helpers — and
+/// through them the storage chip — describe this device's own work instead of
+/// guessing from the record alone.
+abstract interface class DriveUploadStatusSource {
+  /// The latest report from this device's pass.
+  DriveUploadQueueReport get driveUploadStatus;
+
+  /// Called whenever [driveUploadStatus] changes.
+  set onDriveUploadStatus(void Function()? listener);
+
+  /// Runs one pass now, outside the pump's schedule. Answers true when
+  /// nothing this device can publish remains pending.
+  Future<bool> flushDriveUploads();
+}
+
+/// The wire form of a [DriveUploadQueueReport], for the one surface whose
+/// pump runs in another process: the Electron renderer publishes nothing
+/// itself, the companion beside it does, so the companion serves what its
+/// pass reported and `WebGateway` reads it back.
+///
+/// Absence carries meaning that an empty queue does not. A companion that
+/// sends no report at all has said nothing about who owes these uploads, and
+/// the renderer must fall back to [DriveUploadQueueReport.unknown] instead of
+/// reading silence as "everything is published" — hence [reported] on the
+/// wire rather than inferring it from the payload's shape.
+Map<String, Object?> driveUploadQueueReportToJson(
+  DriveUploadQueueReport report,
+) => <String, Object?>{
+  'queued': report.queued.toList(),
+  'foreign': report.foreign.toList(),
+  if (report.stalledDetail != null) 'stalledDetail': report.stalledDetail,
+  'reported': report.reported,
+};
+
+/// Reads a report served by the process that owns the pump.
+DriveUploadQueueReport driveUploadQueueReportFromJson(
+  Map<String, Object?> json,
+) {
+  Set<String> ids(Object? value) => <String>{
+    for (final id in value is List<Object?> ? value : const <Object?>[])
+      if (id is String && id.isNotEmpty) id,
+  };
+  final detail = json['stalledDetail']?.toString();
+  return DriveUploadQueueReport(
+    queued: ids(json['queued']),
+    foreign: ids(json['foreign']),
+    stalledDetail: detail != null && detail.isNotEmpty ? detail : null,
+    reported: json['reported'] == true,
+  );
+}
+
+/// Whether two reports describe the same queue. Reports arrive on every poll
+/// of an unchanged library, and each one that is treated as news rebuilds the
+/// studio for nothing.
+bool sameDriveUploadQueueReport(
+  DriveUploadQueueReport a,
+  DriveUploadQueueReport b,
+) =>
+    a.reported == b.reported &&
+    a.stalledDetail == b.stalledDetail &&
+    a.queued.length == b.queued.length &&
+    a.foreign.length == b.foreign.length &&
+    a.queued.containsAll(b.queued) &&
+    a.foreign.containsAll(b.foreign);
 
 /// Runs one background Drive upload pass: publishes staged media, swaps the
 /// records over through the owner's canonical read/write path (the vault
@@ -55,6 +130,11 @@ class DriveUploadLedger {
 /// device's film in transit and is left alone. Only once its record has sat
 /// unpublished for [restageAfter] — the origin device lost the file, or went
 /// away — is it fetched again from the provider link, when one is still live.
+///
+/// [onReport] receives what this device's queue is doing, once when the pass
+/// starts and again when it settles. Nothing else can tell the difference
+/// between a film this device is pushing and one it is merely waiting for, so
+/// without it every surface has to describe both as "Syncing…".
 Future<bool> runDriveUploadPass({
   required HybridDataStore hybrid,
   Future<StoredData> Function()? read,
@@ -66,6 +146,7 @@ Future<bool> runDriveUploadPass({
   Duration restageAfter = const Duration(minutes: 10),
   DateTime Function()? clock,
   void Function(String message)? log,
+  void Function(DriveUploadQueueReport report)? onReport,
 }) async {
   assert(
     swap != null || (read != null && write != null),
@@ -74,8 +155,29 @@ Future<bool> runDriveUploadPass({
   final memory = ledger ?? DriveUploadLedger();
   final pending = await (readPending ?? hybrid.readCached)();
   final queued = HybridDataStore.pendingDriveUploads(pending);
-  if (queued.isEmpty) return true;
+  memory.foreign.retainWhere(queued.containsKey);
+
+  void report({String? stalledDetail}) {
+    onReport?.call(
+      DriveUploadQueueReport(
+        queued: <String>{
+          for (final id in queued.keys)
+            if (!memory.foreign.contains(id)) id,
+        },
+        foreign: <String>{...memory.foreign},
+        stalledDetail: stalledDetail,
+        reported: true,
+      ),
+    );
+  }
+
+  if (queued.isEmpty) {
+    report();
+    return true;
+  }
   if (!hybrid.isDriveConnected) {
+    memory.consecutiveFailures += 1;
+    report(stalledDetail: 'Google Drive is not connected on this device.');
     if (!memory.waitingForDrive) {
       memory.waitingForDrive = true;
       log?.call(
@@ -86,13 +188,26 @@ Future<bool> runDriveUploadPass({
     return false;
   }
   memory.waitingForDrive = false;
+  // Anything not already known to live elsewhere is this device's to push
+  // while the pass runs, so a film staged a moment ago reads as syncing from
+  // its first frame instead of waiting for the pass to finish.
+  report();
+  // Staged ids this process already published are replayed from the ledger
+  // rather than uploaded again: a cross-device merge can re-introduce the
+  // pre-swap reference, and by then the staged original has been adopted into
+  // the Drive media cache, so a second upload would either duplicate the file
+  // or report bytes that are no longer where the record says they are.
   final result = await hybrid.uploadQueuedDriveAssets(
     pending,
-    published: memory.published,
+    published: <String, AssetReference>{
+      ...memory.resolved,
+      ...memory.published,
+    },
     log: log,
   );
   memory.published.addAll(result.replacements);
   memory.resolved.addAll(result.replacements);
+  memory.foreign.addAll(result.missing.keys);
 
   // A staged result whose bytes vanished can be fetched again from the
   // provider link the record still carries; the next pass then uploads it.
@@ -161,7 +276,23 @@ Future<bool> runDriveUploadPass({
     memory.published.removeWhere(
       (id, _) => result.replacements.containsKey(id),
     );
-    final adopted = await hybrid.adoptPublishedAssets(result);
+    // Persisting an input reuses the file already on disk, so a Drive
+    // generation can name the very asset a local-library record keeps.
+    // Adopting is a rename: moving those bytes would empty that record.
+    final adopted = await hybrid.adoptPublishedAssets(
+      result,
+      keepStaged: <String>{
+        for (final asset in <AssetReference>[
+          ...pending.generations
+              .where((item) => item.storage != LibraryStorage.drive)
+              .expand(generationAssetReferences),
+          ...pending.savedReferences
+              .where((item) => item.storage != LibraryStorage.drive)
+              .expand(savedReferenceAssetReferences),
+        ])
+          if (asset.kind == 'local') asset.value,
+      },
+    );
     if (adopted > 0) {
       log?.call(
         'Drive upload pass: kept $adopted published file(s) in the local '
@@ -171,7 +302,31 @@ Future<bool> runDriveUploadPass({
   } else if (result.failures > 0) {
     log?.call('Drive upload pass: ${result.failures} upload(s) failed.');
   }
-  return result.failures == 0 && restagedReplacements.isEmpty;
+  final settled = result.failures == 0 && restagedReplacements.isEmpty;
+  if (result.failures > 0) {
+    memory.consecutiveFailures += 1;
+  } else {
+    memory.consecutiveFailures = 0;
+  }
+  // Report on the library as this pass left it, so anything published here
+  // stops describing itself as pending at all.
+  final remaining = <String>{
+    for (final id in queued.keys)
+      if (!replacements.containsKey(id)) id,
+  };
+  memory.foreign.retainWhere(remaining.contains);
+  onReport?.call(
+    DriveUploadQueueReport(
+      queued: remaining.difference(memory.foreign),
+      foreign: <String>{...memory.foreign},
+      stalledDetail: result.failures > 0
+          ? 'Uploads from this device have failed '
+                '${memory.consecutiveFailures} time(s) in a row.'
+          : null,
+      reported: true,
+    ),
+  );
+  return settled;
 }
 
 /// Schedules background Drive upload passes with single-flight execution and
@@ -196,6 +351,7 @@ class DriveUploadPump {
 
   Timer? _timer;
   bool _running = false;
+  Future<bool>? _current;
   bool _rerunRequested = false;
   bool _disposed = false;
   Duration? _retryDelay;
@@ -213,8 +369,25 @@ class DriveUploadPump {
     });
   }
 
-  Future<void> _run() async {
-    if (_disposed || _running) return;
+  /// Schedules a pass only when none is already pending. Callers that merely
+  /// notice staged media — every library read does — use this so they cannot
+  /// reset the retry backoff of a pass that keeps failing into a tight loop.
+  void ensureScheduled() {
+    if (_disposed || _running || _timer != null) return;
+    schedule();
+  }
+
+  /// Runs a pass now and answers its outcome, joining the pass already in
+  /// flight when there is one. A manual refresh uses this so it reports what
+  /// the pump actually did instead of racing it into a duplicate upload.
+  Future<bool> flushNow() => _run();
+
+  Future<bool> _run() {
+    if (_disposed) return Future<bool>.value(false);
+    return _current ??= _pass();
+  }
+
+  Future<bool> _pass() async {
     _running = true;
     var done = false;
     try {
@@ -225,21 +398,23 @@ class DriveUploadPump {
       done = false;
     } finally {
       _running = false;
+      _current = null;
     }
-    if (_disposed) return;
+    if (_disposed) return done;
     if (done) {
       _retryDelay = null;
       if (_rerunRequested) {
         _rerunRequested = false;
         schedule();
       }
-      return;
+      return done;
     }
     _rerunRequested = false;
     final delay = _retryDelay ?? initialRetryDelay;
     final doubled = delay * 2;
     _retryDelay = doubled > maximumRetryDelay ? maximumRetryDelay : doubled;
     schedule(delay);
+    return done;
   }
 
   void dispose() {
