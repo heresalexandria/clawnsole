@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
 import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
@@ -12,7 +13,7 @@ import 'reference_prompts.dart';
 
 class AtlasCloudApi {
   AtlasCloudApi({http.Client? client, Uri? baseUrl})
-    : _client = client ?? http.Client(),
+    : _client = recordingProviderClient(client ?? http.Client()),
       _baseUrl = baseUrl ?? Uri.parse('https://api.atlascloud.ai');
 
   final http.Client _client;

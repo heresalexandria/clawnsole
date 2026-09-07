@@ -93,6 +93,33 @@ estimates. Historical records labeled only `provider-reported` cannot always
 distinguish an old adapter quote from a genuine task amount; those records are
 retained rather than relabeled by guesswork. Quote variance summarizes per-film ratios from matched settled pairs.
 
+Every provider call a film makes is recorded in a device-local **API
+transcript** so a puzzling film can be explained after the fact. The recorder
+wraps each adapter's HTTP client once, and the gateway that owns the operation
+(the app itself on native, the companion beside the Electron renderer) names
+that operation in a zone value, so submits, polls, the account readings taken
+around them, and in-process result downloads are all attributed to the film
+that caused them without any call site knowing. Key verification, model
+listings, catalog fetches, and library media reads belong to no film and are
+never recorded; a platform background download finishes outside the process
+and leaves no record either.
+
+What is kept is deliberately not the wire. `Authorization`, `x-api-key`,
+`api-key`, cookies and any header, query parameter or JSON field whose name
+contains `key`, `token`, `secret`, `password`, `credential` or `signature`
+becomes `«redacted»`. Uploaded frames, base64 strings, `data:` URIs, multipart
+parts and media response bodies become size placeholders such as
+`«image/png 1.2 MB»`; a film's bytes stream past the recorder untouched and are
+never buffered. Request bodies are capped at 64 KB and responses at 256 KB,
+with the shortfall stated in the record. Transcripts live in
+`api-transcripts/<localId>.jsonl` beside the library — never inside
+`clawnsole.json`, which stays compact — capped at 200 records and 4 MB per
+film by dropping the oldest, deleted with the film through the same
+reference-aware cleanup that prunes its media, and never synced to Google
+Drive: only the device that made the calls can honestly claim to have made
+them. Recording never blocks or fails a provider call; appends queue behind
+each other and a storage failure quietly stops recording.
+
 Persisted diagnostics use a small allowlist and remove inline media, credential
 fields, bearer strings and private URL details. Existing record serialization,
 recovery-file writes and companion errors use the same boundary. Desktop Google
@@ -104,7 +131,7 @@ refresh tokens survive offline, rate-limit and server failures; a confirmed
 Regression coverage includes repeated identical takes, preflight edits, dropped
 submission responses, interleaved Drive clients, corrupt uploads, concurrent
 library moves, backup recovery, closed-draft assets, failed saves, keyboard and
-semantic access, transient OAuth failures, synthetic secret payloads, and matched
-cost accounting. All fixtures use temporary data and mocked provider transports.
+semantic access, transient OAuth failures, synthetic secret payloads, API
+transcript redaction and caps, and matched cost accounting. All fixtures use temporary data and mocked provider transports.
 Live provider billing, authenticated multi-device Drive behavior and hardware
 lifecycle behavior require their own integration validation.

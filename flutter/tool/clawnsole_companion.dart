@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:clawnsole/core/api_transcript.dart';
+import 'package:clawnsole/core/api_transcript_store.dart';
+import 'package:clawnsole/core/api_transcript_store_io.dart';
 import 'package:clawnsole/core/asset_extensions.dart';
 import 'package:clawnsole/core/asset_stream_io.dart';
 import 'package:clawnsole/core/atomic_file.dart';
@@ -345,7 +348,8 @@ class CompanionConfig {
   }
 }
 
-class CompanionStore implements DurableDataStore, StreamingAssetStore {
+class CompanionStore
+    implements DurableDataStore, StreamingAssetStore, ApiTranscriptStore {
   CompanionStore(this.file);
 
   final File file;
@@ -355,6 +359,32 @@ class CompanionStore implements DurableDataStore, StreamingAssetStore {
 
   Directory get assets =>
       Directory('${file.parent.path}${Platform.pathSeparator}assets');
+
+  /// Provider transcripts sit beside the library file, never inside it.
+  Directory get apiTranscripts => Directory(
+    '${file.parent.path}'
+    '${Platform.pathSeparator}${ApiTranscriptFileStore.directoryName}',
+  );
+
+  late final ApiTranscriptFileStore _apiTranscripts = ApiTranscriptFileStore(
+    () async => apiTranscripts,
+  );
+
+  @override
+  Future<void> appendApiRequest(ApiRequestRecord record) =>
+      _apiTranscripts.appendApiRequest(record);
+
+  @override
+  Future<List<ApiRequestRecord>> readApiRequests(String operationId) =>
+      _apiTranscripts.readApiRequests(operationId);
+
+  @override
+  Future<void> deleteApiRequests(String operationId) =>
+      _apiTranscripts.deleteApiRequests(operationId);
+
+  @override
+  Future<void> pruneApiTranscripts(Set<String> retainedOperationIds) =>
+      _apiTranscripts.pruneApiTranscripts(retainedOperationIds);
 
   Future<bool> exists() => file.exists();
 
@@ -577,6 +607,10 @@ class CompanionStore implements DurableDataStore, StreamingAssetStore {
     // hold it. Read roots while serialized with commits so removing a pending
     // publication lease cannot expose a newly linked asset to stale cleanup.
     final operation = _queue.then((_) async {
+      // The pass that forgets a deleted film's media forgets its transcript.
+      await _apiTranscripts.pruneApiTranscripts(
+        retainedTranscriptIds(generations),
+      );
       if (!await assets.exists()) return;
       final retained = _storedAssetIds(await _readRaw())
         ..addAll(_references(generations, savedReferences));
@@ -602,6 +636,7 @@ class CompanionStore implements DurableDataStore, StreamingAssetStore {
 
   Future<void> clearAssets() async {
     _pendingAssetIds.clear();
+    await _apiTranscripts.deleteAllApiRequests();
     if (await assets.exists()) await assets.delete(recursive: true);
   }
 
@@ -912,6 +947,16 @@ class CompanionHybridStore {
     List<SavedReference> references,
   ) => _dataStore.pruneAssets(generations, references);
 
+  /// Provider transcripts live with the local library, never on Drive.
+  Future<void> appendApiRequest(ApiRequestRecord record) =>
+      _dataStore.appendApiRequest(record);
+
+  Future<List<ApiRequestRecord>> readApiRequests(String operationId) =>
+      _dataStore.readApiRequests(operationId);
+
+  Future<void> deleteApiRequests(String operationId) =>
+      _dataStore.deleteApiRequests(operationId);
+
   Future<StorageStats> stats(int records) => _dataStore.stats(records);
 
   Future<StoredData> connectDrive(String accessToken, String folderName) async {
@@ -1019,6 +1064,13 @@ class CompanionApp {
   }
 
   final CompanionHybridStore _store;
+
+  /// This process makes the renderer's provider calls, so it is the side
+  /// that records them. The transcript lands in a sidecar file beside the
+  /// library and is served back by `/generations/<id>/api-requests`.
+  late final QueuedApiTranscriptSink _transcripts = QueuedApiTranscriptSink(
+    _store.appendApiRequest,
+  );
 
   final ProviderApiRouter _providers;
   final PromptRewriteRouter _rewrite;
@@ -1292,6 +1344,26 @@ class CompanionApp {
           'generation': generation.toJson(),
         });
       }
+      if (request.method == 'GET' &&
+          path.startsWith('/generations/') &&
+          path.endsWith('/api-requests')) {
+        final localId = Uri.decodeComponent(
+          path.substring(
+            '/generations/'.length,
+            path.length - '/api-requests'.length,
+          ),
+        );
+        if (localId.isEmpty || localId.contains('/')) {
+          throw const ProviderException(
+            'A generation id is required.',
+            status: 400,
+          );
+        }
+        final records = await _store.readApiRequests(localId);
+        return await _json(request.response, 200, <String, Object?>{
+          'requests': <Object?>[for (final record in records) record.toJson()],
+        });
+      }
       if (request.method == 'DELETE' && path == '/generations') {
         final localId = request.uri.queryParameters['id'];
         if (localId == null || localId.isEmpty) {
@@ -1308,6 +1380,9 @@ class CompanionApp {
           );
           return StoreChange<void>(next, null);
         });
+        // The transcript goes with the film, without waiting for the
+        // prune pass's grace window.
+        await _store.deleteApiRequests(localId);
         final data = await _store.read();
         await _store.pruneAssets(data.generations, data.savedReferences);
         return await _json(request.response, 200, await _snapshotPayload());
@@ -2372,9 +2447,33 @@ class CompanionApp {
     },
   );
 
-  Future<double?> _balanceSafely(String provider, String key) async {
+  /// Runs [body] with its provider traffic recorded against [operationId].
+  /// A null id — key verification, model listings — records nothing.
+  Future<T> _recordApi<T>(
+    String? operationId,
+    String provider,
+    ApiRequestPurpose purpose,
+    Future<T> Function() body,
+  ) => ApiTranscriptScope.run(
+    body,
+    sink: _transcripts,
+    operationId: operationId ?? '',
+    provider: provider,
+    purpose: purpose,
+  );
+
+  Future<double?> _balanceSafely(
+    String provider,
+    String key, {
+    String? operationId,
+  }) async {
     try {
-      return (await _providers.verify(provider, key)).balance;
+      return (await _recordApi(
+        operationId,
+        provider,
+        ApiRequestPurpose.balance,
+        () => _providers.verify(provider, key),
+      )).balance;
     } on Object {
       return null;
     }
@@ -2468,13 +2567,30 @@ class CompanionApp {
     return config;
   }
 
+  /// Fetches a finished film. With an [owner] the download joins that
+  /// film's transcript as its `result` request: the bytes stream past the
+  /// recorder untouched, and only the status, headers, and size are kept.
   Future<AssetReference?> _retainResult(
+    String source,
+    String label,
+    LibraryStorage storage, {
+    Generation? owner,
+  }) => owner == null
+      ? _retainResultBytes(source, label, storage)
+      : _recordApi(
+          owner.localId,
+          owner.provider,
+          ApiRequestPurpose.result,
+          () => _retainResultBytes(source, label, storage),
+        );
+
+  Future<AssetReference?> _retainResultBytes(
     String source,
     String label,
     LibraryStorage storage,
   ) async {
     final target = validatedProviderUrl(source);
-    final client = _mediaClientFactory();
+    final client = recordingProviderClient(_mediaClientFactory());
     try {
       final upstream = await client.send(http.Request('GET', target));
       if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
@@ -2512,7 +2628,7 @@ class CompanionApp {
   ) async {
     final url = owner.resultUrl?.trim();
     if (url == null || url.isEmpty) return null;
-    return _retainResult(url, staged.label, owner.storage);
+    return _retainResult(url, staged.label, owner.storage, owner: owner);
   }
 
   /// Retains a ready result through its previously captured delivery link
@@ -2533,6 +2649,7 @@ class CompanionApp {
           url,
           'clawnsole-${current.localId}.mp4',
           current.storage,
+          owner: current,
         ),
         stalled: false,
       );
@@ -2719,28 +2836,37 @@ class CompanionApp {
     generation = await _upsert(generation);
     var mayHaveBeenSent = false;
     try {
-      final creditsBefore = await _balanceSafely(provider, key);
+      final creditsBefore = await _balanceSafely(
+        provider,
+        key,
+        operationId: generation.localId,
+      );
       if (creditsBefore != null) {
         generation = generation.copyWith(creditsBefore: creditsBefore);
         generation = await _upsert(generation);
       }
-      final receipt = await _providers.submit(
+      final receipt = await _recordApi(
+        generation.localId,
         provider,
-        key,
-        generation.model,
-        cleanInput,
-        operationId: generation.localId,
-        beforeSend: () async {
-          generation = await _upsert(
-            generation.copyWith(
-              status: submissionUnknownStatus,
-              error: submissionUnknownMessage,
-              clearProgress: true,
-              updatedAt: DateTime.now().toUtc(),
-            ),
-          );
-          mayHaveBeenSent = true;
-        },
+        ApiRequestPurpose.submit,
+        () => _providers.submit(
+          provider,
+          key,
+          generation.model,
+          cleanInput,
+          operationId: generation.localId,
+          beforeSend: () async {
+            generation = await _upsert(
+              generation.copyWith(
+                status: submissionUnknownStatus,
+                error: submissionUnknownMessage,
+                clearProgress: true,
+                updatedAt: DateTime.now().toUtc(),
+              ),
+            );
+            mayHaveBeenSent = true;
+          },
+        ),
       );
       final requestId = receipt['id'];
       final pollingUrl = receipt['polling_url'];
@@ -2778,7 +2904,11 @@ class CompanionApp {
       // Keep the provider task recoverable even if the process exits or the
       // optional balance/cost refresh below loses connectivity.
       generation = await _upsert(generation);
-      final liveAfter = await _balanceSafely(provider, key);
+      final liveAfter = await _balanceSafely(
+        provider,
+        key,
+        operationId: generation.localId,
+      );
       final realized = resolveProviderCost(
         generation,
         receipt,
@@ -2866,6 +2996,7 @@ class CompanionApp {
         source,
         'clawnsole-$id.mp4',
         current.storage,
+        owner: current,
       );
     } on Object catch (error) {
       failure = generationExceptionMessage(error);
@@ -2944,7 +3075,12 @@ class CompanionApp {
     final checkedAt = DateTime.now().toUtc();
     late Generation next;
     try {
-      final payload = await _providers.poll(current.provider, key, pollingUrl);
+      final payload = await _recordApi(
+        current.localId,
+        current.provider,
+        ApiRequestPurpose.poll,
+        () => _providers.poll(current.provider, key, pollingUrl),
+      );
       final reportedStatus = normalizeGenerationStatus(payload['status']);
       var status = reportedStatus;
       if (isGenerationFailureStatus(status) && current.hasDeliveredMedia) {
@@ -3025,6 +3161,7 @@ class CompanionApp {
             downloadUrl,
             'clawnsole-${current.localId}.mp4',
             current.storage,
+            owner: current,
           );
           retentionFailures = 0;
         } on Object catch (error) {
@@ -3035,7 +3172,11 @@ class CompanionApp {
       final failed = isGenerationFailureStatus(status);
       final terminal = status == 'Ready' || failed;
       final balanceAfter = terminal
-          ? await _balanceSafely(current.provider, key)
+          ? await _balanceSafely(
+              current.provider,
+              key,
+              operationId: current.localId,
+            )
           : null;
       final realized = resolveProviderCost(
         current,

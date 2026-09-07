@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
+import 'api_transcript_store.dart';
 import 'background_delivery.dart';
 import 'public_media_http.dart';
 import 'media_content_policy.dart';
@@ -45,6 +47,7 @@ class DirectGateway
         ProviderCatalogCacheGateway,
         ComposerTabsGateway,
         PromptRewriteGateway,
+        ApiTranscriptGateway,
         BackgroundDeliveryGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
@@ -67,7 +70,7 @@ class DirectGateway
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _rewrite = rewriteRouter ?? PromptRewriteRouter(client: client),
-       _client = client ?? PublicMediaClient(),
+       _client = recordingProviderClient(client ?? PublicMediaClient()),
        _backgroundDelivery = backgroundDelivery,
        _referenceVideoNormalizer = referenceVideoNormalizer,
        _referenceVideoEditingService =
@@ -76,6 +79,11 @@ class DirectGateway
            : null;
 
   final DurableDataStore _store;
+
+  /// Where recorded provider traffic goes: a sidecar file per film, beside
+  /// the library and never inside it.
+  late final QueuedApiTranscriptSink _transcripts =
+      QueuedApiTranscriptSink.forStore(_store);
   final ProviderApiRouter _providers;
   final PromptRewriteRouter _rewrite;
   final http.Client _client;
@@ -1027,9 +1035,33 @@ class DirectGateway
     return _snapshot(next);
   }
 
-  Future<double?> _balanceSafely(String provider, String key) async {
+  /// Runs [body] with its provider traffic recorded against [operationId].
+  /// A null id — key verification, model listings — records nothing.
+  Future<T> _recordApi<T>(
+    String? operationId,
+    String provider,
+    ApiRequestPurpose purpose,
+    Future<T> Function() body,
+  ) => ApiTranscriptScope.run(
+    body,
+    sink: _transcripts,
+    operationId: operationId ?? '',
+    provider: provider,
+    purpose: purpose,
+  );
+
+  Future<double?> _balanceSafely(
+    String provider,
+    String key, {
+    String? operationId,
+  }) async {
     try {
-      return (await _providers.verify(provider, key)).balance;
+      return (await _recordApi(
+        operationId,
+        provider,
+        ApiRequestPurpose.balance,
+        () => _providers.verify(provider, key),
+      )).balance;
     } on Object {
       return null;
     }
@@ -1236,28 +1268,37 @@ class DirectGateway
 
     var mayHaveBeenSent = false;
     try {
-      final creditsBefore = await _balanceSafely(provider, key);
+      final creditsBefore = await _balanceSafely(
+        provider,
+        key,
+        operationId: record.localId,
+      );
       if (creditsBefore != null) {
         record = record.copyWith(creditsBefore: creditsBefore);
         await _replaceGeneration(record);
       }
-      final response = await _providers.submit(
+      final response = await _recordApi(
+        record.localId,
         provider,
-        key,
-        record.model,
-        input,
-        operationId: record.localId,
-        beforeSend: () async {
-          final uncertain = record.copyWith(
-            status: submissionUnknownStatus,
-            error: submissionUnknownMessage,
-            clearProgress: true,
-            updatedAt: DateTime.now().toUtc(),
-          );
-          // Await the durable write before the adapter starts its POST.
-          record = await _replaceGeneration(uncertain);
-          mayHaveBeenSent = true;
-        },
+        ApiRequestPurpose.submit,
+        () => _providers.submit(
+          provider,
+          key,
+          record.model,
+          input,
+          operationId: record.localId,
+          beforeSend: () async {
+            final uncertain = record.copyWith(
+              status: submissionUnknownStatus,
+              error: submissionUnknownMessage,
+              clearProgress: true,
+              updatedAt: DateTime.now().toUtc(),
+            );
+            // Await the durable write before the adapter starts its POST.
+            record = await _replaceGeneration(uncertain);
+            mayHaveBeenSent = true;
+          },
+        ),
       );
       final requestId = response['id'];
       final pollingUrl = response['polling_url'];
@@ -1296,7 +1337,11 @@ class DirectGateway
       // Persist it before optional balance/cost bookkeeping makes another
       // network request or the app has another opportunity to be suspended.
       record = await _persistReceipt(record);
-      final liveAfter = await _balanceSafely(provider, key);
+      final liveAfter = await _balanceSafely(
+        provider,
+        key,
+        operationId: record.localId,
+      );
       final realized = resolveProviderCost(
         record,
         response,
@@ -1369,7 +1414,18 @@ class DirectGateway
     }
   }
 
-  Future<AssetReference> _fetchResultAsset(
+  /// Every path that fetches a finished film, recorded as the film's
+  /// `result` request. The bytes stream past the recorder untouched; only
+  /// the status, headers, and size reach the transcript.
+  Future<AssetReference> _fetchResultAsset(String url, Generation generation) =>
+      _recordApi(
+        generation.localId,
+        generation.provider,
+        ApiRequestPurpose.result,
+        () => _fetchResultAssetBytes(url, generation),
+      );
+
+  Future<AssetReference> _fetchResultAssetBytes(
     String url,
     Generation generation,
   ) async {
@@ -1699,10 +1755,11 @@ class DirectGateway
       if (!generation.canCheckStatus) {
         throw StateError('This generation has no polling URL.');
       }
-      final payload = await _providers.poll(
+      final payload = await _recordApi(
+        generation.localId,
         generation.provider,
-        key,
-        generation.pollingUrl!,
+        ApiRequestPurpose.poll,
+        () => _providers.poll(generation.provider, key, generation.pollingUrl!),
       );
       final reportedStatus = normalizeGenerationStatus(payload['status']);
       var status = reportedStatus;
@@ -1799,7 +1856,11 @@ class DirectGateway
       final failed = isGenerationFailureStatus(status);
       final terminal = status == 'Ready' || failed;
       final balanceAfter = terminal
-          ? await _balanceSafely(generation.provider, key)
+          ? await _balanceSafely(
+              generation.provider,
+              key,
+              operationId: generation.localId,
+            )
           : null;
       final realized = resolveProviderCost(
         generation,
@@ -1958,6 +2019,10 @@ class DirectGateway
   }
 
   @override
+  Future<List<ApiRequestRecord>> readApiRequests(String localId) =>
+      _store.readApiRequests(localId);
+
+  @override
   Future<LocalSnapshot> deleteGeneration(String localId) async {
     final current = await _store.read();
     final next = current.copyWith(
@@ -1966,6 +2031,9 @@ class DirectGateway
           .toList(),
     );
     await _store.write(next);
+    // The film's transcript goes with the film, without waiting for the
+    // prune pass's grace window.
+    await _store.deleteApiRequests(localId);
     await _store.pruneAssets(next.generations, next.savedReferences);
     return _snapshot(next);
   }

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import 'api_transcript.dart';
+import 'api_transcript_store.dart';
 import 'durable_data_store.dart';
 import 'google_drive.dart';
 import 'models.dart';
@@ -28,7 +30,8 @@ class SettingsVaultDataStore
         DurableDataStore,
         StreamingAssetStore,
         SettingsVaultStatusSource,
-        ComposerWorkspaceStore {
+        ComposerWorkspaceStore,
+        ApiTranscriptStore {
   SettingsVaultDataStore({
     required DurableDataStore delegate,
     required SecureValueStore secureStore,
@@ -880,6 +883,22 @@ class SettingsVaultDataStore
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
   ]) => _delegate.pruneAssets(generations, savedReferences);
+
+  @override
+  Future<void> appendApiRequest(ApiRequestRecord record) =>
+      _delegate.appendApiRequest(record);
+
+  @override
+  Future<List<ApiRequestRecord>> readApiRequests(String operationId) =>
+      _delegate.readApiRequests(operationId);
+
+  @override
+  Future<void> deleteApiRequests(String operationId) =>
+      _delegate.deleteApiRequests(operationId);
+
+  @override
+  Future<void> pruneApiTranscripts(Set<String> retainedOperationIds) =>
+      _delegate.pruneApiTranscripts(retainedOperationIds);
 
   @override
   Future<StorageStats> stats(int records) => _delegate.stats(records);
