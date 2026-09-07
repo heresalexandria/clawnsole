@@ -8,13 +8,105 @@ extension AppControllerWorkspace on AppController {
       .where((item) => item.id == form.aestheticReferenceId)
       .firstOrNull;
 
+  /// The definition actually in force: the draft's own edited text when there
+  /// is one, otherwise the selected aesthetic's. Null when nothing is
+  /// appended at all.
+  String? get effectiveAestheticText {
+    final custom = form.aestheticCustomText;
+    if (custom != null) {
+      final text = custom.trim();
+      return text.isEmpty ? null : text;
+    }
+    final text = selectedAestheticReference?.text.trim() ?? '';
+    return text.isEmpty ? null : text;
+  }
+
+  /// The definition exactly as the accordion's field holds it: the edited
+  /// text when there is one, else the selected aesthetic's own words.
+  String get aestheticDefinitionText =>
+      form.aestheticCustomText ?? selectedAestheticReference?.text ?? '';
+
+  /// Whether the definition on this draft has been edited away from the
+  /// aesthetic it came from — the state the toolbar names *Custom*.
+  bool get hasCustomAestheticText => form.aestheticCustomText != null;
+
+  /// Whether the Aesthetic Definition accordion has anything to show: an
+  /// aesthetic is selected, or a custom definition outlived its aesthetic.
+  bool get hasAestheticDefinition =>
+      selectedAestheticReference != null || hasCustomAestheticText;
+
+  /// What the Aesthetic key and the accordion header call the current
+  /// choice. A custom definition is *Custom* whatever it grew out of.
+  String? get aestheticDefinitionLabel =>
+      hasCustomAestheticText ? 'Custom' : selectedAestheticReference?.title;
+
   /// What is actually sent: the direction, then its casting block, then the
   /// aesthetic text. None of the two appended parts is in the editable prompt.
   String get generationPrompt =>
-      appendAestheticPrompt(promptWithCast, selectedAestheticReference);
+      appendAestheticText(promptWithCast, effectiveAestheticText);
 
-  void selectAestheticReference(String? id) {
-    updateForm((form) => form.aestheticReferenceId = id);
+  /// Chooses an aesthetic. A custom definition is replaced by the new
+  /// aesthetic's own text unless [keepCustomText] says otherwise; the caller
+  /// asks before discarding one (see the Create picker).
+  void selectAestheticReference(String? id, {bool keepCustomText = false}) {
+    updateForm((form) {
+      form.aestheticReferenceId = id;
+      if (!keepCustomText) form.aestheticCustomText = null;
+    });
+  }
+
+  /// The keystroke path for the Aesthetic Definition field, mirroring
+  /// [updatePrompt]: the text lands on the draft at once, and everything
+  /// derived from it — the character budget, the estimate, the toolbar's
+  /// *Custom* label — settles when typing pauses. Nothing here notifies the
+  /// studio, so the accordion's own field owns its text.
+  void updateAestheticCustomText(String value) {
+    final tab = _draftTab;
+    final base = _aestheticReferences
+        .where((item) => item.id == tab.form.aestheticReferenceId)
+        .firstOrNull;
+    // Typing the saved definition back is not an edit: the draft simply
+    // follows its aesthetic again.
+    final next = base != null && value.trim() == base.text.trim()
+        ? null
+        : value;
+    if (tab.form.aestheticCustomText == next) return;
+    tab.form.aestheticCustomText = next;
+    if (_promptSettlePending != null && !identical(_promptSettlePending, tab)) {
+      _settlePromptEdits();
+    }
+    _promptSettlePending = tab;
+    _promptSettleTimer?.cancel();
+    _promptSettleTimer = Timer(
+      AppController.promptSettleDelay,
+      _settlePromptEdits,
+    );
+    _scheduleComposerTabsSave(touched: tab);
+    _promptEditRevision.value += 1;
+  }
+
+  /// Drops the edited definition, so the draft follows its aesthetic again.
+  void revertAestheticCustomText() {
+    if (!hasCustomAestheticText) return;
+    updateForm((form) => form.aestheticCustomText = null);
+  }
+
+  /// Writes the edited definition back onto the aesthetic it came from, so
+  /// every draft that uses it moves together. Clears the custom text.
+  void applyAestheticCustomTextToSelection() {
+    final base = selectedAestheticReference;
+    final text = form.aestheticCustomText?.trim() ?? '';
+    if (base == null || text.isEmpty) return;
+    saveAestheticReference(
+      id: base.id,
+      title: base.title,
+      text: text,
+      icon: base.icon,
+      color: base.color,
+      tags: base.tags,
+      favorite: base.favorite,
+    );
+    updateForm((form) => form.aestheticCustomText = null);
   }
 
   /// Which half of the References desk is showing. Session-only: the desk
@@ -147,9 +239,10 @@ extension AppControllerWorkspace on AppController {
     return tag == null || item.hasTag(tag);
   }
 
-  /// Creates or updates an aesthetic. Omitted [tags]/[favorite] keep the
+  /// Creates or updates an aesthetic, returning the id it wrote (null when
+  /// the title or text was empty). Omitted [tags]/[favorite] keep the
   /// existing record's values so an edit never silently unstars or untags.
-  void saveAestheticReference({
+  String? saveAestheticReference({
     String? id,
     required String title,
     required String text,
@@ -158,7 +251,7 @@ extension AppControllerWorkspace on AppController {
     List<String>? tags,
     bool? favorite,
   }) {
-    if (title.trim().isEmpty || text.trim().isEmpty) return;
+    if (title.trim().isEmpty || text.trim().isEmpty) return null;
     final existing = id == null
         ? null
         : _aestheticReferences.where((item) => item.id == id).firstOrNull;
@@ -177,6 +270,7 @@ extension AppControllerWorkspace on AppController {
     _invalidateProviderEstimate();
     _flushComposerTabsSave();
     notifyListeners();
+    return record.id;
   }
 
   void deleteAestheticReference(String id) {

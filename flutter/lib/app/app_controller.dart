@@ -299,6 +299,11 @@ class GenerationFormState {
   String prompt = '';
   bool screenplayMode = false;
   String? aestheticReferenceId;
+
+  /// The aesthetic definition edited in place on this draft. Null follows the
+  /// selected aesthetic; anything else is the "Custom" definition that is
+  /// appended at submission instead.
+  String? aestheticCustomText;
   final Set<String> screenplayLinkedCharacters = {};
   final Map<String, String> screenplayCharacterAliases = {};
   final Map<String, String> draftCharacterNames = {};
@@ -447,6 +452,7 @@ class ComposerTab {
       form.prompt.trim().isEmpty &&
       !form.screenplayMode &&
       form.aestheticReferenceId == null &&
+      form.aestheticCustomText == null &&
       form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
       form.references.isEmpty &&
@@ -967,6 +973,7 @@ class AppController extends ChangeNotifier {
     prompt: tab.form.prompt,
     screenplayMode: tab.form.screenplayMode,
     aestheticReferenceId: tab.form.aestheticReferenceId,
+    aestheticCustomText: tab.form.aestheticCustomText,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
     characterMappings: {
@@ -1222,6 +1229,7 @@ class AppController extends ChangeNotifier {
       ..prompt = record.prompt
       ..screenplayMode = record.screenplayMode
       ..aestheticReferenceId = record.aestheticReferenceId
+      ..aestheticCustomText = record.aestheticCustomText
       ..aspectRatio = record.aspectRatio
       ..autoDuration = record.autoDuration
       ..durationSeconds = record.durationSeconds

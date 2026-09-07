@@ -294,7 +294,25 @@ Layout order:
    itself never appears in the prompt box; it is appended silently at
    submission, so an uncast composer keeps the heading through Generate
    above the fold.
-3. **Keyframes / References accordions**: the two guidance sections are
+3. **Aesthetic Definition accordion**: present only when a draft has an
+   aesthetic — one chosen, or a custom definition of its own. A collapsible
+   row in the guidance construction (`aesthetic-accordion-toggle`) sitting
+   between the cast and the keyframes/references pair, with the aesthetic's
+   icon, one flat line of its words, and its name as the status word. The
+   body is the definition itself in an editable field. **Editing it never
+   touches the saved aesthetic**: the draft becomes **Custom** — the
+   Aesthetic key in the Direction toolbar says so on its single row, and the
+   picker adds a *Custom* entry naming what it was edited from. Three ways
+   out sit under the field: *Save as new…* (the aesthetic editor, prefilled,
+   and the draft switches to the new aesthetic), *Update “name”* (writes the
+   words back over the original after asking, so every draft using it moves
+   together), and *Revert*. Choosing another aesthetic while a custom
+   definition is open asks once before replacing it; *No aesthetic* clears
+   both. The custom text is part of the draft — it persists per tab, crosses
+   a relaunch, and makes an otherwise empty tab count as occupied. Typing
+   here follows the Direction field's contract: no keystroke rebuilds the
+   studio.
+4. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny
    thumbnails of what is attached, and a status word (*None* / *n
@@ -313,17 +331,17 @@ Layout order:
    both accordions open, warns in madder, and cannot submit. The
    *Normalize visual references* switch applies to both sections, so it
    sits below the pair.
-4. **"Or start from…"**: two quiet text buttons under the accordions
+5. **"Or start from…"**: two quiet text buttons under the accordions
    disclose the video-continuation and draft-enhance panels. An attached
    source collapses the irrelevant sections and explains what is set
    aside; removing it restores them. Draft enhance hides prompt/frames
    entirely (the original generation owns them) and shows only Finish +
    Safety.
-5. **Frame**: a console-key ratio dropdown whose trigger and menu rows
+6. **Frame**: a console-key ratio dropdown whose trigger and menu rows
    keep the *drawn glyph of the actual shape* plus label and hint; Auto
    uses the free-crop glyph. Frame and Finish share one dropdown row at
    every width above 330 px, so phones stop spending a full row on each.
-6. **Duration**: Manual is the default. Models that support provider-selected
+7. **Duration**: Manual is the default. Models that support provider-selected
    duration show a brushed-metal Auto / Manual switch; models without that
    capability show no Auto option. Manual shows the model- and
    resolution-specific slider range. Auto replaces the slider with the same
@@ -332,18 +350,18 @@ Layout order:
    and it commits clamped to the range on blur/submit; focusing it while
    AUTO is lit drops to Manual, like touching the slider. Layouts that
    require fixed timing lock the switch to Manual and say why.
-7. **Finish**: a console-key resolution dropdown (label + pixel detail
+8. **Finish**: a console-key resolution dropdown (label + pixel detail
    per row; draft mode dims tiers above HD) on the Frame row, then audio
    and fast-draft hardware switches (lit hunter green when on),
    safety-tolerance knob with an `n / 4` readout, and — for models whose
    API takes one — a **Seed** field with a dice button (empty = random),
    all stacked in the single settings column.
-8. **Estimated charge + Save generation to**: side by side in one row at
+9. **Estimated charge + Save generation to**: side by side in one row at
    desktop widths. The stitched hunter-green panel keeps the brass coin,
    credits range in Fraunces, USD in brass, balances, and rate-card link
    in a single console row; the destination panel is one row of storage
    chips, the folder dropdown, and a new-folder icon button.
-9. Footer: the console **model selector** (provider + model on a
+10. Footer: the console **model selector** (provider + model on a
    fourteen-segment readout in a screwed charcoal bezel, chevron key;
    opens the shared picker dialog) directly before the backlit
    **GENERATE VIDEO** push-button indicator, shoulder to shoulder at 56 px.
@@ -381,7 +399,7 @@ Attachments, pending picks, a name, aesthetic selection, and settings edits
 make a draft occupied even before any direction is typed. A tab born from AI Rewrite wears a small brass
 `auto_awesome` mark whose tooltip is the model's one-line summary of what
 changed. The model plaque is not in the heading at all: it sits in the
-composer footer directly before Generate (see item 8), inside the draft it
+composer footer directly before Generate (see item 10), inside the draft it
 belongs to. Phones drop the eyebrow and keep just the rail; the first-run
 bring-your-own-key line sits under the rail when no provider is set up.
 Tabs persist locally and sync with the Drive workspace when connected;
@@ -442,7 +460,10 @@ generation-mode rule above still stands — tabs never select a mode.
   aesthetic key opens a searchable anchored panel with the same ordering:
   *No aesthetic*, a **Favorites** group, then **All**, each row starring in
   place without closing the panel, and a *Manage aesthetics…* footer that
-  opens this tab.
+  opens this tab. A draft whose definition was edited in the composer leads
+  the panel with a **Custom** row naming the aesthetic it grew out of (see
+  §7, item 3); the library itself is never edited from Create without
+  being asked.
 - **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
   live in an anchored panel instead of stacked chip rows. The key lights
   plum with a count while any of them narrows the view, and the panel

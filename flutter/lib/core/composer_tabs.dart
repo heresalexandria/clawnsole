@@ -46,6 +46,7 @@ class ComposerTabRecord {
     this.prompt = '',
     this.screenplayMode = false,
     this.aestheticReferenceId,
+    this.aestheticCustomText,
     this.mediaConfig,
     this.mode,
     this.screenplayLinkedCharacters = const [],
@@ -86,6 +87,12 @@ class ComposerTabRecord {
   final String prompt;
   final bool screenplayMode;
   final String? aestheticReferenceId;
+
+  /// The aesthetic definition as edited in this draft, when the director
+  /// changed it. Null means the selected aesthetic's own text is in force;
+  /// an empty string is a definition deliberately cleared. Additive on
+  /// schema 6 — older builds simply keep the saved aesthetic's text.
+  final String? aestheticCustomText;
   final Map<String, Object?>? mediaConfig;
   final String? mode;
   final List<String> screenplayLinkedCharacters;
@@ -153,6 +160,8 @@ class ComposerTabRecord {
     String? prompt,
     bool? screenplayMode,
     String? aestheticReferenceId,
+    String? aestheticCustomText,
+    bool clearAestheticCustomText = false,
     Map<String, Object?>? mediaConfig,
     String? mode,
     bool clearAestheticReferenceId = false,
@@ -199,6 +208,9 @@ class ComposerTabRecord {
     aestheticReferenceId: clearAestheticReferenceId
         ? null
         : aestheticReferenceId ?? this.aestheticReferenceId,
+    aestheticCustomText: clearAestheticCustomText
+        ? null
+        : aestheticCustomText ?? this.aestheticCustomText,
     screenplayLinkedCharacters:
         screenplayLinkedCharacters ?? this.screenplayLinkedCharacters,
     screenplayReferenceNames:
@@ -249,6 +261,7 @@ class ComposerTabRecord {
     'screenplayMode': screenplayMode,
     if (aestheticReferenceId != null)
       'aestheticReferenceId': aestheticReferenceId,
+    if (aestheticCustomText != null) 'aestheticCustomText': aestheticCustomText,
     if (screenplayLinkedCharacters.isNotEmpty)
       'screenplayLinkedCharacters': screenplayLinkedCharacters,
     if (screenplayReferenceNames.isNotEmpty)
@@ -312,6 +325,10 @@ class ComposerTabRecord {
       prompt: json['prompt'] is String ? json['prompt']! as String : '',
       screenplayMode: flag(json['screenplayMode'], false),
       aestheticReferenceId: text(json['aestheticReferenceId']),
+      // Kept verbatim: a cleared definition ("") is a choice, not an absence.
+      aestheticCustomText: json['aestheticCustomText'] is String
+          ? json['aestheticCustomText']! as String
+          : null,
       screenplayLinkedCharacters:
           (json['screenplayLinkedCharacters'] is List
                   ? json['screenplayLinkedCharacters']! as List

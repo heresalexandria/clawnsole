@@ -100,7 +100,13 @@ List<String> normalizeAestheticTags(Iterable<String> tags) {
 List<String> parseAestheticTags(String value) =>
     normalizeAestheticTags(value.split(RegExp(r'[,;\n]')));
 
-String appendAestheticPrompt(String prompt, AestheticReference? aesthetic) => [
+String appendAestheticPrompt(String prompt, AestheticReference? aesthetic) =>
+    appendAestheticText(prompt, aesthetic?.text);
+
+/// The same join for a definition that no longer belongs to any saved
+/// aesthetic — a "Custom" definition edited in the composer, or the text a
+/// film was rendered with after its aesthetic changed.
+String appendAestheticText(String prompt, String? aesthetic) => [
   prompt.trim(),
-  if (aesthetic != null) aesthetic.text.trim(),
+  if (aesthetic != null) aesthetic.trim(),
 ].where((text) => text.isNotEmpty).join('\n\n');

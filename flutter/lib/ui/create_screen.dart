@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/aesthetic_reference.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'app_intents.dart';
@@ -431,6 +432,19 @@ class _ComposerState extends State<_Composer> {
           // carries it. Absent entirely until a character holds a reference.
           if (CastRow.visibleFor(controller)) ...<Widget>[
             CastRow(controller: controller),
+            SizedBox(height: short ? 8 : 12),
+          ],
+          // The chosen aesthetic's own words, between the cast and the
+          // guidance sections. Present only when there is a definition to
+          // read: an aesthetic is selected, or one was edited into a custom
+          // definition of its own.
+          if (!enhancing && controller.hasAestheticDefinition) ...<Widget>[
+            _AestheticDefinitionAccordion(
+              key: ValueKey(
+                'aesthetic-definition-${controller.activeComposerTabId}',
+              ),
+              controller: controller,
+            ),
             SizedBox(height: short ? 8 : 12),
           ],
           if (draftActive)
@@ -1373,6 +1387,240 @@ List<PromptReferenceOption> _promptReferenceOptions(AppController controller) {
       .toList();
 }
 
+/// The chosen aesthetic's definition, open to reading and editing in place.
+///
+/// Editing here never rewrites the saved aesthetic: the draft carries a
+/// **Custom** definition until it is saved as a new aesthetic, written back
+/// over the one it came from, or reverted. Typing follows the Direction
+/// field's contract — the text lands on the draft at once and the studio
+/// settles when typing pauses, so no keystroke rebuilds the composer.
+class _AestheticDefinitionAccordion extends StatefulWidget {
+  const _AestheticDefinitionAccordion({required this.controller, super.key});
+
+  final AppController controller;
+
+  @override
+  State<_AestheticDefinitionAccordion> createState() =>
+      _AestheticDefinitionAccordionState();
+}
+
+class _AestheticDefinitionAccordionState
+    extends State<_AestheticDefinitionAccordion> {
+  final TextEditingController _field = TextEditingController();
+  late String _seen = widget.controller.aestheticDefinitionText;
+  bool _open = false;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _field.text = _seen;
+  }
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  /// One flat line of the definition for the collapsed header.
+  String get _preview => _field.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  Future<void> _saveAsNew() async {
+    final text = _field.text.trim();
+    if (text.isEmpty) return;
+    final id = await showAestheticEditor(
+      context,
+      controller,
+      initialText: text,
+    );
+    if (id == null || !mounted) return;
+    controller.selectAestheticReference(id);
+  }
+
+  Future<void> _updateBase(AestheticReference base) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update this aesthetic?'),
+        content: Text(
+          '“${base.title}” keeps the definition you just wrote. Every draft '
+          'that uses it renders with the new words.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('aesthetic-update-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    controller.applyAestheticCustomTextToSelection();
+  }
+
+  Widget _action({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+  }) => TextButton.icon(
+    key: key,
+    onPressed: onPressed,
+    icon: Icon(icon, size: 16),
+    label: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 210),
+      child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    ),
+    style: TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    // An outside change — Revert, another aesthetic, a restored film — is the
+    // only thing that moves the field's text out from under the director.
+    final text = controller.aestheticDefinitionText;
+    if (text != _seen) {
+      _seen = text;
+      if (_field.text.trim() != text.trim()) {
+        _field.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+      }
+    }
+    final base = controller.selectedAestheticReference;
+    final custom = controller.hasCustomAestheticText;
+    final typed = _field.text.trim();
+    final differs = base != null && typed != base.text.trim();
+    return LayoutBuilder(
+      builder: (context, constraints) => _accordion(
+        context,
+        base: base,
+        custom: custom,
+        typed: typed,
+        differs: differs,
+        // Narrow columns keep the section word alone so the aesthetic's own
+        // name still fits beside it.
+        label: constraints.maxWidth < 620
+            ? 'Aesthetic'
+            : 'Aesthetic definition',
+      ),
+    );
+  }
+
+  Widget _accordion(
+    BuildContext context, {
+    required AestheticReference? base,
+    required bool custom,
+    required String typed,
+    required bool differs,
+    required String label,
+  }) {
+    return _GuidanceAccordion(
+      toggleKey: const ValueKey('aesthetic-accordion-toggle'),
+      icon: Icons.palette_outlined,
+      label: label,
+      expanded: _open,
+      onToggle: () => setState(() => _open = !_open),
+      previews: <Widget>[
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (custom)
+              Icon(
+                Icons.edit_note_rounded,
+                size: 15,
+                color: context.tokens.brass,
+              )
+            else if (base != null)
+              AestheticIcon(name: base.icon, color: base.color, size: 15),
+            const SizedBox(width: 6),
+            Text(
+              _preview.isEmpty ? 'No definition yet' : _preview,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 10.5,
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      ],
+      summary: controller.aestheticDefinitionLabel,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextField(
+            key: const ValueKey('aesthetic-definition-field'),
+            controller: _field,
+            minLines: 3,
+            maxLines: 8,
+            style: const TextStyle(fontSize: 12.5, height: 1.4),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'The words appended to every render from this draft.',
+              helperText: custom
+                  ? base == null
+                        ? 'A custom definition, saved with this draft only.'
+                        : 'Edited from “${base.title}”. The saved aesthetic '
+                              'is unchanged.'
+                  : 'Editing this makes a custom definition for this draft.',
+              helperMaxLines: 2,
+            ),
+            onChanged: (value) {
+              _seen = value;
+              controller.updateAestheticCustomText(value);
+              // A local rebuild only: the action row follows the text, and
+              // the studio around it stays where it is.
+              setState(() {});
+            },
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            children: <Widget>[
+              _action(
+                key: const ValueKey('aesthetic-save-as-new'),
+                icon: Icons.add_rounded,
+                label: 'Save as new…',
+                onPressed: typed.isEmpty ? null : () => unawaited(_saveAsNew()),
+              ),
+              if (differs && base != null)
+                _action(
+                  key: const ValueKey('aesthetic-update-base'),
+                  icon: Icons.save_outlined,
+                  label: 'Update “${base.title}”',
+                  onPressed: typed.isEmpty
+                      ? null
+                      : () => unawaited(_updateBase(base)),
+                ),
+              if (custom && base != null)
+                _action(
+                  key: const ValueKey('aesthetic-revert'),
+                  icon: Icons.undo_rounded,
+                  label: 'Revert',
+                  onPressed: controller.revertAestheticCustomText,
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Pairs the guidance accordions with the Frame/Finish/Duration settings
 /// column: side by side at desktop widths, stacked with a divider between
 /// them on narrow layouts.
@@ -1732,13 +1980,17 @@ class _GuidanceAccordion extends StatelessWidget {
                 children: <Widget>[
                   Icon(icon, size: 15, color: context.tokens.brass),
                   const SizedBox(width: 7),
-                  Text(
-                    label.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w700,
-                      color: colors.onSurface.withValues(alpha: .82),
+                  Flexible(
+                    child: Text(
+                      label.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        letterSpacing: 1.2,
+                        fontWeight: FontWeight.w700,
+                        color: colors.onSurface.withValues(alpha: .82),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1763,7 +2015,9 @@ class _GuidanceAccordion extends StatelessWidget {
                                 ),
                                 if (summaryText != null) ...<Widget>[
                                   const SizedBox(width: 8),
-                                  summaryText,
+                                  // A long aesthetic name gives way here
+                                  // rather than pushing the row over.
+                                  Flexible(child: summaryText),
                                 ],
                               ],
                             ),
