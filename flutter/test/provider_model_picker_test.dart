@@ -3,6 +3,7 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/create_screen.dart';
+import 'package:clawnsole/ui/panels.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -51,6 +52,23 @@ Future<void> _openPicker(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Choose provider and model'));
   await tester.pumpAndSettle();
 }
+
+/// A context inside the open picker, for reading theme tokens.
+BuildContext context(WidgetTester tester) =>
+    tester.element(find.byKey(_pickerKey));
+
+/// The burl patch every rendered provider heading is faced with, top to
+/// bottom, read straight off the decoration the picker builds.
+List<Alignment> _headingSlices(WidgetTester tester) => tester
+    .widgetList<DecoratedBox>(
+      find.descendant(
+        of: find.byType(BurlwoodSlice),
+        matching: find.byType(DecoratedBox),
+      ),
+    )
+    .map((box) => (box.decoration as BoxDecoration).image?.alignment)
+    .whereType<Alignment>()
+    .toList();
 
 /// Whether the picker's search field currently holds the keyboard.
 bool _searchHasFocus(WidgetTester tester) => tester
@@ -158,6 +176,141 @@ void main() {
     await _openPicker(tester);
     expect(find.byKey(_artcraftOption), findsNothing);
     other.dispose();
+  });
+
+  test('the burl sheet is cut deterministically, never at the joint', () {
+    const keys = <String>[
+      'bfl',
+      'artcraft',
+      'ltx',
+      'runway',
+      'krea',
+      'luma',
+      'pika',
+      'minimax',
+      'kling',
+      'vidu',
+    ];
+    final cuts = BurlwoodCut.run(keys);
+    expect(cuts, hasLength(keys.length));
+
+    // The same run always comes off the sheet the same way, and one key on
+    // its own agrees with the head of a run that starts with it.
+    expect(BurlwoodCut.run(keys), cuts);
+    expect(BurlwoodCut.of(keys.first), cuts.first);
+
+    // No two facings that will touch come off neighbouring parts of the
+    // sheet, so the figure breaks at every joint.
+    for (var i = 1; i < cuts.length; i++) {
+      expect(
+        (cuts[i].row - cuts[i - 1].row).abs(),
+        greaterThanOrEqualTo(2),
+        reason: '${keys[i]} would run into ${keys[i - 1]}',
+      );
+      expect(cuts[i], isNot(cuts[i - 1]));
+    }
+
+    // And the sheet is genuinely used rather than two patches alternating.
+    expect(cuts.map((cut) => cut.patch).toSet().length, greaterThan(4));
+    expect(cuts.map((cut) => cut.flipped).toSet(), <bool>{true, false});
+
+    // Every cut lands inside the sheet.
+    for (final cut in cuts) {
+      expect(cut.row, inInclusiveRange(0, BurlwoodCut.rows - 1));
+      expect(cut.column, inInclusiveRange(0, BurlwoodCut.columns - 1));
+      expect(cut.alignment.x, inInclusiveRange(-1, 1));
+      expect(cut.alignment.y, inInclusiveRange(-1, 1));
+    }
+  });
+
+  test('a run keeps a key on the same patch when nothing crowds it', () {
+    // The hash alone decides; the walk only runs when a facing would touch
+    // the one above it.
+    final alone = BurlwoodCut.of('runway');
+    final led = BurlwoodCut.run(<String>['#favorites', 'runway']).last;
+    expect(led.row, isNot(BurlwoodCut.of('#favorites').row));
+    expect(alone, isA<BurlwoodCut>());
+  });
+
+  testWidgets('provider headings are burl facings, each from its own slice', (
+    tester,
+  ) async {
+    await _useDeskSurface(tester);
+    final controller = await _studio();
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+    await _openPicker(tester);
+
+    // Every heading wears the casework veneer.
+    final slices = find.byType(BurlwoodSlice);
+    expect(slices, findsWidgets);
+    expect(
+      find.descendant(of: slices, matching: find.byType(Material)),
+      findsWidgets,
+      reason: 'the ripple has to land on the wood, not behind it',
+    );
+
+    final alignments = _headingSlices(tester);
+    expect(
+      alignments.length,
+      greaterThanOrEqualTo(3),
+      reason: 'several headings have to be on screen to compare them',
+    );
+    for (var i = 1; i < alignments.length; i++) {
+      expect(
+        alignments[i],
+        isNot(alignments[i - 1]),
+        reason: 'touching headings would show the same patch of burl',
+      );
+      // Two rows of the sheet apart at the very least: adjacent facings
+      // must not read as one continuous board.
+      expect(
+        (alignments[i].y - alignments[i - 1].y).abs(),
+        greaterThan(.5),
+        reason: 'the grain would run straight through the joint',
+      );
+    }
+
+    // The flat stand-in under the photograph is the burl's own finish, so
+    // the row reads right before the texture decodes.
+    final ground = tester
+        .widget<ColoredBox>(
+          find.byKey(const ValueKey('provider-model-heading-background-bfl')),
+        )
+        .color;
+    expect(ground, PanelSurface.burlwood.ground(context(tester).tokens));
+    controller.dispose();
+  });
+
+  testWidgets('headings stand taller and speak louder than they did', (
+    tester,
+  ) async {
+    await _useDeskSurface(tester);
+    final controller = await _studio();
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+    await _openPicker(tester);
+
+    const heading = ValueKey<String>('provider-model-heading-bfl');
+    expect(
+      tester.getSize(find.byKey(heading)).height,
+      greaterThanOrEqualTo(48),
+    );
+    final name = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(heading),
+        matching: find.text('BLACK FOREST LABS'),
+      ),
+    );
+    expect(name.style!.fontSize, greaterThanOrEqualTo(12));
+    expect(name.style!.fontWeight, FontWeight.w800);
+    expect(name.style!.letterSpacing, greaterThanOrEqualTo(1.2));
+    // Casework keeps cream ink in both rooms.
+    expect(
+      name.style!.color,
+      PanelSurface.burlwood.ink(context(tester).tokens).on,
+    );
+    controller.dispose();
   });
 
   testWidgets('the close key dismisses the picker and changes nothing', (

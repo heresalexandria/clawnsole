@@ -4965,9 +4965,6 @@ void main() {
           ),
         );
         final foreground = heading.style!.color!;
-        final surface = Theme.of(
-          tester.element(backgroundFinder),
-        ).colorScheme.surface;
         final lighter =
             foreground.computeLuminance() > background.computeLuminance()
             ? foreground
@@ -4977,10 +4974,9 @@ void main() {
             (lighter.computeLuminance() + .05) /
             (darker.computeLuminance() + .05);
 
-        expect(
-          background.computeLuminance(),
-          lessThan(surface.computeLuminance()),
-        );
+        // The headings are burlwood casework: dark in both modes on their
+        // own account, rather than merely darker than the room behind them.
+        expect(background.computeLuminance(), lessThan(.05));
         expect(contrast, greaterThanOrEqualTo(4.5));
         Navigator.of(tester.element(backgroundFinder)).pop();
         await tester.pumpAndSettle();

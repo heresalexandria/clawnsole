@@ -273,7 +273,22 @@ and they share one memory of which provider sections are folded. The
 search field is the header — it takes focus on desktop, where the director
 can type at once, and not on iOS or Android, where the keyboard would
 cover the list — with a small close key beside it for the platforms that
-have no Escape. Every model row and provider heading carries a small star
+have no Escape. Each **provider heading is a burlwood facing** —
+`BurlwoodSlice` / `BurlwoodCut` in `panels.dart` — 50 px tall, its name in
+12.5 px w800 capitals tracked 1.2, cut from its own patch of the sheet: the
+patches are handed out from a stable hash of the provider id and no two
+touching headings may come off patches within two rows of each other, so
+the figure breaks at every joint instead of running through it (a hairline
+kerf and its lit edge mark the cut). The FAVORITES heading is faced from
+the same run — it is the same kind of thing, and one pale bar among wooden
+ones would read as a slip — while the model rows beneath keep the dialog
+surface. This is casework, so **the headings stay dark in light mode**: the
+owner asked for the rail's wood here specifically, which makes them a
+sanctioned exception to "in light mode the only dark backgrounds are
+buttons and the rail / tab bar". Their content takes
+`PanelSurface.burlwood.ink(tokens)`, and the tappable heading brings its own
+transparent `Material` so the ripple lands on the wood rather than behind
+it. Every model row and provider heading carries a small star
 (brass when lit); starred models pin into a **FAVORITES** section at the top of
 the picker (model + provider name, one tap to select), starred providers'
 sections sort first and open expanded, and the Providers desk groups the
