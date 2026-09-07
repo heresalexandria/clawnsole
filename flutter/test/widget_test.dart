@@ -5757,7 +5757,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
+    // This restored video opens References automatically to read its duration.
     // Timed pumps: the video tile's thumbnail spinner never settles here.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 250));

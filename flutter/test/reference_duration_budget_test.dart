@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
@@ -227,21 +229,304 @@ void main() {
       controller.dispose();
     });
 
-    testWidgets('an unmeasured clip reads ? with a tooltip', (tester) async {
+    testWidgets('an unmeasured clip preserves the measured seconds', (
+      tester,
+    ) async {
       final controller = await _pumpCreate(tester);
       _attachVideos(controller, <double?>[12, null]);
       await tester.pump();
 
-      expect(find.text('? / 30 s'), findsOneWidget);
+      expect(find.text('12 s + ? / 30 s'), findsOneWidget);
       expect(find.text('12 s / 30 s'), findsNothing);
+      expect(_gauge(tester, 'video-duration').value, .4);
       final tooltip = tester.widget<Tooltip>(
         find.descendant(
           of: find.byKey(const ValueKey('reference-capacity-video-duration')),
           matching: find.byType(Tooltip),
         ),
       );
-      expect(tooltip.message, 'Reading one clip’s duration…');
+      expect(tooltip.message, 'Duration unavailable for one clip.');
+      expect(
+        _gaugeSemantics(tester, 'video-duration').properties.value,
+        'At least 40%',
+      );
       controller.dispose();
+    });
+
+    testWidgets('restored mixed media keep separate gauges when collapsed', (
+      tester,
+    ) async {
+      final controller = _director();
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('image-1', MediaReferenceKind.image),
+        _restoredReference('image-2', MediaReferenceKind.image),
+        _restoredReference('video', MediaReferenceKind.video, seconds: 12),
+        _restoredReference('audio-1', MediaReferenceKind.audio, seconds: 3),
+        _restoredReference('audio-2', MediaReferenceKind.audio, seconds: 4),
+      ];
+      await _mountCreate(tester, controller);
+
+      void expectGauges() {
+        expect(_reading(tester, 'image-count').data, '2 / 30 added');
+        expect(_reading(tester, 'video-count').data, '1 / 10 added');
+        expect(_reading(tester, 'audio-count').data, '2 / 10 added');
+        expect(_reading(tester, 'video-duration').data, '12 s / 30 s');
+        expect(_reading(tester, 'audio-duration').data, '7 s / 30 s');
+        expect(_gauge(tester, 'image-count').value, closeTo(2 / 30, .0001));
+        expect(_gauge(tester, 'video-count').value, .1);
+        expect(_gauge(tester, 'audio-count').value, .2);
+        expect(_gauge(tester, 'video-duration').value, .4);
+        expect(_gauge(tester, 'audio-duration').value, closeTo(7 / 30, .0001));
+        expect(
+          find.byKey(const ValueKey('reference-capacity-image-duration')),
+          findsNothing,
+        );
+      }
+
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+      expectGauges();
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('add-video-reference')), findsOneWidget);
+      expectGauges();
+      await tester.tap(
+        find.byKey(const ValueKey('references-accordion-toggle')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+      expectGauges();
+    });
+
+    testWidgets('unpublished duration limits still show static readings', (
+      tester,
+    ) async {
+      final controller = _director(
+        provider: 'krea',
+        model: 'bytedance/seedance-2-5',
+      );
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('video', MediaReferenceKind.video, seconds: 12),
+        _restoredReference('unknown-video', MediaReferenceKind.video),
+        _restoredReference('audio', MediaReferenceKind.audio, seconds: 7),
+      ];
+      await _mountCreate(tester, controller);
+
+      expect(_reading(tester, 'video-count').data, '2 / 10 added');
+      expect(_reading(tester, 'audio-count').data, '1 / 10 added');
+      expect(
+        _reading(tester, 'video-duration').data,
+        '12 s + ? / limit unspecified',
+      );
+      expect(
+        _reading(tester, 'audio-duration').data,
+        '7 s / limit unspecified',
+      );
+      for (final kind in <String>['video', 'audio']) {
+        expect(_gauge(tester, '$kind-duration').value, 0);
+        expect(_gauge(tester, '$kind-duration').color, isNull);
+        expect(
+          _gaugeSemantics(tester, '$kind-duration').properties.value,
+          isNull,
+        );
+        expect(
+          _gaugeSemantics(tester, '$kind-duration').excludeSemantics,
+          isTrue,
+        );
+      }
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+
+      // Exercise the longest meter reading at a phone's content width without
+      // coupling this check to unrelated sections of the create screen.
+      final durationGauge = tester.widget(
+        find.byKey(const ValueKey('reference-capacity-video-duration')),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+            child: Scaffold(
+              body: Center(child: SizedBox(width: 324, child: durationGauge)),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('12 s + ? / limit unspecified'), findsOneWidget);
+    });
+
+    testWidgets('entirely unknown durations explain every unavailable clip', (
+      tester,
+    ) async {
+      final controller = _director();
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('video-1', MediaReferenceKind.video),
+        _restoredReference('video-2', MediaReferenceKind.video),
+      ];
+      await _mountCreate(tester, controller);
+
+      expect(_reading(tester, 'video-duration').data, '? / 30 s');
+      expect(_gauge(tester, 'video-duration').value, 0);
+      expect(
+        tester
+            .widget<Tooltip>(
+              find.descendant(
+                of: find.byKey(
+                  const ValueKey('reference-capacity-video-duration'),
+                ),
+                matching: find.byType(Tooltip),
+              ),
+            )
+            .message,
+        'Duration unavailable for 2 clips.',
+      );
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+    });
+
+    testWidgets('restored unsupported media show a zero count budget', (
+      tester,
+    ) async {
+      final controller = _director(provider: 'ltx', model: 'ltx-2-3-pro');
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('video-1', MediaReferenceKind.video, seconds: 6),
+        _restoredReference('video-2', MediaReferenceKind.video, seconds: 6),
+      ];
+      await _mountCreate(tester, controller);
+
+      final error = buildClawnsoleTheme(Brightness.light).colorScheme.error;
+      expect(_reading(tester, 'video-count').data, '2 / 0 added');
+      expect(_gauge(tester, 'video-count').value, 1);
+      expect(_gauge(tester, 'video-count').color, error);
+      expect(_reading(tester, 'video-count').style?.color, error);
+      expect(
+        _reading(tester, 'video-duration').data,
+        '12 s / limit unspecified',
+      );
+      expect(_gauge(tester, 'video-duration').value, 0);
+      expect(
+        find.byKey(const ValueKey('reference-capacity-audio-count')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+    });
+
+    testWidgets('switching models updates count and seconds capacity', (
+      tester,
+    ) async {
+      final controller = _director();
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('video-1', MediaReferenceKind.video, seconds: 12),
+        _restoredReference('video-2', MediaReferenceKind.video, seconds: 12),
+      ];
+      await _mountCreate(tester, controller);
+      expect(_reading(tester, 'video-count').data, '2 / 10 added');
+      expect(_reading(tester, 'video-duration').data, '24 s / 30 s');
+      expect(_gauge(tester, 'video-duration').color, isNull);
+
+      controller.selectedModelId = 'seedance2';
+      await tester.pumpWidget(_createApp(controller));
+      expect(_reading(tester, 'video-count').data, '2 / 3 added');
+      expect(_reading(tester, 'video-duration').data, '24 s / 15 s');
+      expect(_gauge(tester, 'video-duration').value, 1);
+      expect(
+        _gauge(tester, 'video-duration').color,
+        buildClawnsoleTheme(Brightness.light).colorScheme.error,
+      );
+    });
+
+    testWidgets('switching resolutions updates the audio seconds capacity', (
+      tester,
+    ) async {
+      final controller = _director(provider: 'ltx', model: 'ltx-2-3-pro');
+      addTearDown(controller.dispose);
+      controller.form.resolution = 'hd';
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference('audio', MediaReferenceKind.audio, seconds: 12),
+      ];
+      await _mountCreate(tester, controller);
+      expect(_reading(tester, 'audio-duration').data, '12 s / 20 s');
+      expect(_gauge(tester, 'audio-duration').value, .6);
+      expect(_gauge(tester, 'audio-duration').color, isNull);
+
+      controller.form.resolution = 'qhd';
+      await tester.pumpWidget(_createApp(controller));
+      expect(_reading(tester, 'audio-duration').data, '12 s / 10 s');
+      expect(_gauge(tester, 'audio-duration').value, 1);
+      expect(
+        _gauge(tester, 'audio-duration').color,
+        buildClawnsoleTheme(Brightness.light).colorScheme.error,
+      );
+    });
+
+    for (final seconds in <double?>[null, 12]) {
+      testWidgets(
+        'restored video URL ${seconds == null ? 'opens to measure' : 'stays compact when measured'}',
+        (tester) async {
+          final controller = _director();
+          addTearDown(controller.dispose);
+          controller.form.references = <MediaReferenceDraft>[
+            _restoredReference(
+              'video',
+              MediaReferenceKind.video,
+              seconds: seconds,
+              source: 'https://cdn.test/restored.mp4',
+            ),
+          ];
+          await _mountCreate(tester, controller);
+
+          expect(
+            find.byKey(const ValueKey('add-video-reference')),
+            seconds == null ? findsOneWidget : findsNothing,
+          );
+          expect(
+            _reading(tester, 'video-duration').data,
+            seconds == null ? '? / 30 s' : '12 s / 30 s',
+          );
+        },
+      );
+    }
+
+    testWidgets('restored Drive media keep unknown local clips collapsed', (
+      tester,
+    ) async {
+      final controller = _director();
+      addTearDown(controller.dispose);
+      controller.form.references = <MediaReferenceDraft>[
+        _restoredReference(
+          'local-video',
+          MediaReferenceKind.video,
+          source: 'https://cdn.test/restored.mp4',
+        ),
+        MediaReferenceDraft(
+          id: 'drive-video',
+          label: 'Drive video',
+          kind: MediaReferenceKind.video,
+          source: '',
+          retained: const AssetReference(
+            kind: 'drive',
+            value: 'retained-video',
+            label: 'Drive video',
+            contentType: 'video/mp4',
+          ),
+          thumbnailBytes: base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE'
+            'QVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          ),
+        ),
+      ];
+      await _mountCreate(tester, controller);
+
+      expect(find.byKey(const ValueKey('add-video-reference')), findsNothing);
+      expect(_reading(tester, 'video-count').data, '2 / 10 added');
+      expect(_reading(tester, 'video-duration').data, '? / 30 s');
+      expect(_gauge(tester, 'video-duration').value, 0);
     });
 
     testWidgets('an overrun turns the gauge madder and says why', (
@@ -324,12 +609,35 @@ ReferenceCandidate _candidate(String id, double seconds) => ReferenceCandidate(
   durationSeconds: seconds,
 );
 
+MediaReferenceDraft _restoredReference(
+  String id,
+  MediaReferenceKind kind, {
+  double? seconds,
+  String source = '',
+}) => MediaReferenceDraft(
+  id: id,
+  label: id,
+  kind: kind,
+  source: source,
+  durationSeconds: seconds,
+);
+
 LinearProgressIndicator _gauge(WidgetTester tester, String name) =>
     tester.widget<LinearProgressIndicator>(
       find.descendant(
         of: find.byKey(ValueKey('reference-capacity-$name')),
         matching: find.byType(LinearProgressIndicator),
       ),
+    );
+
+Semantics _gaugeSemantics(WidgetTester tester, String name) =>
+    tester.widget<Semantics>(
+      find
+          .descendant(
+            of: find.byKey(ValueKey('reference-capacity-$name')),
+            matching: find.byType(Semantics),
+          )
+          .first,
     );
 
 /// The `x / y` reading beside a gauge's label.
@@ -343,23 +651,8 @@ Text _reading(WidgetTester tester, String name) => tester
     .last;
 
 Future<AppController> _pumpCreate(WidgetTester tester) async {
-  await tester.binding.setSurfaceSize(const Size(1400, 1400));
-  addTearDown(() async {
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.binding.setSurfaceSize(null);
-  });
   final controller = _director();
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: buildClawnsoleTheme(Brightness.light),
-      home: Scaffold(
-        body: ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) => CreateScreen(controller: controller),
-        ),
-      ),
-    ),
-  );
+  await _mountCreate(tester, controller);
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('references-accordion-toggle')));
   await tester.pumpAndSettle();
@@ -370,6 +663,25 @@ Future<AppController> _pumpCreate(WidgetTester tester) async {
   );
   return controller;
 }
+
+Future<void> _mountCreate(WidgetTester tester, AppController controller) async {
+  await tester.binding.setSurfaceSize(const Size(1400, 1400));
+  addTearDown(() async {
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.binding.setSurfaceSize(null);
+  });
+  await tester.pumpWidget(_createApp(controller));
+}
+
+Widget _createApp(AppController controller) => MaterialApp(
+  theme: buildClawnsoleTheme(Brightness.light),
+  home: Scaffold(
+    body: ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => CreateScreen(controller: controller),
+    ),
+  ),
+);
 
 class _MemoryGateway implements AppGateway {
   LocalSnapshot snapshot = const LocalSnapshot(

@@ -5756,16 +5756,16 @@ class AppController extends ChangeNotifier {
 
   /// Seconds of reference media of [kind] already attached. A reference
   /// whose duration has not been measured yet counts as zero; how many are
-  /// still being read is [referenceSecondsPending].
+  /// unknown is [referenceSecondsPending].
   double referenceSecondsUsed(MediaReferenceKind kind) => form.references
       .where((item) => item.kind == kind)
       .map((item) => item.durationSeconds)
       .whereType<double>()
       .fold<double>(0, (sum, seconds) => sum + seconds);
 
-  /// Attached references of [kind] whose duration is still being measured.
+  /// Attached references of [kind] whose duration is unknown.
   /// Their seconds are missing from [referenceSecondsUsed], so the gauge
-  /// reads `?` rather than a figure that is quietly too small.
+  /// marks the measured sum as incomplete instead of presenting it as a total.
   int referenceSecondsPending(MediaReferenceKind kind) => form.references
       .where((item) => item.kind == kind && item.durationSeconds == null)
       .length;
