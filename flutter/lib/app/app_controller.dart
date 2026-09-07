@@ -17,6 +17,7 @@ import '../core/generation_timing.dart';
 import '../core/generation_preferences.dart';
 import '../core/google_drive.dart';
 import '../core/google_drive_session.dart';
+import '../core/google_drive_upload_pump.dart';
 import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
@@ -484,6 +485,7 @@ class AppController extends ChangeNotifier {
        _mobileTestBuild = mobileTestBuild {
     resetProviderCatalog(mobileTestBuild: mobileTestBuild);
     _resetPublishedProviderPrices();
+    _watchDriveUploadStatus();
     final first = ComposerTab(
       id: _uid(),
       providerId: 'bfl',
@@ -681,6 +683,7 @@ class AppController extends ChangeNotifier {
   bool _pendingWorkCache = false;
   LocalSnapshot? _pendingDriveUploadSnapshot;
   int _pendingDriveUploadCache = 0;
+  Set<String> _pendingDriveUploadIds = const <String>{};
   final Set<String> _statusChecks = <String>{};
 
   /// Generations whose submission call this process is still running, by
@@ -1574,6 +1577,31 @@ class AppController extends ChangeNotifier {
     return _pendingWorkCache;
   }
 
+  /// Mirrors this device's Drive upload queue into the record helpers the
+  /// storage chips read, so a staged file can say whether *this* device is
+  /// publishing it or is only waiting for the device that made it.
+  ///
+  /// A gateway without a local pump (the Electron renderer publishes through
+  /// the companion's) installs nothing, and those chips fall back to the
+  /// truthful "Awaiting upload" rather than claiming a sync.
+  void _watchDriveUploadStatus() {
+    resetDriveUploadQueue();
+    if (gateway case final DriveUploadStatusSource source) {
+      installDriveUploadQueue(source.driveUploadStatus);
+      source.onDriveUploadStatus = () {
+        if (_disposed) return;
+        installDriveUploadQueue(source.driveUploadStatus);
+        notifyListeners();
+      };
+    }
+  }
+
+  /// What this device's upload pass last said about its own queue.
+  DriveUploadQueueReport get driveUploadStatus => switch (gateway) {
+    final DriveUploadStatusSource source => source.driveUploadStatus,
+    _ => DriveUploadQueueReport.unknown,
+  };
+
   /// Media staged on this device that a background pass still needs to
   /// publish to Google Drive: Drive-tagged records whose assets are still
   /// local-kind. Drives the non-blocking "backing up to Drive" indicators.
@@ -1582,12 +1610,28 @@ class AppController extends ChangeNotifier {
     if (current == null) return 0;
     if (!identical(current, _pendingDriveUploadSnapshot)) {
       _pendingDriveUploadSnapshot = current;
-      _pendingDriveUploadCache = pendingDriveUploadAssets(
+      _pendingDriveUploadIds = pendingDriveUploadAssets(
         current.generations,
         current.savedReferences,
-      ).map((reference) => reference.value).toSet().length;
+      ).map((reference) => reference.value).toSet();
+      _pendingDriveUploadCache = _pendingDriveUploadIds.length;
     }
     return _pendingDriveUploadCache;
+  }
+
+  /// Whether staged media is waiting on *this* device. Media another device
+  /// owes is not this device's work: counting it kept iOS reporting pending
+  /// background work — and the studio polling Drive at the faster pending
+  /// cadence — for as long as the other device stayed away.
+  ///
+  /// A staged file this device's pass has not classified yet counts as ours,
+  /// so a film saved a moment ago never loses its background window while
+  /// the first pass is still settling.
+  bool get hasOutgoingDriveUploads {
+    if (pendingDriveUploadCount == 0) return false;
+    final report = driveUploadStatus;
+    if (!report.reported) return true;
+    return _pendingDriveUploadIds.any((id) => !report.foreign.contains(id));
   }
 
   @override
@@ -1599,7 +1643,7 @@ class AppController extends ChangeNotifier {
     if (!_disposed) {
       unawaited(
         _backgroundActivity.setPendingWork(
-          hasPendingProviderWork || pendingDriveUploadCount > 0,
+          hasPendingProviderWork || hasOutgoingDriveUploads,
         ),
       );
     }
@@ -7523,13 +7567,52 @@ class AppController extends ChangeNotifier {
         expectedPreferenceRevision: preferenceRevision,
       );
       await syncComposerWorkspace();
-      showNotice('Google Drive data refreshed.');
+      showNotice('Google Drive data refreshed.${await _driveUploadNotice()}');
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
       googleDriveBusy = false;
       notifyListeners();
     }
+  }
+
+  /// How long a manual refresh waits for the upload pass it kicks before it
+  /// reports from the queue instead. A large film can take minutes; the
+  /// refresh spinner must not.
+  static const Duration _driveRefreshUploadWait = Duration(seconds: 3);
+
+  /// The tail of the refresh notice: what the manual refresh found staged.
+  ///
+  /// A refresh is the director asking why something still says it is not on
+  /// Drive, so it re-kicks this device's upload pass and then says what that
+  /// pass is doing — including when the answer is "nothing here can publish
+  /// these; the device that made them has to".
+  Future<String> _driveUploadNotice() async {
+    if (gateway case final DriveUploadStatusSource source) {
+      try {
+        await source.flushDriveUploads().timeout(_driveRefreshUploadWait);
+      } on Object {
+        // A pass that fails or outruns the wait still reports its queue
+        // below; the pump keeps retrying it either way.
+      }
+      if (_disposed) return '';
+      final status = source.driveUploadStatus;
+      final parts = <String>[
+        if (status.queued.isNotEmpty)
+          status.isStalled
+              ? '${status.queued.length} upload(s) stalled on this device'
+              : '${status.queued.length} upload(s) still in progress',
+        if (status.foreign.isNotEmpty)
+          '${status.foreign.length} file(s) waiting on the device that '
+              'made them',
+      ];
+      if (parts.isEmpty) return '';
+      final detail = status.isStalled && status.stalledDetail != null
+          ? ' ${status.stalledDetail}'
+          : '';
+      return ' ${parts.join('; ')}.$detail';
+    }
+    return '';
   }
 
   Future<String?> setupSettingsVault(String passphrase) async {
@@ -8395,6 +8478,10 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _flushGenerationPreferencesSave();
     _disposed = true;
+    if (gateway case final DriveUploadStatusSource source) {
+      source.onDriveUploadStatus = null;
+      resetDriveUploadQueue();
+    }
     _queuedRetentions.clear();
     unawaited(_backgroundActivity.setPendingWork(false));
     _providerCatalogClient.close();

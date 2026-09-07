@@ -127,6 +127,33 @@ serves the record's provider delivery link instead when one is still live,
 and otherwise answers 404 with "This film is still uploading from the device
 that made it." The player says the same rather than blaming local playback.
 
+### What the storage chip says
+
+A staged asset on a Drive record names a file that exists on exactly one
+device, so the chip describes the record from the point of view of the device
+drawing it. Each pass reports its own queue — the staged ids this device holds
+bytes for, and the ones it found no bytes for, which only their origin device
+can publish — and that report is what the chip reads. **Syncing…** means this
+device has the upload queued or in flight. **Sync stalled** means this device
+holds the bytes but cannot publish them: Drive is disconnected, or the upload
+keeps failing; the pump is still retrying with backoff. **Awaiting upload**
+means the bytes are elsewhere (or no pass has classified them yet) — this
+device is waiting, not working, and the chip clears the moment the origin
+device publishes. Nothing on Drive is published by the wrong device, so
+"Syncing…" is never shown on a device that cannot finish it, and only
+uploads this device owes hold the iOS background-work window open.
+
+A manual refresh re-kicks this device's pass and reports what it found:
+"Google Drive data refreshed. 2 upload(s) still in progress; 1 file(s)
+waiting on the device that made them." A pass that outruns the refresh's short
+wait still reports its queue; the pump keeps going either way.
+
+A record whose staged reference reappears from a cross-device merge after this
+process already published it is re-swapped from the upload ledger rather than
+uploaded again — by then the staged original has been renamed into the Drive
+media cache, so a second upload would find no bytes and the record would be
+stuck saying it is not on Drive.
+
 ## Google Cloud setup
 
 1. Create or select a Google Cloud project and enable the Google Drive API.

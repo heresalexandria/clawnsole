@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/asset_extensions.dart';
 import '../core/generation_status.dart';
 import '../core/models.dart';
 import '../core/generation_timing.dart';
@@ -202,51 +203,88 @@ class StorageBadge extends StatelessWidget {
     required this.storage,
     super.key,
     this.compact = false,
-    this.pendingUpload = false,
+    this.pendingUpload = DriveUploadState.published,
   });
 
   final LibraryStorage storage;
   final bool compact;
 
-  /// The record is Drive-tagged but its media is still staged on this device
-  /// waiting for the background upload pass to publish it.
-  final bool pendingUpload;
+  /// What the record's staged media is waiting for, as seen from this device.
+  ///
+  /// A `local`-kind asset on a Drive record names a file on exactly one
+  /// device. Only that device is syncing, so only that device says so; the
+  /// chip on every other device says it is waiting, which is the truth and,
+  /// unlike "Syncing…", stops being said the moment the film arrives.
+  final DriveUploadState pendingUpload;
 
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: EdgeInsets.symmetric(
-      horizontal: compact ? 7 : 9,
-      vertical: compact ? 3 : 5,
-    ),
-    decoration: BoxDecoration(
-      color: storage == LibraryStorage.drive
-          ? context.colors.primaryContainer.withValues(alpha: .72)
-          : context.colors.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: context.colors.outlineVariant),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(
-          pendingUpload
-              ? Icons.cloud_upload_outlined
-              : storage == LibraryStorage.drive
+  static String labelFor(DriveUploadState state, LibraryStorage storage) =>
+      switch (state) {
+        DriveUploadState.published => storage.shortLabel,
+        DriveUploadState.uploading => 'Syncing…',
+        DriveUploadState.stalled => 'Sync stalled',
+        DriveUploadState.awaitingUpload ||
+        DriveUploadState.awaitingOtherDevice => 'Awaiting upload',
+      };
+
+  static IconData _iconFor(DriveUploadState state, LibraryStorage storage) =>
+      switch (state) {
+        DriveUploadState.published =>
+          storage == LibraryStorage.drive
               ? Icons.cloud_outlined
               : Icons.devices_outlined,
-          size: compact ? 12 : 14,
-        ),
-        const SizedBox(width: 5),
-        Text(
-          pendingUpload ? 'Syncing…' : storage.shortLabel,
-          style: TextStyle(
-            fontSize: compact ? 9.5 : 10.5,
-            fontWeight: FontWeight.w700,
+        DriveUploadState.uploading => Icons.cloud_upload_outlined,
+        DriveUploadState.stalled => Icons.cloud_off_rounded,
+        DriveUploadState.awaitingUpload ||
+        DriveUploadState.awaitingOtherDevice => Icons.cloud_queue_rounded,
+      };
+
+  static String? _tooltipFor(DriveUploadState state) => switch (state) {
+    DriveUploadState.published => null,
+    DriveUploadState.uploading =>
+      'This device is uploading the media to Google Drive.',
+    DriveUploadState.stalled =>
+      'This device holds the media but cannot publish it to Google Drive '
+          'right now. It keeps retrying.',
+    DriveUploadState.awaitingOtherDevice =>
+      'The media is still on the device that made it. It appears here once '
+          'that device uploads it to Google Drive.',
+    DriveUploadState.awaitingUpload =>
+      'The media has not reached Google Drive yet. Whichever device holds it '
+          'publishes it.',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final chip = Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 9,
+        vertical: compact ? 3 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: storage == LibraryStorage.drive
+            ? context.colors.primaryContainer.withValues(alpha: .72)
+            : context.colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: context.colors.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(_iconFor(pendingUpload, storage), size: compact ? 12 : 14),
+          const SizedBox(width: 5),
+          Text(
+            labelFor(pendingUpload, storage),
+            style: TextStyle(
+              fontSize: compact ? 9.5 : 10.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+    final tooltip = _tooltipFor(pendingUpload);
+    return tooltip == null ? chip : Tooltip(message: tooltip, child: chip);
+  }
 }
 
 /// Reloads the connected Google Drive library from its source of truth.
@@ -696,12 +734,22 @@ class _GenerationPromptState extends State<GenerationPrompt> {
 /// file staged on the device that generated it. No other device can open
 /// those bytes and no export here can rescue them, so the placeholder says
 /// what the viewer is actually waiting for instead of blaming playback on
-/// this device.
-String? generationDeliveryUnavailableDetail(Generation item) =>
-    item.awaitsOriginDeviceUpload
-    ? 'This film is still syncing from the device that made it. '
-          'It will play here once that device finishes uploading to Drive.'
-    : null;
+/// this device — and, when this *is* the device holding the bytes, says that
+/// rather than pointing somewhere else.
+String? generationDeliveryUnavailableDetail(Generation item) {
+  if (!item.awaitsOriginDeviceUpload) return null;
+  return switch (generationPendingDriveUpload(item)) {
+    DriveUploadState.uploading =>
+      'This film is still uploading from this device to Drive. '
+          'It will play here as soon as that finishes.',
+    DriveUploadState.stalled =>
+      'This film is staged on this device but cannot reach Drive right now. '
+          'It keeps retrying; check the Google Drive connection.',
+    _ =>
+      'This film is still syncing from the device that made it. '
+          'It will play here once that device finishes uploading to Drive.',
+  };
+}
 
 class StatusBadge extends StatelessWidget {
   const StatusBadge({required this.item, super.key});
