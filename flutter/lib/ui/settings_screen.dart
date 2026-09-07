@@ -2263,26 +2263,6 @@ class _LibraryRoomPanel extends StatelessWidget {
                     : 'History is uncapped. Saved references stay local until you delete them; retained generation media is pruned only when nothing else uses it.',
                 style: TextStyle(color: ink.onMuted),
               ),
-              if (controller.gateway.usesCompanion) ...<Widget>[
-                const SizedBox(height: 13),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: ink.on.withValues(alpha: .07),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'WEB MODE · Local companion active. No localStorage or IndexedDB history is used.',
-                    style: TextStyle(
-                      color: ink.accent,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: .4,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
