@@ -942,6 +942,12 @@ class CompanionHybridStore {
     int end,
   ) => hybrid.readDriveAssetRange(reference, start, end);
 
+  Future<GoogleDriveByteStream> readDriveAssetRangeStream(
+    AssetReference reference,
+    int start,
+    int end,
+  ) => hybrid.readDriveAssetRangeStream(reference, start, end);
+
   Future<void> pruneAssets(
     List<Generation> generations,
     List<SavedReference> references,
@@ -3467,6 +3473,7 @@ class CompanionApp {
         if (cache != null && cache.enabled) {
           return await _driveVideoAsset(request, target, cache);
         }
+        return await _uncachedDriveVideoAsset(request, target);
       }
       return await _serveAssetBytes(
         request,
@@ -3545,33 +3552,83 @@ class CompanionApp {
     final opensAtZero =
         range == null || (range.rawStart == 0 && range.rawEnd == null);
     if (!opensAtZero && knownSize != null && knownSize > 0) {
-      _queueDriveVideoFill(reference, cache);
       final resolved = _resolveByteRange(range, knownSize);
       if (resolved == null) {
         return _rangeNotSatisfiable(request, knownSize);
       }
-      final bytes = await _store.readDriveAssetRange(
-        reference,
-        resolved.start,
-        resolved.end,
-      );
-      request.response
-        ..statusCode = HttpStatus.partialContent
-        ..headers.set(
-          HttpHeaders.contentRangeHeader,
-          'bytes ${resolved.start}-${resolved.end}/$knownSize',
-        );
-      request.response.headers
-        ..contentType = ContentType.parse(
-          passiveMediaContentType(reference.contentType),
-        )
-        ..set(HttpHeaders.acceptRangesHeader, 'bytes')
-        ..contentLength = bytes.length;
-      request.response.add(bytes);
-      return request.response.close();
+      _queueDriveVideoFill(reference, cache);
+      return _serveDriveVideoRange(request, reference, resolved, knownSize);
     }
     final file = await _fillDriveVideo(reference, cache);
     return _serveAssetFile(request, reference, file);
+  }
+
+  Future<void> _serveDriveVideoRange(
+    HttpRequest request,
+    AssetReference reference,
+    ({int start, int end}) range,
+    int size,
+  ) async {
+    final download = await _store.readDriveAssetRangeStream(
+      reference,
+      range.start,
+      range.end,
+    );
+    final stream = range.start == 0
+        ? await validatedPassiveMediaStream(download.stream)
+        : download.stream;
+    request.response
+      ..statusCode = HttpStatus.partialContent
+      ..headers.set(
+        HttpHeaders.contentRangeHeader,
+        'bytes ${range.start}-${range.end}/$size',
+      );
+    request.response.headers
+      ..contentType = ContentType.parse(
+        passiveMediaContentType(reference.contentType),
+      )
+      ..set(HttpHeaders.acceptRangesHeader, 'bytes')
+      ..contentLength = range.end - range.start + 1;
+    return _deliverMediaStream(request.response, stream);
+  }
+
+  /// Disabling the disk cache must not move the whole movie into memory.
+  /// Playback still streams, including open-ended seeks such as bytes=1-.
+  Future<void> _uncachedDriveVideoAsset(
+    HttpRequest request,
+    AssetReference reference,
+  ) async {
+    final range = _parseByteRange(request);
+    final size = reference.bytes;
+    if (range != null && size != null && size > 0) {
+      final resolved = _resolveByteRange(range, size);
+      if (resolved == null) return _rangeNotSatisfiable(request, size);
+      return _serveDriveVideoRange(request, reference, resolved, size);
+    }
+    final download = await _store.readDriveAssetStream(reference);
+    if (range != null) {
+      // Legacy records may lack a byte count. Stage these uncommon requests
+      // to disk so suffix ranges stay exact without a full in-memory body.
+      final staged = await stageAssetStream(
+        download.stream,
+        expectedLength: download.contentLength,
+      );
+      try {
+        return await _serveAssetFile(request, reference, File(staged.path));
+      } finally {
+        await staged.dispose();
+      }
+    }
+    final stream = await validatedPassiveMediaStream(download.stream);
+    request.response.headers
+      ..contentType = ContentType.parse(
+        passiveMediaContentType(reference.contentType),
+      )
+      ..set(HttpHeaders.acceptRangesHeader, 'bytes');
+    if (download.contentLength case final length?) {
+      request.response.headers.contentLength = length;
+    }
+    return _deliverMediaStream(request.response, stream);
   }
 
   /// Streams one Drive download into the cache, shared across concurrent

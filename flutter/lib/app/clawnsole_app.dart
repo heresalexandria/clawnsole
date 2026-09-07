@@ -118,6 +118,9 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   }
 
   @override
+  void didHaveMemoryPressure() => controller.clearPreviewMemory();
+
+  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _periodicUpdateCheck?.cancel();

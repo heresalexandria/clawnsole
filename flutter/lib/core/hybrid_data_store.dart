@@ -165,6 +165,7 @@ class HybridDataStore
   Future<void> _workspaceWrites = Future<void>.value();
   Future<void>? _workspacePublish;
   bool _workspaceDirty = false;
+  bool _workspaceFlushRequested = false;
   Timer? _workspacePublishTimer;
   DateTime? _workspacePublishedAt;
 
@@ -202,6 +203,7 @@ class HybridDataStore
 
   void _scheduleWorkspacePublish({required bool now}) {
     if (!isDriveConnected) return;
+    if (now) _workspaceFlushRequested = true;
     final last = _workspacePublishedAt;
     final wait = now || last == null
         ? Duration.zero
@@ -209,13 +211,13 @@ class HybridDataStore
     if (wait <= Duration.zero) {
       _workspacePublishTimer?.cancel();
       _workspacePublishTimer = null;
-      unawaited(syncComposerWorkspaceToDrive());
+      unawaited(_startWorkspacePublish());
       return;
     }
     if (_workspacePublishTimer?.isActive ?? false) return;
     _workspacePublishTimer = Timer(wait, () {
       _workspacePublishTimer = null;
-      unawaited(syncComposerWorkspaceToDrive());
+      unawaited(_startWorkspacePublish());
     });
   }
 
@@ -244,19 +246,26 @@ class HybridDataStore
   /// Publishing runs outside the local write queue: a slow connection must
   /// never hold newer keystrokes in memory behind an earlier network request.
   Future<void> syncComposerWorkspaceToDrive() {
+    _workspaceFlushRequested = true;
+    return _startWorkspacePublish();
+  }
+
+  Future<void> _startWorkspacePublish() {
     _workspacePublishTimer?.cancel();
     _workspacePublishTimer = null;
     if (_workspacePublish != null) return _workspacePublish!;
     if (!isDriveConnected) return Future<void>.value();
-    return _workspacePublish = _publishComposerWorkspace().whenComplete(() {
+    return _workspacePublish = _publishComposerWorkspace().then((reschedule) {
       _workspacePublish = null;
+      if (reschedule) _scheduleWorkspacePublish(now: false);
     });
   }
 
-  Future<void> _publishComposerWorkspace() async {
+  Future<bool> _publishComposerWorkspace() async {
     try {
       while (_workspaceDirty && isDriveConnected) {
         _workspaceDirty = false;
+        _workspaceFlushRequested = false;
         final current = await _local.read();
         final own = current.composerTabs?.ownDevice;
         final published = own == null
@@ -289,12 +298,19 @@ class HybridDataStore
         });
         _workspaceWrites = operation.then<void>((_) {}, onError: (_) {});
         await operation;
+        if (_workspaceDirty && !_workspaceFlushRequested) {
+          // Saves that arrive during a slow upload still land locally at
+          // once, but must obey the same publication window as later saves.
+          // Only an explicit flush may send the next revision immediately.
+          return true;
+        }
       }
     } on Object {
       _workspaceDirty = true;
       // Drafts are on disk. The next save, Drive read, or foreground pass
       // retries publication.
     }
+    return false;
   }
 
   @override
@@ -617,6 +633,12 @@ class HybridDataStore
     int start,
     int end,
   ) => _drive.readAssetRange(reference, start, end);
+
+  Future<GoogleDriveByteStream> readDriveAssetRangeStream(
+    AssetReference reference,
+    int start,
+    int end,
+  ) => _drive.readAssetRangeStream(reference, start, end);
 
   /// The locally materialized URI for [reference] when one exists, without
   /// triggering any Drive download.

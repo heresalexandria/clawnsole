@@ -19,13 +19,43 @@ class AsyncValueCache<T> {
 
   int get retainedWeight => _weight;
   int get length => _entries.length;
+  bool get isEmpty => _entries.isEmpty;
 
-  Future<T> load(Object key, Future<T> Function() loader) {
+  /// Returns a completed value without starting work, refreshing its recency.
+  T? lookup(Object key) {
+    final entry = _entries.remove(key);
+    if (entry == null) return null;
+    _entries[key] = entry;
+    return entry.value;
+  }
+
+  /// Retains already available data under the same budgets as loaded values.
+  void put(Object key, T value) {
+    final weight = value == null ? -1 : weightOf(value);
+    _remove(key);
+    if (weight < 0 || weight > maximumWeight) return;
+    _entries[key] = _CacheEntry(Future<T>.value(value))
+      ..value = value
+      ..weight = weight;
+    _weight += weight;
+    _trim();
+  }
+
+  void remove(Object key) => _remove(key);
+
+  /// Reuses and touches pending or retained work without starting a loader.
+  Future<T>? lookupFuture(Object key) {
     final cached = _entries.remove(key);
     if (cached != null) {
       _entries[key] = cached;
       return cached.future;
     }
+    return null;
+  }
+
+  Future<T> load(Object key, Future<T> Function() loader) {
+    final cached = lookupFuture(key);
+    if (cached != null) return cached;
 
     final result = Completer<T>();
     final entry = _CacheEntry(result.future);
@@ -39,6 +69,7 @@ class AsyncValueCache<T> {
             if (value == null || weight < 0 || weight > maximumWeight) {
               _remove(key);
             } else {
+              entry.value = value;
               entry.weight = weight;
               _weight += weight;
               _trim();
@@ -79,5 +110,6 @@ class _CacheEntry<T> {
   _CacheEntry(this.future);
 
   final Future<T> future;
+  T? value;
   int weight = 0;
 }

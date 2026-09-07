@@ -5,6 +5,37 @@ import 'package:clawnsole/core/async_value_cache.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('synchronous values and reads share the same eviction budget', () async {
+    final cache = AsyncValueCache<int>(maximumWeight: 10, weightOf: (n) => n);
+    cache.put('first', 4);
+    cache.put('second', 4);
+    expect(cache.lookup('first'), 4);
+    cache.put('third', 4);
+    expect(cache.lookup('second'), isNull);
+    expect(cache.lookupFuture('second'), isNull);
+    expect(cache.retainedWeight, 8);
+    cache.put('first', 3);
+    expect(cache.retainedWeight, 7);
+    expect(await cache.load('first', () => throw StateError('refetch')), 3);
+    cache.remove('first');
+    expect(cache.retainedWeight, 4);
+    cache.put('oversized', 11);
+    expect(cache.lookup('oversized'), isNull);
+    expect(cache.retainedWeight, 4);
+  });
+
+  test('synchronous replacement survives an older pending load', () async {
+    final cache = AsyncValueCache<int>(maximumWeight: 10, weightOf: (n) => n);
+    final pending = Completer<int>();
+    final result = cache.load('preview', () => pending.future);
+    expect(cache.lookup('preview'), isNull);
+    cache.put('preview', 3);
+    pending.complete(4);
+    expect(await result, 4);
+    expect(cache.lookup('preview'), 3);
+    expect(cache.retainedWeight, 3);
+  });
+
   test('byte budget evicts least recently used completed values', () async {
     final cache = AsyncValueCache<Uint8List>(
       maximumWeight: 10,

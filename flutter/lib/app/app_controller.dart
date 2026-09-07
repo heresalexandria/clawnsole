@@ -8,6 +8,7 @@ import 'package:mime/mime.dart';
 
 import '../core/api_transcript.dart';
 import '../core/asset_extensions.dart';
+import '../core/async_value_cache.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/composer_tabs.dart';
@@ -712,9 +713,11 @@ class AppController extends ChangeNotifier {
   int _videoPreviewSourceRevision = 0;
   Future<void> _prefetchQueue = Future<void>.value();
   final Set<String> _prefetchedVideoAssets = <String>{};
-  final Map<String, Uint8List> _restoredAssetBytes = <String, Uint8List>{};
-  final Map<String, Future<Uint8List>> _assetReadJobs =
-      <String, Future<Uint8List>>{};
+  final _restoredAssetBytes = AsyncValueCache<Uint8List>(
+    maximumWeight: 32 * 1024 * 1024,
+    weightOf: (bytes) => bytes.buffer.lengthInBytes,
+  );
+  int _previewMemoryRevision = 0;
   final List<ReferenceImportProgress> _referenceImports =
       <ReferenceImportProgress>[];
   Future<void> _referenceWorkQueue = Future<void>.value();
@@ -744,7 +747,10 @@ class AppController extends ChangeNotifier {
   final Map<String, Generation> _queuedRetentions = <String, Generation>{};
   final Set<String> _activeRetentions = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
-  final Map<String, Uint8List> _referencePreviewBytes = <String, Uint8List>{};
+  final _referencePreviewBytes = AsyncValueCache<Uint8List>(
+    maximumWeight: 8 * 1024 * 1024,
+    weightOf: (bytes) => bytes.buffer.lengthInBytes,
+  );
   final Set<String> _referenceDurationWrites = <String>{};
   final Set<String> _generationInputPreviewWrites = <String>{};
   int _idCounter = 0;
@@ -3420,9 +3426,7 @@ class AppController extends ChangeNotifier {
     try {
       await _savePreferences(_preferences(localThumbnailCacheMb: clamped));
       if (clamped == 0) {
-        _restoredAssetBytes.clear();
-        _assetReadJobs.clear();
-        _referencePreviewBytes.clear();
+        clearPreviewMemory();
         await _videoCacheGateway?.clearThumbnailCache();
       } else {
         unawaited(_restoreCachedFirstPage().then((_) => notifyListeners()));
@@ -3448,9 +3452,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> clearThumbnailCache() async {
     try {
-      _restoredAssetBytes.clear();
-      _assetReadJobs.clear();
-      _referencePreviewBytes.clear();
+      clearPreviewMemory();
       await _videoCacheGateway?.clearThumbnailCache();
       notifyListeners();
     } on Object catch (error) {
@@ -3580,43 +3582,45 @@ class AppController extends ChangeNotifier {
         (from.bytes != null && to.bytes != null && from.bytes != to.bytes)) {
       return;
     }
-    final bytes = _restoredAssetBytes[_assetCacheKey(from)];
+    final bytes = _restoredAssetBytes.lookup(_assetCacheKey(from));
     if (bytes == null) return;
-    _restoredAssetBytes.putIfAbsent(_assetCacheKey(to), () => bytes);
+    // The new snapshot names the published id. Transfer this entry instead
+    // of charging the same buffer twice and evicting the next preview in a
+    // batch of publish swaps before it can be carried over.
+    _restoredAssetBytes.remove(_assetCacheKey(from));
+    if (_restoredAssetBytes.lookup(_assetCacheKey(to)) == null) {
+      _restoredAssetBytes.put(_assetCacheKey(to), bytes);
+    }
   }
 
   /// Synchronously available retained bytes restored before first paint.
-  Uint8List? cachedAssetBytes(AssetReference? reference) =>
-      reference == null ? null : _restoredAssetBytes[_assetCacheKey(reference)];
+  Uint8List? cachedAssetBytes(AssetReference? reference) => reference == null
+      ? null
+      : _restoredAssetBytes.lookup(_assetCacheKey(reference));
 
   /// Returns a reference preview immediately, including a newly generated
   /// frame whose durable thumbnail write is still in flight.
   Uint8List? cachedReferencePreview(SavedReference reference) =>
       cachedAssetBytes(reference.thumbnailAsset) ??
-      _referencePreviewBytes[reference.id];
+      _referencePreviewBytes.lookup(reference.id);
 
-  /// Reads retained preview bytes once per process and remembers them for
-  /// synchronous reuse by every card that references the same immutable id.
-  Future<Uint8List> readPreviewAsset(AssetReference reference) {
-    final key = _assetCacheKey(reference);
-    final restored = _restoredAssetBytes[key];
-    if (restored != null) return Future<Uint8List>.value(restored);
-    final existing = _assetReadJobs[key];
-    if (existing != null) return existing;
-    late final Future<Uint8List> job;
-    job = gateway
-        .readAsset(reference)
-        .then((bytes) {
-          _restoredAssetBytes[key] = bytes;
-          return bytes;
-        })
-        .catchError((Object error) {
-          if (identical(_assetReadJobs[key], job)) _assetReadJobs.remove(key);
-          throw error;
-        });
-    _assetReadJobs[key] = job;
-    return job;
+  /// Clears disposable preview bytes without changing drafts, durable media,
+  /// or the Drive session. In-flight reads still complete for their callers,
+  /// but cannot refill the cache after this memory-pressure boundary.
+  void clearPreviewMemory() {
+    _previewMemoryRevision += 1;
+    _restoredAssetBytes.clear();
+    _referencePreviewBytes.clear();
   }
+
+  /// Shares pending reads and retains completed previews within a byte budget.
+  /// Oversized images remain available to the active caller without staying
+  /// alive for the rest of the controller's lifetime.
+  Future<Uint8List> readPreviewAsset(AssetReference reference) =>
+      _restoredAssetBytes.load(
+        _assetCacheKey(reference),
+        () => gateway.readAsset(reference),
+      );
 
   /// Restores only the first page and only from local storage. Cache misses
   /// remain misses until a card is actually viewed, at which point its normal
@@ -3655,18 +3659,21 @@ class AppController extends ChangeNotifier {
     } else {
       return;
     }
-    await Future.wait(
-      references.entries.map((entry) async {
-        if (_restoredAssetBytes.containsKey(entry.key)) return;
-        try {
-          final bytes = await cache.cachedAssetBytes(entry.value);
-          if (bytes == null || bytes.isEmpty) return;
-          _restoredAssetBytes[entry.key] = bytes;
-        } on Object {
-          // Cache inspection is best effort and must not delay app recovery.
-        }
-      }),
-    );
+    final memoryRevision = _previewMemoryRevision;
+    // Cache-only first-paint restoration is speculative. Read one file at a
+    // time so a page of large stills does not create twenty concurrent buffers.
+    for (final entry in references.entries) {
+      if (_disposed || memoryRevision != _previewMemoryRevision) return;
+      if (_restoredAssetBytes.lookup(entry.key) != null) continue;
+      try {
+        final bytes = await cache.cachedAssetBytes(entry.value);
+        if (_disposed || memoryRevision != _previewMemoryRevision) return;
+        if (bytes == null || bytes.isEmpty) continue;
+        _restoredAssetBytes.put(entry.key, bytes);
+      } on Object {
+        // Cache inspection is best effort and must not delay app recovery.
+      }
+    }
   }
 
   /// Serially fills the video cache in the background. [revision] cancels a
@@ -3678,7 +3685,8 @@ class AppController extends ChangeNotifier {
     if (asset == null || asset.kind != 'drive') return;
     if (!_prefetchedVideoAssets.add(asset.value)) return;
     _prefetchQueue = _prefetchQueue.then((_) async {
-      if (localVideoCacheMb <= 0 ||
+      if (_disposed ||
+          localVideoCacheMb <= 0 ||
           (revision != null && revision != _prefetchRevision)) {
         _prefetchedVideoAssets.remove(asset.value);
         return;
@@ -8048,7 +8056,9 @@ class AppController extends ChangeNotifier {
     Uint8List thumbnailBytes,
   ) async {
     if (thumbnailBytes.isEmpty) return;
-    _referencePreviewBytes[reference.id] = thumbnailBytes;
+    if (_disposed) return;
+    final memoryRevision = _previewMemoryRevision;
+    _referencePreviewBytes.put(reference.id, thumbnailBytes);
     notifyListeners();
     if (gateway is! MediaPreviewGateway ||
         !_referencePreviewWrites.add(reference.id)) {
@@ -8065,8 +8075,10 @@ class AppController extends ChangeNotifier {
           .where((item) => item.id == reference.id)
           .firstOrNull
           ?.thumbnailAsset;
-      if (retained != null) {
-        _restoredAssetBytes[_assetCacheKey(retained)] = thumbnailBytes;
+      if (!_disposed &&
+          memoryRevision == _previewMemoryRevision &&
+          retained != null) {
+        _restoredAssetBytes.put(_assetCacheKey(retained), thumbnailBytes);
       }
     } on Object {
       // The original reference remains usable if a thumbnail write fails.
@@ -8996,6 +9008,7 @@ class AppController extends ChangeNotifier {
   void dispose() {
     _flushGenerationPreferencesSave();
     _disposed = true;
+    clearPreviewMemory();
     if (gateway case final DriveUploadStatusSource source) {
       source.onDriveUploadStatus = null;
       resetDriveUploadQueue();

@@ -612,23 +612,38 @@ class GoogleDriveApi {
     );
   }
 
+  /// Streams one byte range without retaining the response body in memory.
+  /// If a server ignores Range, skip and limit its stream rather than
+  /// buffering the complete film just to extract the requested bytes.
+  Future<GoogleDriveByteStream> readFileRangeStream(
+    String fileId,
+    int start,
+    int end,
+  ) async {
+    if (start < 0 || end < start) {
+      throw ArgumentError('The requested byte range is invalid.');
+    }
+    final request = http.Request('GET', _mediaUri(fileId))
+      ..headers.addAll({..._headers, 'Range': 'bytes=$start-$end'});
+    final response = await _client.send(request);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await _expect(await http.Response.fromStream(response));
+    }
+    final skip = response.statusCode == 206 ? 0 : start;
+    final length = response.contentLength;
+    final wanted = end - start + 1;
+    return GoogleDriveByteStream(
+      _byteWindow(response.stream, skip, wanted),
+      contentLength: length == null ? null : (length - skip).clamp(0, wanted),
+    );
+  }
+
   /// Reads one byte range of a media file. Drive honors Range for
   /// `alt=media`; a server that answers 200 anyway is sliced locally so the
   /// caller always receives exactly the requested window.
   Future<Uint8List> readFileRange(String fileId, int start, int end) async {
-    if (start < 0 || end < start) {
-      throw ArgumentError('The requested byte range is invalid.');
-    }
-    final response = await _client.get(
-      _mediaUri(fileId),
-      headers: <String, String>{..._headers, 'Range': 'bytes=$start-$end'},
-    );
-    await _expect(response, decodeBody: false);
-    final bytes = response.bodyBytes;
-    if (response.statusCode == 206) return bytes;
-    final from = start.clamp(0, bytes.length);
-    final to = (end + 1).clamp(from, bytes.length);
-    return Uint8List.sublistView(bytes, from, to);
+    final download = await readFileRangeStream(fileId, start, end);
+    return http.ByteStream(download.stream).toBytes();
   }
 
   Future<void> deleteFile(String fileId) async {
@@ -718,6 +733,51 @@ class GoogleDriveException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Preserve source backpressure and release it when the requested window ends
+/// or the media consumer goes away. Only the current network chunk is held.
+Stream<List<int>> _byteWindow(
+  Stream<List<int>> source,
+  int skip,
+  int remaining,
+) {
+  late final StreamController<List<int>> output;
+  late StreamSubscription<List<int>> subscription;
+  output = StreamController<List<int>>(
+    onListen: () {
+      subscription = source.listen(
+        (chunk) {
+          if (skip >= chunk.length) {
+            skip -= chunk.length;
+            return;
+          }
+          final count = (chunk.length - skip).clamp(0, remaining);
+          output.add(
+            chunk is Uint8List
+                ? Uint8List.sublistView(chunk, skip, skip + count)
+                : chunk.sublist(skip, skip + count),
+          );
+          skip = 0;
+          remaining -= count;
+          if (remaining == 0) {
+            unawaited(
+              subscription
+                  .cancel()
+                  .catchError(output.addError)
+                  .whenComplete(output.close),
+            );
+          }
+        },
+        onError: output.addError,
+        onDone: output.close,
+      );
+    },
+    onPause: () => subscription.pause(),
+    onResume: () => subscription.resume(),
+    onCancel: () => subscription.cancel(),
+  );
+  return output.stream;
 }
 
 extension<T> on List<T> {

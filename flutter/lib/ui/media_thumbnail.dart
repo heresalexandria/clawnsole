@@ -7,6 +7,7 @@ import '../core/async_value_cache.dart';
 import '../core/gateway.dart';
 import '../core/models.dart';
 import 'media_duration_loader.dart';
+import 'media_preview_work.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
 
@@ -155,6 +156,10 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   void _load() {
     final token = ++_loadToken;
     final input = widget;
+    // A video tile's frame and metadata share delivery resolution. On web,
+    // resolving a picked file can otherwise duplicate its entire data URI.
+    Future<Uri?>? resolvedUri;
+    Future<Uri?> mediaUri() => resolvedUri ??= _mediaUri(input);
     _imageBytes = null;
     _videoThumbnail = null;
     if (input.kind == MediaReferenceKind.image &&
@@ -162,13 +167,13 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
         input.reference?.isLocal == true) {
       _imageBytes = _readAsset(input.gateway, input.reference!);
     } else if (input.kind == MediaReferenceKind.video) {
-      _videoThumbnail = _loadVideoThumbnail(input, token);
+      _videoThumbnail = _loadVideoThumbnail(input, token, mediaUri);
       if (input.onVideoMetadata != null) {
-        unawaited(_loadVideoMetadata(input, token));
+        unawaited(_loadVideoMetadata(input, token, mediaUri));
       }
     } else if (input.kind == MediaReferenceKind.audio &&
         input.onMediaDuration != null) {
-      unawaited(_loadMediaDuration(input, token));
+      unawaited(_loadMediaDuration(input, token, mediaUri));
     }
   }
 
@@ -182,6 +187,7 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
   Future<_VideoThumbnailResult?> _loadVideoThumbnail(
     MediaThumbnail input,
     int token,
+    Future<Uri?> Function() mediaUri,
   ) async {
     final providedThumbnail = input.thumbnailBytes;
     if (providedThumbnail != null && providedThumbnail.isNotEmpty) {
@@ -199,10 +205,20 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     }
     if (!_isCurrent(token)) return null;
     try {
-      final bytes = await _videoThumbnailJobs.load((
+      final key = (
         _previewFingerprint(input),
         input.frameLoader == null ? null : identityHashCode(input.frameLoader),
-      ), () => _generateVideoThumbnail(input));
+      );
+      final bytes = await _loadProbe<Uint8List>(
+        cache: _videoThumbnailJobs,
+        key: key,
+        token: token,
+        mediaUri: mediaUri,
+        probe: (uri) => (input.frameLoader ?? loadVideoFrame)(
+          uri,
+          const Duration(milliseconds: 250),
+        ),
+      );
       if (!_isCurrent(token) || bytes == null) return null;
       widget.onThumbnail?.call(bytes);
       return _VideoThumbnailResult(bytes);
@@ -211,25 +227,25 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     }
   }
 
-  Future<Uint8List?> _generateVideoThumbnail(MediaThumbnail input) async {
-    final uri = await _mediaUri(input);
-    if (uri == null) return null;
-    return (input.frameLoader ?? loadVideoFrame)(
-      uri,
-      const Duration(milliseconds: 250),
-    );
-  }
-
-  Future<void> _loadVideoMetadata(MediaThumbnail input, int token) async {
+  Future<void> _loadVideoMetadata(
+    MediaThumbnail input,
+    int token,
+    Future<Uri?> Function() mediaUri,
+  ) async {
     try {
-      final uri = await _mediaUri(input);
-      if (!_isCurrent(token) || uri == null) return;
-      final metadata = await _videoMetadataJobs.load((
+      final key = (
         _previewFingerprint(input),
         input.metadataLoader == null
             ? null
             : identityHashCode(input.metadataLoader),
-      ), () => (input.metadataLoader ?? loadVideoMetadata)(uri));
+      );
+      final metadata = await _loadProbe<VideoSourceMetadata>(
+        cache: _videoMetadataJobs,
+        key: key,
+        token: token,
+        mediaUri: mediaUri,
+        probe: input.metadataLoader ?? loadVideoMetadata,
+      );
       if (!_isCurrent(token) || metadata == null) return;
       widget.onVideoMetadata?.call(metadata);
     } on Object {
@@ -238,21 +254,56 @@ class _MediaThumbnailState extends State<MediaThumbnail> {
     }
   }
 
-  Future<void> _loadMediaDuration(MediaThumbnail input, int token) async {
+  Future<void> _loadMediaDuration(
+    MediaThumbnail input,
+    int token,
+    Future<Uri?> Function() mediaUri,
+  ) async {
     try {
-      final uri = await _mediaUri(input);
-      if (!_isCurrent(token) || uri == null) return;
-      final duration = await _mediaDurationJobs.load((
+      final key = (
         _previewFingerprint(input),
         input.durationLoader == null
             ? null
             : identityHashCode(input.durationLoader),
-      ), () => (input.durationLoader ?? loadMediaDuration)(uri));
+      );
+      final duration = await _loadProbe<double>(
+        cache: _mediaDurationJobs,
+        key: key,
+        token: token,
+        mediaUri: mediaUri,
+        probe: input.durationLoader ?? loadMediaDuration,
+      );
       if (!_isCurrent(token) || duration == null) return;
       widget.onMediaDuration?.call(duration);
     } on Object {
       // Same contract as video metadata: never leak an unhandled async error.
     }
+  }
+
+  Future<T?> _loadProbe<T>({
+    required AsyncValueCache<T?> cache,
+    required Object key,
+    required int token,
+    required Future<Uri?> Function() mediaUri,
+    required Future<T?> Function(Uri uri) probe,
+  }) async {
+    final cached = cache.lookupFuture(key);
+    if (cached != null) return cached;
+    if (!_isCurrent(token)) return null;
+    // Delivery lookup may wait on disk or network without opening a decoder.
+    // Keep it outside the decoder budget so a slow source cannot starve
+    // unrelated previews, and empty URL drafts finish immediately.
+    final uri = await mediaUri();
+    if (!_isCurrent(token) || uri == null) return null;
+    return mediaPreviewWork.run(() async {
+      if (!_isCurrent(token)) return null;
+      // Another visible tile may have filled the cache while this waited.
+      final cached = cache.lookupFuture(key);
+      if (cached != null) return cached;
+      // Only started probes enter the shared cache: cancelling an obsolete
+      // queued tile must not cancel another tile that needs the same media.
+      return cache.load(key, () => probe(uri));
+    });
   }
 
   Future<Uri?> _mediaUri(MediaThumbnail input) async {

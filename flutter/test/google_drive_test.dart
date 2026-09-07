@@ -17,6 +17,64 @@ import 'package:http/testing.dart';
 import 'support/memory_asset_streaming.dart';
 
 void main() {
+  testWidgets(
+    'draft saves during a slow upload keep the publication throttle',
+    (tester) async {
+      var now = DateTime.utc(2026, 9, 6, 12);
+      final local = _MemoryStore(const StoredData());
+      final drive = _SlowWorkspaceDriveStore();
+      final hybrid = HybridDataStore(
+        local: local,
+        drive: drive,
+        newDeviceId: () => 'desk',
+        clock: () => now,
+      );
+      await hybrid.connect('token', 'Studio');
+      drive.pending = Completer<void>();
+      await hybrid.writeComposerWorkspace(
+        const ComposerTabsState(
+          tabs: [ComposerTabRecord(id: 'draft', prompt: 'First')],
+        ),
+      );
+      await tester.pump();
+      expect(drive.writes, 1);
+
+      now = now.add(const Duration(seconds: 1));
+      await hybrid.writeComposerWorkspace(
+        const ComposerTabsState(
+          tabs: [ComposerTabRecord(id: 'draft', prompt: 'Latest keystrokes')],
+        ),
+      );
+      expect(
+        (await hybrid.readComposerWorkspace())?.tabs.single.prompt,
+        'Latest keystrokes',
+      );
+      drive.pending!.complete();
+      await tester.pump();
+      expect(
+        drive.writes,
+        1,
+        reason: 'typing cannot trigger back-to-back uploads',
+      );
+      expect(
+        drive.data.composerTabs?.deviceById('desk')?.tabs.single.prompt,
+        'First',
+      );
+
+      now = now.add(const Duration(seconds: 19));
+      await tester.pump(const Duration(seconds: 19));
+      expect(drive.writes, 1);
+      now = now.add(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(drive.writes, 2);
+      expect(
+        drive.data.composerTabs?.deviceById('desk')?.tabs.single.prompt,
+        'Latest keystrokes',
+        reason: 'the trailing save publishes without another edit or poll',
+      );
+    },
+  );
+
   test(
     'slow Drive publication never blocks saving newer drafts locally',
     () async {
@@ -1548,8 +1606,10 @@ class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
 class _SlowWorkspaceDriveStore extends _MemoryDriveStore {
   _SlowWorkspaceDriveStore() : super(const StoredData());
   Completer<void>? pending;
+  int writes = 0;
   @override
   Future<void> write(StoredData value) async {
+    writes += 1;
     await pending?.future;
     await super.write(value);
   }

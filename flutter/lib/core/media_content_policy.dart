@@ -101,7 +101,7 @@ Future<Stream<List<int>>> validatedPassiveMediaStream(
     await iterator.cancel();
     rethrow;
   }
-  return () async* {
+  final body = () async* {
     try {
       for (final chunk in initial) {
         yield chunk;
@@ -113,4 +113,26 @@ Future<Stream<List<int>>> validatedPassiveMediaStream(
       await iterator.cancel();
     }
   }();
+  // An async* generator cannot reach its finally block while moveNext is
+  // waiting on a stalled source. Release that iterator directly on consumer
+  // cancellation, then tear down the forwarding subscription. This also
+  // applies to an HTTP player that abandons a download mid-stream.
+  late final StreamController<List<int>> output;
+  late StreamSubscription<List<int>> subscription;
+  output = StreamController<List<int>>(
+    onListen: () {
+      subscription = body.listen(
+        output.add,
+        onError: output.addError,
+        onDone: output.close,
+      );
+    },
+    onPause: () => subscription.pause(),
+    onResume: () => subscription.resume(),
+    onCancel: () async {
+      await iterator.cancel();
+      await subscription.cancel();
+    },
+  );
+  return output.stream;
 }

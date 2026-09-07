@@ -81,4 +81,24 @@ void main() {
       );
     },
   );
+
+  test(
+    'abandoned playback releases a source waiting after its prefix',
+    () async {
+      var cancelled = false;
+      final source = StreamController<List<int>>(
+        onCancel: () => cancelled = true,
+      );
+      source.add(List.filled(passiveMediaSniffBytes, 42));
+      final validated = await validatedPassiveMediaStream(source.stream);
+      final received = Completer<void>();
+      final subscription = validated.listen((_) => received.complete());
+      await received.future;
+      // Let the generator begin waiting for a tail that never arrives.
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel().timeout(const Duration(seconds: 2));
+      expect(cancelled, isTrue);
+      await source.close();
+    },
+  );
 }

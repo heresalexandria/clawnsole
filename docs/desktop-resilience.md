@@ -167,9 +167,53 @@ integration scenarios beyond synthetic tests. The app retains the existing
 uncertain-submission recovery contract; it cannot reconstruct an unreturned
 provider receipt by safely repeating the charge.
 
-The preview budgets bound completed memoized data, not every live widget,
-pending image read or platform decoder. A global decoder pool needs a uniform
-cancellation contract; releasing slots while native work continues would merely
-hide resource use. Large byte-oriented reference imports, editing and export
-paths remain separate from streamed result delivery. These are explicit future
-performance work, not claims covered by this memory experiment.
+The original cache experiment bounds completed memoized data, not every live
+widget, pending image read or platform decoder. The follow-up below also bounds
+preview extraction concurrency; running work holds its slot until it actually
+finishes. Large byte-oriented reference imports, editing and export paths remain
+separate from streamed result delivery and are not covered by this experiment.
+
+## Long-session preview and playback bounds
+
+A further resource audit found three caches outside the earlier memoization
+budgets: controller-restored preview bytes, the controller's successful read
+futures, and generated-film thumbnail/filmstrip jobs. The controller now keeps
+at most 32 MiB of completed restored bytes and 8 MiB of generated reference
+previews; shared generated-film previews have a 16 MiB budget. Each also has an
+entry limit. Budgets count backing buffers, including byte-array views. Pending
+consumers still receive their results, while cleared or evicted completions
+cannot restore retained cache data. OS memory pressure clears these caches;
+durable media, drafts, Drive sessions and upload queues remain intact. A local
+to Drive publish transfers its cached preview to the published id without
+counting the same buffer twice or downloading the thumbnail again.
+
+Reference frame/metadata probes and generated-film filmstrips share two
+concurrent extraction slots. A 20-video regression fixture completes all 40
+frame/metadata probes with peak concurrency of two. Queued reference probes for
+disposed or recycled cards skip extraction. Duration probes also avoid waiting
+forever to dispose a native player whose creation failed. Source/controller
+identity is captured before asynchronous work so recycling a card cannot write
+one film's previews onto another.
+
+Cold Drive seeks previously buffered the entire requested range, potentially
+almost a whole film for `bytes=1-`, while also warming the disk cache. Turning
+the disk cache off likewise buffered whole videos. Both paths now deliver
+streams with response backpressure. Range-ignoring servers are skipped and
+limited while streaming; legacy records without a size use temporary disk
+staging for exact suffix ranges. Regression fixtures announce a 1 GiB body and
+verify playback starts after the first 64 KiB, without a buffered asset read.
+Abandoning playback cancels upstream even when media validation is awaiting a
+stalled next chunk. Normal cache warming and replay remain available.
+
+Draft edits arriving during a slow Drive publish now obey the existing
+20-second automatic publication interval, avoiding continuous back-to-back
+writes. Local saves remain immediate, explicit flushes publish the latest
+revision, and a pending revision is sent automatically after the interval even
+without another edit. Reconnect recovery, conditional metadata reads and the
+normal cross-device reconciliation schedule are preserved.
+
+These are bounds on disposable caches and concurrent preview work, not a cap
+on total process memory. Mounted gallery cards, active playback, compositor
+resources, and reference editing still require memory. Synthetic regression
+coverage and a fresh native simulator launch do not establish the sole cause
+of an observed whole-machine freeze or substitute for a long live session.

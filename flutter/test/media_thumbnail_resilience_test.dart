@@ -62,7 +62,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('delayed URI lookup keeps its original frame loader', (
+  testWidgets('recycled tile skips decoding after delayed URI lookup', (
     tester,
   ) async {
     final gateway = _Gateway();
@@ -101,7 +101,7 @@ void main() {
     await tester.pumpAndSettle();
     oldUri.complete(Uri.parse('https://media.test/old-uri'));
     await tester.pumpAndSettle();
-    expect(requests, ['new:/new-uri', 'old:/old-uri']);
+    expect(requests, ['new:/new-uri']);
     expect(saved, ['new']);
   });
 
@@ -207,6 +207,233 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a page shares two decoder slots across frames and metadata', (
+    tester,
+  ) async {
+    final gateway = _Gateway();
+    final gate = Completer<void>();
+    var active = 0;
+    var peak = 0;
+    var started = 0;
+    var callbacks = 0;
+    Future<void> probe() async {
+      started += 1;
+      active += 1;
+      if (active > peak) peak = active;
+      await gate.future;
+      active -= 1;
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: List.generate(
+            20,
+            (index) => SizedBox(
+              width: 30,
+              height: 20,
+              child: MediaThumbnail(
+                gateway: gateway,
+                kind: MediaReferenceKind.video,
+                source: 'https://media.test/bounded-$index',
+                frameLoader: (_, _) async {
+                  await probe();
+                  return _frame;
+                },
+                metadataLoader: (_) async {
+                  await probe();
+                  return _metadata;
+                },
+                onThumbnail: (_) => callbacks += 1,
+                onVideoMetadata: (_) => callbacks += 1,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(started, 2);
+    expect(peak, 2);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(started, 40);
+    expect(callbacks, 40);
+    expect(peak, 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('leaving a page skips its queued media probes', (tester) async {
+    final gateway = _Gateway();
+    final gate = Completer<Uint8List?>();
+    var started = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: List.generate(
+            20,
+            (index) => SizedBox(
+              width: 30,
+              height: 20,
+              child: MediaThumbnail(
+                gateway: gateway,
+                kind: MediaReferenceKind.video,
+                source: 'https://media.test/leaving-$index',
+                frameLoader: (_, _) {
+                  started += 1;
+                  return gate.future;
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(started, 2);
+    await tester.pumpWidget(const SizedBox());
+    gate.complete(_frame);
+    await tester.pumpAndSettle();
+    expect(started, 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('frame and metadata share URI resolution and cached probes', (
+    tester,
+  ) async {
+    final gateway = _Gateway();
+    var resolutions = 0;
+    var frames = 0;
+    var metadata = 0;
+    final tile = _host(
+      MediaThumbnail(
+        gateway: gateway,
+        kind: MediaReferenceKind.video,
+        source: 'https://media.test/shared-delivery',
+        mediaUriLoader: () async {
+          resolutions += 1;
+          return Uri.parse('https://media.test/shared-delivery');
+        },
+        frameLoader: (_, _) async {
+          frames += 1;
+          return _frame;
+        },
+        metadataLoader: (_) async {
+          metadata += 1;
+          return _metadata;
+        },
+        onVideoMetadata: (_) {},
+      ),
+    );
+    await tester.pumpWidget(tile);
+    await tester.pumpAndSettle();
+    expect(resolutions, 1);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(tile);
+    await tester.pumpAndSettle();
+    expect(resolutions, 1);
+    expect(frames, 1);
+    expect(metadata, 1);
+  });
+
+  testWidgets('obsolete tile cannot cancel another tile for the same media', (
+    tester,
+  ) async {
+    final gateway = _Gateway();
+    final uri = Completer<Uri?>();
+    var frames = 0;
+    var callbacks = 0;
+    Future<Uint8List?> frameLoader(Uri _, Duration _) async {
+      frames += 1;
+      return _frame;
+    }
+
+    Widget tile(String name) => SizedBox(
+      key: ValueKey(name),
+      width: 30,
+      height: 20,
+      child: MediaThumbnail(
+        gateway: gateway,
+        kind: MediaReferenceKind.video,
+        source: 'https://media.test/shared-cancellation',
+        mediaUriLoader: () => uri.future,
+        frameLoader: frameLoader,
+        onThumbnail: (_) => callbacks += 1,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Column(children: [tile('obsolete'), tile('visible')])),
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: Column(children: [tile('visible')])),
+    );
+    uri.complete(Uri.parse('https://media.test/shared-cancellation'));
+    await tester.pumpAndSettle();
+    expect(frames, 1);
+    expect(callbacks, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('waiting for media URIs cannot occupy decoder slots', (
+    tester,
+  ) async {
+    final gateway = _Gateway();
+    final pendingUri = Completer<Uri?>();
+    var frames = 0;
+    Future<Uint8List?> frameLoader(Uri _, Duration _) async {
+      frames += 1;
+      return _frame;
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Column(
+          children: List.generate(
+            2,
+            (index) => SizedBox(
+              width: 30,
+              height: 20,
+              child: MediaThumbnail(
+                gateway: gateway,
+                kind: MediaReferenceKind.video,
+                source: 'https://media.test/slow-uri-$index',
+                mediaUriLoader: () => pendingUri.future,
+                frameLoader: frameLoader,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      _host(MediaThumbnail(gateway: gateway, kind: MediaReferenceKind.video)),
+    );
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 1),
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await tester.pumpWidget(
+      _host(
+        MediaThumbnail(
+          gateway: gateway,
+          kind: MediaReferenceKind.video,
+          source: 'https://media.test/ready-uri',
+          frameLoader: frameLoader,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 1),
+    );
+    expect(frames, 1);
+    pendingUri.complete(Uri.parse('https://media.test/obsolete-uri'));
+    await tester.pumpAndSettle();
+    expect(frames, 1);
     expect(tester.takeException(), isNull);
   });
 }
