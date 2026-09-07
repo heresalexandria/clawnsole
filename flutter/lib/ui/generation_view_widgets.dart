@@ -446,6 +446,7 @@ enum _DenseGenerationAction {
   save,
   enhance,
   reuse,
+  extend,
   rewrite,
   copyToDrive,
   checkStatus,
@@ -465,6 +466,7 @@ class GenerationActionsMenu extends StatelessWidget {
     this.onCopyToDrive,
     this.includeSave = true,
     this.includeReuse = true,
+    this.includeExtend = true,
     this.includeRewrite = true,
     this.includeCheckStatus = true,
     this.includeDetails = true,
@@ -479,6 +481,10 @@ class GenerationActionsMenu extends StatelessWidget {
   final VoidCallback? onCopyToDrive;
   final bool includeSave;
   final bool includeReuse;
+
+  /// Extend is only ever a menu verb, so even the surfaces that lift Reuse
+  /// onto their action row keep it here.
+  final bool includeExtend;
   final bool includeRewrite;
   final bool includeCheckStatus;
 
@@ -493,6 +499,8 @@ class GenerationActionsMenu extends StatelessWidget {
       _DenseGenerationAction.save,
     if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
     if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
+    if (includeExtend && controller.canExtend(item))
+      _DenseGenerationAction.extend,
     if (includeRewrite && controller.canRewrite(item))
       _DenseGenerationAction.rewrite,
     if (onCopyToDrive != null) _DenseGenerationAction.copyToDrive,
@@ -530,6 +538,8 @@ class GenerationActionsMenu extends StatelessWidget {
               controller.enhance(item);
             case _DenseGenerationAction.reuse:
               unawaited(controller.reuse(item));
+            case _DenseGenerationAction.extend:
+              unawaited(controller.extend(item));
             case _DenseGenerationAction.rewrite:
               unawaited(
                 showPromptRewriteDialog(
@@ -559,6 +569,7 @@ class GenerationActionsMenu extends StatelessWidget {
               action == _DenseGenerationAction.copyToDrive &&
               controller.isCopyingGeneration(item.localId);
           return PopupMenuItem<_DenseGenerationAction>(
+            key: ValueKey('generation-action-${action.name}'),
             value: action,
             enabled: !copying,
             child: Row(
@@ -598,6 +609,7 @@ IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
       _DenseGenerationAction.save => Icons.download_rounded,
       _DenseGenerationAction.enhance => Icons.auto_fix_high_rounded,
       _DenseGenerationAction.reuse => Icons.replay_rounded,
+      _DenseGenerationAction.extend => Icons.fast_forward_rounded,
       _DenseGenerationAction.rewrite => Icons.auto_awesome_outlined,
       _DenseGenerationAction.copyToDrive => Icons.cloud_upload_outlined,
       _DenseGenerationAction.checkStatus => Icons.sync_rounded,
@@ -615,6 +627,7 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.save => item.isImage ? 'Save image' : 'Save video',
   _DenseGenerationAction.enhance => 'Enhance',
   _DenseGenerationAction.reuse => item.isFailed ? 'Retry generation' : 'Reuse',
+  _DenseGenerationAction.extend => 'Extend',
   _DenseGenerationAction.rewrite => 'AI Rewrite',
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
   _DenseGenerationAction.checkStatus => 'Check status',

@@ -521,13 +521,26 @@ generation-mode rule above still stands — tabs never select a mode.
 - Card actions stay light: the primary verbs (**Save**, **Reuse/Retry**,
   **Check status**, and — once an AI Rewrite key is saved — **AI Rewrite**
   on delivered films) are buttons; everything else (Organize, Enhance,
-  Copy to Drive, View details, Delete) folds into the shared
+  **Extend**, Copy to Drive, View details, Delete) folds into the shared
   `GenerationActionsMenu` (⋯), which also lists AI Rewrite for the dense
   card sizes. The cost readout is a compact amount chip
   (`GenerationCostChip`) on the same row — just the credit or dollar
   figure at a glance, with the realized/estimated wording, USD
   conversion, balance trail, and quote-vs-realized lines in a small
   anchored popover on tap.
+- **Extend writes the next scene.** On a delivered film whose model takes a
+  reference video, the ⋯ menu offers *Extend*: it opens the film the way
+  Reuse does — same model, settings, folder, and aesthetic — but attaches the
+  film itself as the first creative reference and clears the direction back
+  to `Extend @name.`, plus the script's first scene heading when the film was
+  written as a screenplay. Nothing else of the old direction is kept; the
+  point is to write what happens next. The reference is named after the film
+  (the tab name it was rendered from, else its first words), and the cast it
+  was rendered with is re-attached in its original order for as long as the
+  model has room — counted per kind, against the total, and against the
+  reference-video seconds, with the extended film counting first. Anything
+  that will not fit is left out and said so in a flash notice. Keyframes are
+  not carried over: the film itself is the guidance now.
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
   keyframes.

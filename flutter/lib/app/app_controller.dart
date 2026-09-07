@@ -8275,6 +8275,204 @@ class AppController extends ChangeNotifier {
     showNotice('Prompt, settings, and retained references copied.');
   }
 
+  /// Whether [item] can seed the next scene: a delivered film, on a provider
+  /// and model this build still has, whose model takes a reference video.
+  bool canExtend(Generation item) =>
+      canReuse(item) &&
+      !item.isImage &&
+      item.isReady &&
+      item.hasDeliveredMedia &&
+      modelById(item.provider, item.model).maxVideoReferences > 0;
+
+  /// The name the extended film answers to in the prompt: the tab it was
+  /// rendered from, else the first words of its direction, else its id.
+  /// Unique among what is attached and what the References library holds.
+  String _extendReferenceName(Generation item) {
+    final title = item.title?.trim() ?? '';
+    var base =
+        (title.isNotEmpty ? title : composerTabTitle(null, item.displayPrompt))
+            .replaceAll(RegExp(r'[@:\n\r]'), ' ')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim()
+            .replaceAll(RegExp(r'[.…]+$'), '')
+            .trim();
+    if (base.length > 60) base = base.substring(0, 60).trim();
+    if (base.isEmpty ||
+        base == composerTabUntitled ||
+        isReservedReferenceName(base)) {
+      final id = item.localId.replaceAll(RegExp(r'[^A-Za-z0-9]'), '');
+      final short = id.isEmpty
+          ? 'film'
+          : id.substring(0, id.length < 6 ? id.length : 6);
+      base = 'scene-$short';
+    }
+    var name = base;
+    for (var attempt = 2; attempt <= 30; attempt += 1) {
+      if (referenceNameProblem(name, allowReserved: true) == null) break;
+      name = '$base $attempt';
+    }
+    return name;
+  }
+
+  /// The delivered film as a creative reference, without going through the
+  /// library listing: an extend is always about this one record.
+  ReferenceCandidate? _extendCandidate(Generation item, String name) {
+    final asset =
+        item.resultAsset ??
+        (item.resultUrl == null
+            ? null
+            : AssetReference(
+                kind: 'remote',
+                value: item.resultUrl!,
+                label: name,
+                contentType: 'video/mp4',
+              ));
+    if (asset == null) return null;
+    return ReferenceCandidate(
+      id: item.localId,
+      name: name,
+      kind: MediaReferenceKind.video,
+      asset: asset,
+      thumbnailAsset: item.thumbnailAsset,
+      createdAt: item.createdAt,
+      folderId: item.folderId,
+      tags: item.tags,
+      generated: true,
+      storage: item.storage,
+      durationSeconds: item.config.duration is num
+          ? (item.config.duration as num).toDouble()
+          : null,
+    );
+  }
+
+  /// Why the reference just appended does not fit, or null when it does. Read
+  /// against the live form, so each answer counts what is already attached —
+  /// the extended film first.
+  String? _extendCapacityProblem(MediaReferenceKind kind) {
+    final model = selectedModel;
+    final limit = referenceLimit(kind);
+    if (form.referenceCount(kind) > limit) {
+      return limit == 0
+          ? '${model.label} does not accept reference ${kind.pluralLabel}.'
+          : '${model.label} accepts up to $limit ${kind.pluralLabel}.';
+    }
+    final total = model.maxTotalReferences;
+    if (total != null && form.references.length > total) {
+      return '${model.label} accepts up to $total creative references total.';
+    }
+    final seconds = model.maxReferenceSeconds(kind, form.resolution);
+    if (seconds != null) {
+      final used = form.references
+          .where((item) => item.kind == kind)
+          .map((item) => item.durationSeconds)
+          .whereType<double>()
+          .fold<double>(0, (sum, value) => sum + value);
+      if (used > seconds + .001) {
+        final media = kind == MediaReferenceKind.video ? 'video' : 'audio';
+        return '${model.label} accepts up to $seconds seconds of reference '
+            '$media in total.';
+      }
+    }
+    return null;
+  }
+
+  /// Opens the next scene of [item]: the film itself becomes the reference to
+  /// extend, the direction is cleared back to `Extend @name.` (plus the scene
+  /// heading, in a screenplay), and everything else — model, settings,
+  /// aesthetic, and as much of the cast as the model still has room for —
+  /// carries over. The old direction is deliberately not kept: the point is
+  /// to write what happens next.
+  Future<void> extend(Generation item) async {
+    if (!canExtend(item)) {
+      showNotice('That film cannot be extended with this provider or model.');
+      return;
+    }
+    // A tab with direction already typed in it is somebody's work.
+    final tab = activeComposerTab.isBlank
+        ? activeComposerTab
+        : addComposerTab();
+    try {
+      await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
+    } on Object catch (error) {
+      showNotice(_message(error));
+      return;
+    }
+    final name = _inComposerTab(tab, () => _extendReferenceName(item));
+    final candidate = _extendCandidate(item, name);
+    if (candidate == null) {
+      showNotice('That film has no video to extend yet.');
+      return;
+    }
+    // The cast the film was rendered with, in the order it was attached;
+    // everything else the film used starts fresh with the new scene.
+    final cast = _inComposerTab(tab, () {
+      final names = <String>{
+        for (final entry in form.characterMappings.values)
+          for (final value in entry) value.toLowerCase(),
+      };
+      final characters = form.references
+          .where(
+            (draft) => names.contains(referencePromptName(draft).toLowerCase()),
+          )
+          .toList();
+      form
+        ..keyframes = <KeyframeDraft>[]
+        ..references = <MediaReferenceDraft>[];
+      return characters;
+    });
+    await _inComposerTab(
+      tab,
+      () => addReferenceCandidates(MediaReferenceKind.video, [candidate]),
+    );
+    if (_disposed) return;
+    final dropped = <String>[];
+    String? reason;
+    _inComposerTab(tab, () {
+      form.references = form.references
+          .map(
+            (draft) =>
+                draft.savedReferenceId == null && draft.promptName != name
+                ? draft.copyWith(promptName: name)
+                : draft,
+          )
+          .toList();
+      for (final draft in cast) {
+        final kept = form.references;
+        form.references = <MediaReferenceDraft>[...kept, draft];
+        final problem = _extendCapacityProblem(draft.kind);
+        if (problem == null) continue;
+        form.references = kept;
+        reason ??= problem;
+        final castName = draft.promptName ?? draft.label;
+        dropped.add(castName);
+        _removeCastReference(castName);
+      }
+      final heading = form.screenplayMode
+          ? firstScreenplaySceneHeading(form.prompt)
+          : null;
+      form.prompt = <String>[
+        'Extend @$name.',
+        if (heading != null) heading,
+      ].join('\n');
+      tab.sourceGenerationId = item.localId;
+      _adoptGenerationFolder(tab, item);
+      _selectCompatibleModel();
+      _normalizeFormForModel();
+      _invalidateProviderEstimate();
+      formRevision += 1;
+    });
+    _scheduleComposerTabsSave(touched: tab);
+    notifyListeners();
+    await navigate(AppSection.create);
+    showNotice(
+      dropped.isEmpty
+          ? 'Ready to extend “$name”.'
+          : 'Extend attached “$name”; ${dropped.length} character '
+                '${dropped.length == 1 ? 'reference' : 'references'} left '
+                'out — ${reason ?? 'the model has no room for them.'}',
+    );
+  }
+
   void enhance(Generation item) {
     if (item.draftCacheUrl == null) return;
     // Draft enhance hides the prompt entirely, so an enhance-born tab is
