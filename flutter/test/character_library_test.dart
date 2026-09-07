@@ -6,6 +6,8 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/ui/character_library.dart';
+import 'package:clawnsole/ui/references_screen.dart';
+import 'package:clawnsole/ui/section_tabs.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,6 +96,19 @@ Future<void> _pump(WidgetTester tester, AppController controller) async {
           child: CharacterLibraryView(controller: controller),
         ),
       ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _pumpReferencesDesk(
+  WidgetTester tester,
+  AppController controller,
+) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: buildClawnsoleTheme(Brightness.light),
+      home: Scaffold(body: ReferencesScreen(controller: controller)),
     ),
   );
   await tester.pumpAndSettle();
@@ -455,6 +470,80 @@ void main() {
       findsOneWidget,
     );
     await tester.pump(const Duration(seconds: 5));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the References desk opens its Characters tab from the rail', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(
+      _CharacterGateway(<SavedReference>[
+        _saved('star.png', characterName: 'VINNY'),
+        _saved('Vinny.mp4', kind: MediaReferenceKind.video),
+        _saved('hero.png', characterName: 'ALEXANDRIA'),
+        _saved('landscape.png'),
+      ]),
+    );
+    addTearDown(controller.dispose);
+    await _pumpReferencesDesk(tester, controller);
+
+    // The desk opens on media, so the tab is a heading until it is used.
+    expect(find.byType(CharacterLibraryView), findsNothing);
+    final tab = find.byKey(const ValueKey('references-tab-characters'));
+    expect(tab, findsOneWidget);
+    // The pill counts characters, not the media cast under them: four saved
+    // references, three of them cast, but only two names.
+    expect(controller.characterLibrary, hasLength(2));
+    expect(find.descendant(of: tab, matching: find.text('2')), findsOneWidget);
+
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+
+    expect(controller.referencesTab, ReferencesTab.characters);
+    expect(find.byType(CharacterLibraryView), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('reference-library-search')),
+      findsNothing,
+      reason: 'the media toolbar belongs to the media tab only',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('references-tab-media')));
+    await tester.pumpAndSettle();
+    expect(controller.referencesTab, ReferencesTab.media);
+    expect(find.byType(CharacterLibraryView), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a third tab still reaches the rail on a phone', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = _controller(
+      _CharacterGateway(<SavedReference>[
+        _saved('star.png', characterName: 'VINNY'),
+      ]),
+    );
+    addTearDown(controller.dispose);
+    await _pumpReferencesDesk(tester, controller);
+
+    // Three tabs are wider than 390 pt, so the rail's own horizontal scroll
+    // carries the third one rather than overflowing the row.
+    expect(
+      find.descendant(
+        of: find.byType(SectionTabRail),
+        matching: find.byType(Scrollable),
+      ),
+      findsOneWidget,
+    );
+    final tab = find.byKey(const ValueKey('references-tab-characters'));
+    await tester.ensureVisible(tab);
+    await tester.pumpAndSettle();
+    await tester.tap(tab);
+    await tester.pumpAndSettle();
+
+    expect(controller.referencesTab, ReferencesTab.characters);
+    expect(find.byType(CharacterLibraryView), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

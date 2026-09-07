@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../app/app_controller_characters.dart';
 import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'aesthetic_library.dart';
+import 'character_library.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
 import 'media_picker_source.dart';
@@ -125,13 +127,16 @@ class _ReferencesScreenState extends State<ReferencesScreen> {
           final desktop = constraints.maxWidth >= 960;
           final padding = constraints.maxWidth < 620 ? 16.0 : 28.0;
           final heading = _ReferencesHeading(controller: controller);
-          // Aesthetics are text-only, so their tab replaces the folder rail
-          // and results with one scrolling column under the same pinned
-          // heading. Dropped files only ever mean media.
-          if (controller.referencesTab == ReferencesTab.aesthetics) {
+          // Aesthetics are text-only and characters are a name-to-media
+          // index, so both tabs replace the folder rail and results with one
+          // scrolling column under the same pinned heading. Dropped files only
+          // ever mean media.
+          if (controller.referencesTab != ReferencesTab.media) {
             return _AestheticTabLayout(
               heading: heading,
-              body: AestheticLibraryView(controller: controller),
+              body: controller.referencesTab == ReferencesTab.aesthetics
+                  ? AestheticLibraryView(controller: controller)
+                  : CharacterLibraryView(controller: controller),
               scrollController: _aestheticScrollController,
               desktop: desktop,
               padding: padding,
@@ -379,6 +384,16 @@ class _ReferencesHeading extends StatelessWidget {
               selected: controller.referencesTab == ReferencesTab.aesthetics,
               onTap: () =>
                   controller.setReferencesTab(ReferencesTab.aesthetics),
+            ),
+            SectionTab(
+              key: const ValueKey('references-tab-characters'),
+              label: 'Characters',
+              semanticLabel: 'Character references',
+              icon: Icons.groups_2_rounded,
+              count: controller.characterLibrary.length,
+              selected: controller.referencesTab == ReferencesTab.characters,
+              onTap: () =>
+                  controller.setReferencesTab(ReferencesTab.characters),
             ),
           ],
         ),
