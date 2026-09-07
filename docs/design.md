@@ -401,7 +401,21 @@ Layout order:
    but never both (`framesExclusiveWithReferences`, the ArtCraft Seedance
    family) say so inside the body; attaching one side quietly sets the
    other aside, and a conflicted form (via reuse or a model switch) pins
-   both accordions open, warns in madder, and cannot submit. The
+   both accordions open, warns in madder, and cannot submit. Reference
+   video and audio are budgeted in **seconds as well as slots**: under a
+   kind's count gauge runs a second gauge of the same shape reading
+   `12 s / 30 s`, `?` in place of the used figure (with a tooltip) while a
+   clip's duration is still being measured, quiet until nine tenths of the
+   budget is spent, brass past that, madder over. The limit line names the
+   cap too. Every add path asks
+   `AppController.checkReferenceBudget` before any upload or persistence,
+   so a clip that would overrun the budget is refused with the reason and
+   a multi-file drop or pick takes the ones that fit and reports the rest
+   in one notice; a local file has no duration until the metadata loader
+   reads it, so that overrun is named the moment the figure lands. A
+   duration measured after the add, or a model switch that shrinks the
+   budget under an attached set, leaves the section warning in madder and
+   Generate blocked with the same sentence. The
    *Normalize visual references* switch applies to both sections, so it
    sits below the pair.
 5. **"Or start from…"**: two quiet text buttons under the accordions

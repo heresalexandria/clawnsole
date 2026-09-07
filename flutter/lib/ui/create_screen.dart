@@ -2330,19 +2330,19 @@ class _ReferencesSection extends StatelessWidget {
                   MediaReferenceKind.audio => 'audio clip',
                 }
               : kind.pluralLabel;
-          final seconds = model.maxReferenceSeconds(kind, form.resolution);
+          final seconds = controller.referenceSecondsLimit(kind);
           final minimum = kind == MediaReferenceKind.audio
               ? model.minReferenceAudioSeconds
               : null;
           final duration = seconds == null
               ? ''
               : minimum != null && maximum == 1
-              ? ' ($minimum–${seconds}s)'
+              ? ' ($minimum–$seconds s)'
               : minimum != null
-              ? ' (${minimum}s min each · ${seconds}s total)'
+              ? ' ($minimum s min each · $seconds s total)'
               : maximum == 1
-              ? ' (up to ${seconds}s)'
-              : ' (${seconds}s total)';
+              ? ' (up to $seconds s)'
+              : ' ($seconds s total)';
           return '$maximum $label$duration';
         })
         .join(' · ');
@@ -2373,6 +2373,24 @@ class _ReferencesSection extends StatelessWidget {
                 .toList(),
           )
         : null;
+    // A model switch can shrink a seconds budget under a set that already
+    // fit, and a duration measured after the add can push the set over it.
+    // Either way the section says, in madder, why Generate is dark.
+    final overBudget = <(MediaReferenceKind, String)>[
+      if (!setAside)
+        for (final kind in const <MediaReferenceKind>[
+          MediaReferenceKind.video,
+          MediaReferenceKind.audio,
+        ])
+          if (controller.referenceSecondsOverBudget(kind))
+            (
+              kind,
+              '${model.label} accepts up to '
+                  '${controller.referenceSecondsLimit(kind)} s of reference '
+                  '${kind == MediaReferenceKind.audio ? 'audio' : 'video'} — '
+                  'remove or trim a clip before generating.',
+            ),
+    ];
     final notes = <String>[
       if (!setAside && model.maxImageReferences > 0)
         'Creative images can guide the opening, subject, identity, or style; use First frame for stricter frame-0 conditioning.',
@@ -2437,6 +2455,19 @@ class _ReferencesSection extends StatelessWidget {
             height: 1.4,
           ),
         ),
+        for (final warning in overBudget) ...<Widget>[
+          const SizedBox(height: 5),
+          Text(
+            warning.$2,
+            key: ValueKey('reference-seconds-over-budget-${warning.$1.name}'),
+            style: TextStyle(
+              color: context.colors.error,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+        ],
         if (!setAside) ...<Widget>[
           const SizedBox(height: 10),
           _ReferenceCapacityGauges(controller: controller),
@@ -2506,22 +2537,32 @@ class _ReferenceCapacityGauges extends StatelessWidget {
           valueLabel: '${attached.length} / $maximum added',
         ),
       );
-      final maximumSeconds = model.maxReferenceSeconds(kind, form.resolution);
+      // Under the count, the same gauge again for the seconds a model
+      // publishes for this kind: 12 s / 30 s, with the bar reading the
+      // budget the same way.
+      final maximumSeconds = controller.referenceSecondsLimit(kind);
       if (maximumSeconds == null) continue;
-      final known = attached
-          .map((reference) => reference.durationSeconds)
-          .whereType<double>()
-          .toList();
-      final used = known.fold<double>(0, (sum, seconds) => sum + seconds);
-      final unknown = attached.length - known.length;
+      final used = controller.referenceSecondsUsed(kind);
+      final unknown = controller.referenceSecondsPending(kind);
       gauges.add(
         _ReferenceCapacityGauge(
           key: ValueKey('reference-capacity-${kind.name}-duration'),
-          label: '$kindLabel duration',
+          label:
+              '${kind == MediaReferenceKind.audio ? 'Audio' : 'Video'} '
+              'duration',
           value: used / maximumSeconds,
-          valueLabel:
-              '${formatMediaDuration(used)} / ${formatMediaDuration(maximumSeconds.toDouble())}'
-              '${unknown == 0 ? '' : ' · measuring $unknown'}',
+          // A clip whose duration is still being read leaves the figure
+          // unknowable rather than merely small, so the used reading says
+          // so outright instead of quietly under-counting.
+          valueLabel: unknown > 0
+              ? '? / ${formatMediaDuration(maximumSeconds.toDouble())}'
+              : '${formatMediaDuration(used)} / '
+                    '${formatMediaDuration(maximumSeconds.toDouble())}',
+          tooltip: unknown == 0
+              ? null
+              : unknown == 1
+              ? 'Reading one clip’s duration…'
+              : 'Reading $unknown clips’ durations…',
         ),
       );
     }
@@ -2544,6 +2585,7 @@ class _ReferenceCapacityGauge extends StatelessWidget {
     required this.label,
     required this.value,
     required this.valueLabel,
+    this.tooltip,
     super.key,
   });
 
@@ -2551,11 +2593,32 @@ class _ReferenceCapacityGauge extends StatelessWidget {
   final double value;
   final String valueLabel;
 
+  /// Explains an unknowable reading, e.g. a duration still being measured.
+  final String? tooltip;
+
+  /// A gauge runs quiet until the budget is nearly spent, warns in brass
+  /// over nine tenths, and reads madder once it is past full — the same
+  /// three tones for a count and for a duration.
+  Color? _tone(BuildContext context) => !value.isFinite || value <= .9
+      ? null
+      : value > 1.0001
+      ? context.colors.error
+      : context.tokens.brass;
+
   @override
   Widget build(BuildContext context) {
     final progress = value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+    final tone = _tone(context);
+    final reading = Text(
+      valueLabel,
+      style: TextStyle(
+        color: tone ?? context.colors.onSurfaceVariant,
+        fontSize: 10,
+        fontWeight: FontWeight.w600,
+      ),
+    );
     return Semantics(
-      label: '$label, $valueLabel',
+      label: '$label, $valueLabel${tooltip == null ? '' : ', $tooltip'}',
       value: '${(progress * 100).round()}%',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2565,20 +2628,17 @@ class _ReferenceCapacityGauge extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
+                    color: tone,
                   ),
                 ),
               ),
-              Text(
-                valueLabel,
-                style: TextStyle(
-                  color: context.colors.onSurfaceVariant,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              if (tooltip == null)
+                reading
+              else
+                Tooltip(message: tooltip!, child: reading),
             ],
           ),
           const SizedBox(height: 4),
@@ -2589,6 +2649,7 @@ class _ReferenceCapacityGauge extends StatelessWidget {
               child: LinearProgressIndicator(
                 minHeight: 7,
                 value: progress,
+                color: tone,
                 backgroundColor: context.colors.surfaceContainerHighest,
               ),
             ),
@@ -3062,15 +3123,21 @@ class _AddReferenceButton extends StatelessWidget {
   Widget build(BuildContext context) {
     // Uploads never lock the buttons: adds append instantly and persistence
     // continues on the controller's background work queue.
-    final enabled = controller.canAddReference(kind);
+    final verdict = controller.checkReferenceBudget(kind);
+    final enabled = verdict.allowed;
     final count = controller.form.referenceCount(kind);
     final maximum = controller.referenceLimit(kind);
+    // A seconds budget never closes the button — whether the next clip fits
+    // depends on how long it is — so the tooltip carries the cap instead.
+    final budget = controller.referenceSecondsLimit(kind);
     return PopupMenuButton<String>(
       key: ValueKey('add-${kind.name}-reference'),
       enabled: enabled,
-      tooltip: enabled
+      tooltip: !enabled
+          ? verdict.refusal!
+          : budget == null
           ? 'Add reference ${kind.pluralLabel}'
-          : '$maximum ${kind.pluralLabel} attached',
+          : 'Add reference ${kind.pluralLabel} · $budget s total',
       onSelected: (choice) {
         if (choice == 'saved') {
           unawaited(() async {

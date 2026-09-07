@@ -296,6 +296,21 @@ class ReferenceCandidate {
   final double? durationSeconds;
 }
 
+/// The answer to "may one more reference join this form?". Every add path
+/// asks [AppController.checkReferenceBudget] before it does any upload or
+/// persistence work, so a refusal costs the director nothing but a notice.
+class ReferenceBudgetVerdict {
+  const ReferenceBudgetVerdict.allowed() : refusal = null;
+
+  const ReferenceBudgetVerdict.refused(String this.refusal);
+
+  /// The sentence to show when the reference cannot be added; null when it
+  /// can.
+  final String? refusal;
+
+  bool get allowed => refusal == null;
+}
+
 class GenerationFormState {
   String prompt = '';
   bool screenplayMode = false;
@@ -4759,11 +4774,30 @@ class AppController extends ChangeNotifier {
     Iterable<ReferenceCandidate> candidates,
   ) async {
     final tab = _draftTab;
-    final available = referenceLimit(kind) - form.referenceCount(kind);
-    final selected = candidates
-        .where((item) => item.kind == kind)
-        .take(available < 0 ? 0 : available)
-        .toList();
+    // Saved and generated candidates carry their measured duration, so the
+    // seconds budget is decided here — before any media is read or hydrated.
+    // Candidates are walked in order: the ones that fit are taken, and the
+    // ones left out are reported together in one notice.
+    final selected = <ReferenceCandidate>[];
+    final refusals = <String>[];
+    var claimedCount = 0;
+    var claimedSeconds = .0;
+    for (final candidate in candidates.where((item) => item.kind == kind)) {
+      final verdict = checkReferenceBudget(
+        kind,
+        durationSeconds: candidate.durationSeconds,
+        pendingCount: claimedCount,
+        pendingSeconds: claimedSeconds,
+      );
+      if (!verdict.allowed) {
+        refusals.add(verdict.refusal!);
+        continue;
+      }
+      selected.add(candidate);
+      claimedCount += 1;
+      claimedSeconds += candidate.durationSeconds ?? 0;
+    }
+    _noteReferenceRefusals(refusals);
     if (selected.isEmpty) return;
     // Drafts appear immediately; media bytes hydrate on the background work
     // queue so choosing saved references never blocks further adds — even
@@ -5547,11 +5581,12 @@ class AppController extends ChangeNotifier {
       (role == KeyframeRole.middle ||
           !form.keyframes.any((frame) => frame.role == role));
 
+  /// Whether the add buttons for [kind] are live at all. The same budget
+  /// [checkReferenceBudget] enforces, asked without a particular candidate:
+  /// a seconds budget cannot close the buttons, because whether the next
+  /// clip fits depends on how long it turns out to be.
   bool canAddReference(MediaReferenceKind kind) =>
-      !referencesBlockedByFrames &&
-      form.referenceCount(kind) < referenceLimit(kind) &&
-      (selectedModel.maxTotalReferences == null ||
-          form.references.length < selectedModel.maxTotalReferences!);
+      checkReferenceBudget(kind).allowed;
 
   VideoModelDefinition? _modelForReferenceAsFirstFrame(
     MediaReferenceDraft reference,
@@ -5659,6 +5694,142 @@ class AppController extends ChangeNotifier {
           form.referenceTask != MediaReferenceTask.reference
       ? selectedModel.maxVideoReferences.clamp(0, 1)
       : selectedModel.maxReferences(kind, form.mode);
+
+  /// Total seconds of reference media of [kind] the selected model accepts,
+  /// resolved for the form's current resolution. Null when the model
+  /// publishes no seconds budget for that kind; images never carry one.
+  int? referenceSecondsLimit(MediaReferenceKind kind) =>
+      referenceLimit(kind) <= 0
+      ? null
+      : selectedModel.maxReferenceSeconds(kind, form.resolution);
+
+  /// Seconds of reference media of [kind] already attached. A reference
+  /// whose duration has not been measured yet counts as zero; how many are
+  /// still being read is [referenceSecondsPending].
+  double referenceSecondsUsed(MediaReferenceKind kind) => form.references
+      .where((item) => item.kind == kind)
+      .map((item) => item.durationSeconds)
+      .whereType<double>()
+      .fold<double>(0, (sum, seconds) => sum + seconds);
+
+  /// Attached references of [kind] whose duration is still being measured.
+  /// Their seconds are missing from [referenceSecondsUsed], so the gauge
+  /// reads `?` rather than a figure that is quietly too small.
+  int referenceSecondsPending(MediaReferenceKind kind) => form.references
+      .where((item) => item.kind == kind && item.durationSeconds == null)
+      .length;
+
+  /// The attached references of [kind] already exceed the model's seconds
+  /// budget — after a model switch shrank it, or once a measured duration
+  /// landed. [validate] blocks Generate with the reason while this holds.
+  bool referenceSecondsOverBudget(MediaReferenceKind kind) {
+    final budget = referenceSecondsLimit(kind);
+    return budget != null && referenceSecondsUsed(kind) > budget + _secondSlack;
+  }
+
+  /// Whether one more reference of [kind] fits every budget the selected
+  /// model publishes: the per-kind count, the total count, and — when the
+  /// candidate's [durationSeconds] is already known — the seconds budget.
+  ///
+  /// [pendingCount] and [pendingSeconds] carry what earlier candidates of
+  /// the same batch have claimed, so a multi-file drop or pick walks its
+  /// candidates in order and takes the ones that fit.
+  ///
+  /// A candidate whose duration is not measured yet passes the seconds test
+  /// here: a local pick or drop has no duration until the metadata loader
+  /// reads it. [rememberReferenceDuration] says so the moment the figure
+  /// lands, [validate] blocks Generate meanwhile, and the accordion's
+  /// seconds gauge shows the overrun.
+  ReferenceBudgetVerdict checkReferenceBudget(
+    MediaReferenceKind kind, {
+    double? durationSeconds,
+    int pendingCount = 0,
+    double pendingSeconds = 0,
+  }) {
+    final model = selectedModel;
+    if (referencesBlockedByFrames) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} takes pinned frames or creative references, not both.',
+      );
+    }
+    final maximum = referenceLimit(kind);
+    if (maximum <= 0) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} does not accept reference ${kind.pluralLabel}.',
+      );
+    }
+    if (form.referenceCount(kind) + pendingCount >= maximum) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} accepts up to $maximum ${kind.pluralLabel}.',
+      );
+    }
+    final total = model.maxTotalReferences;
+    if (total != null && form.references.length + pendingCount >= total) {
+      return ReferenceBudgetVerdict.refused(
+        '${model.label} accepts up to $total creative references total.',
+      );
+    }
+    if (durationSeconds != null && durationSeconds > 0) {
+      final minimum = kind == MediaReferenceKind.audio
+          ? model.minReferenceAudioSeconds
+          : null;
+      if (minimum != null && durationSeconds + _secondSlack < minimum) {
+        return ReferenceBudgetVerdict.refused(
+          _referenceMinimumSecondsProblem(model, minimum),
+        );
+      }
+      final budget = referenceSecondsLimit(kind);
+      if (budget != null) {
+        final projected =
+            referenceSecondsUsed(kind) + pendingSeconds + durationSeconds;
+        if (projected > budget + _secondSlack) {
+          return ReferenceBudgetVerdict.refused(
+            '${_referenceSecondsBudgetPhrase(model, kind, budget)}; that clip '
+            'would bring it to ${_secondsLabel(projected)}.',
+          );
+        }
+      }
+    }
+    return const ReferenceBudgetVerdict.allowed();
+  }
+
+  /// One notice for a whole batch: the first reason, plus how many
+  /// candidates were left out when more than one did not fit.
+  void _noteReferenceRefusals(List<String> refusals) {
+    if (refusals.isEmpty) return;
+    showNotice(
+      refusals.length == 1
+          ? refusals.first
+          : '${refusals.first} ${refusals.length} files were left out.',
+    );
+  }
+
+  /// `Seedance 2.5 accepts up to 30 s of reference video`.
+  static String _referenceSecondsBudgetPhrase(
+    VideoModelDefinition model,
+    MediaReferenceKind kind,
+    int budget,
+  ) =>
+      '${model.label} accepts up to ${_secondsLabel(budget.toDouble())} of '
+      'reference ${kind == MediaReferenceKind.audio ? 'audio' : 'video'}';
+
+  static String _referenceMinimumSecondsProblem(
+    VideoModelDefinition model,
+    int minimum,
+  ) =>
+      '${model.label} needs each reference audio clip to be at least '
+      '${_secondsLabel(minimum.toDouble())}.';
+
+  /// A budget reading: `30 s`, `42.5 s`. Whole seconds wherever the figure
+  /// is whole, so a published cap reads exactly as the provider states it.
+  static String _secondsLabel(double seconds) {
+    final tenths = (seconds * 10).round();
+    return tenths % 10 == 0 ? '${tenths ~/ 10} s' : '${tenths / 10} s';
+  }
+
+  /// Rounding slack for seconds comparisons, so a 15.0004 s clip measured
+  /// off a container header is not refused by a 15 s budget.
+  static const double _secondSlack = .001;
 
   void setReferenceTask(MediaReferenceTask task) {
     if (!selectedModel.referenceTasks.contains(task)) return;
@@ -5830,21 +6001,23 @@ class AppController extends ChangeNotifier {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
     final attached = _inComposerTab(target, () {
-      final available = referenceLimit(kind) - form.referenceCount(kind);
-      final totalAvailable = selectedModel.maxTotalReferences == null
-          ? available
-          : selectedModel.maxTotalReferences! - form.references.length;
-      final accepted = available < totalAvailable ? available : totalAvailable;
-      final uploads = picked.take(accepted < 0 ? 0 : accepted).toList();
-      if (picked.length > uploads.length) {
-        final totalLimit = selectedModel.maxTotalReferences;
-        showNotice(
-          totalLimit != null && totalAvailable <= available
-              ? '${selectedModel.label} accepts up to $totalLimit creative references total.'
-              : '${selectedModel.label} accepts up to '
-                    '${referenceLimit(kind)} ${kind.pluralLabel}.',
+      // A local pick carries no duration yet — the metadata loader reads it
+      // once the tile mounts — so only the count budgets can be judged here.
+      // [rememberReferenceDuration] takes over for the seconds budget.
+      final uploads = <PickedAsset>[];
+      final refusals = <String>[];
+      for (final asset in picked) {
+        final verdict = checkReferenceBudget(
+          kind,
+          pendingCount: uploads.length,
         );
+        if (!verdict.allowed) {
+          refusals.add(verdict.refusal!);
+          continue;
+        }
+        uploads.add(asset);
       }
+      _noteReferenceRefusals(refusals);
       final added = <(String, PickedAsset)>[];
       for (final asset in uploads) {
         final draftId = _appendReference(kind, label: asset.name, asset: asset);
@@ -6068,12 +6241,24 @@ class AppController extends ChangeNotifier {
     if (index < 0 || form.references[index].durationSeconds == seconds) {
       return;
     }
+    final kind = form.references[index].kind;
+    final wasOverBudget = referenceSecondsOverBudget(kind);
     form.references = form.references
         .map(
           (item) =>
               item.id == id ? item.copyWith(durationSeconds: seconds) : item,
         )
         .toList();
+    // A local pick or drop reaches the form without a duration, so this is
+    // the first moment its seconds can be judged. Say so once, when the set
+    // crosses the budget; [validate] keeps Generate blocked afterwards.
+    if (!wasOverBudget && referenceSecondsOverBudget(kind)) {
+      showNotice(
+        '${_referenceSecondsBudgetPhrase(selectedModel, kind, referenceSecondsLimit(kind)!)}; '
+        'the attached clips come to '
+        '${_secondsLabel(referenceSecondsUsed(kind))}.',
+      );
+    }
     final savedReferenceId = form.references[index].savedReferenceId;
     final saved = savedReferences
         .where((item) => item.id == savedReferenceId)
@@ -6628,17 +6813,21 @@ class AppController extends ChangeNotifier {
           ? model.minReferenceAudioSeconds
           : null;
       if (minimum != null &&
-          knownDurations.any((seconds) => seconds + .001 < minimum)) {
-        return '${model.label} needs each reference audio clip to be at least $minimum seconds.';
+          knownDurations.any((seconds) => seconds + _secondSlack < minimum)) {
+        return _referenceMinimumSecondsProblem(model, minimum);
       }
       final maximum = model.maxReferenceSeconds(kind, form.resolution);
       final total = knownDurations.fold<double>(
         0,
         (sum, seconds) => sum + seconds,
       );
-      if (maximum != null && total > maximum + .001) {
-        final media = kind == MediaReferenceKind.video ? 'video' : 'audio';
-        return '${model.label} accepts up to $maximum seconds of reference $media in total.';
+      // A model switch can shrink the budget under a set that already fit,
+      // and a duration measured after the add can push the set over it. Both
+      // land here, so the reason Generate is dark is the same sentence the
+      // add path would have shown.
+      if (maximum != null && total > maximum + _secondSlack) {
+        return '${_referenceSecondsBudgetPhrase(model, kind, maximum)}; '
+            'the attached clips come to ${_secondsLabel(total)}.';
       }
     }
     return null;

@@ -3578,9 +3578,13 @@ void main() {
     controller.updateReference(audio.id, 'https://cdn.test/brief.mp3');
 
     controller.rememberReferenceDuration(audio.id, 2);
-    expect(controller.validate(), contains('at least 3 seconds'));
+    expect(controller.validate(), contains('at least 3 s'));
     controller.rememberReferenceDuration(audio.id, 16);
-    expect(controller.validate(), contains('up to 15 seconds'));
+    expect(
+      controller.validate(),
+      'Grok Imagine 1.5 accepts up to 15 s of reference audio; the attached '
+      'clips come to 16 s.',
+    );
     controller.rememberReferenceDuration(audio.id, 10);
     expect(controller.validate(), isNull);
     controller.dispose();
