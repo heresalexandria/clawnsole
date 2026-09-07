@@ -458,6 +458,12 @@ class ComposerTab {
   int pendingDropReferenceAdds = 0;
   int pendingFrameAdds = 0;
 
+  /// The format and aesthetic this tab was opened with — inherited from the
+  /// draft before it, or asked for on the Defaults desk. Neither is work the
+  /// director did *here*, so a tab that still matches them stays seedable.
+  bool openedScreenplayMode = false;
+  String? openedAestheticReferenceId;
+
   String get label => composerTabTitle(title, form.prompt);
 
   /// Nothing has been directed here yet, so seeding it in place clobbers no
@@ -466,8 +472,8 @@ class ComposerTab {
       !hasUserEdits &&
       (title?.trim().isEmpty ?? true) &&
       form.prompt.trim().isEmpty &&
-      !form.screenplayMode &&
-      form.aestheticReferenceId == null &&
+      form.screenplayMode == openedScreenplayMode &&
+      form.aestheticReferenceId == openedAestheticReferenceId &&
       form.aestheticCustomText == null &&
       form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&

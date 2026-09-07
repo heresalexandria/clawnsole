@@ -56,6 +56,14 @@ extension AppControllerGenerationPreferences on AppController {
     }
   }
 
+  /// Opens a blank draft carrying the source tab's provider, model, folders,
+  /// and studio-wide choices, plus the last-used controls for that model.
+  ///
+  /// The format and the chosen aesthetic ride along on the tab rather than
+  /// through [GenerationPreferences]: they are decisions about the film being
+  /// written, not knobs belonging to a model, so a director working in
+  /// Screenplay keeps writing screenplays in the next draft while switching
+  /// model inside a draft leaves the format alone.
   ComposerTab _blankComposerTab(ComposerTab source) {
     final tab = ComposerTab(
       id: _uid(),
@@ -64,6 +72,14 @@ extension AppControllerGenerationPreferences on AppController {
       localFolderId: source.localFolderId,
       driveFolderId: source.driveFolderId,
     );
+    tab.form
+      ..screenplayMode = source.form.screenplayMode
+      ..aestheticReferenceId = source.form.aestheticReferenceId;
+    // What the tab opened with is nobody's work in it yet, so Reuse, Extend
+    // and Enhance may still seed it in place.
+    tab
+      ..openedScreenplayMode = tab.form.screenplayMode
+      ..openedAestheticReferenceId = tab.form.aestheticReferenceId;
     _applyGenerationSettings(
       tab,
       _generationPreferences[generationPreferenceKey(

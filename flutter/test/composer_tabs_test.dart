@@ -43,7 +43,10 @@ void main() {
       expect(controller.form.references, isEmpty);
       final original = controller.activeComposerTabId;
       controller.addComposerTab();
-      expect(controller.selectedAestheticReference, isNull);
+      // The aesthetic is a studio-wide choice: the next draft opens with it,
+      // and with none of the previous draft's direction.
+      expect(controller.selectedAestheticReference?.id, id);
+      expect(controller.form.prompt, isEmpty);
       controller.activateComposerTab(original);
       await _settle();
       final reopened = AppController(gateway: gateway);

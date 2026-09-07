@@ -503,8 +503,13 @@ is not overwritten by a new session.
 
 Last-used controls are separate from draft content: ratio, duration and Auto,
 resolution, audio, frame rate, draft quality, safety, timing, and upscale controls
-are remembered per provider/model. Blank tabs leave Direction, format, seed,
-references, aesthetic selection, and source media empty. Editing only an older
+are remembered per provider/model. Blank tabs leave Direction, seed,
+references, and source media empty, but **inherit the format
+(Plaintext/Screenplay) and the chosen aesthetic from the draft they were
+opened from** — those are decisions about the film, not knobs belonging to a
+model, so they never travel in the per-model record and switching model inside
+a draft leaves the format alone. What a tab opened with is not yet work done in
+it, so Reuse, Extend and Enhance may still seed such a tab in place. Editing only an older
 tab's prompt does not replace newer remembered controls. Explicit control edits
 and Generate update defaults; choosing another model restores its own defaults
 and checks them against current capabilities. Settings writes are coalesced while
