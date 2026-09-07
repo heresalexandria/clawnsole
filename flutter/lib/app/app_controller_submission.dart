@@ -223,7 +223,14 @@ extension AppControllerSubmission on AppController {
         // durable record — receipt, uncertainty, or failure — is the truth.
         _submissionsInFlight.remove(operationId);
       }
+      // The provider has answered: the key stops reading SUBMITTING in the
+      // same frame the receipt lands, not after the housekeeping below.
+      // Caching input previews and refreshing credits can take a while behind
+      // a Drive destination or a video reference, and a lit key that long
+      // reads as a stuck submission.
+      submitting = false;
       _replaceInMemory(pending);
+      notifyListeners();
       if (pending.isSubmissionUnknown) {
         showNotice(
           pending.error ??
