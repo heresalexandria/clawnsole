@@ -509,7 +509,12 @@ references, and source media empty, but **inherit the format
 opened from** — those are decisions about the film, not knobs belonging to a
 model, so they never travel in the per-model record and switching model inside
 a draft leaves the format alone. What a tab opened with is not yet work done in
-it, so Reuse, Extend and Enhance may still seed such a tab in place. Editing only an older
+it, so Reuse, Extend and Enhance may still seed such a tab in place.
+**Settings › Defaults** can replace any of that inheritance with a fixed
+answer: the model comes first (its own remembered controls are what the rest
+is laid over), then each named default, then the usual normalization against
+the model's capabilities. Reuse, Extend and Enhance restore a film's own
+recipe and never consult the defaults. Editing only an older
 tab's prompt does not replace newer remembered controls. Explicit control edits
 and Generate update defaults; choosing another model restores its own defaults
 and checks them against current capabilities. Settings writes are coalesced while
@@ -751,7 +756,20 @@ horizontally rather than wrapping. The desks, in rail order:
 - **General** — generation placeholder appearance, provider access, the
   provider documentation / privacy / licenses links, and the *Made by
   Alexandria* card.
-- **Defaults** — what a new Create draft starts with (below).
+- **Defaults** — one card, *New drafts start with…*, a row per setting
+  (format, model, frame, finish, duration, audio, fast draft, aesthetic).
+  Every control's first answer is **Last used**, which is the inheriting
+  behaviour above; anything else is an instruction the composer follows when
+  it opens the next blank draft. The model row raises the same
+  `showProviderModelPicker` dialog the composer does, writing to the default
+  instead of the draft; the value lists offer only what the chosen model
+  supports, and the aesthetic row adds an explicit **None** beside Last used.
+  A *Reset to last used* key appears once anything is set. The record
+  (`CreateDefaults`, `AppPreferences.createDefaults`) is all-nullable and
+  omitted from the settings JSON while empty, so an untouched studio's
+  preferences keep their shape. Two neighbouring preferences deliberately stay
+  where they are rather than being mirrored here: the save-to destination
+  lives on the Storage desk and *Normalize visual references* on the composer.
 - **AI Rewrite** — one masked key field per vendor.
 - **Storage** — project-data figures, default destination, the two cache
   caps, the data file and its reveal/relocate keys, and *Room to stretch.*

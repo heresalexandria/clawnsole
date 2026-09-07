@@ -121,11 +121,18 @@ void main() {
     await _pump(tester, controller, size: const Size(390, 844));
 
     expect(tester.takeException(), isNull);
-    // The last desk starts off the right edge and is reached by scrolling.
-    await openSettingsTab(tester, SettingsTab.data);
-    expect(controller.settingsTab, SettingsTab.data);
-    expect(_marks[SettingsTab.data]!, findsOneWidget);
-    expect(tester.takeException(), isNull);
+    // The far desks start off the right edge and are reached by scrolling,
+    // and no desk overflows its column at phone width.
+    for (final tab in SettingsTab.values) {
+      await openSettingsTab(tester, tab);
+      expect(controller.settingsTab, tab);
+      expect(_marks[tab]!, findsOneWidget);
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'the ${tab.label} desk overflowed at 390 pt',
+      );
+    }
     await _close(tester, controller);
   });
 }

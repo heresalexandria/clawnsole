@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import 'composer_tabs.dart';
+import 'create_defaults.dart';
 import 'generation_preferences.dart';
 import 'generation_status.dart';
 
@@ -1497,6 +1498,7 @@ class AppPreferences {
     this.favoriteProviders = const <String>[],
     this.providerRetentionAcknowledgements = const <String, String>{},
     this.generationPreferences = const <String, GenerationPreferences>{},
+    this.createDefaults = CreateDefaults.none,
   });
 
   static const int defaultLocalVideoCacheMb = 100;
@@ -1559,6 +1561,10 @@ class AppPreferences {
   /// Last-used controls per [generationPreferenceKey], without draft content.
   final Map<String, GenerationPreferences> generationPreferences;
 
+  /// What a new blank Create draft opens with. Every unset field inherits
+  /// from the previous draft, which is the behaviour without any defaults.
+  final CreateDefaults createDefaults;
+
   AppPreferences copyWith({
     AppSection? activeSection,
     LibraryFilter? libraryFilter,
@@ -1588,6 +1594,7 @@ class AppPreferences {
     List<String>? favoriteProviders,
     Map<String, String>? providerRetentionAcknowledgements,
     Map<String, GenerationPreferences>? generationPreferences,
+    CreateDefaults? createDefaults,
   }) => AppPreferences(
     activeSection: activeSection ?? this.activeSection,
     libraryFilter: libraryFilter ?? this.libraryFilter,
@@ -1626,6 +1633,7 @@ class AppPreferences {
         providerRetentionAcknowledgements ??
         this.providerRetentionAcknowledgements,
     generationPreferences: generationPreferences ?? this.generationPreferences,
+    createDefaults: createDefaults ?? this.createDefaults,
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1666,6 +1674,8 @@ class AppPreferences {
         for (final key in generationPreferences.keys.toList()..sort())
           key: generationPreferences[key]!.toJson(),
       },
+    // Asking for nothing keeps the record byte for byte as it was.
+    if (!createDefaults.isEmpty) 'createDefaults': createDefaults.toJson(),
   };
 
   /// Reads a favorites list, dropping non-strings, blanks, and repeats while
@@ -1769,6 +1779,9 @@ class AppPreferences {
       generationPreferences: _generationPreferencesMap(
         json['generationPreferences'],
       ),
+      createDefaults:
+          CreateDefaults.tryFromJson(json['createDefaults']) ??
+          CreateDefaults.none,
     );
   }
 }
