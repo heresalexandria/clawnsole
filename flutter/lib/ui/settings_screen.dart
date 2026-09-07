@@ -17,6 +17,7 @@ import 'busy_button.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
 import 'panels.dart';
+import 'section_tabs.dart';
 import 'formatters.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -49,66 +50,134 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ) ??
       false;
 
+  AppController get controller => widget.controller;
+
+  /// The desks on the rail, in order.
+  ///
+  /// Sync is dropped entirely without Drive: the encrypted settings vault
+  /// that shares the desk with it comes from the same gateways, so a build
+  /// without `supportsGoogleDrive` has neither control to show.
+  List<SettingsTab> get _tabs => <SettingsTab>[
+    SettingsTab.general,
+    SettingsTab.defaults,
+    SettingsTab.aiRewrite,
+    SettingsTab.storage,
+    if (controller.supportsGoogleDrive) SettingsTab.sync,
+    SettingsTab.data,
+  ];
+
+  static IconData _icon(SettingsTab tab) => switch (tab) {
+    SettingsTab.general => Icons.tune_rounded,
+    SettingsTab.defaults => Icons.playlist_add_check_rounded,
+    SettingsTab.aiRewrite => Icons.auto_awesome_rounded,
+    SettingsTab.storage => Icons.storage_rounded,
+    SettingsTab.sync => Icons.cloud_sync_rounded,
+    SettingsTab.data => Icons.delete_sweep_outlined,
+  };
+
+  /// Every desk is one column at every width: a tab holds one domain, so the
+  /// old 7/4 split had nothing left to balance.
+  List<Widget> _cards(SettingsTab tab) => switch (tab) {
+    SettingsTab.general => <Widget>[
+      _GenerationAppearanceCard(controller: controller),
+      _ProviderAccessCard(controller: controller),
+      const _AboutSection(),
+    ],
+    SettingsTab.defaults => <Widget>[const _CreateDefaultsPlaceholderCard()],
+    SettingsTab.aiRewrite => <Widget>[_AiRewriteCard(controller: controller)],
+    SettingsTab.storage => <Widget>[
+      _StorageSection(controller: controller),
+      _LibraryRoomPanel(controller: controller),
+    ],
+    SettingsTab.sync => <Widget>[_GoogleDriveSection(controller: controller)],
+    SettingsTab.data => <Widget>[
+      _ClearDataCard(controller: controller, confirm: _confirm),
+    ],
+  };
+
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final split = constraints.maxWidth >= 1050;
-      final main = Column(
-        children: <Widget>[
-          _GenerationAppearanceCard(controller: widget.controller),
-          const SizedBox(height: 18),
-          _ProviderAccessCard(controller: widget.controller),
-          const SizedBox(height: 18),
-          _AiRewriteCard(controller: widget.controller),
-          if (widget.controller.supportsGoogleDrive) ...<Widget>[
-            const SizedBox(height: 18),
-            _GoogleDriveSection(controller: widget.controller),
-          ],
-          const SizedBox(height: 18),
-          _StorageSection(controller: widget.controller),
-        ],
-      );
-      final side = _SettingsSide(
-        controller: widget.controller,
-        confirm: _confirm,
-      );
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(constraints.maxWidth < 620 ? 16 : 28),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1320),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const Eyebrow('Personal setup', icon: Icons.tune_rounded),
-                const SizedBox(height: 10),
-                Text(
-                  'Settings.',
-                  style: Theme.of(context).textTheme.displayLarge,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  widget.controller.supportsGoogleDrive
-                      ? 'Manage appearance, Drive sync, and this device’s private keys.'
-                      : 'Manage appearance, updates, and Clawnsole’s private local data.',
-                ),
-                const SizedBox(height: 24),
-                if (split)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(flex: 7, child: main),
-                      const SizedBox(width: 20),
-                      Expanded(flex: 4, child: side),
+  Widget build(BuildContext context) => ListenableBuilder(
+    // The rail is the screen's own state, so a bare Settings screen switches
+    // desks without waiting for a caller to rebuild it.
+    listenable: controller,
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, constraints) {
+        final tabs = _tabs;
+        final selected = tabs.contains(controller.settingsTab)
+            ? controller.settingsTab
+            : SettingsTab.general;
+        final cards = _cards(selected);
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(constraints.maxWidth < 620 ? 16 : 28),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1320),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Eyebrow('Personal setup', icon: Icons.tune_rounded),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Settings.',
+                    style: Theme.of(context).textTheme.displayLarge,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    controller.supportsGoogleDrive
+                        ? 'Manage appearance, Drive sync, and this device’s private keys.'
+                        : 'Manage appearance, updates, and Clawnsole’s private local data.',
+                  ),
+                  const SizedBox(height: 24),
+                  SectionTabRail(
+                    semanticLabel: 'Settings desk',
+                    tabs: <SectionTab>[
+                      for (final tab in tabs)
+                        SectionTab(
+                          key: ValueKey<String>(tab.tabKey),
+                          label: tab.label,
+                          semanticLabel: '${tab.label} settings',
+                          icon: _icon(tab),
+                          selected: tab == selected,
+                          onTap: () => controller.setSettingsTab(tab),
+                        ),
                     ],
-                  )
-                else ...<Widget>[main, const SizedBox(height: 18), side],
-              ],
+                  ),
+                  const SizedBox(height: 20),
+                  for (var index = 0; index < cards.length; index += 1) ...[
+                    if (index > 0) const SizedBox(height: 18),
+                    cards[index],
+                  ],
+                ],
+              ),
             ),
           ),
+        );
+      },
+    ),
+  );
+}
+
+/// Holds the Defaults desk until it has controls of its own.
+class _CreateDefaultsPlaceholderCard extends StatelessWidget {
+  const _CreateDefaultsPlaceholderCard();
+
+  @override
+  Widget build(BuildContext context) => SurfaceCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'New drafts start with…',
+          style: Theme.of(context).textTheme.titleLarge,
         ),
-      );
-    },
+        const SizedBox(height: 6),
+        Text(
+          'Every new draft carries over whatever the previous one had. Controls '
+          'for setting your own defaults arrive here next.',
+          style: TextStyle(color: context.colors.onSurfaceVariant),
+        ),
+      ],
+    ),
   );
 }
 
@@ -652,7 +721,7 @@ class _StorageSectionState extends State<_StorageSection> {
                     if (!controller.googleDriveConnected) ...<Widget>[
                       const SizedBox(height: 2),
                       Text(
-                        'Connect Google Drive below to save new items there.',
+                        'Connect Google Drive on the Sync desk to save new items there.',
                         style: TextStyle(
                           fontSize: 11,
                           color: context.colors.onSurfaceVariant,
@@ -1742,11 +1811,12 @@ class _Stat extends StatelessWidget {
   );
 }
 
-class _SettingsSide extends StatelessWidget {
-  const _SettingsSide({required this.controller, required this.confirm});
+/// What the library has room for, on the Storage desk beside the figures it
+/// describes.
+class _LibraryRoomPanel extends StatelessWidget {
+  const _LibraryRoomPanel({required this.controller});
 
   final AppController controller;
-  final Future<bool> Function(String title, String detail) confirm;
 
   @override
   Widget build(BuildContext context) {
@@ -1799,7 +1869,23 @@ class _SettingsSide extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 15),
+      ],
+    );
+  }
+}
+
+/// The Data desk: the three actions that take something away.
+class _ClearDataCard extends StatelessWidget {
+  const _ClearDataCard({required this.controller, required this.confirm});
+
+  final AppController controller;
+  final Future<bool> Function(String title, String detail) confirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
         SurfaceCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1862,38 +1948,49 @@ class _SettingsSide extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 15),
-        for (final provider in videoProviders) ...<Widget>[
-          OutlinedButton.icon(
-            key: ValueKey('provider-documentation-${provider.id}'),
-            onPressed: () => unawaited(launchUrl(Uri.parse(provider.docsUrl))),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: Text(
-              provider.id == bflProvider.id
-                  ? 'FLUX 3 documentation'
-                  : '${provider.name} documentation',
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        OutlinedButton.icon(
-          onPressed: () =>
-              unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
-          icon: const Icon(Icons.privacy_tip_outlined, size: 16),
-          label: const Text('Privacy policy'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: () =>
-              showLicensePage(context: context, applicationName: 'Clawnsole'),
-          icon: const Icon(Icons.article_outlined, size: 16),
-          label: const Text('Open source licenses'),
-        ),
-        const SizedBox(height: 15),
-        const _CreatorCard(),
       ],
     );
   }
+}
+
+/// The General desk's tail: where to read more, and who made this.
+class _AboutSection extends StatelessWidget {
+  const _AboutSection();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      for (final provider in videoProviders) ...<Widget>[
+        OutlinedButton.icon(
+          key: ValueKey('provider-documentation-${provider.id}'),
+          onPressed: () => unawaited(launchUrl(Uri.parse(provider.docsUrl))),
+          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+          label: Text(
+            provider.id == bflProvider.id
+                ? 'FLUX 3 documentation'
+                : '${provider.name} documentation',
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+      OutlinedButton.icon(
+        onPressed: () =>
+            unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
+        icon: const Icon(Icons.privacy_tip_outlined, size: 16),
+        label: const Text('Privacy policy'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () =>
+            showLicensePage(context: context, applicationName: 'Clawnsole'),
+        icon: const Icon(Icons.article_outlined, size: 16),
+        label: const Text('Open source licenses'),
+      ),
+      const SizedBox(height: 15),
+      const _CreatorCard(),
+    ],
+  );
 }
 
 class _CreatorCard extends StatelessWidget {

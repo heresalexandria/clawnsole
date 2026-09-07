@@ -593,6 +593,10 @@ class AppController extends ChangeNotifier {
   /// Which half of the References desk is showing (session-only).
   ReferencesTab referencesTab = ReferencesTab.media;
 
+  /// Which desk of the Settings screen is showing (session-only). A deep link
+  /// that knows where it means opens the screen through [openSettings].
+  SettingsTab settingsTab = SettingsTab.general;
+
   /// Aesthetic library filters on the References desk (session-only).
   String aestheticSearch = '';
   String? aestheticTag;

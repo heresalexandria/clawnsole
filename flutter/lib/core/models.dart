@@ -23,6 +23,32 @@ enum AppSection { create, library, references, providers, settings }
 /// aesthetic library, and the characters saved media are cast as.
 enum ReferencesTab { media, aesthetics, characters }
 
+/// The desks of the Settings screen, in rail order. Each holds one domain, so
+/// a director looking for one control has one place to look.
+enum SettingsTab { general, defaults, aiRewrite, storage, sync, data }
+
+extension SettingsTabValue on SettingsTab {
+  /// The name on the rail.
+  String get label => switch (this) {
+    SettingsTab.general => 'General',
+    SettingsTab.defaults => 'Defaults',
+    SettingsTab.aiRewrite => 'AI Rewrite',
+    SettingsTab.storage => 'Storage',
+    SettingsTab.sync => 'Sync',
+    SettingsTab.data => 'Data',
+  };
+
+  /// The stable widget-key string of this tab's key on the rail.
+  String get tabKey => switch (this) {
+    SettingsTab.general => 'settings-tab-general',
+    SettingsTab.defaults => 'settings-tab-defaults',
+    SettingsTab.aiRewrite => 'settings-tab-ai-rewrite',
+    SettingsTab.storage => 'settings-tab-storage',
+    SettingsTab.sync => 'settings-tab-sync',
+    SettingsTab.data => 'settings-tab-data',
+  };
+}
+
 enum LibraryFilter { all, working, ready, failed }
 
 enum GenerationViewMode { compact, mini, full }

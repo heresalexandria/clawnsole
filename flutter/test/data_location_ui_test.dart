@@ -13,6 +13,8 @@ import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/settings_tabs.dart';
+
 void main() {
   Future<AppController> controllerFor(_DataLocationGateway gateway) async {
     final controller = AppController(gateway: gateway);
@@ -22,8 +24,9 @@ void main() {
 
   Future<void> pumpSettings(
     WidgetTester tester,
-    AppController controller,
-  ) async {
+    AppController controller, {
+    SettingsTab tab = SettingsTab.storage,
+  }) async {
     await tester.binding.setSurfaceSize(const Size(850, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
@@ -38,6 +41,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsTab(tester, tab);
   }
 
   testWidgets('storage section offers reveal and relocation per capability', (
@@ -114,7 +118,7 @@ void main() {
       localGenerations: 1,
     );
     final controller = await controllerFor(gateway);
-    await pumpSettings(tester, controller);
+    await pumpSettings(tester, controller, tab: SettingsTab.sync);
 
     final moveButton = find.byKey(const ValueKey('drive-move-local-library'));
     expect(moveButton, findsOneWidget);
@@ -143,7 +147,7 @@ void main() {
       localGenerations: 1,
     );
     final controller = await controllerFor(gateway);
-    await pumpSettings(tester, controller);
+    await pumpSettings(tester, controller, tab: SettingsTab.sync);
 
     final moveButton = find.byKey(const ValueKey('drive-move-local-library'));
     await tester.ensureVisible(moveButton);
@@ -179,7 +183,7 @@ void main() {
     final controller = await controllerFor(
       _DataLocationGateway(localGenerations: 1),
     );
-    await pumpSettings(tester, controller);
+    await pumpSettings(tester, controller, tab: SettingsTab.sync);
 
     expect(
       find.byKey(const ValueKey('drive-move-local-library')),

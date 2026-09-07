@@ -738,6 +738,34 @@ sees them: the companion holds the key and makes the vendor call; native
 builds call the vendor directly. The last-used vendor, model, and effort are
 remembered per vendor in preferences.
 
+### The Settings desk
+
+Settings is **six folder tabs** under the *Personal setup* eyebrow and the
+*Settings.* heading — the References desk's construction (`SectionTabRail`),
+so idle tabs are raised console keys on a hairline rule and the open desk is
+cut from the surface beneath it with a brass lip. Each desk is a single column
+at every width inside the same 1320-px column (the old 7/4 split had nothing
+left to balance once each tab held one domain); on a phone the rail scrolls
+horizontally rather than wrapping. The desks, in rail order:
+
+- **General** — generation placeholder appearance, provider access, the
+  provider documentation / privacy / licenses links, and the *Made by
+  Alexandria* card.
+- **Defaults** — what a new Create draft starts with (below).
+- **AI Rewrite** — one masked key field per vendor.
+- **Storage** — project-data figures, default destination, the two cache
+  caps, the data file and its reveal/relocate keys, and *Room to stretch.*
+- **Sync** — the Google Drive library and, inside it, the encrypted
+  settings-vault panel. **The whole desk is absent without Drive**: every
+  gateway that offers the vault offers Drive too, so a build without
+  `supportsGoogleDrive` has neither control to show.
+- **Data** — clear history, reset preferences, delete everything.
+
+Which desk is open is session-only, like the References desk: Settings always
+reopens on General. A prompt that already knows where it is sending the
+director calls `openSettings(SettingsTab.sync)` rather than plain
+`navigate` — the "connect Drive before generating there" refusal does.
+
 ## 9. Version & updates
 
 - The top-bar **version chip** opens a dialog that reports the running

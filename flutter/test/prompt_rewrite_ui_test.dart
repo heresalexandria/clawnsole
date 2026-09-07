@@ -17,6 +17,8 @@ import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/settings_tabs.dart';
+
 void main() {
   testWidgets('full cards keep AI Rewrite in their actions menu', (
     tester,
@@ -298,6 +300,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsTab(tester, SettingsTab.aiRewrite);
     await tester.ensureVisible(
       find.byKey(const ValueKey('rewrite-key-anthropic')),
     );
@@ -428,6 +431,7 @@ void main() {
     addTearDown(controller.dispose);
 
     await _pumpScreen(tester, SettingsScreen(controller: controller));
+    await openSettingsTab(tester, SettingsTab.aiRewrite);
     final field = find.byKey(const ValueKey('rewrite-key-openai'));
     await tester.ensureVisible(field);
     await tester.enterText(field, 'sk-test-key');
@@ -462,6 +466,7 @@ void main() {
     addTearDown(controller.dispose);
 
     await _pumpScreen(tester, SettingsScreen(controller: controller));
+    await openSettingsTab(tester, SettingsTab.aiRewrite);
     final field = find.byKey(const ValueKey('rewrite-key-anthropic'));
     await tester.ensureVisible(field);
     await tester.enterText(field, 'sk-ant-bad');

@@ -19,6 +19,8 @@ import 'package:clawnsole/ui/generation_video.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/settings_tabs.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -534,6 +536,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await openSettingsTab(tester, SettingsTab.storage);
 
     final dropdown = find.byKey(const ValueKey('local-video-cache-cap'));
     await tester.ensureVisible(dropdown);
