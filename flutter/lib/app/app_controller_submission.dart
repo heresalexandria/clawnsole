@@ -22,6 +22,7 @@ extension AppControllerSubmission on AppController {
       ..prompt = value.prompt
       ..screenplayMode = value.screenplayMode
       ..aestheticReferenceId = value.aestheticReferenceId
+      ..aestheticCustomText = value.aestheticCustomText
       ..screenplayLinkedCharacters.addAll(value.screenplayLinkedCharacters)
       ..screenplayCharacterAliases.addAll(value.screenplayCharacterAliases)
       ..draftCharacterNames.addAll(value.draftCharacterNames)
@@ -93,6 +94,12 @@ extension AppControllerSubmission on AppController {
     final provider = selectedProvider;
     final model = selectedModel;
     final prompt = generationPrompt;
+    // What the aesthetic was at the moment of sending. Draft enhance sends
+    // the original film's own prompt, so nothing was appended there.
+    final aestheticBase = selectedAestheticReference;
+    final aestheticText = form.mode == VideoMode.draftEnhance
+        ? null
+        : effectiveAestheticText;
     final quoteInput = _providerEstimateInput();
     final fallbackEstimate = currentEstimate;
     final normalizeReferences = autoFixReferenceVideos;
@@ -136,6 +143,9 @@ extension AppControllerSubmission on AppController {
           ? null
           : tab.sourceGenerationId,
       rewriteSummary: tab.rewriteSummary,
+      aestheticReferenceId: aestheticText == null ? null : aestheticBase?.id,
+      aestheticTitle: aestheticText == null ? null : aestheticBase?.title,
+      aestheticText: aestheticText,
       storage: effectiveStorage,
     );
     submitting = true;

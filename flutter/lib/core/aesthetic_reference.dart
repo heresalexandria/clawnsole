@@ -110,3 +110,21 @@ String appendAestheticText(String prompt, String? aesthetic) => [
   prompt.trim(),
   if (aesthetic != null) aesthetic.trim(),
 ].where((text) => text.isNotEmpty).join('\n\n');
+
+/// Removes the aesthetic block [aesthetic] appended to [prompt] at
+/// submission, leaving the direction (and its casting block) as it was
+/// typed. Returns [prompt] unchanged when the block is not there.
+String stripAestheticText(String prompt, String? aesthetic) {
+  final block = aesthetic?.trim() ?? '';
+  if (block.isEmpty) return prompt;
+  final trimmed = prompt.trimRight();
+  if (!trimmed.endsWith(block)) return prompt;
+  return trimmed.substring(0, trimmed.length - block.length).trimRight();
+}
+
+/// The last paragraph of [prompt], used to recognize the aesthetic block on
+/// films rendered before the aesthetic was recorded alongside the prompt.
+String trailingPromptParagraph(String prompt) {
+  final blocks = prompt.trim().split(RegExp(r'\n\s*\n'));
+  return blocks.isEmpty ? '' : blocks.last.trim();
+}

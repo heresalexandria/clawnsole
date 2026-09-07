@@ -865,6 +865,9 @@ class Generation {
     this.title,
     this.rewriteOfLocalId,
     this.rewriteSummary,
+    this.aestheticReferenceId,
+    this.aestheticTitle,
+    this.aestheticText,
     this.tags = const <String>[],
     this.favorite = false,
     this.hidden = false,
@@ -928,6 +931,16 @@ class Generation {
 
   /// The model's one-line account of what the rewrite changed.
   final String? rewriteSummary;
+
+  /// The aesthetic in force when this was sent, so reusing the film can put
+  /// the choice back where it was made instead of dumping its words into the
+  /// prompt box. The id and title are the aesthetic it came from (both null
+  /// for a definition written in the composer); [aestheticText] is what was
+  /// actually appended. All three are absent on films rendered before this
+  /// was recorded, and on films with no aesthetic at all.
+  final String? aestheticReferenceId;
+  final String? aestheticTitle;
+  final String? aestheticText;
   final List<String> tags;
   final bool favorite;
   final bool hidden;
@@ -1153,6 +1166,9 @@ class Generation {
     title: clearTitle ? null : title ?? this.title,
     rewriteOfLocalId: rewriteOfLocalId ?? this.rewriteOfLocalId,
     rewriteSummary: rewriteSummary ?? this.rewriteSummary,
+    aestheticReferenceId: aestheticReferenceId,
+    aestheticTitle: aestheticTitle,
+    aestheticText: aestheticText,
     tags: tags ?? this.tags,
     favorite: favorite ?? this.favorite,
     hidden: hidden ?? this.hidden,
@@ -1227,6 +1243,12 @@ class Generation {
     if (rewriteOfLocalId != null) 'rewriteOfLocalId': rewriteOfLocalId,
     if (rewriteSummary != null && rewriteSummary!.trim().isNotEmpty)
       'rewriteSummary': rewriteSummary,
+    if (aestheticReferenceId != null)
+      'aestheticReferenceId': aestheticReferenceId,
+    if (aestheticTitle != null && aestheticTitle!.trim().isNotEmpty)
+      'aestheticTitle': aestheticTitle,
+    if (aestheticText != null && aestheticText!.trim().isNotEmpty)
+      'aestheticText': aestheticText,
     if (tags.isNotEmpty) 'tags': tags,
     if (favorite) 'favorite': true,
     if (hidden) 'hidden': true,
@@ -1338,6 +1360,18 @@ class Generation {
       _ => null,
     },
     rewriteSummary: switch (json['rewriteSummary']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
+    aestheticReferenceId: switch (json['aestheticReferenceId']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
+    aestheticTitle: switch (json['aestheticTitle']) {
+      final String value when value.trim().isNotEmpty => value.trim(),
+      _ => null,
+    },
+    aestheticText: switch (json['aestheticText']) {
       final String value when value.trim().isNotEmpty => value.trim(),
       _ => null,
     },

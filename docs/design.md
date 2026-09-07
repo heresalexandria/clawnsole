@@ -312,6 +312,20 @@ Layout order:
    a relaunch, and makes an otherwise empty tab count as occupied. Typing
    here follows the Direction field's contract: no keystroke rebuilds the
    studio.
+
+   **Reuse restores the aesthetic as a choice, never as prompt text.** A
+   generation records what it appended (`aestheticReferenceId`,
+   `aestheticTitle`, `aestheticText`), so reopening it lifts that block back
+   out of the prompt and puts the choice where it was made: the same words
+   select the aesthetic again; words the library has changed since come back
+   as a **Custom** definition with the original aesthetic still selected; a
+   deleted aesthetic leaves the definition alone in the accordion. A film
+   rendered before this was recorded is only read that way when its last
+   paragraph is still, word for word, a saved aesthetic — anything else stays
+   in the prompt exactly as it was sent. Reuse into a new tab and the film
+   modal's Reuse take the same door. An AI Rewrite answers with the whole
+   prompt, aesthetic and all: the choice survives only when those words come
+   back word for word, so nothing is ever appended to a rewrite twice.
 4. **Keyframes / References accordions**: the two guidance sections are
    collapsible rows stacked in one column (paired beside the settings
    column at ≥880 px). A collapsed header carries the section name, tiny

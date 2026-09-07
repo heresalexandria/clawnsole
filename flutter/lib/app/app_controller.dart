@@ -7901,6 +7901,51 @@ class AppController extends ChangeNotifier {
 
   /// Rehydrates [tab] (the tab in front by default) from [item]: retained
   /// keyframes, references, and source media plus every scalar setting.
+  /// What a film's aesthetic means for the draft it reopens in: the direction
+  /// with the appended aesthetic block lifted back out, the aesthetic to
+  /// select, and the definition to carry as Custom when the library has moved
+  /// on since the render.
+  ///
+  /// Films rendered before the aesthetic travelled with the record carry only
+  /// the merged prompt. The one safe reading there is a trailing paragraph
+  /// that is still, word for word, a saved aesthetic; anything else stays in
+  /// the prompt exactly as it was sent.
+  ({String prompt, String? referenceId, String? customText}) _restoredAesthetic(
+    Generation item,
+  ) {
+    var text = item.aestheticText?.trim() ?? '';
+    var recordedId = item.aestheticReferenceId;
+    if (text.isEmpty) {
+      final tail = trailingPromptParagraph(item.prompt);
+      final legacy = tail.isEmpty
+          ? null
+          : _aestheticReferences
+                .where((entry) => entry.text.trim() == tail)
+                .firstOrNull;
+      if (legacy == null) {
+        return (prompt: item.prompt, referenceId: null, customText: null);
+      }
+      text = legacy.text.trim();
+      recordedId = legacy.id;
+    }
+    final prompt = stripAestheticText(item.prompt, text);
+    final same = _aestheticReferences
+        .where((entry) => entry.text.trim() == text)
+        .toList();
+    // The aesthetic it was rendered from, if it still says the same thing;
+    // otherwise any aesthetic that does; otherwise the words themselves.
+    final matched =
+        same.where((entry) => entry.id == recordedId).firstOrNull ??
+        same.firstOrNull;
+    if (matched != null) {
+      return (prompt: prompt, referenceId: matched.id, customText: null);
+    }
+    final base = _aestheticReferences
+        .where((entry) => entry.id == recordedId)
+        .firstOrNull;
+    return (prompt: prompt, referenceId: base?.id, customText: text);
+  }
+
   Future<void> _restoreGenerationSettings(
     Generation item, {
     bool includePrompt = false,
@@ -8071,6 +8116,8 @@ class AppController extends ChangeNotifier {
           ? item.config.referenceTask
           : MediaReferenceTask.reference;
       final takesPrompt = includePrompt && item.mode != VideoMode.draftEnhance;
+      // The aesthetic goes back to being a choice, not prompt text.
+      final aesthetic = takesPrompt ? _restoredAesthetic(item) : null;
       _disabledReferences.clear();
       form.screenplayLinkedCharacters.clear();
       form.screenplayCharacterAliases
@@ -8078,8 +8125,13 @@ class AppController extends ChangeNotifier {
         ..addAll(item.config.screenplayCharacterAliases);
       form.draftCharacterNames.clear();
       if (takesPrompt) form.characterMappings.clear();
+      if (takesPrompt) {
+        form
+          ..aestheticReferenceId = aesthetic!.referenceId
+          ..aestheticCustomText = aesthetic.customText;
+      }
       form
-        ..prompt = takesPrompt ? item.prompt : form.prompt
+        ..prompt = takesPrompt ? aesthetic!.prompt : form.prompt
         ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
@@ -8167,7 +8219,17 @@ class AppController extends ChangeNotifier {
     }
     _inComposerTab(tab, () {
       if (prompt != null) {
-        tab.form.prompt = prompt;
+        // A rewrite answers with the whole prompt, the aesthetic block
+        // included. The aesthetic stays a choice only when those words came
+        // back word for word; otherwise the rewrite owns the text, and
+        // nothing gets appended to it a second time.
+        final stripped = stripAestheticText(prompt, effectiveAestheticText);
+        if (stripped == prompt) {
+          form
+            ..aestheticReferenceId = null
+            ..aestheticCustomText = null;
+        }
+        tab.form.prompt = stripped;
         // A rewrite echoes the casting block back; it belongs to the cast.
         absorbPromptMappings();
       }
