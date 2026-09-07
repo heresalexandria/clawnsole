@@ -7,6 +7,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'aesthetic_library.dart';
 import 'filter_menu.dart';
@@ -404,14 +405,10 @@ class FilledButtonIconVisual extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
-    child: FilledButton.icon(
-      onPressed: loading ? null : () {},
-      icon: loading
-          ? const SizedBox.square(
-              dimension: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(icon),
+    child: BusyFilledButton.icon(
+      onPressed: () async {},
+      busy: loading,
+      icon: Icon(icon),
       label: Text(label),
     ),
   );
@@ -865,8 +862,8 @@ class _ReferenceBulkActions extends StatelessWidget {
   final int selectedCount;
   final bool allVisibleSelected;
   final VoidCallback onSelectAll;
-  final VoidCallback? onMove;
-  final VoidCallback? onVisibility;
+  final Future<void> Function()? onMove;
+  final Future<void> Function()? onVisibility;
   final String visibilityLabel;
   final VoidCallback onDone;
 
@@ -904,13 +901,16 @@ class _ReferenceBulkActions extends StatelessWidget {
             allVisibleSelected ? 'Deselect visible' : 'Select visible',
           ),
         ),
+        // Move only opens the folder picker; the loader belongs to that
+        // dialog's own Move key, which does the writing.
         FilledButton.tonalIcon(
           key: const ValueKey('reference-bulk-move'),
-          onPressed: onMove,
+          onPressed: onMove == null ? null : () => unawaited(onMove!()),
           icon: const Icon(Icons.drive_file_move_outline, size: 18),
           label: const Text('Move'),
         ),
-        OutlinedButton.icon(
+        BusyOutlinedButton.icon(
+          key: const ValueKey('reference-bulk-visibility'),
           onPressed: onVisibility,
           icon: Icon(
             visibilityLabel == 'Hide'
@@ -1108,95 +1108,123 @@ class _ReferenceCard extends StatelessWidget {
                     color: reference.favorite ? context.tokens.brass : null,
                   ),
                 ),
-                PopupMenuButton<String>(
-                  tooltip: '${reference.name} options',
-                  onSelected: (value) {
-                    if (value == 'edit') {
-                      unawaited(
-                        showReferenceMetadataDialog(
-                          context,
-                          controller,
-                          reference: reference,
-                        ),
-                      );
-                    } else if (value == 'move') {
-                      unawaited(
-                        showMoveToFolderDialog(
-                          context,
-                          FolderScope.references(controller),
-                          <String>{reference.id},
-                        ),
-                      );
-                    } else if (value == 'trim') {
-                      unawaited(
-                        showReferenceTrimDialog(context, controller, reference),
-                      );
-                    } else if (value == 'tag') {
-                      unawaited(
-                        _showReferenceTagDialog(context, controller, reference),
-                      );
-                    } else if (value == 'visibility') {
-                      unawaited(
-                        controller.setReferencesHidden(<String>{
-                          reference.id,
-                        }, !reference.hidden),
-                      );
-                    } else if (value == 'copy') {
-                      unawaited(
-                        controller.copyLocalLibraryToGoogleDrive(
-                          referenceIds: <String>{reference.id},
-                        ),
-                      );
-                    } else {
-                      unawaited(
-                        _confirmReferenceDelete(context, controller, reference),
-                      );
-                    }
-                  },
-                  itemBuilder: (context) => <PopupMenuEntry<String>>[
-                    const PopupMenuItem(
-                      value: 'edit',
-                      child: Text('Edit details'),
-                    ),
-                    if (reference.kind == MediaReferenceKind.video)
-                      const PopupMenuItem(
-                        value: 'trim',
-                        child: Text('Trim as new reference'),
-                      ),
-                    const PopupMenuItem(value: 'move', child: Text('Move')),
-                    const PopupMenuItem(value: 'tag', child: Text('Tag')),
-                    PopupMenuItem(
-                      value: 'visibility',
-                      child: Text(reference.hidden ? 'Unhide' : 'Hide'),
-                    ),
-                    if (reference.storage == LibraryStorage.local &&
-                        controller.googleDriveConnected)
-                      PopupMenuItem(
-                        value: 'copy',
-                        enabled: !controller.isCopyingReference(reference.id),
-                        child: Row(
-                          children: <Widget>[
-                            if (controller.isCopyingReference(
+                // The card answers for work started from its menu even after
+                // that menu has closed: the options key becomes the loader.
+                ListenableBuilder(
+                  listenable: controller.busy,
+                  builder: (context, child) =>
+                      controller.busy.isBusy('reference', reference.id)
+                      ? const SizedBox.square(
+                          dimension: 40,
+                          child: Center(child: BusySpinner()),
+                        )
+                      : child!,
+                  child: PopupMenuButton<String>(
+                    tooltip: '${reference.name} options',
+                    onSelected: (value) {
+                      if (value == 'edit') {
+                        unawaited(
+                          showReferenceMetadataDialog(
+                            context,
+                            controller,
+                            reference: reference,
+                          ),
+                        );
+                      } else if (value == 'move') {
+                        unawaited(
+                          showMoveToFolderDialog(
+                            context,
+                            FolderScope.references(controller),
+                            <String>{reference.id},
+                          ),
+                        );
+                      } else if (value == 'trim') {
+                        unawaited(
+                          showReferenceTrimDialog(
+                            context,
+                            controller,
+                            reference,
+                          ),
+                        );
+                      } else if (value == 'tag') {
+                        unawaited(
+                          _showReferenceTagDialog(
+                            context,
+                            controller,
+                            reference,
+                          ),
+                        );
+                      } else if (value == 'visibility') {
+                        // The menu is gone by the time the store answers, so
+                        // the card carries the loader for it.
+                        unawaited(
+                          controller.busy.run(
+                            'reference',
+                            reference.id,
+                            () => controller.setReferencesHidden(<String>{
                               reference.id,
-                            )) ...<Widget>[
-                              const SizedBox.square(
-                                dimension: 15,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                            ],
-                            Text(
-                              controller.isCopyingReference(reference.id)
-                                  ? 'Copying to Google Drive…'
-                                  : 'Copy to Google Drive',
-                            ),
-                          ],
-                        ),
+                            }, !reference.hidden),
+                          ),
+                        );
+                      } else if (value == 'copy') {
+                        unawaited(
+                          controller.copyLocalLibraryToGoogleDrive(
+                            referenceIds: <String>{reference.id},
+                          ),
+                        );
+                      } else {
+                        unawaited(
+                          _confirmReferenceDelete(
+                            context,
+                            controller,
+                            reference,
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (context) => <PopupMenuEntry<String>>[
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Text('Edit details'),
                       ),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                  ],
+                      if (reference.kind == MediaReferenceKind.video)
+                        const PopupMenuItem(
+                          value: 'trim',
+                          child: Text('Trim as new reference'),
+                        ),
+                      const PopupMenuItem(value: 'move', child: Text('Move')),
+                      const PopupMenuItem(value: 'tag', child: Text('Tag')),
+                      PopupMenuItem(
+                        value: 'visibility',
+                        child: Text(reference.hidden ? 'Unhide' : 'Hide'),
+                      ),
+                      if (reference.storage == LibraryStorage.local &&
+                          controller.googleDriveConnected)
+                        PopupMenuItem(
+                          value: 'copy',
+                          enabled: !controller.isCopyingReference(reference.id),
+                          child: Row(
+                            children: <Widget>[
+                              if (controller.isCopyingReference(
+                                reference.id,
+                              )) ...<Widget>[
+                                const BusySpinner(),
+                                const SizedBox(width: 10),
+                              ],
+                              Text(
+                                controller.isCopyingReference(reference.id)
+                                    ? 'Copying to Google Drive…'
+                                    : 'Copy to Google Drive',
+                              ),
+                            ],
+                          ),
+                        ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete'),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1791,10 +1819,7 @@ class _ReferenceTagEditorState extends State<_ReferenceTagEditor> {
                     }
                   },
             icon: saving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const BusySpinner()
                 : const Icon(Icons.check_rounded, size: 18),
             label: const Text('Save tags'),
           ),
@@ -1871,7 +1896,17 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      // Saving a reference writes the store, uploads and retains media: long
+      // enough that the dialog has to hold still and say so.
+      BusyGate(
+        child: BusyGateBuilder(
+          builder: (context, saving) =>
+              PopScope(canPop: !saving, child: _form(context, saving)),
+        ),
+      );
+
+  Widget _form(BuildContext context, bool saving) {
     final controller = widget.controller;
     final reference = widget.reference;
     final draft = widget.draft;
@@ -1901,10 +1936,12 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
                         ),
                       )
                       .toList(),
-                  onChanged: (value) => setState(() {
-                    destination = value ?? destination;
-                    folderId = null;
-                  }),
+                  onChanged: saving
+                      ? null
+                      : (value) => setState(() {
+                          destination = value ?? destination;
+                          folderId = null;
+                        }),
                 ),
                 const SizedBox(height: 10),
               ] else ...<Widget>[
@@ -1929,6 +1966,7 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
               TextField(
                 controller: name,
                 autofocus: true,
+                enabled: !saving,
                 maxLength: 80,
                 decoration: const InputDecoration(labelText: 'Name'),
               ),
@@ -1938,6 +1976,7 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
                 TextField(
                   key: const ValueKey('reference-character-name'),
                   controller: character,
+                  enabled: !saving,
                   textCapitalization: TextCapitalization.characters,
                   maxLength: 60,
                   decoration: InputDecoration(
@@ -1970,11 +2009,14 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
                         ),
                       ),
                 ],
-                onChanged: (value) => setState(() => folderId = value),
+                onChanged: saving
+                    ? null
+                    : (value) => setState(() => folderId = value),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: tags,
+                enabled: !saving,
                 decoration: const InputDecoration(
                   labelText: 'Tags',
                   hintText: 'character, product, motion',
@@ -1987,10 +2029,12 @@ class _ReferenceMetadataDialogState extends State<_ReferenceMetadataDialog> {
       ),
       actions: <Widget>[
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: saving ? null : () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        BusyFilledButton(
+          key: const ValueKey('save-reference-metadata'),
+          busyLabel: 'Saving…',
           onPressed: () async {
             final problem = controller.characterNameProblem(
               character.text,
@@ -2247,10 +2291,7 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
                       )
                     : Row(
                         children: <Widget>[
-                          const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
+                          const BusySpinner(),
                           const SizedBox(width: 10),
                           Expanded(
                             child: ValueListenableBuilder<double?>(
@@ -2332,10 +2373,7 @@ class _ReferenceTrimDialogState extends State<_ReferenceTrimDialog> {
               ? _save
               : null,
           icon: _saving
-              ? const SizedBox.square(
-                  dimension: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
+              ? const BusySpinner()
               : const Icon(Icons.content_cut_rounded, size: 17),
           label: Text(_saving ? 'Trimming…' : 'Save new reference'),
         ),
@@ -2860,28 +2898,46 @@ Future<void> _confirmReferenceDelete(
   AppController controller,
   SavedReference reference,
 ) async {
-  final confirmed = await showDialog<bool>(
+  await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Delete “${reference.name}”?'),
-      content: const Text(
-        'This removes it from saved references. Existing generation history is unchanged.',
+    // The delete runs behind the button that asked for it and the dialog
+    // closes once the store has answered, so the confirmation is never a
+    // silent hand-off to a card that looks untouched.
+    builder: (context) => BusyGate(
+      child: BusyGateBuilder(
+        builder: (context, deleting) => PopScope(
+          canPop: !deleting,
+          child: AlertDialog(
+            title: Text('Delete “${reference.name}”?'),
+            content: const Text(
+              'This removes it from saved references. Existing generation history is unchanged.',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: deleting
+                    ? null
+                    : () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              BusyFilledButton(
+                key: const ValueKey('confirm-reference-delete'),
+                busyLabel: 'Deleting…',
+                onPressed: () async {
+                  await controller.busy.run(
+                    'reference',
+                    reference.id,
+                    () => controller.deleteSavedReference(reference.id),
+                  );
+                  if (context.mounted) Navigator.pop(context, true);
+                },
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Delete'),
-        ),
-      ],
     ),
   );
-  if (confirmed == true) {
-    await controller.deleteSavedReference(reference.id);
-  }
 }
 
 Future<void> showCharacterAssignmentDialog(
@@ -2912,7 +2968,6 @@ class _CharacterAssignmentDialogState
     extends State<_CharacterAssignmentDialog> {
   late final TextEditingController name;
   String? error;
-  bool saving = false;
 
   @override
   void initState() {
@@ -2929,7 +2984,14 @@ class _CharacterAssignmentDialogState
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => BusyGate(
+    child: BusyGateBuilder(
+      builder: (context, saving) =>
+          PopScope(canPop: !saving, child: _form(context, saving)),
+    ),
+  );
+
+  Widget _form(BuildContext context, bool saving) {
     final controller = widget.controller;
     final reference = widget.reference;
     return AlertDialog(
@@ -2947,6 +3009,7 @@ class _CharacterAssignmentDialogState
                 key: const ValueKey('character-name-field'),
                 controller: name,
                 autofocus: true,
+                enabled: !saving,
                 maxLength: 60,
                 textCapitalization: TextCapitalization.characters,
                 decoration: InputDecoration(
@@ -2965,7 +3028,9 @@ class _CharacterAssignmentDialogState
                       .map(
                         (character) => ActionChip(
                           label: Text(character),
-                          onPressed: () => name.text = character,
+                          onPressed: saving
+                              ? null
+                              : () => name.text = character,
                         ),
                       )
                       .toList(),
@@ -2979,33 +3044,26 @@ class _CharacterAssignmentDialogState
           onPressed: saving ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        FilledButton(
+        BusyFilledButton(
           key: const ValueKey('save-character-name'),
-          onPressed: saving
-              ? null
-              : () async {
-                  final problem = controller.characterNameProblem(
-                    name.text,
-                    excludeDraftId: reference.id,
-                    excludeSavedReferenceId: reference.savedReferenceId,
-                  );
-                  if (problem != null) {
-                    setState(() => error = problem);
-                    return;
-                  }
-                  setState(() => saving = true);
-                  final saved = await controller.setDraftCharacterName(
-                    reference.id,
-                    name.text,
-                  );
-                  if (!context.mounted) return;
-                  if (saved) {
-                    Navigator.pop(context);
-                  } else {
-                    setState(() => saving = false);
-                  }
-                },
-          child: Text(saving ? 'Saving…' : 'Save'),
+          busyLabel: 'Saving…',
+          onPressed: () async {
+            final problem = controller.characterNameProblem(
+              name.text,
+              excludeDraftId: reference.id,
+              excludeSavedReferenceId: reference.savedReferenceId,
+            );
+            if (problem != null) {
+              setState(() => error = problem);
+              return;
+            }
+            final saved = await controller.setDraftCharacterName(
+              reference.id,
+              name.text,
+            );
+            if (saved && context.mounted) Navigator.pop(context);
+          },
+          child: const Text('Save'),
         ),
       ],
     );

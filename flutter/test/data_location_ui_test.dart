@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:clawnsole/app/app_controller.dart';
@@ -6,6 +7,7 @@ import 'package:clawnsole/core/data_location.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/ui/busy_button.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
@@ -133,6 +135,44 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('the Drive move waits behind the key that confirmed it', (
+    tester,
+  ) async {
+    final gateway = _DataLocationGateway(
+      driveConnected: true,
+      localGenerations: 1,
+    );
+    final controller = await controllerFor(gateway);
+    await pumpSettings(tester, controller);
+
+    final moveButton = find.byKey(const ValueKey('drive-move-local-library'));
+    await tester.ensureVisible(moveButton);
+    await tester.tap(moveButton);
+    await tester.pumpAndSettle();
+
+    // Opening the confirmation is not work, so nothing spins yet.
+    expect(find.byType(BusySpinner), findsNothing);
+    final gate = gateway.hold = Completer<void>();
+    final confirm = find.byKey(const ValueKey('drive-move-confirm'));
+    await tester.tap(confirm);
+    await tester.pump();
+
+    expect(find.byType(BusySpinner), findsOneWidget);
+    expect(find.text('Moving…'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextButton>(find.widgetWithText(TextButton, 'Cancel'))
+          .onPressed,
+      isNull,
+    );
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(confirm, findsNothing);
+    expect(gateway.moveCalls, 1);
+    controller.dispose();
+  });
+
   testWidgets('the move action is absent while Drive is disconnected', (
     tester,
   ) async {
@@ -255,8 +295,13 @@ class _DataLocationGateway
   }) async =>
       GoogleDriveCopyResult(snapshot: snapshot, generations: 0, references: 0);
 
+  /// Held open by the loader test, so the move can be looked at mid-flight.
+  Completer<void>? hold;
+
   @override
   Future<GoogleDriveCopyResult> moveLocalLibraryToGoogleDrive() async {
+    final gate = hold;
+    if (gate != null) await gate.future;
     moveCalls += 1;
     snapshot = snapshot.copyWith(generations: const <Generation>[]);
     return GoogleDriveCopyResult(

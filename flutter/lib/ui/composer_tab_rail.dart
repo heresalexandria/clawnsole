@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import 'busy_button.dart';
 import 'formatters.dart';
 import 'hardware.dart';
 
@@ -105,9 +106,10 @@ class ComposerTabRail extends StatelessWidget {
                       style: TextStyle(color: context.colors.error),
                     ),
                   ),
-                  TextButton(
-                    onPressed: () =>
-                        unawaited(controller.retryComposerTabsSave()),
+                  BusyTextButton(
+                    key: const ValueKey('composer-tabs-save-retry'),
+                    busyLabel: 'Retrying…',
+                    onPressed: controller.retryComposerTabsSave,
                     child: const Text('Retry'),
                   ),
                 ],
@@ -145,10 +147,48 @@ class _DraftChoice {
 /// because the answer is the same either way — open a copy of it as a tab
 /// here. Nothing syncs into the open tabs on its own; opening the menu
 /// quietly refreshes the other devices' records.
-class _ComposerDraftsMenu extends StatelessWidget {
+class _ComposerDraftsMenu extends StatefulWidget {
   const _ComposerDraftsMenu({required this.controller});
 
   final AppController controller;
+
+  @override
+  State<_ComposerDraftsMenu> createState() => _ComposerDraftsMenuState();
+}
+
+class _ComposerDraftsMenuState extends State<_ComposerDraftsMenu> {
+  /// Live inside the open menu, which the parent cannot rebuild: the
+  /// refreshing row listens to this itself.
+  final ValueNotifier<bool> _refreshing = ValueNotifier<bool>(false);
+  bool _opening = false;
+
+  AppController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _refreshing.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refresh() async {
+    _refreshing.value = true;
+    try {
+      await controller.refreshOtherDeviceDrafts();
+    } finally {
+      if (mounted) _refreshing.value = false;
+    }
+  }
+
+  Future<void> _open(_DraftChoice choice) async {
+    setState(() => _opening = true);
+    try {
+      await (choice.deviceId == null
+          ? controller.reopenComposerTab(choice.tabId)
+          : controller.openDeviceDraft(choice.deviceId!, choice.tabId));
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -167,14 +207,37 @@ class _ComposerDraftsMenu extends StatelessWidget {
     return PopupMenuButton<_DraftChoice>(
       key: const ValueKey('composer-drafts-menu'),
       tooltip: devices.isEmpty ? 'Recover closed draft' : 'Recover a draft',
-      icon: const Icon(Icons.restore, size: 19),
-      onOpened: () => unawaited(controller.refreshOtherDeviceDrafts()),
-      onSelected: (choice) => unawaited(
-        choice.deviceId == null
-            ? controller.reopenComposerTab(choice.tabId)
-            : controller.openDeviceDraft(choice.deviceId!, choice.tabId),
-      ),
+      enabled: !_opening,
+      icon: _opening
+          ? const BusySpinner()
+          : const Icon(Icons.restore, size: 19),
+      onOpened: () => unawaited(_refresh()),
+      onSelected: (choice) => unawaited(_open(choice)),
       itemBuilder: (context) => <PopupMenuEntry<_DraftChoice>>[
+        // Opening the menu asks the other devices what they are holding; the
+        // list says so instead of quietly growing a moment later.
+        PopupMenuItem<_DraftChoice>(
+          key: const ValueKey('composer-drafts-refreshing'),
+          enabled: false,
+          // Zero-height until it has something to say, so a settled menu
+          // opens with no gap above its first draft.
+          height: 0,
+          child: ValueListenableBuilder<bool>(
+            valueListenable: _refreshing,
+            builder: (context, refreshing, _) => refreshing
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Row(
+                      children: <Widget>[
+                        const BusySpinner(),
+                        const SizedBox(width: 10),
+                        Text('Checking other devices…', style: heading),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
         if (closed.isNotEmpty && devices.isNotEmpty) section('Closed here'),
         for (final tab in closed)
           PopupMenuItem<_DraftChoice>(

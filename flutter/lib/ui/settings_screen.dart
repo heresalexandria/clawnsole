@@ -13,6 +13,7 @@ import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
+import 'busy_button.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
 import 'panels.dart';
@@ -288,6 +289,7 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
   }
 
   Future<void> _remove(RewriteProvider provider) async {
+    setState(() => _busyProviders.add(provider.id));
     try {
       await widget.controller.removeRewriteKey(provider);
       if (!mounted) return;
@@ -300,6 +302,8 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
           failed: true,
         ),
       );
+    } finally {
+      if (mounted) setState(() => _busyProviders.remove(provider.id));
     }
   }
 
@@ -356,7 +360,7 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
                 }
               }),
               onSave: () => _save(provider),
-              onRemove: () => unawaited(_remove(provider)),
+              onRemove: () => _remove(provider),
             ),
           ],
         ],
@@ -393,7 +397,7 @@ class _RewriteProviderKey extends StatelessWidget {
   final _RewriteKeyResult? result;
   final VoidCallback onToggleKey;
   final Future<void> Function() onSave;
-  final VoidCallback onRemove;
+  final Future<void> Function() onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -443,20 +447,17 @@ class _RewriteProviderKey extends StatelessWidget {
           spacing: 7,
           runSpacing: 7,
           children: <Widget>[
-            FilledButton(
+            BusyFilledButton(
               key: ValueKey('rewrite-key-save-${provider.id}'),
-              onPressed: busy ? null : () => unawaited(onSave()),
-              child: busy
-                  ? const SizedBox.square(
-                      dimension: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(connected ? 'Replace key' : 'Verify & save'),
+              onPressed: busy ? null : onSave,
+              busyLabel: connected ? 'Replacing…' : 'Verifying…',
+              child: Text(connected ? 'Replace key' : 'Verify & save'),
             ),
             if (connected)
-              TextButton(
+              BusyTextButton(
                 key: ValueKey('rewrite-key-remove-${provider.id}'),
                 onPressed: busy ? null : onRemove,
+                busyLabel: 'Removing…',
                 child: Text(
                   'Remove',
                   style: TextStyle(color: context.colors.error),
@@ -719,22 +720,13 @@ class _StorageSectionState extends State<_StorageSection> {
                   label: const Text('Open folder'),
                 ),
               if (controller.supportsDataRelocation)
-                OutlinedButton.icon(
+                BusyOutlinedButton.icon(
                   key: const ValueKey('storage-change-location'),
-                  onPressed: controller.dataRelocationBusy
-                      ? null
-                      : () => unawaited(_changeLocation()),
-                  icon: controller.dataRelocationBusy
-                      ? const SizedBox.square(
-                          dimension: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.drive_folder_upload_rounded, size: 17),
-                  label: Text(
-                    controller.dataRelocationBusy
-                        ? 'Moving library…'
-                        : 'Change location…',
-                  ),
+                  busy: controller.dataRelocationBusy,
+                  busyLabel: 'Moving library…',
+                  onPressed: _changeLocation,
+                  icon: const Icon(Icons.drive_folder_upload_rounded, size: 17),
+                  label: const Text('Change location…'),
                 ),
             ],
           ),
@@ -883,10 +875,7 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
                       key: ValueKey('$keyPrefix-usage'),
                       children: <Widget>[
                         if (loading) ...<Widget>[
-                          const SizedBox.square(
-                            dimension: 12,
-                            child: CircularProgressIndicator(strokeWidth: 1.6),
-                          ),
+                          const BusySpinner(),
                           const SizedBox(width: 7),
                         ],
                         Text(
@@ -905,16 +894,13 @@ class _LocalVideoCacheControlState extends State<_LocalVideoCacheControl> {
                   },
                 ),
               ),
-              TextButton.icon(
+              BusyTextButton.icon(
                 key: ValueKey('$keyPrefix-clear'),
-                onPressed: _updating ? null : () => unawaited(_clear()),
-                icon: _updating
-                    ? const SizedBox.square(
-                        dimension: 13,
-                        child: CircularProgressIndicator(strokeWidth: 1.7),
-                      )
-                    : const Icon(Icons.delete_sweep_rounded, size: 16),
-                label: Text(_updating ? 'Updating…' : 'Clear'),
+                busy: _updating,
+                busyLabel: 'Updating…',
+                onPressed: _clear,
+                icon: const Icon(Icons.delete_sweep_rounded, size: 16),
+                label: const Text('Clear'),
               ),
             ],
           ),
@@ -946,11 +932,16 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
     super.dispose();
   }
 
-  Future<void> _confirmMoveToDrive() async {
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
+  /// The move runs behind the key that confirmed it — copying, verifying and
+  /// then removing every local original is minutes of work, not a blink — and
+  /// the dialog closes once Drive has it all.
+  Future<void> _confirmMoveToDrive() => showDialog<void>(
+    context: context,
+    builder: (dialogContext) => BusyGate(
+      child: BusyGateBuilder(
+        builder: (context, moving) => PopScope(
+          canPop: !moving,
+          child: AlertDialog(
             title: const Text('Move the local library to Drive?'),
             content: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 460),
@@ -963,21 +954,26 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
             ),
             actions: <Widget>[
               TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
+                onPressed: moving
+                    ? null
+                    : () => Navigator.pop(dialogContext, false),
                 child: const Text('Cancel'),
               ),
-              FilledButton(
+              BusyFilledButton(
                 key: const ValueKey('drive-move-confirm'),
-                onPressed: () => Navigator.pop(dialogContext, true),
+                busyLabel: 'Moving…',
+                onPressed: () async {
+                  await widget.controller.moveLocalLibraryToGoogleDrive();
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                },
                 child: const Text('Move and remove local copies'),
               ),
             ],
           ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
-    await widget.controller.moveLocalLibraryToGoogleDrive();
-  }
+        ),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1065,38 +1061,30 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
             runSpacing: 10,
             children: <Widget>[
               if (!connected)
-                FilledButton.icon(
+                BusyFilledButton.icon(
                   onPressed: unavailable || widget.controller.googleDriveBusy
                       ? null
                       : () =>
                             widget.controller.connectGoogleDrive(_folder.text),
-                  icon: widget.controller.googleDriveBusy
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add_to_drive_rounded, size: 18),
+                  busyLabel: 'Connecting…',
+                  icon: const Icon(Icons.add_to_drive_rounded, size: 18),
                   label: const Text('Connect Drive'),
                 )
               else ...<Widget>[
-                FilledButton.tonalIcon(
+                BusyFilledButton.tonalIcon(
                   onPressed: widget.controller.googleDriveBusy
                       ? null
                       : widget.controller.refreshGoogleDrive,
-                  icon: widget.controller.googleDriveBusy
-                      ? const SizedBox.square(
-                          dimension: 15,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.sync_rounded, size: 18),
-                  label: Text(
-                    widget.controller.googleDriveBusy ? 'Working…' : 'Refresh',
-                  ),
+                  busyLabel: 'Working…',
+                  icon: const Icon(Icons.sync_rounded, size: 18),
+                  label: const Text('Refresh'),
                 ),
-                OutlinedButton.icon(
+                BusyOutlinedButton.icon(
+                  key: const ValueKey('drive-disconnect'),
                   onPressed: widget.controller.googleDriveBusy
                       ? null
                       : widget.controller.disconnectGoogleDrive,
+                  busyLabel: 'Disconnecting…',
                   icon: const Icon(Icons.link_off_rounded, size: 18),
                   label: const Text('Disconnect this device'),
                 ),
@@ -1107,13 +1095,17 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                         widget.controller.savedReferences.any(
                           (item) => item.storage == LibraryStorage.local,
                         ))) ...<Widget>[
-                  OutlinedButton.icon(
+                  BusyOutlinedButton.icon(
+                    key: const ValueKey('drive-copy-local-library'),
                     onPressed: widget.controller.googleDriveBusy
                         ? null
                         : widget.controller.copyLocalLibraryToGoogleDrive,
+                    busyLabel: 'Copying…',
                     icon: const Icon(Icons.cloud_upload_outlined, size: 18),
                     label: const Text('Copy local library to Drive'),
                   ),
+                  // This key only asks; the dialog's own key does the move
+                  // and carries the loader for it.
                   OutlinedButton.icon(
                     key: const ValueKey('drive-move-local-library'),
                     onPressed: widget.controller.googleDriveBusy
@@ -1623,10 +1615,7 @@ class _SettingsVaultPanelState extends State<_SettingsVaultPanel> {
               if (busy)
                 const Padding(
                   padding: EdgeInsets.only(left: 10),
-                  child: SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                  child: BusySpinner(),
                 ),
             ],
           ),
@@ -1834,14 +1823,11 @@ class _SettingsSide extends StatelessWidget {
                 icon: Icons.delete_sweep_outlined,
                 title: 'Clear history',
                 subtitle: 'Generation records and unshared media',
-                onTap: () async {
-                  if (await confirm(
-                    'Clear generation history?',
-                    'This keeps saved references, their folders and tags, your API keys, and preferences.',
-                  )) {
-                    await controller.clearHistory();
-                  }
-                },
+                confirm: () => confirm(
+                  'Clear generation history?',
+                  'This keeps saved references, their folders and tags, your API keys, and preferences.',
+                ),
+                onTap: controller.clearHistory,
               ),
               _ClearButton(
                 icon: Icons.restart_alt_rounded,
@@ -1859,22 +1845,19 @@ class _SettingsSide extends StatelessWidget {
                 subtitle:
                     'History, saved references, assets, preferences, and securely stored provider keys',
                 danger: true,
-                onTap: () async {
-                  if (await confirm(
-                    controller.supportsGoogleDrive
-                        ? controller.supportsLocalLibrary
-                              ? 'Delete Local and Drive data?'
-                              : 'Delete Drive and device data?'
-                        : 'Delete all local data?',
-                    controller.supportsGoogleDrive
-                        ? controller.supportsLocalLibrary
-                              ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus provider keys from secure storage.'
-                              : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus this device’s secure settings.'
-                        : 'This permanently removes the Flutter app’s local JSON file.',
-                  )) {
-                    await controller.clearAll();
-                  }
-                },
+                confirm: () => confirm(
+                  controller.supportsGoogleDrive
+                      ? controller.supportsLocalLibrary
+                            ? 'Delete Local and Drive data?'
+                            : 'Delete Drive and device data?'
+                      : 'Delete all local data?',
+                  controller.supportsGoogleDrive
+                      ? controller.supportsLocalLibrary
+                            ? 'This permanently removes Clawnsole metadata and assets from this device and the connected Drive folder, plus provider keys from secure storage.'
+                            : 'This permanently removes Clawnsole metadata and assets from the connected Drive folder, plus this device’s secure settings.'
+                      : 'This permanently removes the Flutter app’s local JSON file.',
+                ),
+                onTap: controller.clearAll,
               ),
             ],
           ),
@@ -1969,38 +1952,71 @@ class _CreatorCard extends StatelessWidget {
   );
 }
 
-class _ClearButton extends StatelessWidget {
+/// A destructive settings row. Clearing history or deleting a library walks
+/// the store and the Drive folder, so the tile shows the work and refuses a
+/// second tap until it is done.
+class _ClearButton extends StatefulWidget {
   const _ClearButton({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.confirm,
     this.danger = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
+
+  /// Asked before [onTap] runs, and outside its loader.
+  final Future<bool> Function()? confirm;
   final Future<void> Function() onTap;
   final bool danger;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: EdgeInsets.zero,
-    leading: Icon(
-      icon,
-      color: danger ? context.colors.error : context.colors.primary,
-    ),
-    title: Text(
-      title,
-      style: TextStyle(
-        fontSize: 12.5,
-        fontWeight: FontWeight.w700,
-        color: danger ? context.colors.error : null,
+  State<_ClearButton> createState() => _ClearButtonState();
+}
+
+class _ClearButtonState extends State<_ClearButton> {
+  bool _running = false;
+
+  Future<void> _run() async {
+    if (_running) return;
+    // The question is asked before the loader starts: a tile that spins
+    // while a confirmation is still on screen would be lying.
+    final confirm = widget.confirm;
+    if (confirm != null && !await confirm()) return;
+    if (!mounted) return;
+    setState(() => _running = true);
+    try {
+      await widget.onTap();
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = widget.danger ? context.colors.error : context.colors.primary;
+    return ListTile(
+      key: ValueKey('clear-${widget.title}'),
+      contentPadding: EdgeInsets.zero,
+      enabled: !_running,
+      leading: Icon(widget.icon, color: tint),
+      title: Text(
+        widget.title,
+        style: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+          color: widget.danger ? context.colors.error : null,
+        ),
       ),
-    ),
-    subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
-    trailing: const Icon(Icons.chevron_right_rounded, size: 17),
-    onTap: () => unawaited(onTap()),
-  );
+      subtitle: Text(widget.subtitle, style: const TextStyle(fontSize: 11)),
+      trailing: _running
+          ? BusySpinner(color: tint)
+          : const Icon(Icons.chevron_right_rounded, size: 17),
+      onTap: () => unawaited(_run()),
+    );
+  }
 }

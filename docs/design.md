@@ -229,6 +229,29 @@ charcoal bezels, the plum Generate key (a button), and a switch's lit green
 side stay dark in light mode — the selector's display becomes an unlit LCD
 on paper.
 
+### Busy states (`flutter/lib/ui/busy_button.dart`)
+
+Every action that is not instant says so, and always the same way: a **14 px
+ring with a 2 px stroke** in the control's own foreground colour. `BusyButton`
+and its Material-shaped variants (`BusyFilledButton`, `.tonal`, `.icon`,
+`BusyOutlinedButton`, `BusyTextButton`, `BusyIconButton`) take an async
+`onPressed` and own the loader for it: while the work runs the key is
+disabled, the mark takes the icon slot — reserved, so nothing shifts — or
+leads the label, and `busyLabel` swaps the word ('Saving…'). Siblings inside
+a dialog read the same state through `BusyGate` / `BusyGateBuilder` (Cancel,
+the fields, and `PopScope`), and `BusySpinner` carries the mark into rows and
+tiles that are not buttons. Work started away from the thing it changes — a
+menu that has already closed, a snackbar's recovery key, a card dropped on a
+folder — runs through `AppController.busy` (`BusyRegistry`, keyed
+`kind:id`), so the card or row shows the loader wherever it is drawn. Two
+rules keep it honest: a key that only opens a dialog or a picker is **not**
+busy (the modal's own primary key carries the loader for the work it starts),
+and optimistic one-tap toggles — favorite stars, a single Hide, preference
+switches — stay optimistic with no mark at all. A notice is never a
+start-of-work signal: `showNotice` reports what happened, after the fact.
+Determinate work keeps its own bar (`LinearProgressIndicator`, the upload
+rings), and media placeholders keep their own sizes.
+
 ## 6. Shell anatomy
 
 - **Top bar (64 px):** brass claw + "Clawnsole" (Fraunces 21/19) as the

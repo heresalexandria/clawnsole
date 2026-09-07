@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'generation_video.dart';
 import 'media_thumbnail.dart';
 
@@ -207,15 +208,16 @@ class _VisualReferenceImagePage extends StatelessWidget {
       title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: <Widget>[
         if (reference != null)
-          IconButton(
+          BusyIconButton(
+            key: const ValueKey('viewer-download'),
             tooltip: 'Download image',
-            onPressed: () => unawaited(() async {
+            onPressed: () async {
               try {
                 await controller.saveReferenceImage(reference!);
               } on Object catch (error) {
                 controller.showErrorNotice(error);
               }
-            }()),
+            },
             icon: const Icon(Icons.download_rounded),
           ),
       ],

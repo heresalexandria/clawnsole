@@ -6,6 +6,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'formatters.dart';
@@ -248,12 +249,10 @@ class _LibraryResultsState extends State<_LibraryResults> {
                   selectedIds.addAll(visibleIds);
                 }
               }),
-              onMove: selected.isEmpty
-                  ? null
-                  : () => unawaited(_moveSelected(context)),
+              onMove: selected.isEmpty ? null : () => _moveSelected(context),
               onVisibility: selected.isEmpty
                   ? null
-                  : () => unawaited(_setSelectedHidden(!selectedAreHidden)),
+                  : () => _setSelectedHidden(!selectedAreHidden),
               visibilityLabel: selectedAreHidden ? 'Unhide' : 'Hide',
               onCancel: () => _setSelecting(false),
             ),
@@ -679,8 +678,8 @@ class _BulkActionBar extends StatelessWidget {
   final int visibleCount;
   final bool allVisibleSelected;
   final VoidCallback onSelectAll;
-  final VoidCallback? onMove;
-  final VoidCallback? onVisibility;
+  final Future<void> Function()? onMove;
+  final Future<void> Function()? onVisibility;
   final String visibilityLabel;
   final VoidCallback onCancel;
 
@@ -718,13 +717,16 @@ class _BulkActionBar extends StatelessWidget {
             allVisibleSelected ? 'Deselect visible' : 'Select visible',
           ),
         ),
+        // Move only opens the folder picker; the loader belongs to that
+        // dialog's own Move key, which does the writing.
         FilledButton.tonalIcon(
           key: const ValueKey('library-bulk-move'),
-          onPressed: onMove,
+          onPressed: onMove == null ? null : () => unawaited(onMove!()),
           icon: const Icon(Icons.drive_file_move_outline, size: 18),
           label: const Text('Move'),
         ),
-        OutlinedButton.icon(
+        BusyOutlinedButton.icon(
+          key: const ValueKey('library-bulk-visibility'),
           onPressed: onVisibility,
           icon: Icon(
             visibilityLabel == 'Hide'
@@ -849,20 +851,20 @@ class GenerationCard extends StatefulWidget {
 }
 
 class _GenerationCardState extends State<GenerationCard> {
-  bool saving = false;
+  Future<void> _save() =>
+      saveGenerationVideo(context, widget.controller, widget.item);
 
-  Future<void> _save() async {
-    setState(() => saving = true);
-    try {
-      await saveGenerationVideo(context, widget.controller, widget.item);
-    } finally {
-      if (mounted) setState(() => saving = false);
-    }
-  }
+  /// Work on this film, marked on the registry so the card shows a loader
+  /// whether the action came from its own key or from a menu that has
+  /// already closed.
+  Future<T> _busy<T>(Future<T> Function() action) =>
+      widget.controller.busy.run('generation', widget.item.localId, action);
 
   Future<void> _remove() async {
     if (await confirmGenerationRecordRemoval(context)) {
-      await widget.controller.deleteGeneration(widget.item.localId);
+      await _busy(
+        () => widget.controller.deleteGeneration(widget.item.localId),
+      );
     }
   }
 
@@ -884,16 +886,20 @@ class _GenerationCardState extends State<GenerationCard> {
       ),
     );
     void visibility() => unawaited(
-      widget.controller.setGenerationsHidden(<String>{
-        item.localId,
-      }, !item.hidden),
+      _busy(
+        () => widget.controller.setGenerationsHidden(<String>{
+          item.localId,
+        }, !item.hidden),
+      ),
     );
     final copyToDrive =
         item.storage == LibraryStorage.local &&
             widget.controller.googleDriveConnected
         ? () => unawaited(
-            widget.controller.copyLocalLibraryToGoogleDrive(
-              generationIds: <String>{item.localId},
+            _busy(
+              () => widget.controller.copyLocalLibraryToGoogleDrive(
+                generationIds: <String>{item.localId},
+              ),
             ),
           )
         : null;
@@ -1149,48 +1155,51 @@ class _GenerationCardState extends State<GenerationCard> {
                           children: <Widget>[
                             if (item.resultAsset != null ||
                                 item.resultUrl != null)
-                              FilledButton.tonalIcon(
+                              BusyFilledButton.tonalIcon(
                                 style: FilledButton.styleFrom(
                                   minimumSize: const Size(88, 40),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 15,
                                   ),
                                 ),
-                                onPressed: saving
-                                    ? null
-                                    : () => unawaited(_save()),
-                                icon: saving
-                                    ? const SizedBox.square(
-                                        dimension: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.download_rounded,
-                                        size: 16,
-                                      ),
+                                onPressed: _save,
+                                icon: const Icon(
+                                  Icons.download_rounded,
+                                  size: 16,
+                                ),
                                 label: const Text('Save'),
                               ),
                             if (widget.controller.canReuse(item))
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size(88, 40),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 15,
-                                  ),
-                                ),
-                                onPressed: () =>
-                                    unawaited(widget.controller.reuse(item)),
-                                icon: const Icon(
-                                  Icons.replay_rounded,
-                                  size: 16,
-                                ),
-                                label: Text(
-                                  item.isFailed && !item.hasDeliveredMedia
-                                      ? 'Retry'
-                                      : 'Reuse',
-                                ),
+                              ListenableBuilder(
+                                listenable: widget.controller.busy,
+                                builder: (context, _) =>
+                                    BusyOutlinedButton.icon(
+                                      key: ValueKey(
+                                        'library-reuse-${item.localId}',
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size(88, 40),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 15,
+                                        ),
+                                      ),
+                                      busy: widget.controller.busy.isBusy(
+                                        'generation',
+                                        item.localId,
+                                      ),
+                                      onPressed: () => _busy(
+                                        () => widget.controller.reuse(item),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.replay_rounded,
+                                        size: 16,
+                                      ),
+                                      label: Text(
+                                        item.isFailed && !item.hasDeliveredMedia
+                                            ? 'Retry'
+                                            : 'Reuse',
+                                      ),
+                                    ),
                               ),
                             GenerationStatusButton(
                               controller: widget.controller,
@@ -1483,10 +1492,7 @@ class _GenerationTagEditorState extends State<_GenerationTagEditor> {
               FilledButton.icon(
                 onPressed: saving ? null : () => unawaited(_save()),
                 icon: saving
-                    ? const SizedBox.square(
-                        dimension: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const BusySpinner()
                     : const Icon(Icons.check_rounded, size: 18),
                 label: const Text('Save'),
               ),

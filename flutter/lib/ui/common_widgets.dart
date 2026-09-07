@@ -14,6 +14,7 @@ import '../core/loading_timing.dart';
 import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import '../core/shell_bridge.dart';
+import 'busy_button.dart';
 import 'estimated_progress_bar.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
@@ -173,10 +174,7 @@ class ReferenceUploadIndicator extends StatelessWidget {
             ),
             child: Row(
               children: <Widget>[
-                const SizedBox.square(
-                  dimension: 17,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+                const BusySpinner(),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -314,10 +312,7 @@ class DriveRefreshButton extends StatelessWidget {
         ? 'Refresh from Google Drive'
         : 'Connect Google Drive in Settings to refresh';
     final icon = busy
-        ? const SizedBox.square(
-            dimension: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
+        ? const BusySpinner()
         : const Icon(Icons.refresh_rounded, size: 18);
     if (compact) {
       return IconButton.outlined(
@@ -1482,7 +1477,9 @@ Future<void> showReferenceFrameViewer(
                       label: const Text('Open link'),
                     ),
                   if (source != null)
-                    FilledButton.tonalIcon(
+                    BusyFilledButton.tonalIcon(
+                      key: const ValueKey('reference-download'),
+                      busyLabel: 'Saving…',
                       onPressed: () async {
                         try {
                           await controller.saveReferenceImage(source);
@@ -1589,7 +1586,9 @@ Future<void> showSourceReferenceSheet(
           icon: const Icon(Icons.open_in_new_rounded, size: 15),
           label: const Text('Open link'),
         ),
-      FilledButton.tonalIcon(
+      BusyFilledButton.tonalIcon(
+        key: const ValueKey('reference-dialog-download'),
+        busyLabel: 'Saving…',
         onPressed: () async {
           try {
             await controller.saveReferenceImage(source);
@@ -1776,16 +1775,10 @@ class GenerationStatusButton extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final checking = controller.isCheckingStatus(item.localId);
-    return OutlinedButton.icon(
-      onPressed: checking
-          ? null
-          : () => unawaited(controller.checkStatus(item)),
-      icon: checking
-          ? const SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.sync_rounded, size: 15),
+    return BusyOutlinedButton.icon(
+      busy: checking,
+      onPressed: () => controller.checkStatus(item),
+      icon: const Icon(Icons.sync_rounded, size: 15),
       label: Text(
         checking
             ? 'Checking…'
@@ -3130,9 +3123,13 @@ class ActivityCard extends StatelessWidget {
                         runSpacing: 7,
                         children: <Widget>[
                           if (hasMedia)
-                            FilledButton.tonalIcon(
-                              onPressed: () => unawaited(
-                                saveGenerationVideo(context, controller, item),
+                            BusyFilledButton.tonalIcon(
+                              key: ValueKey('activity-save-${item.localId}'),
+                              busyLabel: 'Saving…',
+                              onPressed: () => saveGenerationVideo(
+                                context,
+                                controller,
+                                item,
                               ),
                               icon: const Icon(
                                 Icons.download_rounded,
@@ -3141,14 +3138,28 @@ class ActivityCard extends StatelessWidget {
                               label: const Text('Save'),
                             ),
                           if (controller.canReuse(item))
-                            OutlinedButton.icon(
-                              onPressed: () =>
-                                  unawaited(controller.reuse(item)),
-                              icon: const Icon(Icons.replay_rounded, size: 15),
-                              label: Text(
-                                item.isFailed && !item.hasDeliveredMedia
-                                    ? 'Retry'
-                                    : 'Reuse',
+                            ListenableBuilder(
+                              listenable: controller.busy,
+                              builder: (context, _) => BusyOutlinedButton.icon(
+                                key: ValueKey('activity-reuse-${item.localId}'),
+                                busy: controller.busy.isBusy(
+                                  'generation',
+                                  item.localId,
+                                ),
+                                onPressed: () => controller.busy.run(
+                                  'generation',
+                                  item.localId,
+                                  () => controller.reuse(item),
+                                ),
+                                icon: const Icon(
+                                  Icons.replay_rounded,
+                                  size: 15,
+                                ),
+                                label: Text(
+                                  item.isFailed && !item.hasDeliveredMedia
+                                      ? 'Retry'
+                                      : 'Reuse',
+                                ),
                               ),
                             ),
                           if (controller.canRewrite(item))

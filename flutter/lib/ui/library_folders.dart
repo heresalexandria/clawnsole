@@ -19,6 +19,7 @@ import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/library_rules.dart';
 import '../core/models.dart';
+import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'filter_menu.dart';
 import 'hardware.dart';
@@ -939,13 +940,18 @@ class FolderTreeState extends State<FolderTree> {
     }
   }
 
-  Future<void> _acceptDrop(LibraryDragData data, String? folderId) async {
-    if (data.isFolder) {
-      await scope.moveFolder(data.folder!, parentId: folderId);
-    } else {
-      await scope.moveItems(data.itemIds, folderId: folderId);
-    }
-  }
+  /// A drop is a store write with a network leg behind it, so the row that
+  /// took it holds a loader and refuses further drops until it lands.
+  Future<void> _acceptDrop(LibraryDragData data, String? folderId) => scope
+      .controller
+      .busy
+      .run('folder', folderId ?? AppController.libraryFolderUnfiled, () async {
+        if (data.isFolder) {
+          await scope.moveFolder(data.folder!, parentId: folderId);
+        } else {
+          await scope.moveItems(data.itemIds, folderId: folderId);
+        }
+      });
 
   bool _accepts(LibraryDragData data, LibraryFolder? target) {
     if (data.collection != scope.collection) return false;
@@ -1043,10 +1049,7 @@ class FolderTreeState extends State<FolderTree> {
           if (_saving)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 6),
-              child: SizedBox.square(
-                dimension: 14,
-                child: CircularProgressIndicator(strokeWidth: 1.8),
-              ),
+              child: BusySpinner(),
             )
           else
             IconButton(
@@ -1293,8 +1296,26 @@ class _FolderRowState extends State<_FolderRow> {
     if (_dragOver && mounted) setState(() => _dragOver = false);
   }
 
+  /// The registry id this row answers for: its folder, or Unfiled when the
+  /// row is the catch-all drop target.
+  String? get _busyId =>
+      widget.folder?.id ??
+      (widget.dropTarget ? AppController.libraryFolderUnfiled : null);
+
   @override
   Widget build(BuildContext context) {
+    final id = _busyId;
+    if (id == null) return _row(context, busy: false);
+    return ListenableBuilder(
+      listenable: widget.scope.controller.busy,
+      builder: (context, _) => _row(
+        context,
+        busy: widget.scope.controller.busy.isBusy('folder', id),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, {required bool busy}) {
     final folder = widget.folder;
     final selected = widget.selected;
     final touch = isHardwareTouchPlatform;
@@ -1433,6 +1454,10 @@ class _FolderRowState extends State<_FolderRow> {
                           ),
                         ),
                       ),
+                      if (busy) ...<Widget>[
+                        const SizedBox(width: 6),
+                        const BusySpinner(),
+                      ],
                       if (widget.onAction != null && folder != null)
                         SizedBox(
                           width: 26,
@@ -1477,7 +1502,7 @@ class _FolderRowState extends State<_FolderRow> {
       // `row` has become the DragTarget itself.
       final content = row;
       row = DragTarget<LibraryDragData>(
-        onWillAcceptWithDetails: _willAccept,
+        onWillAcceptWithDetails: busy ? (_) => false : _willAccept,
         onLeave: (_) => _leave(),
         onAcceptWithDetails: (details) {
           _leave();
@@ -1568,10 +1593,7 @@ Future<bool> showFolderMoveDialog(
                     }
                   },
             icon: moving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const BusySpinner()
                 : const Icon(Icons.drive_file_move_outline, size: 18),
             label: const Text('Move'),
           ),
@@ -1693,10 +1715,7 @@ Future<bool> showMoveToFolderDialog(
                     }
                   },
             icon: moving
-                ? const SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const BusySpinner()
                 : const Icon(Icons.drive_file_move_outline, size: 18),
             label: const Text('Move'),
           ),
@@ -1739,26 +1758,42 @@ Future<void> confirmFolderDelete(
 ) async {
   final directCount = scope.directCount(folder.id);
   final childCount = scope.children(folder.id).length;
-  final confirmed = await showDialog<bool>(
+  await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text('Remove “${folder.name}”?'),
-      content: Text(
-        '${directCount == 0 ? 'No ${scope.noun(2)}' : '$directCount ${scope.noun(directCount)}'} directly inside will move to Unfiled. '
-        '${childCount == 0 ? 'There are no subfolders.' : '$childCount ${childCount == 1 ? 'subfolder moves' : 'subfolders move'} up one level.'} Nothing will be deleted.',
+    builder: (context) => BusyGate(
+      child: BusyGateBuilder(
+        builder: (context, removing) => PopScope(
+          canPop: !removing,
+          child: AlertDialog(
+            title: Text('Remove “${folder.name}”?'),
+            content: Text(
+              '${directCount == 0 ? 'No ${scope.noun(2)}' : '$directCount ${scope.noun(directCount)}'} directly inside will move to Unfiled. '
+              '${childCount == 0 ? 'There are no subfolders.' : '$childCount ${childCount == 1 ? 'subfolder moves' : 'subfolders move'} up one level.'} Nothing will be deleted.',
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: removing
+                    ? null
+                    : () => Navigator.pop(context, false),
+                child: const Text('Keep folder'),
+              ),
+              BusyFilledButton(
+                key: const ValueKey('confirm-folder-remove'),
+                busyLabel: 'Removing…',
+                onPressed: () async {
+                  await scope.controller.busy.run(
+                    'folder',
+                    folder.id,
+                    () => scope.delete(folder),
+                  );
+                  if (context.mounted) Navigator.pop(context, true);
+                },
+                child: const Text('Remove folder'),
+              ),
+            ],
+          ),
+        ),
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Keep folder'),
-        ),
-        FilledButton(
-          key: const ValueKey('confirm-folder-remove'),
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Remove folder'),
-        ),
-      ],
     ),
   );
-  if (confirmed == true) await scope.delete(folder);
 }
