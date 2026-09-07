@@ -19,9 +19,9 @@ String providerCredentialAcknowledgementId(
 
 enum AppSection { create, library, references, providers, settings }
 
-/// The two halves of the References desk: saved media, and the text-only
-/// aesthetic library.
-enum ReferencesTab { media, aesthetics }
+/// The folder tabs of the References desk: saved media, the text-only
+/// aesthetic library, and the characters saved media are cast as.
+enum ReferencesTab { media, aesthetics, characters }
 
 enum LibraryFilter { all, working, ready, failed }
 

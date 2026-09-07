@@ -489,8 +489,8 @@ generation-mode rule above still stands — tabs never select a mode.
   fill with cream icon and text; both modes were verified against the old
   unreadable-active-tab bug. Narrow layouts stack the search above the
   segment row and shrink Select to an icon key.
-- **The References desk is two folder tabs** — *Media* and *Aesthetics*,
-  with facet counts — standing on a hairline rule that closes the pinned
+- **The References desk is three folder tabs** — *Media*, *Aesthetics*,
+  and *Characters*, with facet counts — standing on a hairline rule that closes the pinned
   heading under *Your creative ingredients.* They are the Create draft
   rail's construction (`SectionTabRail`, `lib/ui/section_tabs.dart`) cut
   larger: idle tabs are raised console keys on the rule, the open desk is
@@ -514,6 +514,26 @@ generation-mode rule above still stands — tabs never select a mode.
   the panel with a **Custom** row naming the aesthetic it grew out of (see
   §7, item 3); the library itself is never edited from Create without
   being asked.
+- **The Characters tab manages the name→media mappings Create casts**
+  (`lib/ui/character_library.dart`, `lib/app/app_controller_characters.dart`).
+  A character *is* saved media: the reference carrying a `characterName`
+  assignment, plus any saved file already called that name, which Create casts
+  beside it — so a row shows overlapping cast thumbnails, the cue-style name, a
+  reference count, and a ⋯ menu (*Edit character*, *Release @card*, *Delete
+  character*). The toolbar keeps the one-row pattern: All / Unassigned facet
+  segments, one search over character and reference names, and a **New
+  character** key. The editing sheet names the character and picks the
+  reference that carries the name; because an assignment is unique across
+  references, choosing another moves it rather than failing at the storage
+  boundary, and the sheet names the files that will be cast alongside it. An
+  **Unassigned** section lists media no character has claimed, each row
+  offering the name its own file implies. *Delete character* only clears the
+  assignment — the media never leaves References. Every write goes through
+  `updateSavedReference`, so Drive, the local store, prompt tags, and the
+  composer stay in step, and a batch speaks once (“VINCE renamed to VINNIE
+  across 1 reference.”). Per-draft casting is untouched: the Cast row and the
+  Characters modal on **Create** still own that draft's `characterMappings`,
+  and a library rename leaves an open draft's cast exactly as it was.
 - **Filters popover** (`LibraryFilterButton`): status, favorites, and tags
   live in an anchored panel instead of stacked chip rows. The key lights
   plum with a count while any of them narrows the view, and the panel
