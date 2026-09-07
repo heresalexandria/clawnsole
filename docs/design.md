@@ -535,12 +535,15 @@ generation-mode rule above still stands — tabs never select a mode.
   to `Extend @name.`, plus the script's first scene heading when the film was
   written as a screenplay. Nothing else of the old direction is kept; the
   point is to write what happens next. The reference is named after the film
-  (the tab name it was rendered from, else its first words), and the cast it
-  was rendered with is re-attached in its original order for as long as the
-  model has room — counted per kind, against the total, and against the
+  (the tab name it was rendered from, else its first words), and the
+  references the film was rendered with come back — the cast first, then the
+  rest, each group in its original order — for as long as the model has room
+  beside the film: counted per kind, against the total, and against the
   reference-video seconds, with the extended film counting first. Anything
-  that will not fit is left out and said so in a flash notice. Keyframes are
-  not carried over: the film itself is the guidance now.
+  that will not fit is left out, cast or not, and said so in one flash
+  notice; an extension of an extension already carries the earlier
+  references baked into its footage. Keyframes are not carried over: the
+  film itself is the guidance now.
 - Every card shows **all settings** as `GenerationSpecChips`: mode, ratio
   (with mini shape glyph), duration, resolution, audio, draft tier, timed
   keyframes.

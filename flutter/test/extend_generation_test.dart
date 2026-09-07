@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Extend opens the next scene: the delivered film becomes the reference to
 /// carry on from, the direction starts again at `Extend @name.`, and every
-/// other choice — model, settings, aesthetic, and the cast that still fits —
+/// other choice — model, settings, aesthetic, and the references that still fit —
 /// comes along.
 void main() {
   test('only a delivered video on a reference model can be extended', () {
@@ -124,7 +124,7 @@ void main() {
   });
 
   test(
-    'mapped characters come back, in order, while the model has room',
+    "the film's references come back, cast first, while the model has room",
     () async {
       final controller = _controller();
       addTearDown(controller.dispose);
@@ -141,10 +141,12 @@ void main() {
         ),
       );
 
+      // Nine image slots: everything fits, the cast ahead of the prop.
       expect(controller.form.references.map((item) => item.promptName), [
         'Rooftop chase',
         'Sloth',
         'Moth',
+        'A prop',
       ]);
       expect(controller.form.characterMappings, {
         'HERO': ['Sloth'],
@@ -153,6 +155,39 @@ void main() {
       expect(controller.notice, 'Ready to extend “Rooftop chase”.');
     },
   );
+
+  test('references that no longer fit beside the film are dropped, cast or '
+      'not', () async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+
+    // Seedance 2.0 takes three reference videos; the extended film is one,
+    // so of the three the film was made with only two come back — the cast
+    // first, and the prop is what gives way. The cast list is untouched.
+    await controller.extend(
+      _film(
+        title: 'Rooftop chase',
+        prompt: 'A sloth climbs.\n\nHERO: @Sloth\nRIVAL: @Moth',
+        references: <MediaReferenceLabel>[
+          _reference('A prop', MediaReferenceKind.video, seconds: 4),
+          _reference('Sloth', MediaReferenceKind.video, seconds: 4),
+          _reference('Moth', MediaReferenceKind.video, seconds: 4),
+        ],
+      ),
+    );
+
+    expect(controller.form.references.map((item) => item.promptName), [
+      'Rooftop chase',
+      'Sloth',
+      'Moth',
+    ]);
+    expect(controller.form.characterMappings, {
+      'HERO': ['Sloth'],
+      'RIVAL': ['Moth'],
+    });
+    expect(controller.notice, contains('1 reference left out'));
+    expect(controller.notice, contains('Seedance 2.0'));
+  });
 
   test('characters over the model limit are left out, and said so', () async {
     final controller = _controller();
@@ -180,7 +215,7 @@ void main() {
       'HERO': ['Sloth'],
       'RIVAL': ['Moth'],
     });
-    expect(controller.notice, contains('1 character reference left out'));
+    expect(controller.notice, contains('1 reference left out'));
     expect(controller.notice, contains('Seedance 2.0'));
   });
 

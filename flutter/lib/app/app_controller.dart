@@ -8379,9 +8379,12 @@ class AppController extends ChangeNotifier {
   /// Opens the next scene of [item]: the film itself becomes the reference to
   /// extend, the direction is cleared back to `Extend @name.` (plus the scene
   /// heading, in a screenplay), and everything else — model, settings,
-  /// aesthetic, and as much of the cast as the model still has room for —
-  /// carries over. The old direction is deliberately not kept: the point is
-  /// to write what happens next.
+  /// aesthetic, and as many of the film's own references as the model still
+  /// has room for beside it, cast first — carries over. Whatever no longer
+  /// fits is dropped rather than squeezed in: an extension of an extension
+  /// already carries the earlier references baked into its footage. The old
+  /// direction is deliberately not kept: the point is to write what happens
+  /// next.
   Future<void> extend(Generation item) async {
     if (!canExtend(item)) {
       showNotice('That film cannot be extended with this provider or model.');
@@ -8403,22 +8406,27 @@ class AppController extends ChangeNotifier {
       showNotice('That film has no video to extend yet.');
       return;
     }
-    // The cast the film was rendered with, in the order it was attached;
-    // everything else the film used starts fresh with the new scene.
-    final cast = _inComposerTab(tab, () {
-      final names = <String>{
+    // Everything the film was rendered with, the cast first and each group in
+    // the order it was attached. Each comes back only while the model still
+    // has room beside the film itself; the rest is dropped, since the film
+    // already carries them in its footage.
+    final castNames = <String>{};
+    final carried = _inComposerTab(tab, () {
+      castNames.addAll(<String>{
         for (final entry in form.characterMappings.values)
           for (final value in entry) value.toLowerCase(),
-      };
-      final characters = form.references
-          .where(
-            (draft) => names.contains(referencePromptName(draft).toLowerCase()),
-          )
-          .toList();
+      });
+      bool isCast(MediaReferenceDraft draft) =>
+          castNames.contains(referencePromptName(draft).toLowerCase());
+      final previous = form.references;
+      final ordered = <MediaReferenceDraft>[
+        ...previous.where(isCast),
+        ...previous.where((draft) => !isCast(draft)),
+      ];
       form
         ..keyframes = <KeyframeDraft>[]
         ..references = <MediaReferenceDraft>[];
-      return characters;
+      return ordered;
     });
     await _inComposerTab(
       tab,
@@ -8436,16 +8444,20 @@ class AppController extends ChangeNotifier {
                 : draft,
           )
           .toList();
-      for (final draft in cast) {
+      for (final draft in carried) {
         final kept = form.references;
         form.references = <MediaReferenceDraft>[...kept, draft];
         final problem = _extendCapacityProblem(draft.kind);
         if (problem == null) continue;
         form.references = kept;
         reason ??= problem;
-        final castName = draft.promptName ?? draft.label;
-        dropped.add(castName);
-        _removeCastReference(castName);
+        final droppedName = draft.promptName ?? draft.label;
+        dropped.add(droppedName);
+        // A dropped cast member leaves the casting block too; a script that
+        // names someone who is no longer attached would only mislead.
+        if (castNames.contains(referencePromptName(draft).toLowerCase())) {
+          _removeCastReference(droppedName);
+        }
       }
       final heading = form.screenplayMode
           ? firstScreenplaySceneHeading(form.prompt)
@@ -8467,7 +8479,7 @@ class AppController extends ChangeNotifier {
     showNotice(
       dropped.isEmpty
           ? 'Ready to extend “$name”.'
-          : 'Extend attached “$name”; ${dropped.length} character '
+          : 'Extend attached “$name”; ${dropped.length} '
                 '${dropped.length == 1 ? 'reference' : 'references'} left '
                 'out — ${reason ?? 'the model has no room for them.'}',
     );
