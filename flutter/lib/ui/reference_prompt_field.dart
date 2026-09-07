@@ -27,6 +27,28 @@ class PromptReferenceOption {
 /// which element it is. Computed once per text, not once per span.
 typedef _ScreenplayLine = ({int start, int end, ScreenplayElement element});
 
+/// The plain word a character name would complete: where it starts, where the
+/// caret is, and the letters typed so far.
+typedef _CharacterNameQuery = ({int start, int end, String prefix});
+
+/// One row of the completion menu. The `@` mentions and the character names
+/// share the overlay, so they also share its look, position and key handling.
+class _SuggestionRow {
+  const _SuggestionRow({
+    required this.key,
+    required this.icon,
+    required this.title,
+    required this.onSelect,
+    this.subtitle,
+  });
+
+  final Key key;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onSelect;
+}
+
 class _ReferencePromptEditingController extends TextEditingController {
   _ReferencePromptEditingController({
     required super.text,
@@ -245,6 +267,11 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   RenderEditable? _editable;
   _PromptMentionQuery? _query;
   List<PromptReferenceOption> _suggestions = const <PromptReferenceOption>[];
+  _CharacterNameQuery? _nameQuery;
+  List<String> _nameSuggestions = const <String>[];
+  // Escape dismisses names for the word being typed, so the dismissal is
+  // remembered against that word's start rather than against a match.
+  int? _dismissedNameStart;
   int? _highlightedSuggestion;
   int? _screenplayHighlight;
   bool _allowFocusTraversal = false;
@@ -257,10 +284,11 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   List<String>? _suggestionsNames;
   List<String> _screenplaySuggestionsCache = const [];
 
-  List<String> get _screenplaySuggestions {
-    if (!widget.screenplayMode || _dismissScreenplaySuggestions) {
-      return const [];
-    }
+  /// What the screenplay cue flow offers at the caret, whether or not it has
+  /// been dismissed. The character-name menu stands down wherever this is
+  /// non-empty, so the two never compete for one caret.
+  List<String> get _screenplayCompletionsAtCaret {
+    if (!widget.screenplayMode) return const [];
     final value = _controller.value;
     if (_suggestionsValue != value ||
         !listEquals(_suggestionsNames, widget.characterNames)) {
@@ -274,6 +302,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     }
     return _screenplaySuggestionsCache;
   }
+
+  List<String> get _screenplaySuggestions =>
+      _dismissScreenplaySuggestions ? const [] : _screenplayCompletionsAtCaret;
 
   @override
   void initState() {
@@ -347,12 +378,10 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   void _refreshSuggestions() {
     _preserveAncestorScrollForSelectAll();
     if (widget.screenplayMode && mounted) setState(() {});
-    final query =
-        _typingReference &&
-            _focusNode.hasFocus &&
-            _controller.value.composing.isCollapsed
-        ? _mentionQuery(_controller.value, widget.references)
-        : null;
+    final value = _controller.value;
+    final typing =
+        _typingReference && _focusNode.hasFocus && value.composing.isCollapsed;
+    final query = typing ? _mentionQuery(value, widget.references) : null;
     final suggestions = query == null
         ? const <PromptReferenceOption>[]
         : widget.references.where((reference) {
@@ -361,16 +390,45 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
                 .toLowerCase();
             return name.startsWith(query.normalized);
           }).toList();
+    // The dismissal expires with the word, not with the match, so a word that
+    // stops matching and matches again stays dismissed until the caret leaves.
+    final word = _typedWord(value);
+    if (word == null || word.start != _dismissedNameStart) {
+      _dismissedNameStart = null;
+    }
+    final nameQuery =
+        word != null &&
+            typing &&
+            query == null &&
+            _dismissedNameStart == null &&
+            _screenplayCompletionsAtCaret.isEmpty
+        ? (
+            start: word.start,
+            end: word.end,
+            prefix: value.text.substring(word.start, word.end),
+          )
+        : null;
+    final names = nameQuery == null
+        ? const <String>[]
+        : _characterNameMatches(nameQuery.prefix, widget.characterNames);
+    final matchedNameQuery = names.isEmpty ? null : nameQuery;
     if (!mounted ||
-        (_query == query && _sameOptions(_suggestions, suggestions))) {
+        (_query == query &&
+            _sameOptions(_suggestions, suggestions) &&
+            _nameQuery == matchedNameQuery &&
+            listEquals(_nameSuggestions, names))) {
       return;
     }
     setState(() {
       _query = query;
       _suggestions = suggestions;
-      _highlightedSuggestion = null;
+      _nameQuery = matchedNameQuery;
+      _nameSuggestions = names;
+      // A name list starts on its first row, so Down leaves it for the second.
+      // The mention list keeps its own start, where Down opens on the first.
+      _highlightedSuggestion = names.isEmpty ? null : 0;
     });
-    if (suggestions.isEmpty) {
+    if (suggestions.isEmpty && names.isEmpty) {
       _suggestionsOverlay.hide();
     } else {
       // Normal text-input notifications happen between frames, so the real
@@ -384,7 +442,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       _suggestionsOverlay.show();
       if (_editable == null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || _suggestions.isEmpty) return;
+          if (!mounted || _rows.isEmpty) return;
           _editable = _findRenderEditable();
           if (_editable != null) setState(() {});
         });
@@ -445,6 +503,31 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     _focusNode.requestFocus();
   }
 
+  void _selectName(String name) {
+    final query = _nameQuery;
+    if (query == null) return;
+    _controller.value = _completeName(_controller.value, query, name);
+    widget.onChanged(_controller.text);
+    _focusNode.requestFocus();
+  }
+
+  /// A character name is ordinary prose: the stored spelling replaces the
+  /// typed prefix with no tag, no styling, and — like a completed `@` mention
+  /// — no trailing space, so the director keeps punctuating the sentence.
+  TextEditingValue _completeName(
+    TextEditingValue value,
+    _CharacterNameQuery query,
+    String name,
+  ) => TextEditingValue(
+    text: value.text.replaceRange(query.start, query.end, name),
+    selection: TextSelection.collapsed(offset: query.start + name.length),
+  );
+
+  void _dismissNameSuggestions() {
+    final query = _nameQuery;
+    if (query != null) _dismissedNameStart = query.start;
+  }
+
   TextEditingValue _completeReference(
     TextEditingValue value,
     _PromptMentionQuery query,
@@ -467,33 +550,47 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     TextEditingValue newValue,
   ) {
     final query = _query;
+    final nameQuery = _nameQuery;
     final keyboard = HardwareKeyboard.instance;
     // Software keyboards send multiline Return as an editing value instead of
     // a KeyEvent. Only accept a single newline at the active query's caret;
     // leave composition, selection replacement, multiline paste and modified
     // Return alone.
-    if (query != null &&
-        _suggestions.isNotEmpty &&
+    final completionEnd = query != null && _suggestions.isNotEmpty
+        ? query.end
+        : nameQuery != null && _nameSuggestions.isNotEmpty
+        ? nameQuery.end
+        : null;
+    if (completionEnd != null &&
         _focusNode.hasFocus &&
         oldValue.composing.isCollapsed &&
         newValue.composing.isCollapsed &&
         oldValue.selection.isCollapsed &&
-        oldValue.selection.extentOffset == query.end &&
+        oldValue.selection.extentOffset == completionEnd &&
         newValue.selection.isCollapsed &&
-        newValue.selection.extentOffset == query.end + 1 &&
+        newValue.selection.extentOffset == completionEnd + 1 &&
         newValue.text.length == oldValue.text.length + 1 &&
-        newValue.text[query.end] == '\n' &&
+        newValue.text[completionEnd] == '\n' &&
         !keyboard.isShiftPressed &&
         !keyboard.isControlPressed &&
         !keyboard.isMetaPressed &&
         !keyboard.isAltPressed &&
         newValue.text ==
-            oldValue.text.replaceRange(query.end, query.end, '\n')) {
-      return _completeReference(
-        oldValue,
-        query,
-        _suggestions[_highlightedSuggestion ?? 0],
-      );
+            oldValue.text.replaceRange(completionEnd, completionEnd, '\n')) {
+      return query != null && _suggestions.isNotEmpty
+          ? _completeReference(
+              oldValue,
+              query,
+              _suggestions[_highlightedSuggestion ?? 0],
+            )
+          : _completeName(
+              oldValue,
+              nameQuery!,
+              _nameSuggestions[(_highlightedSuggestion ?? 0).clamp(
+                0,
+                _nameSuggestions.length - 1,
+              )],
+            );
     }
     final formatted = widget.screenplayMode
         ? ScreenplayInputFormatter(
@@ -555,10 +652,31 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
         !_controller.value.composing.isCollapsed) {
       return KeyEventResult.ignored;
     }
+    final keyboard = HardwareKeyboard.instance;
+    final unmodified =
+        !keyboard.isShiftPressed &&
+        !keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed;
+    // Tab accepts a character name before the screenplay editor reads it as an
+    // element change. The two never offer completions at the same caret, so
+    // element cycling is untouched wherever the name menu is closed.
+    if (event.logicalKey == LogicalKeyboardKey.tab &&
+        unmodified &&
+        _nameSuggestions.isNotEmpty) {
+      _selectName(
+        _nameSuggestions[(_highlightedSuggestion ?? 0).clamp(
+          0,
+          _nameSuggestions.length - 1,
+        )],
+      );
+      return KeyEventResult.handled;
+    }
     if (widget.screenplayMode) {
       if (event.logicalKey == LogicalKeyboardKey.escape) {
         _allowFocusTraversal = true;
         _typingReference = false;
+        _dismissNameSuggestions();
         _refreshSuggestions();
         setState(() => _dismissScreenplaySuggestions = true);
         return KeyEventResult.handled;
@@ -611,16 +729,13 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
         }.contains(event.logicalKey)) {
       _screenplayHighlight = null;
     }
-    if (_suggestions.isEmpty) {
+    final rows = _rows;
+    if (rows.isEmpty) {
       return KeyEventResult.ignored;
     }
     // Modified arrows belong to the text field (selection, word/paragraph
-    // movement). Only unmodified Up/Down navigate an actively typed @ query.
-    final keyboard = HardwareKeyboard.instance;
-    if (keyboard.isShiftPressed ||
-        keyboard.isControlPressed ||
-        keyboard.isMetaPressed ||
-        keyboard.isAltPressed) {
+    // movement). Only unmodified Up/Down navigate an actively typed query.
+    if (!unmodified) {
       return KeyEventResult.ignored;
     }
     if ({
@@ -630,6 +745,9 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       LogicalKeyboardKey.end,
       LogicalKeyboardKey.escape,
     }.contains(event.logicalKey)) {
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        _dismissNameSuggestions();
+      }
       _typingReference = false;
       _refreshSuggestions();
       return event.logicalKey == LogicalKeyboardKey.escape
@@ -642,18 +760,18 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
         if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
           _highlightedSuggestion = _highlightedSuggestion == null
               ? 0
-              : (_highlightedSuggestion! + 1) % _suggestions.length;
+              : (_highlightedSuggestion! + 1) % rows.length;
         } else {
           _highlightedSuggestion = _highlightedSuggestion == null
-              ? _suggestions.length - 1
-              : (_highlightedSuggestion! - 1) % _suggestions.length;
+              ? rows.length - 1
+              : (_highlightedSuggestion! - 1) % rows.length;
         }
       });
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      _select(_suggestions[_highlightedSuggestion ?? 0]);
+      rows[(_highlightedSuggestion ?? 0).clamp(0, rows.length - 1)].onSelect();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -677,8 +795,33 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     return editable;
   }
 
+  /// Only one of the two lists is ever populated: the mention flow wins while
+  /// an `@` query is being typed, and names complete the plain word otherwise.
+  List<_SuggestionRow> get _rows => <_SuggestionRow>[
+    for (final option in _suggestions)
+      _SuggestionRow(
+        key: ValueKey('prompt-reference-${option.mention.normalized}'),
+        icon: switch (option.mention.kind) {
+          MediaReferenceKind.image => Icons.image_rounded,
+          MediaReferenceKind.video => Icons.video_library_rounded,
+          MediaReferenceKind.audio => Icons.graphic_eq_rounded,
+        },
+        title: option.mention.canonical,
+        subtitle: option.label,
+        onSelect: () => _select(option),
+      ),
+    for (final name in _nameSuggestions)
+      _SuggestionRow(
+        key: ValueKey('prompt-character-$name'),
+        icon: Icons.person_rounded,
+        title: name,
+        onSelect: () => _selectName(name),
+      ),
+  ];
+
   Widget _buildSuggestionsOverlay(BuildContext context) {
-    if (_suggestions.isEmpty) return const SizedBox.shrink();
+    final rows = _rows;
+    if (rows.isEmpty) return const SizedBox.shrink();
     final overlay = Overlay.of(context).context.findRenderObject();
     final editable = _editable;
     final field = _fieldKey.currentContext?.findRenderObject();
@@ -709,7 +852,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
     final menuWidth = field.size.width
         .clamp(240.0, 360.0)
         .clamp(0.0, availableWidth);
-    final menuHeight = (_suggestions.length * 44.0).clamp(44.0, 260.0);
+    final menuHeight = (rows.length * 44.0).clamp(44.0, 260.0);
     final left = caretTop.dx.clamp(
       margin,
       (overlay.size.width - menuWidth - margin).clamp(margin, double.infinity),
@@ -731,11 +874,14 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       width: menuWidth,
       // Keep the overlay in this editor's tap region. The app dismisses the
       // keyboard on outside pointer-down, before a suggestion's onTap can run.
-      child: TextFieldTapRegion(groupId: _focusNode, child: _suggestionsMenu()),
+      child: TextFieldTapRegion(
+        groupId: _focusNode,
+        child: _suggestionsMenu(rows),
+      ),
     );
   }
 
-  Widget _suggestionsMenu() => Container(
+  Widget _suggestionsMenu(List<_SuggestionRow> rows) => Container(
     key: const ValueKey('prompt-reference-suggestions'),
     decoration: BoxDecoration(
       color: context.colors.surfaceContainerHigh,
@@ -755,21 +901,19 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
       child: ListView(
         shrinkWrap: true,
         padding: EdgeInsets.zero,
-        children: _suggestions
-            .asMap()
-            .entries
+        children: rows.indexed
             .map(
               (entry) => ColoredBox(
-                color: (_highlightedSuggestion ?? 0) == entry.key
+                key: entry.$2.key,
+                color: (_highlightedSuggestion ?? 0) == entry.$1
                     ? context.colors.primaryContainer
                     : Colors.transparent,
                 child: InkWell(
-                  key: ValueKey(
-                    'prompt-reference-${entry.value.mention.normalized}',
-                  ),
                   canRequestFocus: false,
-                  onTap: () => _select(entry.value),
-                  child: Padding(
+                  onTap: entry.$2.onSelect,
+                  child: Container(
+                    // A finger-sized row, and the height the menu reserves.
+                    constraints: const BoxConstraints(minHeight: 44),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 9,
@@ -777,36 +921,36 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
                     child: Row(
                       children: <Widget>[
                         Icon(
-                          switch (entry.value.mention.kind) {
-                            MediaReferenceKind.image => Icons.image_rounded,
-                            MediaReferenceKind.video =>
-                              Icons.video_library_rounded,
-                            MediaReferenceKind.audio =>
-                              Icons.graphic_eq_rounded,
-                          },
+                          entry.$2.icon,
                           size: 18,
                           color: context.colors.primary,
                         ),
                         const SizedBox(width: 10),
-                        Text(
-                          entry.value.mention.canonical,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
+                        Flexible(
                           child: Text(
-                            entry.value.label,
+                            entry.$2.title,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: context.colors.onSurfaceVariant,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
+                        if (entry.$2.subtitle case final subtitle?) ...<Widget>[
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: context.colors.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1009,6 +1153,47 @@ class _PromptMentionQuery {
 
   @override
   int get hashCode => Object.hash(start, end, normalized);
+}
+
+final _wordCharacter = RegExp(r'[\p{L}\p{N}_]', unicode: true);
+final _letter = RegExp(r'\p{L}', unicode: true);
+
+/// The letters-only word that ends exactly at the caret. Null when the caret
+/// sits inside a word the director is editing, when nothing has been typed,
+/// or when the letters continue a tag or an alphanumeric token.
+({int start, int end})? _typedWord(TextEditingValue value) {
+  final selection = value.selection;
+  if (!selection.isValid || !selection.isCollapsed) return null;
+  final text = value.text;
+  final caret = selection.extentOffset;
+  if (caret <= 0 || caret > text.length) return null;
+  if (caret < text.length && _wordCharacter.hasMatch(text[caret])) return null;
+  var start = caret;
+  while (start > 0 && _letter.hasMatch(text[start - 1])) {
+    start -= 1;
+  }
+  if (start == caret) return null;
+  if (start > 0 &&
+      (text[start - 1] == '@' || _wordCharacter.hasMatch(text[start - 1]))) {
+    return null;
+  }
+  return (start: start, end: caret);
+}
+
+/// Names whose spelling begins with [prefix], in the order they were given.
+/// A word already spelled as a name in full is finished, not a query.
+List<String> _characterNameMatches(String prefix, List<String> names) {
+  final query = prefix.toLowerCase();
+  if (names.any((name) => name.toLowerCase() == query)) return const <String>[];
+  final seen = <String>{};
+  final matches = <String>[];
+  for (final name in names) {
+    final candidate = name.toLowerCase();
+    if (!candidate.startsWith(query) || !seen.add(candidate)) continue;
+    matches.add(name);
+    if (matches.length == 8) break;
+  }
+  return matches;
 }
 
 _PromptMentionQuery? _mentionQuery(

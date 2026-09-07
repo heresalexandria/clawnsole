@@ -282,7 +282,12 @@ Layout order:
    needs and clips it only when a row truly cannot hold it, and on a
    phone row the character counter takes a compact reading (`0 / 50k`,
    exact figures in its tooltip) so the name is spelled whole at 390 pt.
-   It rides along into the fullscreen editor.
+   It rides along into the fullscreen editor. Once a character is cast
+   or written into a script, typing the first letters of its name
+   suggests the cast in the same menu the `@` mentions use — Up/Down to
+   choose, Return, Tab or a tap to take it — and writes the name as
+   plain text, with no tag and no highlight. Escape dismisses it for
+   that word, and a screenplay cue line keeps its own completions.
 2. **Cast row**: a compact strip between the direction and the guidance /
    settings pair, present only when a character actually holds a
    reference on a model that accepts creative references. A brass label,
