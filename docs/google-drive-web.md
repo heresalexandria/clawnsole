@@ -148,6 +148,25 @@ A manual refresh re-kicks this device's pass and reports what it found:
 waiting on the device that made them." A pass that outruns the refresh's short
 wait still reports its queue; the pump keeps going either way.
 
+On macOS the pump is not in the renderer — the companion process holds the
+staged bytes and publishes them — so the companion's report is what this
+device is doing, and it travels over two routes. Every `GET /state` response
+carries a top-level `driveUploads` object beside `driveConnection`:
+`{queued, foreign, stalledDetail, reported}`, which is the pass's report
+verbatim and is never persisted into the library. `POST /drive/uploads/flush`
+runs a pass now — joining the one already in flight rather than racing it —
+waits up to three seconds, the same cap the studio applies to a native pump,
+and answers `{settled, driveUploads}` with the queue as it stands; the pass
+itself outlives the cap. `WebGateway` implements the same
+`DriveUploadStatusSource` the native gateway does, so the studio installs the
+companion's report through the one path it already had. `reported` rides the
+wire rather than being inferred: a companion too old to send the object at all
+has said nothing about who owes these uploads, and the renderer must read that
+silence as "Awaiting upload", not as an empty queue meaning published. A
+`/state` read that finds staged media also makes sure a pass is coming, so
+media a cross-device merge introduces gets classified rather than sitting
+undescribed.
+
 A record whose staged reference reappears from a cross-device merge after this
 process already published it is re-swapped from the upload ledger rather than
 uploaded again — by then the staged original has been renamed into the Drive

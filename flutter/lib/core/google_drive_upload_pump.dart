@@ -62,6 +62,56 @@ abstract interface class DriveUploadStatusSource {
   Future<bool> flushDriveUploads();
 }
 
+/// The wire form of a [DriveUploadQueueReport], for the one surface whose
+/// pump runs in another process: the Electron renderer publishes nothing
+/// itself, the companion beside it does, so the companion serves what its
+/// pass reported and `WebGateway` reads it back.
+///
+/// Absence carries meaning that an empty queue does not. A companion that
+/// sends no report at all has said nothing about who owes these uploads, and
+/// the renderer must fall back to [DriveUploadQueueReport.unknown] instead of
+/// reading silence as "everything is published" — hence [reported] on the
+/// wire rather than inferring it from the payload's shape.
+Map<String, Object?> driveUploadQueueReportToJson(
+  DriveUploadQueueReport report,
+) => <String, Object?>{
+  'queued': report.queued.toList(),
+  'foreign': report.foreign.toList(),
+  if (report.stalledDetail != null) 'stalledDetail': report.stalledDetail,
+  'reported': report.reported,
+};
+
+/// Reads a report served by the process that owns the pump.
+DriveUploadQueueReport driveUploadQueueReportFromJson(
+  Map<String, Object?> json,
+) {
+  Set<String> ids(Object? value) => <String>{
+    for (final id in value is List<Object?> ? value : const <Object?>[])
+      if (id is String && id.isNotEmpty) id,
+  };
+  final detail = json['stalledDetail']?.toString();
+  return DriveUploadQueueReport(
+    queued: ids(json['queued']),
+    foreign: ids(json['foreign']),
+    stalledDetail: detail != null && detail.isNotEmpty ? detail : null,
+    reported: json['reported'] == true,
+  );
+}
+
+/// Whether two reports describe the same queue. Reports arrive on every poll
+/// of an unchanged library, and each one that is treated as news rebuilds the
+/// studio for nothing.
+bool sameDriveUploadQueueReport(
+  DriveUploadQueueReport a,
+  DriveUploadQueueReport b,
+) =>
+    a.reported == b.reported &&
+    a.stalledDetail == b.stalledDetail &&
+    a.queued.length == b.queued.length &&
+    a.foreign.length == b.foreign.length &&
+    a.queued.containsAll(b.queued) &&
+    a.foreign.containsAll(b.foreign);
+
 /// Runs one background Drive upload pass: publishes staged media, swaps the
 /// records over through the owner's canonical read/write path (the vault
 /// facade on native builds, the serialized companion store on desktop web),

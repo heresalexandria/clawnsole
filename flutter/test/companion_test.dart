@@ -1904,6 +1904,18 @@ class _StateCountingDriveStore extends _MemoryDriveStore {
   }
 }
 
+/// A Drive store that accepts nothing. The device holds the bytes and still
+/// cannot publish them, which is exactly what a stalled queue describes.
+class _RefusingDriveStore extends _MemoryDriveStore {
+  @override
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.drive,
+  }) async => throw StateError('Google Drive refused the upload.');
+}
+
 class _StreamingDriveStore extends _MemoryDriveStore {
   _StreamingDriveStore({super.presenter});
 
@@ -2396,6 +2408,117 @@ void _localFirstPublishTests() {
       expect(drive.assets[published.value], <int>[1, 2, 3]);
     } finally {
       store.dispose();
+      await temporary.delete(recursive: true);
+    }
+  });
+
+  test('/state carries the queue this companion is working on', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-upload-status-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final drive = _RefusingDriveStore();
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    // One film's bytes are on this disk; the other's are on the device that
+    // made it, and only that device can ever publish them.
+    final mine = await local.writeAsset(
+      Uint8List.fromList(<int>[9, 9, 9, 9]),
+      label: 'mine.mp4',
+      contentType: 'video/mp4',
+    );
+    const theirs = AssetReference(
+      kind: 'local',
+      value: 'abcdef0123456789-bb',
+      label: 'theirs.mp4',
+      contentType: 'video/mp4',
+    );
+    drive.data = StoredData(
+      generations: <Generation>[
+        film('mine', result: mine),
+        film('theirs', result: theirs),
+      ],
+    );
+    await store.connectDrive('token', 'Studio');
+    final application = CompanionApp.hybrid(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      // A connected pass sorts the queue: this device owes `mine`, and found
+      // no bytes at all for `theirs`.
+      expect(await store.flushDriveUploads(), isFalse);
+      expect(store.driveUploadStatus.queued, <String>{mine.value});
+      expect(store.driveUploadStatus.foreign, <String>{theirs.value});
+
+      // Drive drops away. What this device owes has not changed; the pass
+      // now says why it cannot drain it.
+      await drive.disconnect();
+      expect(await store.flushDriveUploads(), isFalse);
+
+      final state =
+          jsonDecode((await http.get(base.resolve('/state'))).body)
+              as Map<String, Object?>;
+      // Beside the connection, not inside the library: this is what the
+      // process is doing, not something the next launch should believe.
+      expect(state['generations'], isNotNull);
+      final uploads = state['driveUploads']! as Map<String, Object?>;
+      expect(uploads['reported'], isTrue);
+      expect(uploads['queued'], <String>[mine.value]);
+      expect(uploads['foreign'], <String>[theirs.value]);
+      expect(uploads['stalledDetail'], contains('not connected'));
+    } finally {
+      store.dispose();
+      await subscription.cancel();
+      await server.close(force: true);
+      await temporary.delete(recursive: true);
+    }
+  });
+
+  test('the flush route runs a pass and answers with its queue', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'clawnsole-upload-flush-test.',
+    );
+    final local = CompanionStore(File('${temporary.path}/clawnsole.json'));
+    final drive = _StreamingDriveStore();
+    final store = CompanionHybridStore(
+      HybridDataStore(local: local, drive: drive),
+    );
+    final bytes = Uint8List.fromList(<int>[4, 5, 6]);
+    final staged = await local.writeAsset(
+      bytes,
+      label: 'film.mp4',
+      contentType: 'video/mp4',
+    );
+    drive.data = StoredData(
+      generations: <Generation>[film('made-here', result: staged)],
+    );
+    await store.connectDrive('token', 'Studio');
+    final application = CompanionApp.hybrid(store: store, api: BflApi());
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen(application.handle);
+    final base = Uri.parse('http://127.0.0.1:${server.port}');
+
+    try {
+      final response = await http.post(base.resolve('/drive/uploads/flush'));
+      expect(response.statusCode, 200);
+      final payload = jsonDecode(response.body) as Map<String, Object?>;
+      expect(payload['settled'], isTrue);
+      final uploads = payload['driveUploads']! as Map<String, Object?>;
+      expect(uploads['reported'], isTrue);
+      expect(uploads['queued'], isEmpty);
+      expect(uploads['foreign'], isEmpty);
+
+      // The pass the route ran is the one that published the film.
+      final published = (await store.read()).generations.single.resultAsset!;
+      expect(published.kind, 'drive');
+      expect(drive.assets[published.value], bytes);
+    } finally {
+      store.dispose();
+      await subscription.cancel();
+      await server.close(force: true);
       await temporary.delete(recursive: true);
     }
   });
