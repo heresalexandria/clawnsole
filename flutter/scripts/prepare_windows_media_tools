@@ -37,9 +37,15 @@ DESTINATION="$FLUTTER_DIRECTORY/windows/media-tools"
 
 mkdir -p "$CACHE_ROOT"
 if [[ ! -f "$ARCHIVE" ]]; then
-  curl --fail --location --retry 3 --connect-timeout 30 \
+  # GitHub's release CDN answers 5xx for minutes at a time; the archive is
+  # pinned by SHA-256 below, so retrying for a while costs nothing but wall
+  # clock. --retry-all-errors covers the transient statuses curl would
+  # otherwise treat as final, and a partial file is never left behind.
+  curl --fail --location --connect-timeout 30 \
+    --retry 10 --retry-delay 6 --retry-max-time 420 --retry-all-errors \
     "https://github.com/BtbN/FFmpeg-Builds/releases/download/$RELEASE_TAG/$ARCHIVE_NAME" \
-    --output "$ARCHIVE"
+    --output "$ARCHIVE.partial" \
+    && mv "$ARCHIVE.partial" "$ARCHIVE"
 fi
 echo "$ARCHIVE_SHA256  $ARCHIVE" | "${CHECK_SHA256[@]}"
 
