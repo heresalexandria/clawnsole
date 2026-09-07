@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+# Downloads the pre-built archives that package:media_kit's Windows CMake
+# would otherwise fetch itself during `flutter build windows`.
+#
+# CMake's file(DOWNLOAD) treats a 5xx from GitHub's release CDN as a file: it
+# writes the error page to the archive path, the MD5 check fails, and the
+# build stops with "please try to re-build project again". Fetching the same
+# pinned archives here first, with curl's retries and the plugin's own MD5
+# pins, leaves CMake nothing to download. The pins are read from the plugin's
+# CMakeLists.txt so a plugin upgrade cannot silently diverge from this script;
+# if that file changes shape, the script warns and lets CMake carry on alone.
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) ;;
+  *)
+    echo "The Windows plugin archives are prepared on Windows." >&2
+    exit 1
+    ;;
+esac
+
+require_command curl
+require_command python
+
+PLUGIN="media_kit_libs_windows_video"
+PACKAGE_CONFIG="$FLUTTER_DIRECTORY/.dart_tool/package_config.json"
+if [[ ! -f "$PACKAGE_CONFIG" ]]; then
+  (cd "$FLUTTER_DIRECTORY" && flutter pub get >/dev/null)
+fi
+
+plugin_root="$(python - "$PACKAGE_CONFIG" "$PLUGIN" <<'PY'
+import json, os, re, sys
+from urllib.parse import urlparse, unquote
+
+config_path, name = sys.argv[1], sys.argv[2]
+with open(config_path, encoding="utf-8") as handle:
+    config = json.load(handle)
+for package in config.get("packages", []):
+    if package.get("name") != name:
+        continue
+    uri = package["rootUri"]
+    if uri.startswith("file:"):
+        path = unquote(urlparse(uri).path)
+        # file:///D:/a/... parses with a leading slash before the drive.
+        if re.match(r"^/[A-Za-z]:/", path):
+            path = path[1:]
+    else:
+        path = os.path.normpath(os.path.join(os.path.dirname(config_path), uri))
+    print(path.replace("\\", "/").rstrip("/"))
+    break
+PY
+)"
+if [[ -z "$plugin_root" ]]; then
+  echo "Package $PLUGIN is not in $PACKAGE_CONFIG; CMake will download its archives." >&2
+  exit 0
+fi
+
+CMAKE_LISTS="$plugin_root/windows/CMakeLists.txt"
+if [[ ! -f "$CMAKE_LISTS" ]]; then
+  echo "No CMakeLists.txt at $CMAKE_LISTS; CMake will download its archives." >&2
+  exit 0
+fi
+
+# Flutter's generated_plugins.cmake adds each plugin as
+# `add_subdirectory(<plugin>/windows plugins/<plugin>)`, so this is the
+# plugin's CMAKE_BINARY_DIR, where its CMake looks for the archive first.
+BINARY_DIRECTORY="$FLUTTER_DIRECTORY/build/windows/x64/plugins/$PLUGIN"
+mkdir -p "$BINARY_DIRECTORY"
+
+cmake_value() {
+  sed -n "s/^set(${1} \"\(.*\)\")\$/\1/p" "$CMAKE_LISTS" | head -n 1
+}
+
+md5_of() {
+  python -c 'import hashlib, sys; print(hashlib.md5(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
+}
+
+for prefix in LIBMPV ANGLE; do
+  archive_name="$(cmake_value "$prefix")"
+  archive_url="$(cmake_value "${prefix}_URL")"
+  archive_md5="$(cmake_value "${prefix}_MD5")"
+  if [[ -z "$archive_name" || -z "$archive_url" || -z "$archive_md5" ]]; then
+    echo "Could not read the $prefix pins from $CMAKE_LISTS; CMake will download it." >&2
+    continue
+  fi
+  archive_url="${archive_url//\$\{${prefix}\}/$archive_name}"
+  target="$BINARY_DIRECTORY/$archive_name"
+  if [[ -f "$target" ]] && [[ "$(md5_of "$target")" == "$archive_md5" ]]; then
+    echo "Using the cached $archive_name."
+    continue
+  fi
+  rm -f "$target" "$target.partial"
+  echo "Fetching $archive_name for $PLUGIN."
+  curl --fail --location --connect-timeout 30 \
+    --retry 10 --retry-delay 6 --retry-max-time 420 --retry-all-errors \
+    "$archive_url" --output "$target.partial"
+  if [[ "$(md5_of "$target.partial")" != "$archive_md5" ]]; then
+    rm -f "$target.partial"
+    echo "$archive_name did not match the MD5 pinned by $PLUGIN." >&2
+    exit 1
+  fi
+  mv "$target.partial" "$target"
+done

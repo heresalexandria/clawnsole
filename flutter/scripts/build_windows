@@ -117,6 +117,7 @@ find_runtime_directory() {
 print_heading "Windows x64 release build"
 prepare_flutter
 "$FLUTTER_DIRECTORY/scripts/prepare_windows_media_tools"
+"$FLUTTER_DIRECTORY/scripts/prefetch_windows_plugin_archives"
 
 OAUTH_BUILD_ARGUMENTS=()
 if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID:-}" ]]; then
@@ -130,10 +131,30 @@ if [[ -n "${CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET:-}" ]]; then
   )
 fi
 
-flutter build windows --release \
-  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
-  "${OAUTH_BUILD_ARGUMENTS[@]}" \
-  "$@"
+# A plugin's CMake fetches its own archives and reports a CDN hiccup as an
+# integrity failure; the prefetch above should leave it nothing to download,
+# but if one still slips through, wait for the CDN and try the build again.
+build_log="$(mktemp)"
+attempt=1
+while true; do
+  if flutter build windows --release \
+    "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
+    "${OAUTH_BUILD_ARGUMENTS[@]}" \
+    "$@" 2>&1 | tee "$build_log"; then
+    break
+  fi
+  if (( attempt >= 3 )) || ! grep -q \
+    -e "Integrity check failed" \
+    -e "please try to re-build project again" \
+    "$build_log"; then
+    exit 1
+  fi
+  echo "A plugin archive download failed (attempt $attempt of 3); retrying in 45 s." >&2
+  attempt=$((attempt + 1))
+  sleep 45
+  "$FLUTTER_DIRECTORY/scripts/prefetch_windows_plugin_archives"
+done
+rm -f "$build_log"
 
 if [[ ! -f "$RELEASE_DIRECTORY/Clawnsole.exe" ]]; then
   echo "Clawnsole.exe was not built at $RELEASE_DIRECTORY." >&2
