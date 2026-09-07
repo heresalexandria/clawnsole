@@ -35,8 +35,11 @@ than inventing new colors or sizes.
   itself.
 - **One calm pace.** Nothing pulses or slides far. Selection states animate
   ~140 ms; everything else just settles. The single exception is physical:
-  the Generate key's incandescent lamps wander a few percent while a
-  submission is in flight, because real filaments do.
+  the Generate key's incandescent lamps breathe, flicker and sag while a
+  submission is in flight, because a real lamp on a real supply does. It is
+  the only thing in the app that moves on its own, it is a property of the
+  hardware rather than an attention-getter, and it stops the moment the
+  console stops working.
 - **Capability is sacred.** Redesigns may reshape controls but never remove
   an input the provider supports. Prefer inference and disclosure over
   hiding features.
@@ -181,11 +184,24 @@ The value-setting controls are skeuomorphic console hardware, drawn in code
   hot spots — on pointer-down and while the **submission** is in flight,
   i.e. until the provider accepts the job; once the render is running the
   key returns to its unlit, pressable state (there is no spinner).
-  The lamps behave like lamps: they warm over ~240 ms (ease-out) and cool
-  with a ~420 ms afterglow, and while on the filaments wander a few
-  percent with an occasional brief sag (`HardwareLitButtonState.filament`,
-  0.9–1.05) — the one thing in the app that moves on its own, and it ticks
-  only while lit. Keyboard focus wears the brass halo. No specular band,
+  The lamps behave like lamps, and two lights live in the cap that are not
+  the same light. A finger on the key raises only the cap's own dim
+  **contact glow** (30 % of full, 120 ms); the **lamps** answer `lit`
+  alone, so the whole warm-up is still ahead of them when the job goes out
+  and a press that never becomes a submission never moves them. The
+  filament warms over ~340 ms, flaring ~7 % past its working brightness at
+  ~185 ms — a cold wire is a poor resistor — before settling exactly on it;
+  switched off it loses half its light in 50 ms and three quarters by
+  100 ms, then hangs on as an ember out to ~600 ms. While lit it
+  **breathes**: about 1.2 a second, eased so it dwells at the top and the
+  bottom, down to roughly three quarters of steady and back
+  (`HardwareLitButtonState.filament`, ~0.71–1.03), with the fine wander of
+  an imperfect supply over it and a deeper sag now and again. The two hot
+  spots lead and the whole block follows ~55 ms behind them
+  (`filamentBody`), because that is the order light reaches a diffuser in.
+  The filament ticks only while there is light in the lens, so a dark
+  console schedules no frames. Keyboard focus wears the brass halo. No
+  specular band,
   no gloss, no bloom: real lenses are matte and spill almost no light.
   Plum in both modes — a button is allowed to stay dark on paper.
 - **`HardwareSelector`** (`hardware_selector.dart`): the model selector —

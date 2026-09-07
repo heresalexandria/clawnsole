@@ -8,6 +8,13 @@
 // matte: no specular band, no gloss, no bloom. Its plastic is the same plum
 // in both appearance modes (a button is one of the two things allowed to
 // stay dark on paper); only the bezel shadow alphas change with the room.
+//
+// Two lights live in the cap and they are not the same light. The finger's
+// own contact glow comes up dim while the key is held — the console has not
+// accepted anything yet. The lamps proper belong to the console: they answer
+// only [HardwareLitButton.lit], so the whole warm-up is still ahead of them
+// when the job goes out, and a press that never turns into a submission
+// never moves them.
 
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -55,6 +62,11 @@ const _lensBottomIdle = Color(0xFF503653);
 const _lensTopLit = Color(0xFF9E4B90);
 const _lensBottomLit = Color(0xFF7E3B76);
 
+// A cold filament draws more than a hot one, so the first moment of a lamp
+// is brighter than its steady state. This is where the overshoot lands.
+const _lensTopFlash = Color(0xFFB35CA3);
+const _lensBottomFlash = Color(0xFF914688);
+
 // The incandescent lamps behind the diffuser.
 const _lamp = Color(0xFFEFAFDB);
 
@@ -68,6 +80,31 @@ const _keyShadow = Color(0xFF120C08);
 /// Cream ink for the legend: white-filled engraving on a coloured lens.
 const _legendInk = Color(0xFFF3EAD9);
 const _legendInkLit = Color(0xFFFFF8EE);
+
+// ---------------------------------------------------------------------------
+// Lamp timing. Every number here is a lamp fact, not a UI preference.
+// ---------------------------------------------------------------------------
+
+/// How long the filament takes to come up to heat.
+const Duration _warmUp = Duration(milliseconds: 340);
+
+/// How long the glass keeps a trace of it after the console lets go.
+const Duration _afterglow = Duration(milliseconds: 600);
+
+/// The key's own contact glow under a finger: quick on, unhurried off.
+const Duration _contactOn = Duration(milliseconds: 120);
+const Duration _contactOff = Duration(milliseconds: 220);
+
+/// How much light the contact glow puts in the lens compared with the lamps.
+const double _contactGlow = .3;
+
+/// The lamp's breath while it is lit: how far down it swings and how often.
+const double _breathFloor = .74;
+const double _breathHz = 1.18;
+
+/// The breath comes in over this long, so the warm-up is seen for itself
+/// before the lamp starts moving.
+const double _breathRampSeconds = .45;
 
 /// A fixed speckle pattern in unit space: the frosted diffuser's tooth.
 /// Generated once, mapped onto whatever size the lens ends up.
@@ -120,27 +157,70 @@ class HardwareLitButton extends StatefulWidget {
   State<HardwareLitButton> createState() => HardwareLitButtonState();
 }
 
+/// The filament coming up to heat. A cold wire is a poor resistor, so it
+/// draws hard for the first instant and flares a few percent past its
+/// working brightness before settling back to it.
+class _FilamentWarm extends Curve {
+  const _FilamentWarm();
+
+  static double _raw(double t) => 1 - math.exp(-4 * t) * math.cos(4.2 * t);
+
+  // Trimmed so the curve lands exactly on 1 at the end of the warm-up.
+  @override
+  double transformInternal(double t) => _raw(t) - (_raw(1) - 1) * t;
+}
+
+/// Switched off, a filament loses most of its light in a breath and then
+/// sits there glowing dim while the last heat leaves the wire.
+class _FilamentCool extends Curve {
+  const _FilamentCool();
+
+  /// [u] is how far into the cool-down we are, 0 to 1.
+  static double _ember(double u) =>
+      .74 * math.exp(-11 * u) + .26 * math.exp(-3.2 * u);
+
+  @override
+  double transformInternal(double t) {
+    // The reverse curve is handed the parent's remaining value, so the time
+    // that has passed is its complement.
+    final u = 1 - t;
+    return (_ember(u) - _ember(1) * u).clamp(0.0, 1.0);
+  }
+}
+
 /// Public so tests can read the lamp without screen-scraping pixels.
 class HardwareLitButtonState extends State<HardwareLitButton>
     with TickerProviderStateMixin {
-  // Incandescent lamps: the filament heats over a quarter second and
-  // settles; switched off it drops fast, then the afterglow lingers.
+  // The console's lamps. They answer `lit` and nothing else: a finger on the
+  // key does not light them, so the warm-up is still whole when the job goes
+  // out, and a press that comes to nothing never disturbs them.
   late final AnimationController _lamp = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 240),
-    reverseDuration: const Duration(milliseconds: 420),
+    duration: _warmUp,
+    reverseDuration: _afterglow,
     value: widget.lit ? 1 : 0,
   )..addStatusListener(_handleLampStatus);
   late final Animation<double> _glow = CurvedAnimation(
     parent: _lamp,
-    curve: Curves.easeOutCubic,
-    reverseCurve: Curves.easeInCubic,
+    curve: const _FilamentWarm(),
+    reverseCurve: const _FilamentCool(),
   );
 
-  // The filament's wander, ticking only while the lamps are on.
+  // The key's own contact glow while a finger holds it down.
+  late final AnimationController _contact = AnimationController(
+    vsync: this,
+    duration: _contactOn,
+    reverseDuration: _contactOff,
+  );
+
+  // The filament's life, ticking only while there is light in the lens.
   late final Ticker _filamentTicker = createTicker(_tickFilament);
   final ValueNotifier<double> _filament = ValueNotifier<double>(1);
+  double _filamentBody = 1;
   final int _seed = math.Random().nextInt(1 << 20);
+  late final List<double> _phases = <double>[
+    for (var i = 0; i < 3; i++) _hash01(i - 31) * 2 * math.pi,
+  ];
   late final AnimationController _hoverLift = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 140),
@@ -152,16 +232,25 @@ class HardwareLitButtonState extends State<HardwareLitButton>
 
   bool get _enabled => widget.onPressed != null;
 
-  /// How lit the lens is right now, 0 (lamps off) to 1 (full lamps).
+  /// How lit the lens is right now: 0 with everything off, 1 at the lamps'
+  /// working brightness, and a little over 1 at the top of the warm-up
+  /// flare. A held key on its own reaches only the contact glow.
   @visibleForTesting
-  double get litAmount => _glow.value;
+  double get litAmount => math.max(_glow.value, _contactGlow * _contact.value);
 
-  /// The filament's momentary brightness relative to steady, about
-  /// 0.9–1.05 while the lamps are on and exactly 1 when they are off.
+  /// The filament's momentary output relative to steady, as the hot spots
+  /// see it: roughly 0.72–1.06 while the lamps are on — the slow breath and
+  /// the fine flicker together — and exactly 1 when they are off.
   @visibleForTesting
   double get filament => _filament.value;
 
-  /// Whether the filament wander is ticking — true only while lit.
+  /// The same output as the whole block sees it: the diffuser lags the hot
+  /// spots by a few frames and rounds their edges off.
+  @visibleForTesting
+  double get filamentBody => _filamentBody;
+
+  /// Whether the filament is alive — true only while there is light in the
+  /// lens, from the first frame of warm-up to the last of the afterglow.
   @visibleForTesting
   bool get isFilamentLit => _filamentTicker.isActive;
 
@@ -183,11 +272,13 @@ class HardwareLitButtonState extends State<HardwareLitButton>
   void didUpdateWidget(HardwareLitButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.lit != oldWidget.lit) _driveLamp();
+    // Going inert mid-press drops the finger's own state. It must not reach
+    // the lamps: the console lights those, and it has just said to.
     if (!_enabled && (_pressed || _focused)) {
       _pressed = false;
       _focused = false;
       _hoverLift.reverse();
-      _driveLamp();
+      _driveContact();
     }
   }
 
@@ -196,60 +287,93 @@ class HardwareLitButtonState extends State<HardwareLitButton>
     _filamentTicker.dispose();
     _filament.dispose();
     _lamp.dispose();
+    _contact.dispose();
     _hoverLift.dispose();
     super.dispose();
   }
 
-  // The wander runs exactly as long as any light is in the lens: from the
-  // first frame of warm-up to the last of the afterglow, and never once
-  // the lamp is cold, so a dark console schedules no frames.
+  // The filament lives exactly as long as any light is in the lens: from the
+  // first frame of warm-up to the last of the afterglow, and never once the
+  // lamp is cold, so a dark console schedules no frames.
   void _handleLampStatus(AnimationStatus status) {
     if (status == AnimationStatus.dismissed) {
       _filamentTicker.stop();
       _filament.value = 1;
+      _filamentBody = 1;
     } else if (!_filamentTicker.isActive) {
       _filamentTicker.start();
     }
   }
 
   void _tickFilament(Duration elapsed) {
-    final next = _filamentAt(
-      elapsed.inMicroseconds / Duration.microsecondsPerSecond,
-    );
-    if ((next - _filament.value).abs() > .0004) _filament.value = next;
+    final t = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+    final hot = _filamentAt(t);
+    _filamentBody = _bodyAt(t);
+    if ((hot - _filament.value).abs() > .0004) _filament.value = hot;
   }
 
-  double _phase(int n) => math.Random(_seed + n).nextDouble() * 2 * math.pi;
+  /// A cheap, allocation-free noise in [0, 1) for integer [n]. The old code
+  /// built a [math.Random] per call, several times a frame, for this.
+  double _hash01(int n) {
+    var h = (n * 374761393 + _seed * 668265263) & 0x3fffffff;
+    h = (h ^ (h >> 13)) & 0x3fffffff;
+    h = (h * 1274126177) & 0x3fffffff;
+    h = (h ^ (h >> 16)) & 0x3fffffff;
+    return (h & 0xfffff) / 0x100000;
+  }
 
-  double _noise(int n) => math.Random(_seed ^ (n * 7919)).nextDouble();
-
-  /// Incandescent filaments never hold perfectly steady: a few percent of
-  /// slow wander from the supply, and now and then a brief sag. Subtle by
-  /// design — the eye should feel it before it sees it.
+  /// What the lamp is giving at [t] seconds, relative to its steady output.
+  ///
+  /// Two things are layered. A slow breath — a little over one a second,
+  /// eased so it dwells at the top and the bottom instead of sweeping evenly
+  /// — takes the lamp down to about three quarters and back; it fades in
+  /// over the first half second so the warm-up is read for itself first.
+  /// Over that runs the fine wander of a filament on an imperfect supply,
+  /// with a deeper sag now and then.
   double _filamentAt(double t) {
-    var w =
-        1 +
-        .02 * math.sin(2 * math.pi * 1.31 * t + _phase(0)) +
-        .012 * math.sin(2 * math.pi * 3.07 * t + _phase(1)) +
-        .008 * math.sin(2 * math.pi * 5.83 * t + _phase(2));
-    // Every so often, in about one window of nine hundred milliseconds in
-    // five, the supply sags for a moment.
-    const window = .9;
+    final swing = (1 + math.cos(2 * math.pi * _breathHz * t)) / 2;
+    final eased = Curves.easeInOutCubic.transform(swing.clamp(0.0, 1.0));
+    final depth = (t / _breathRampSeconds).clamp(0.0, 1.0);
+    final breath =
+        1 - (1 - (_breathFloor + (1 - _breathFloor) * eased)) * depth;
+    final fine =
+        .022 * math.sin(2 * math.pi * 3.11 * t + _phases[0]) +
+        .014 * math.sin(2 * math.pi * 5.87 * t + _phases[1]) +
+        .009 * math.sin(2 * math.pi * 9.43 * t + _phases[2]);
+    var w = breath * (1 + fine);
+    // Roughly three windows in ten, the supply drops for a moment.
+    const window = .7;
     final k = (t / window).floor();
-    if (_noise(k) < .22) {
-      final at = (k + .2 + .6 * _noise(k + 1000)) * window;
-      final d = (t - at) / .045;
-      w -= .07 * math.exp(-d * d);
+    if (_hash01(k) < .3) {
+      final at = (k + .18 + .64 * _hash01(k + 977)) * window;
+      final d = (t - at) / .038;
+      w -= .11 * math.exp(-d * d);
     }
-    return w.clamp(.9, 1.05);
+    return w.clamp(.62, 1.08);
   }
 
-  // One calm pace: 140 ms up, 280 ms down, and never a loop.
+  /// The same output after the diffuser: a few frames behind the hot spots
+  /// and averaged over two taps, so the block breathes a beat after them.
+  double _bodyAt(double t) {
+    const lag = .055;
+    return (_filamentAt(t - lag) + _filamentAt(t - lag - .035)) / 2;
+  }
+
+  // The lamps follow the console. Warm 340 ms, cool 600 ms, never a loop.
   void _driveLamp() {
-    if (widget.lit || _pressed) {
+    if (widget.lit) {
       _lamp.forward();
     } else {
       _lamp.reverse();
+    }
+  }
+
+  // The contact glow follows the finger, and only the finger.
+  void _driveContact() {
+    if (_pressed && _enabled) {
+      _contact.forward();
+    } else {
+      _contact.reverse();
     }
   }
 
@@ -258,7 +382,7 @@ class HardwareLitButtonState extends State<HardwareLitButton>
     if (_pressed == value) return;
     if (value) hardwareSelectionFeedback();
     setState(() => _pressed = value);
-    _driveLamp();
+    _driveContact();
   }
 
   /// [click] is false when the finger already clicked on the way down.
@@ -273,11 +397,21 @@ class HardwareLitButtonState extends State<HardwareLitButton>
     final dark = Theme.of(context).brightness == Brightness.dark;
 
     final face = AnimatedBuilder(
-      animation: Listenable.merge(<Listenable>[_lamp, _hoverLift, _filament]),
+      animation: Listenable.merge(<Listenable>[
+        _lamp,
+        _contact,
+        _hoverLift,
+        _filament,
+      ]),
       builder: (context, _) {
-        final lit = _glow.value;
-        final filament = _filament.value;
-        final glow = (lit * filament).clamp(0.0, 1.0);
+        // Three levels, because a diffused lamp is not one number: what is
+        // steadily in the lens, what the hot spots are giving this instant,
+        // and what has reached the whole block a few frames later.
+        final contact = _contactGlow * _contact.value;
+        final lamp = _glow.value;
+        final lit = math.max(lamp.clamp(0.0, 1.0), contact);
+        final glow = math.max(lamp * _filament.value, contact);
+        final body = math.max(lamp * _filamentBody, contact);
         final ink = Color.lerp(_legendInk, _legendInkLit, lit)!;
         final legend = Text(
           HardwareLitButton.engrave(widget.label),
@@ -324,7 +458,8 @@ class HardwareLitButtonState extends State<HardwareLitButton>
           painter: _IndicatorPainter(
             dark: dark,
             lit: lit,
-            filament: filament,
+            glow: glow,
+            body: body,
             hover: _hoverLift.value,
             pressed: _pressed,
             focusGlow: _focused ? context.tokens.brass : null,
@@ -411,7 +546,8 @@ class _IndicatorPainter extends CustomPainter {
   const _IndicatorPainter({
     required this.dark,
     required this.lit,
-    required this.filament,
+    required this.glow,
+    required this.body,
     required this.hover,
     required this.pressed,
     required this.focusGlow,
@@ -419,24 +555,39 @@ class _IndicatorPainter extends CustomPainter {
 
   final bool dark;
 
-  /// How far the lamps have warmed, 0 to 1.
+  /// The steady light in the lens, 0 to 1: what the structure of the cap —
+  /// its edge catch, its tooth, its ink — is lit by.
   final double lit;
 
-  /// The filament's momentary brightness relative to steady.
-  final double filament;
+  /// What the hot spots are giving this instant, breath and flicker
+  /// included. Runs a little over 1 at the top of the warm-up flare.
+  final double glow;
 
-  /// What the lamps are actually giving right now.
-  double get glow => (lit * filament).clamp(0.0, 1.0);
+  /// What has reached the whole block: the same light a few frames later,
+  /// with the diffuser's edges taken off it.
+  final double body;
 
-  /// The diffuser smooths the wander before it reaches the whole block, so
-  /// the body follows the filament only a little.
-  double get body => (lit * (.85 + .15 * filament)).clamp(0.0, 1.0);
   final double hover;
   final bool pressed;
   final Color? focusGlow;
 
+  /// The halo around each lamp sits between the two: further through the
+  /// diffuser than the hot spot, nearer than the block.
+  double get _halo => (glow + body) / 2;
+
   /// Hover is a small lift in the lens, not a colour change.
   Color _lift(Color color) => Color.lerp(color, Colors.white, .05 * hover)!;
+
+  /// An alpha that survives the warm-up flare pushing a level past 1.
+  static double _alpha(double base, double level) =>
+      (base * level).clamp(0.0, 1.0);
+
+  /// The lens plastic at [level]: from unlit through working brightness and,
+  /// past 1, on into the brief flare of a filament that is still cold.
+  static Color _plastic(Color idle, Color working, Color flash, double level) =>
+      level <= 1
+      ? Color.lerp(idle, working, level.clamp(0.0, 1.0))!
+      : Color.lerp(working, flash, (level - 1).clamp(0.0, 1.0))!;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -519,7 +670,7 @@ class _IndicatorPainter extends CustomPainter {
         const Radius.circular(_outerRadius + 1.5),
       ),
       Paint()
-        ..color = _spill.withValues(alpha: (dark ? .22 : .14) * glow)
+        ..color = _spill.withValues(alpha: _alpha(dark ? .26 : .17, _halo))
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
     );
   }
@@ -574,8 +725,10 @@ class _IndicatorPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: <Color>[
-            _lift(Color.lerp(_lensTopIdle, _lensTopLit, body)!),
-            _lift(Color.lerp(_lensBottomIdle, _lensBottomLit, body)!),
+            _lift(_plastic(_lensTopIdle, _lensTopLit, _lensTopFlash, body)),
+            _lift(
+              _plastic(_lensBottomIdle, _lensBottomLit, _lensBottomFlash, body),
+            ),
           ],
         ).createShader(lensRect),
     );
@@ -607,7 +760,9 @@ class _IndicatorPainter extends CustomPainter {
             Offset(lensRect.left + width * .3, lensRect.top + height * .58),
             Offset(lensRect.left + width * .7, lensRect.top + height * .58),
           ];
-    // The lamps' glow, wide and soft.
+    // The lamps' glow, wide and soft — one remove further through the
+    // diffuser than the filaments themselves, so it answers a beat later.
+    final halo = _halo;
     for (final center in centers) {
       final radius = math.max(height * 1.15, width * .34);
       canvas.drawCircle(
@@ -616,15 +771,16 @@ class _IndicatorPainter extends CustomPainter {
         Paint()
           ..shader = RadialGradient(
             colors: <Color>[
-              _lamp.withValues(alpha: .55 * glow),
-              _lamp.withValues(alpha: .2 * glow),
+              _lamp.withValues(alpha: _alpha(.58, halo)),
+              _lamp.withValues(alpha: _alpha(.21, halo)),
               _lamp.withValues(alpha: 0),
             ],
             stops: const <double>[0, .45, 1],
           ).createShader(Rect.fromCircle(center: center, radius: radius)),
       );
     }
-    // The hot spots where the filaments sit closest to the diffuser.
+    // The hot spots where the filaments sit closest to the diffuser. These
+    // lead: nothing stands between them and the wire.
     for (final center in centers) {
       final radius = height * .42;
       canvas.drawCircle(
@@ -633,8 +789,8 @@ class _IndicatorPainter extends CustomPainter {
         Paint()
           ..shader = RadialGradient(
             colors: <Color>[
-              const Color(0xFFFCE3F4).withValues(alpha: .42 * glow),
-              _lamp.withValues(alpha: .26 * glow),
+              const Color(0xFFFCE3F4).withValues(alpha: _alpha(.46, glow)),
+              _lamp.withValues(alpha: _alpha(.28, glow)),
               _lamp.withValues(alpha: 0),
             ],
             stops: const <double>[0, .35, 1],
@@ -709,7 +865,8 @@ class _IndicatorPainter extends CustomPainter {
   bool shouldRepaint(_IndicatorPainter old) =>
       old.dark != dark ||
       old.lit != lit ||
-      old.filament != filament ||
+      old.glow != glow ||
+      old.body != body ||
       old.hover != hover ||
       old.pressed != pressed ||
       old.focusGlow != focusGlow;
