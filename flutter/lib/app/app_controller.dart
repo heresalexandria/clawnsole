@@ -2553,11 +2553,16 @@ class AppController extends ChangeNotifier {
       // Test status also gates the compiled mobile credential. Refresh the
       // snapshot now so provider UI cannot retain the key after an unlock.
       try {
-        _apply(await gateway.load());
+        final revision = _snapshotRevision;
+        await _applySnapshotRead(
+          await gateway.load(),
+          startedAtRevision: revision,
+        );
       } on Object {
         // Request routing consults the active catalog directly; foreground
         // reconciliation can repair this best-effort UI snapshot later.
       }
+      if (_disposed) return;
       _resetPublishedProviderPrices();
       _reconcileProviderCatalogSelection();
       notifyListeners();
@@ -2699,7 +2704,11 @@ class AppController extends ChangeNotifier {
       // provider retention estimate lapsed while the app was suspended, and a
       // link just past that estimate deserves one recovery attempt first.
       if (hasAnyApiKey) await pollWorking(ignoreSchedule: true);
-      _apply(await gateway.load());
+      final revision = _snapshotRevision;
+      await _applySnapshotRead(
+        await gateway.load(),
+        startedAtRevision: revision,
+      );
       // Drive reconnection can stall on sockets the platform killed during
       // suspension; a bounded wait keeps this reconcile hook responsive for
       // the next foreground return.
@@ -3086,24 +3095,31 @@ class AppController extends ChangeNotifier {
       generationPreferences: Map.of(_generationPreferences),
     );
     _preferenceRevision += 1;
+    // A preference write answers with the store's whole library, read before
+    // the call returned. Applying that wholesale would drop any record another
+    // code path put in memory while the write was open (a delivery just
+    // imported, an organization edit whose write is still queued), so it goes
+    // through the same superseded-read merge every other asynchronous library
+    // read uses. The studio's live preferences still win over the response —
+    // this call is what just wrote them — so restorePreferences stays off.
+    Future<void> writePreferences() async {
+      final revision = _snapshotRevision;
+      final saved = await gateway.setPreferences(preferences);
+      if (_disposed) return;
+      await _applySnapshotRead(saved, startedAtRevision: revision);
+      await _retryPendingSettingsVaultSync();
+    }
+
     final operation = _preferenceWrites.then((_) async {
       try {
-        final saved = await gateway.setPreferences(preferences);
-        if (!_disposed) {
-          _apply(saved);
-          await _retryPendingSettingsVaultSync();
-        }
+        await writePreferences();
       } on Object {
         // Mobile and companion Drive tokens are short-lived. The client can
         // still look connected when a preference write (tab selection is one)
         // is the first request to discover expiration. Silently replace the
         // session and retry the idempotent preference write once.
         if (_disposed || !await resumeGoogleDrive(force: true)) rethrow;
-        final saved = await gateway.setPreferences(preferences);
-        if (!_disposed) {
-          _apply(saved);
-          await _retryPendingSettingsVaultSync();
-        }
+        await writePreferences();
       }
     });
     _preferenceWrites = operation.then<void>((_) {}, onError: (_) {});
