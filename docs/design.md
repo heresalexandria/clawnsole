@@ -635,6 +635,23 @@ generation-mode rule above still stands — tabs never select a mode.
   figure at a glance, with the realized/estimated wording, USD
   conversion, balance trail, and quote-vs-realized lines in a small
   anchored popover on tap.
+- **A film can show its API requests.** For anything that reached a
+  provider, the ⋯ menu offers *API Requests*
+  (`lib/ui/api_requests_modal.dart`): a film-modal-sized dialog listing every
+  call Clawnsole made for that film on this device — `#3 · 18:22:41 · GET
+  /v1/jobs/job-1 · 200 · 412 ms`, with its purpose (submit, poll, balance,
+  result) and provider underneath. A row accordions open onto the complete
+  request (URL, headers, body) and response (status, headers, body) in
+  monospace selectable blocks that scroll inside their own box, each row
+  carrying a **Copy** key and the header a **Copy all** that puts the whole
+  transcript — film id, provider and model, created, status, then every
+  request — on the clipboard as plain text for a bug report. Nothing shown is
+  a secret or a payload: credentials read `«redacted»` and uploaded frames,
+  base64 and media bodies read `«image/png 1.2 MB»`. The footer says where
+  the transcript lives, because it lives only here: transcripts are recorded
+  by the device that made the calls and are never synced, so a film opened on
+  another device says so plainly instead of implying nothing was sent.
+
 - **Extend writes the next scene.** On a delivered film whose model takes a
   reference video, the ⋯ menu offers *Extend*: it opens the film the way
   Reuse does — same model, settings, folder, and aesthetic — but attaches the

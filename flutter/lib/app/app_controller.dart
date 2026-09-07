@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
+import '../core/api_transcript.dart';
 import '../core/asset_extensions.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
@@ -33,6 +34,7 @@ import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
 import 'busy_registry.dart';
 
+part 'app_controller_api_transcript.dart';
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
