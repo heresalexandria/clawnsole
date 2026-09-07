@@ -18,11 +18,13 @@ import 'busy_button.dart';
 import 'estimated_progress_bar.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
+import 'generated_video_preview_cache.dart';
 import 'generation_loading_placeholder.dart';
 import 'generation_video.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'media_thumbnail.dart';
+import 'media_preview_work.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
@@ -2010,9 +2012,8 @@ class _GenerationMediaState extends State<GenerationMedia> {
     // surfaces, so the URI future is deferred: work starts on the first
     // await (a play tap), never at listing build for every visible card.
     final item = widget.item;
-    _uri = _DeferredFuture<Uri?>(
-      () => widget.controller.generationMediaUri(item),
-    );
+    final controller = widget.controller;
+    _uri = _DeferredFuture<Uri?>(() => controller.generationMediaUri(item));
     _imageBytes = widget.item.isImage
         ? widget.item.resultAsset != null
               ? widget.controller.readPreviewAsset(widget.item.resultAsset!)
@@ -2079,18 +2080,21 @@ class _GenerationMediaState extends State<GenerationMedia> {
   }
 }
 
-final Map<String, _GeneratedVideoPreviewJob> _previewJobs =
-    <String, _GeneratedVideoPreviewJob>{};
+final _previewJobs = GeneratedVideoPreviewCache();
 final LoadingTimingEstimator _previewTimings = LoadingTimingEstimator();
+final _previewControllerKeys = Expando<int>('generation-preview-controller');
+int _nextPreviewControllerKey = 0;
 
 /// One extraction job per film. A record's retained film never changes
 /// content — the background upload pass only moves it from a staged local
 /// id to a Drive id — so the key names *that* a film is retained, not which
 /// store holds it, and the swap neither restarts extraction nor flashes the
 /// card back to its loading placeholder.
-String _generationPreviewJobKey(Generation item) =>
-    '${item.storage.name}:${item.localId}:'
-    '${item.resultAsset != null ? 'retained' : item.resultUrl}';
+Object _generationPreviewJobKey(AppController controller, Generation item) => (
+  _previewControllerKeys[controller] ??= ++_nextPreviewControllerKey,
+  '${item.storage.name}:${item.localId}:'
+      '${item.resultAsset != null ? 'retained' : item.resultUrl}',
+);
 
 /// The idle chrome bar a full video card renders under its film: the cached
 /// filmstrip occupies the exact band the player's live timeline will use, and
@@ -2135,8 +2139,9 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
     }
     // The thumbnail preview above shares its extraction job; piggyback on it
     // instead of running a second frame pass for the same film.
-    _timeline = _previewJobs[_generationPreviewJobKey(widget.item)]?.future
-        .then((preview) => preview?.timeline);
+    _timeline = _previewJobs
+        .lookup(_generationPreviewJobKey(widget.controller, widget.item))
+        ?.then((preview) => preview?.timeline);
   }
 
   @override
@@ -2254,25 +2259,6 @@ class _GenerationIdleChromeState extends State<GenerationIdleChrome> {
   }
 }
 
-class _GeneratedVideoPreview {
-  const _GeneratedVideoPreview({required this.thumbnail, this.timeline});
-
-  final Uint8List thumbnail;
-  final Uint8List? timeline;
-}
-
-class _GeneratedVideoPreviewJob {
-  const _GeneratedVideoPreviewJob({
-    required this.future,
-    required this.startedAt,
-    required this.expectedDuration,
-  });
-
-  final Future<_GeneratedVideoPreview?> future;
-  final DateTime startedAt;
-  final Duration expectedDuration;
-}
-
 class _CachedVideoPreview extends StatefulWidget {
   const _CachedVideoPreview({
     required this.controller,
@@ -2291,59 +2277,49 @@ class _CachedVideoPreview extends StatefulWidget {
 }
 
 class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
-  Future<_GeneratedVideoPreview?>? _preview;
-  _GeneratedVideoPreview? _initialPreview;
+  Future<GeneratedVideoPreview?>? _preview;
+  GeneratedVideoPreview? _initialPreview;
   late int _sourceRevision;
   late DateTime _previewStartedAt;
   late Duration _previewExpectedDuration;
 
-  String get _jobKey => _generationPreviewJobKey(widget.item);
-
-  Future<Uint8List> _read(AssetReference reference) =>
-      widget.controller.readPreviewAsset(reference);
-
-  _GeneratedVideoPreviewJob _previewJob(String key) {
-    final existing = _previewJobs[key];
-    if (existing != null) return existing;
-    final startedAt = DateTime.now();
-    final stopwatch = Stopwatch()..start();
-    final expectedDuration = _previewTimings.expected(
-      LoadingOperation.generationPreviewBuild,
+  GeneratedVideoPreviewJob _previewJob(
+    Object key,
+    AppController controller,
+    Generation item,
+  ) {
+    return _previewJobs.load(
+      key,
+      expectedDuration: _previewTimings.expected(
+        LoadingOperation.generationPreviewBuild,
+      ),
+      loader: () async {
+        final stopwatch = Stopwatch()..start();
+        final preview = await _generateAndCache(controller, item);
+        if (preview != null) {
+          _previewTimings.record(
+            LoadingOperation.generationPreviewBuild,
+            stopwatch.elapsed,
+          );
+        }
+        return preview;
+      },
     );
-    late final _GeneratedVideoPreviewJob job;
-    final future = _generateAndCache().then((preview) {
-      stopwatch.stop();
-      if (preview == null && identical(_previewJobs[key], job)) {
-        _previewJobs.remove(key);
-      } else if (preview != null) {
-        _previewTimings.record(
-          LoadingOperation.generationPreviewBuild,
-          stopwatch.elapsed,
-        );
-      }
-      return preview;
-    });
-    job = _GeneratedVideoPreviewJob(
-      future: future,
-      startedAt: startedAt,
-      expectedDuration: expectedDuration,
-    );
-    _previewJobs[key] = job;
-    return job;
   }
 
   void _load() {
+    final controller = widget.controller;
+    final item = widget.item;
+    final jobKey = _generationPreviewJobKey(controller, item);
     _initialPreview = null;
-    _sourceRevision = widget.controller.videoPreviewSourceRevision;
-    final thumbnail = widget.item.thumbnailAsset;
+    _sourceRevision = controller.videoPreviewSourceRevision;
+    final thumbnail = item.thumbnailAsset;
     if (thumbnail != null) {
-      final restoredThumbnail = widget.controller.cachedAssetBytes(thumbnail);
+      final restoredThumbnail = controller.cachedAssetBytes(thumbnail);
       if (restoredThumbnail != null) {
-        _initialPreview = _GeneratedVideoPreview(
+        _initialPreview = GeneratedVideoPreview(
           thumbnail: restoredThumbnail,
-          timeline: widget.controller.cachedAssetBytes(
-            widget.item.timelineThumbnailAsset,
-          ),
+          timeline: controller.cachedAssetBytes(item.timelineThumbnailAsset),
         );
       }
       _previewStartedAt = DateTime.now();
@@ -2351,19 +2327,19 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
         LoadingOperation.generationPreviewRead,
       );
       final stopwatch = Stopwatch()..start();
-      _preview = Future<_GeneratedVideoPreview?>(() async {
+      _preview = Future<GeneratedVideoPreview?>(() async {
         try {
-          final thumbnailBytes = await _read(thumbnail);
+          final thumbnailBytes = await controller.readPreviewAsset(thumbnail);
           Uint8List? timelineBytes;
-          final timeline = widget.item.timelineThumbnailAsset;
+          final timeline = item.timelineThumbnailAsset;
           if (timeline != null) {
             try {
-              timelineBytes = await _read(timeline);
+              timelineBytes = await controller.readPreviewAsset(timeline);
             } on Object {
               // A missing timeline strip must not hide the main thumbnail.
             }
           }
-          final preview = _GeneratedVideoPreview(
+          final preview = GeneratedVideoPreview(
             thumbnail: thumbnailBytes,
             timeline: timelineBytes,
           );
@@ -2374,49 +2350,53 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
           );
           return preview;
         } on Object {
-          final job = _previewJob('$_jobKey:regenerate');
+          final job = _previewJob((jobKey, 'regenerate'), controller, item);
           return await job.future;
         }
       });
       return;
     }
-    final job = _previewJob(_jobKey);
+    final job = _previewJob(jobKey, controller, item);
     _previewStartedAt = job.startedAt;
     _previewExpectedDuration = job.expectedDuration;
     _preview = job.future;
   }
 
-  Future<_GeneratedVideoPreview?> _generateAndCache() async {
+  static Future<GeneratedVideoPreview?> _generateAndCache(
+    AppController controller,
+    Generation item,
+  ) async {
     try {
       // Frame extraction must never force a full Drive download for a card
       // that is merely visible: ask only for a cheap source (cached file,
       // local file, or companion URL). A cold Drive film keeps its
       // tap-to-play placeholder until the cache warms up.
-      final uri = await widget.controller.generationPreviewSourceUri(
-        widget.item,
-      );
+      final uri = await controller.generationPreviewSourceUri(item);
       if (uri == null) return null;
-      final configured = widget.item.config.duration;
+      final configured = item.config.duration;
       final seconds = configured is num ? configured.toDouble() : 8.0;
       final duration = Duration(
         milliseconds: (seconds.clamp(1, 120) * 1000).round(),
       );
-      final positions = videoTimelinePositions(duration, 6);
-      final frames = <Uint8List>[];
-      for (final position in positions) {
-        final frame = await loadVideoFrame(uri, position);
-        if (frame != null) frames.add(frame);
-      }
-      if (frames.isEmpty) return null;
-      final timeline = frames.length > 1
-          ? await _composeTimelineStrip(frames)
-          : null;
-      final preview = _GeneratedVideoPreview(
-        thumbnail: frames.first,
-        timeline: timeline,
-      );
-      await widget.controller.cacheGenerationPreviews(
-        widget.item,
+      final preview = await mediaPreviewWork.run(() async {
+        final positions = videoTimelinePositions(duration, 6);
+        final frames = <Uint8List>[];
+        for (final position in positions) {
+          final frame = await loadVideoFrame(uri, position);
+          if (frame != null) frames.add(frame);
+        }
+        if (frames.isEmpty) return null;
+        final timeline = frames.length > 1
+            ? await _composeTimelineStrip(frames)
+            : null;
+        return GeneratedVideoPreview(
+          thumbnail: frames.first,
+          timeline: timeline,
+        );
+      });
+      if (preview == null) return null;
+      await controller.cacheGenerationPreviews(
+        item,
         thumbnailBytes: preview.thumbnail,
         timelineBytes: preview.timeline,
       );
@@ -2490,7 +2470,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<_GeneratedVideoPreview?>(
+  Widget build(BuildContext context) => FutureBuilder<GeneratedVideoPreview?>(
     future: _preview,
     initialData: _initialPreview,
     builder: (context, snapshot) {

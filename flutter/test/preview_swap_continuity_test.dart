@@ -37,28 +37,31 @@ const _regeneratedThumbnail = AssetReference(
   bytes: 3,
 );
 
-Generation _film({AssetReference? thumbnail, AssetReference? result}) =>
-    Generation(
-      localId: 'made-here',
-      provider: 'krea',
-      model: 'bytedance/seedance-2-5',
-      status: 'Ready',
-      prompt: 'A lighthouse at dusk.',
-      mode: VideoMode.t2v,
-      config: const GenerationConfig(
-        aspectRatio: '16:9',
-        duration: 5,
-        resolution: 'hd',
-        generateAudio: false,
-        safetyTolerance: 2,
-        draft: false,
-      ),
-      resultAsset: result,
-      thumbnailAsset: thumbnail,
-      createdAt: _now,
-      updatedAt: _now,
-      storage: LibraryStorage.drive,
-    );
+Generation _film({
+  AssetReference? thumbnail,
+  AssetReference? result,
+  String id = 'made-here',
+}) => Generation(
+  localId: id,
+  provider: 'krea',
+  model: 'bytedance/seedance-2-5',
+  status: 'Ready',
+  prompt: 'A lighthouse at dusk.',
+  mode: VideoMode.t2v,
+  config: const GenerationConfig(
+    aspectRatio: '16:9',
+    duration: 5,
+    resolution: 'hd',
+    generateAudio: false,
+    safetyTolerance: 2,
+    draft: false,
+  ),
+  resultAsset: result,
+  thumbnailAsset: thumbnail,
+  createdAt: _now,
+  updatedAt: _now,
+  storage: LibraryStorage.drive,
+);
 
 LocalSnapshot _snapshot(List<Generation> films) => LocalSnapshot(
   generations: films,
@@ -102,6 +105,50 @@ class _Gateway implements AppGateway, GoogleDriveGateway {
 }
 
 void main() {
+  test(
+    'a batch publish transfers previews without double-counting buffers',
+    () async {
+      final local = <AssetReference>[
+        for (var index = 0; index < 3; index++)
+          AssetReference(
+            kind: 'local',
+            value: 'staged-$index',
+            label: 'thumbnail',
+          ),
+      ];
+      final drive = <AssetReference>[
+        for (var index = 0; index < 3; index++)
+          AssetReference(
+            kind: 'drive',
+            value: 'published-$index',
+            label: 'thumbnail',
+          ),
+      ];
+      final gateway = _Gateway({
+        for (final asset in local)
+          'local:${asset.value}': Uint8List(10 * 1024 * 1024),
+      });
+      final controller = AppController(gateway: gateway)
+        ..snapshot = _snapshot([
+          for (var index = 0; index < 3; index++)
+            _film(thumbnail: local[index], id: 'film-$index'),
+        ]);
+      addTearDown(controller.dispose);
+      for (final asset in local) {
+        await controller.readPreviewAsset(asset);
+      }
+      gateway.loadResult = _snapshot([
+        for (var index = 0; index < 3; index++)
+          _film(thumbnail: drive[index], id: 'film-$index'),
+      ]);
+      await controller.refreshDriveLibraryForTesting();
+      for (final asset in drive) {
+        expect(controller.cachedAssetBytes(asset), isNotNull);
+        await controller.readPreviewAsset(asset);
+      }
+      expect(gateway.reads, 3, reason: 'published previews never redownload');
+    },
+  );
   test(
     'a restored preview survives the publish swap without a refetch',
     () async {

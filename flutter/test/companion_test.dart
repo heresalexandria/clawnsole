@@ -1498,7 +1498,18 @@ void main() {
         );
         expect(direct.statusCode, 200);
         expect(direct.bodyBytes, filmOne);
-        expect(drive.fullReads, 1);
+        expect(drive.fullReads, 0);
+        expect(drive.streamDownloads, 3);
+
+        final directSeek = await http.get(
+          base.resolve('/assets?id=drive-film-one&kind=drive'),
+          headers: const {'Range': 'bytes=1-'},
+        );
+        expect(directSeek.statusCode, 206);
+        expect(directSeek.bodyBytes, filmOne.sublist(1));
+        expect(directSeek.headers['content-range'], 'bytes 1-7/8');
+        expect(drive.fullReads, 0);
+        expect(drive.rangeReads, 2);
       } finally {
         await subscription.cancel();
         await server.close(force: true);
@@ -1954,6 +1965,19 @@ class _StreamingDriveStore extends _MemoryDriveStore {
       bytes,
       start.clamp(0, bytes.length),
       (end + 1).clamp(0, bytes.length),
+    );
+  }
+
+  @override
+  Future<GoogleDriveByteStream> readAssetRangeStream(
+    AssetReference reference,
+    int start,
+    int end,
+  ) async {
+    final bytes = await readAssetRange(reference, start, end);
+    return GoogleDriveByteStream(
+      Stream.value(bytes),
+      contentLength: bytes.length,
     );
   }
 }

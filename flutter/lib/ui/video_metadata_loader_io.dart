@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../core/models.dart';
-import 'video_controller.dart';
+import 'video_probe.dart';
 
 Future<VideoSourceMetadata?> loadVideoMetadata(Uri uri) async {
   // Windows registers media_kit as its video_player backend (main.dart), so
@@ -22,27 +22,16 @@ Future<VideoSourceMetadata?> loadVideoMetadata(Uri uri) async {
   }
 }
 
-Future<VideoSourceMetadata?> _loadWithVideoPlayer(Uri uri) async {
-  final controller = createVideoController(uri);
-  try {
-    await controller.initialize().timeout(const Duration(seconds: 15));
-    final value = controller.value;
-    final metadata = VideoSourceMetadata(
-      width: value.size.width.round(),
-      height: value.size.height.round(),
-      durationSeconds:
-          value.duration.inMicroseconds / Duration.microsecondsPerSecond,
-    );
-    return metadata.isUsable ? metadata : null;
-  } on Object {
-    return null;
-  } finally {
-    // dispose() waits on the platform's create call, which never completes
-    // when create itself failed — awaiting it here would wedge the probe (and
-    // the caller's loading state) forever. Release without blocking.
-    unawaited(controller.dispose().catchError((_) {}));
-  }
-}
+Future<VideoSourceMetadata?> _loadWithVideoPlayer(Uri uri) =>
+    readVideoProbe(uri, (value) {
+      final metadata = VideoSourceMetadata(
+        width: value.size.width.round(),
+        height: value.size.height.round(),
+        durationSeconds:
+            value.duration.inMicroseconds / Duration.microsecondsPerSecond,
+      );
+      return metadata.isUsable ? metadata : null;
+    });
 
 const _maximumSourceBytes = 50 * 1024 * 1024;
 

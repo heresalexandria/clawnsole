@@ -523,6 +523,25 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
     }
   }
 
+  /// Streams a playback range without materializing a potentially full film.
+  Future<GoogleDriveByteStream> readAssetRangeStream(
+    AssetReference reference,
+    int start,
+    int end,
+  ) async {
+    if (reference.kind != 'drive') {
+      throw StateError('The asset is not stored in Google Drive.');
+    }
+    _requireConnected();
+    final sessionRevision = _sessionRevision;
+    try {
+      return await _api!.readFileRangeStream(reference.value, start, end);
+    } on GoogleDriveException catch (error) {
+      _handleDriveError(error, sessionRevision);
+      rethrow;
+    }
+  }
+
   /// The already-materialized URI for [reference], or null when presenting it
   /// would require a Drive download.
   Future<Uri?> cachedAssetUri(AssetReference reference) async {
