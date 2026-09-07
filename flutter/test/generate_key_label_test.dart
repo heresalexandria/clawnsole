@@ -20,6 +20,7 @@ HardwareLitButton _key(WidgetTester tester) =>
 /// and it must not change width doing it: the key hugs its own legend, so
 /// the shorter reading would shrink it under the finger that pressed it.
 void main() {
+  _submittingReleasesWithTheReceipt();
   testWidgets('the Generate key reads SUBMITTING while a submission is in '
       'flight and keeps its width', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1000));
@@ -91,11 +92,65 @@ void main() {
   });
 }
 
+/// The key relaxes the moment the provider's receipt lands, not after the
+/// housekeeping that follows it (input previews, credits). Once a film is
+/// In progress on the card, the console must never still read SUBMITTING.
+void _submittingReleasesWithTheReceipt() {
+  test('submitting clears in the same frame the receipt lands', () async {
+    final gate = Completer<void>();
+    final controller = AppController(
+      gateway: _BlockingGateway(gate, answersWithReceipt: true),
+    );
+    await controller.initialize();
+    controller
+      ..selectedProviderId = 'runway'
+      ..selectedModelId = 'seedance2_5';
+    controller.updateForm((form) => form.prompt = 'A slow tide over basalt.');
+
+    // Every time the studio speaks while a film is already accepted, the key
+    // must already be dark.
+    final litWhileAccepted = <String>[];
+    controller.addListener(() {
+      final accepted = controller.visibleGenerations
+          .where((item) => item.canCheckStatus)
+          .toList();
+      if (accepted.isNotEmpty && controller.submitting) {
+        litWhileAccepted.add(accepted.first.status);
+      }
+    });
+
+    final submission = controller.submit(
+      providerRetentionRiskAcknowledged: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.submitting, isTrue);
+    gate.complete();
+    await submission;
+
+    expect(controller.submitting, isFalse);
+    expect(
+      controller.visibleGenerations.single.canCheckStatus,
+      isTrue,
+      reason: 'the receipt landed',
+    );
+    expect(
+      litWhileAccepted,
+      isEmpty,
+      reason: 'the key read SUBMITTING after the film was accepted',
+    );
+    controller.dispose();
+  });
+}
+
 /// Holds `submit` open so the console can be read mid-flight.
 class _BlockingGateway implements AppGateway {
-  _BlockingGateway(this.gate);
+  _BlockingGateway(this.gate, {this.answersWithReceipt = false});
 
   final Completer<void> gate;
+
+  /// When set, `submit` answers like a provider that accepted the job:
+  /// a Pending record with a request id and a polling URL.
+  final bool answersWithReceipt;
 
   LocalSnapshot snapshot = const LocalSnapshot(
     generations: <Generation>[],
@@ -136,7 +191,14 @@ class _BlockingGateway implements AppGateway {
   @override
   Future<Generation> submit(GenerationSubmission submission) async {
     await gate.future;
-    return submission.record;
+    if (!answersWithReceipt) return submission.record;
+    return submission.record.copyWith(
+      status: 'Pending',
+      requestId: 'job-1',
+      pollingUrl: 'https://example.invalid/jobs/job-1',
+      providerAcceptedAt: DateTime.now().toUtc(),
+      updatedAt: DateTime.now().toUtc(),
+    );
   }
 
   @override
