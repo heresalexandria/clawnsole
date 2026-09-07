@@ -7,6 +7,7 @@ import '../app/app_theme.dart';
 import '../core/asset_extensions.dart';
 import '../core/models.dart';
 import '../core/provider_catalog.dart';
+import 'api_requests_modal.dart';
 import 'busy_button.dart';
 import 'common_widgets.dart';
 import 'formatters.dart';
@@ -452,6 +453,7 @@ enum _DenseGenerationAction {
   copyToDrive,
   checkStatus,
   details,
+  apiRequests,
   delete,
 }
 
@@ -512,6 +514,12 @@ class GenerationActionsMenu extends StatelessWidget {
       _DenseGenerationAction.checkStatus,
     if (includeDetails && item.hasProviderDetails)
       _DenseGenerationAction.details,
+    // Offered for anything that has been sent to a provider, whether or not
+    // it came back: a failed submission is exactly what a director wants the
+    // transcript for. The modal explains an empty one.
+    if (controller.canReadApiRequests &&
+        (item.requestId != null || item.hasProviderDetails))
+      _DenseGenerationAction.apiRequests,
     if (onDelete != null) _DenseGenerationAction.delete,
   ];
 
@@ -587,6 +595,14 @@ class GenerationActionsMenu extends StatelessWidget {
                     item: item,
                   ),
                 );
+              case _DenseGenerationAction.apiRequests:
+                unawaited(
+                  showApiRequestsModal(
+                    context,
+                    controller: controller,
+                    item: item,
+                  ),
+                );
               case _DenseGenerationAction.delete:
                 onDelete?.call();
             }
@@ -596,7 +612,9 @@ class GenerationActionsMenu extends StatelessWidget {
                 action == _DenseGenerationAction.copyToDrive &&
                 controller.isCopyingGeneration(item.localId);
             return PopupMenuItem<_DenseGenerationAction>(
-              key: ValueKey('generation-action-${action.name}'),
+              key: ValueKey(
+                'generation-action-${_denseGenerationActionKey(action)}',
+              ),
               value: action,
               enabled: !copying,
               child: Row(
@@ -629,6 +647,14 @@ class GenerationActionsMenu extends StatelessWidget {
   }
 }
 
+/// The stable key a verb answers to. Every verb uses its enum name; the
+/// transcript's is spelled the way its label reads.
+String _denseGenerationActionKey(_DenseGenerationAction action) =>
+    switch (action) {
+      _DenseGenerationAction.apiRequests => 'api-requests',
+      final other => other.name,
+    };
+
 IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
     switch (action) {
       _DenseGenerationAction.move => Icons.drive_file_move_outline,
@@ -642,6 +668,7 @@ IconData _denseGenerationActionIcon(_DenseGenerationAction action) =>
       _DenseGenerationAction.copyToDrive => Icons.cloud_upload_outlined,
       _DenseGenerationAction.checkStatus => Icons.sync_rounded,
       _DenseGenerationAction.details => Icons.receipt_long_rounded,
+      _DenseGenerationAction.apiRequests => Icons.terminal_rounded,
       _DenseGenerationAction.delete => Icons.delete_outline_rounded,
     };
 
@@ -660,6 +687,7 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
   _DenseGenerationAction.checkStatus => 'Check status',
   _DenseGenerationAction.details => 'Open film',
+  _DenseGenerationAction.apiRequests => 'API Requests',
   _DenseGenerationAction.delete => 'Delete history record',
 };
 

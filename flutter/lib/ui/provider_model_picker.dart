@@ -48,15 +48,25 @@ Set<String> _collapsedFor(AppController controller) =>
 ///
 /// The chosen model is applied through [AppController.selectProviderModel]
 /// before the future completes; dismissing without a choice changes nothing.
+///
+/// A caller choosing a model for something other than the open draft — the
+/// Defaults desk picks the model new drafts start on — passes [onSelected] to
+/// take the choice itself, and [selectedProviderId] / [selectedModelId] so the
+/// list ticks the model it is actually choosing for.
 Future<void> showProviderModelPicker(
   BuildContext context,
-  AppController controller,
-) async {
+  AppController controller, {
+  Future<void> Function(String providerId, String modelId)? onSelected,
+  String? selectedProviderId,
+  String? selectedModelId,
+}) async {
   final choice = await showDialog<String>(
     context: context,
     builder: (context) => _ProviderModelPickerDialog(
       key: const ValueKey<String>('provider-model-picker'),
       controller: controller,
+      selectedProviderId: selectedProviderId,
+      selectedModelId: selectedModelId,
     ),
   );
   if (choice == null) return;
@@ -65,15 +75,26 @@ Future<void> showProviderModelPicker(
   final model = choice.substring(divider + 1);
   // A provider the director just picked from stays open next time.
   _collapsedFor(controller).remove(provider);
-  await controller.selectProviderModel(provider, model);
+  await (onSelected == null
+      ? controller.selectProviderModel(provider, model)
+      : onSelected(provider, model));
 }
 
 /// The dialog shell: the theme's dialog surface, sized to the room, with the
 /// search field standing in for a title bar.
 class _ProviderModelPickerDialog extends StatelessWidget {
-  const _ProviderModelPickerDialog({required this.controller, super.key});
+  const _ProviderModelPickerDialog({
+    required this.controller,
+    super.key,
+    this.selectedProviderId,
+    this.selectedModelId,
+  });
 
   final AppController controller;
+
+  /// The model to tick, when it is not the open draft's.
+  final String? selectedProviderId;
+  final String? selectedModelId;
 
   @override
   Widget build(BuildContext context) {
@@ -90,7 +111,11 @@ class _ProviderModelPickerDialog extends StatelessWidget {
       child: SizedBox(
         width: narrow ? double.infinity : 420,
         height: height,
-        child: _ProviderSearchMenu(controller: controller),
+        child: _ProviderSearchMenu(
+          controller: controller,
+          selectedProviderId: selectedProviderId,
+          selectedModelId: selectedModelId,
+        ),
       ),
     );
   }
@@ -99,9 +124,15 @@ class _ProviderModelPickerDialog extends StatelessWidget {
 /// The picker's body: the search field, then the scrolling list of favorites
 /// and provider sections.
 class _ProviderSearchMenu extends StatefulWidget {
-  const _ProviderSearchMenu({required this.controller});
+  const _ProviderSearchMenu({
+    required this.controller,
+    this.selectedProviderId,
+    this.selectedModelId,
+  });
 
   final AppController controller;
+  final String? selectedProviderId;
+  final String? selectedModelId;
 
   @override
   State<_ProviderSearchMenu> createState() => _ProviderSearchMenuState();
@@ -111,6 +142,11 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
   final TextEditingController _search = TextEditingController();
 
   Set<String> get _collapsedProviders => _collapsedFor(widget.controller);
+
+  String get _selectedProviderId =>
+      widget.selectedProviderId ?? widget.controller.selectedProviderId;
+  String get _selectedModelId =>
+      widget.selectedModelId ?? widget.controller.selectedModel.id;
 
   @override
   void dispose() {
@@ -253,8 +289,8 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                         key: const ValueKey('provider-model-favorites'),
                         cut: cuts[_favoritesSliceKey]!,
                         favorites: favorites,
-                        selectedProviderId: controller.selectedProviderId,
-                        selectedModelId: controller.selectedModel.id,
+                        selectedProviderId: _selectedProviderId,
+                        selectedModelId: _selectedModelId,
                         onUnstar: (favorite) => unawaited(
                           controller.toggleFavoriteModel(
                             favorite.provider.id,
@@ -274,8 +310,8 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
                         initiallyExpanded: !_collapsedProviders.contains(
                           match.provider.id,
                         ),
-                        selectedProviderId: controller.selectedProviderId,
-                        selectedModelId: controller.selectedModel.id,
+                        selectedProviderId: _selectedProviderId,
+                        selectedModelId: _selectedModelId,
                         favorite: controller.isFavoriteProvider(
                           match.provider.id,
                         ),

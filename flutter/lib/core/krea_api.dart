@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
 import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
@@ -199,7 +200,7 @@ const _kreaRouteSpecs = <String, _KreaRouteSpec>{
 
 class KreaApi {
   KreaApi({http.Client? client, Uri? baseUrl})
-    : _client = client ?? http.Client(),
+    : _client = recordingProviderClient(client ?? http.Client()),
       _baseUrl = baseUrl ?? Uri.parse('https://api.krea.ai');
 
   final http.Client _client;

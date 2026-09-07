@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
 import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
@@ -12,7 +13,7 @@ import 'reference_prompts.dart';
 
 class RunwayApi {
   RunwayApi({http.Client? client, Uri? baseUrl, Uri? modelGuideUrl})
-    : _client = client ?? http.Client(),
+    : _client = recordingProviderClient(client ?? http.Client()),
       _baseUrl = baseUrl ?? Uri.parse('https://api.dev.runwayml.com'),
       _modelGuideUrl =
           modelGuideUrl ??

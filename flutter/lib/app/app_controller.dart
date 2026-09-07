@@ -6,11 +6,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 
+import '../core/api_transcript.dart';
 import '../core/asset_extensions.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/composer_tabs.dart';
 import '../core/aesthetic_reference.dart';
+import '../core/create_defaults.dart';
 import '../core/data_location.dart';
 import '../core/gateway.dart';
 import '../core/generation_timing.dart';
@@ -32,6 +34,7 @@ import '../core/shell_bridge.dart';
 import '../core/video_cache_gateway.dart';
 import 'busy_registry.dart';
 
+part 'app_controller_api_transcript.dart';
 part 'app_controller_rewrite.dart';
 part 'app_controller_screenplay.dart';
 part 'app_controller_workspace.dart';
@@ -458,6 +461,12 @@ class ComposerTab {
   int pendingDropReferenceAdds = 0;
   int pendingFrameAdds = 0;
 
+  /// The format and aesthetic this tab was opened with — inherited from the
+  /// draft before it, or asked for on the Defaults desk. Neither is work the
+  /// director did *here*, so a tab that still matches them stays seedable.
+  bool openedScreenplayMode = false;
+  String? openedAestheticReferenceId;
+
   String get label => composerTabTitle(title, form.prompt);
 
   /// Nothing has been directed here yet, so seeding it in place clobbers no
@@ -466,8 +475,8 @@ class ComposerTab {
       !hasUserEdits &&
       (title?.trim().isEmpty ?? true) &&
       form.prompt.trim().isEmpty &&
-      !form.screenplayMode &&
-      form.aestheticReferenceId == null &&
+      form.screenplayMode == openedScreenplayMode &&
+      form.aestheticReferenceId == openedAestheticReferenceId &&
       form.aestheticCustomText == null &&
       form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
@@ -526,6 +535,10 @@ class AppController extends ChangeNotifier {
 
   final List<ComposerTab> _composerTabs = <ComposerTab>[];
   final Map<String, GenerationPreferences> _generationPreferences = {};
+
+  /// What a new blank draft opens with. Every unset field inherits from the
+  /// previous draft, which is what happens with no defaults at all.
+  CreateDefaults createDefaults = CreateDefaults.none;
   Timer? _generationPreferencesSaveTimer;
   String _activeComposerTabId = '';
 
@@ -586,6 +599,10 @@ class AppController extends ChangeNotifier {
 
   /// Which half of the References desk is showing (session-only).
   ReferencesTab referencesTab = ReferencesTab.media;
+
+  /// Which desk of the Settings screen is showing (session-only). A deep link
+  /// that knows where it means opens the screen through [openSettings].
+  SettingsTab settingsTab = SettingsTab.general;
 
   /// Aesthetic library filters on the References desk (session-only).
   String aestheticSearch = '';
@@ -820,9 +837,19 @@ class AppController extends ChangeNotifier {
 
   /// Opens a blank workspace using the last-used settings for its provider and
   /// model. The direction and everything attached start empty.
-  ComposerTab addComposerTab({bool activate = true}) {
+  ///
+  /// [applyCreateDefaults] is false for the tabs a film is about to be
+  /// restored into: Reuse, Extend and Enhance carry the film's own recipe, and
+  /// a desk default has no business overruling it.
+  ComposerTab addComposerTab({
+    bool activate = true,
+    bool applyCreateDefaults = true,
+  }) {
     final source = activeComposerTab;
-    final tab = _blankComposerTab(source);
+    final tab = _blankComposerTab(
+      source,
+      applyCreateDefaults: applyCreateDefaults,
+    );
     _composerTabs.add(tab);
     if (activate) {
       _activeComposerTabId = tab.id;
@@ -2868,6 +2895,7 @@ class AppController extends ChangeNotifier {
       localVideoCacheMb = value.preferences.localVideoCacheMb;
       localThumbnailCacheMb = value.preferences.localThumbnailCacheMb;
       autoFixReferenceVideos = value.preferences.autoFixReferenceVideos;
+      createDefaults = value.preferences.createDefaults;
       costDeskColumns = value.preferences.costDeskColumns;
       rewriteProviderId = value.preferences.rewriteProvider;
       rewriteModelIds
@@ -3343,6 +3371,19 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     try {
       await _savePreferences(_preferences(autoFixReferenceVideos: value));
+    } on Object catch (error) {
+      showNotice(_message(error));
+    }
+  }
+
+  /// Records what a new blank draft should start with. One deliberate answer
+  /// per call, so the write goes out at once rather than on a debounce.
+  Future<void> setCreateDefaults(CreateDefaults value) async {
+    if (createDefaults == value) return;
+    createDefaults = value;
+    notifyListeners();
+    try {
+      await _savePreferences(_preferences(createDefaults: value));
     } on Object catch (error) {
       showNotice(_message(error));
     }
@@ -5166,6 +5207,7 @@ class AppController extends ChangeNotifier {
     int? localVideoCacheMb,
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
+    CreateDefaults? createDefaults,
     AppThemeMode? themeMode,
     List<String>? favoriteModels,
     List<String>? favoriteProviders,
@@ -5194,6 +5236,7 @@ class AppController extends ChangeNotifier {
     localThumbnailCacheMb: localThumbnailCacheMb ?? this.localThumbnailCacheMb,
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
+    createDefaults: createDefaults ?? this.createDefaults,
     themeMode: themeMode ?? this.themeMode,
     rewriteProvider: rewriteProviderId,
     rewriteModels: Map<String, String>.of(rewriteModelIds),
@@ -8406,7 +8449,7 @@ class AppController extends ChangeNotifier {
     String? prompt,
     String? rewriteSummary,
   }) async {
-    final tab = addComposerTab();
+    final tab = addComposerTab(applyCreateDefaults: false);
     try {
       await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
     } on Object catch (error) {
@@ -8588,7 +8631,7 @@ class AppController extends ChangeNotifier {
     // A tab with direction already typed in it is somebody's work.
     final tab = activeComposerTab.isBlank
         ? activeComposerTab
-        : addComposerTab();
+        : addComposerTab(applyCreateDefaults: false);
     try {
       await _restoreGenerationSettings(item, includePrompt: true, tab: tab);
     } on Object catch (error) {
@@ -8689,7 +8732,7 @@ class AppController extends ChangeNotifier {
         current.isBlank &&
         current.form.draftAsset == null &&
         current.form.draftUrl.trim().isEmpty;
-    final tab = free ? current : addComposerTab();
+    final tab = free ? current : addComposerTab(applyCreateDefaults: false);
     _inComposerTab(tab, () {
       form
         ..autoDuration = item.config.duration == 'auto'

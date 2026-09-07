@@ -56,14 +56,48 @@ extension AppControllerGenerationPreferences on AppController {
     }
   }
 
-  ComposerTab _blankComposerTab(ComposerTab source) {
+  /// The model a new blank draft opens on: the Defaults desk's choice while
+  /// the live catalog still has it, and otherwise nothing — a model that has
+  /// been withdrawn falls back to whatever the last draft was using.
+  (String, String)? _defaultProviderModel() {
+    final defaults = createDefaults;
+    if (!defaults.hasModel) return null;
+    final provider = providers
+        .where((item) => item.id == defaults.providerId)
+        .firstOrNull;
+    final model = provider?.models
+        .where((item) => item.id == defaults.modelId)
+        .firstOrNull;
+    if (provider == null || model == null) return null;
+    return (provider.id, model.id);
+  }
+
+  /// Opens a blank draft carrying the source tab's provider, model, folders,
+  /// and studio-wide choices, plus the last-used controls for that model, then
+  /// the Defaults desk's answers over the top.
+  ///
+  /// The format and the chosen aesthetic ride along on the tab rather than
+  /// through [GenerationPreferences]: they are decisions about the film being
+  /// written, not knobs belonging to a model, so a director working in
+  /// Screenplay keeps writing screenplays in the next draft while switching
+  /// model inside a draft leaves the format alone.
+  ComposerTab _blankComposerTab(
+    ComposerTab source, {
+    bool applyCreateDefaults = true,
+  }) {
+    // The model comes first: its own remembered controls are what the rest of
+    // the defaults are then laid over.
+    final chosen = applyCreateDefaults ? _defaultProviderModel() : null;
     final tab = ComposerTab(
       id: _uid(),
-      providerId: source.providerId,
-      modelId: source.modelId,
+      providerId: chosen?.$1 ?? source.providerId,
+      modelId: chosen?.$2 ?? source.modelId,
       localFolderId: source.localFolderId,
       driveFolderId: source.driveFolderId,
     );
+    tab.form
+      ..screenplayMode = source.form.screenplayMode
+      ..aestheticReferenceId = source.form.aestheticReferenceId;
     _applyGenerationSettings(
       tab,
       _generationPreferences[generationPreferenceKey(
@@ -72,8 +106,52 @@ extension AppControllerGenerationPreferences on AppController {
           )] ??
           _generationSettings(source),
     );
+    if (applyCreateDefaults) _applyCreateDefaults(tab);
+    // What the tab opened with is nobody's work in it yet, so Reuse, Extend
+    // and Enhance may still seed it in place.
+    tab
+      ..openedScreenplayMode = tab.form.screenplayMode
+      ..openedAestheticReferenceId = tab.form.aestheticReferenceId;
     _inComposerTab(tab, _normalizeFormForModel);
     return tab;
+  }
+
+  /// Lays the Defaults desk's answers over an inherited blank draft.
+  ///
+  /// An unset field is left exactly as inheritance and the per-model record
+  /// left it — that is what "Last used" means — and `_normalizeFormForModel`
+  /// still has the last word on a combination the chosen model cannot take.
+  void _applyCreateDefaults(ComposerTab tab) {
+    final defaults = createDefaults;
+    if (defaults.isEmpty) return;
+    final form = tab.form;
+    if (defaults.screenplayMode case final bool value) {
+      form.screenplayMode = value;
+    }
+    if (defaults.aestheticReferenceId case final String id) {
+      // The empty string is an explicit "None". An id the library no longer
+      // holds also starts the draft with none: the aesthetic that was asked
+      // for is gone, and quietly borrowing the last draft's would be a lie.
+      form.aestheticReferenceId =
+          id.isEmpty || !_aestheticReferences.any((item) => item.id == id)
+          ? null
+          : id;
+    }
+    if (defaults.aspectRatio case final String value) form.aspectRatio = value;
+    if (defaults.resolution case final String value) form.resolution = value;
+    if (defaults.duration case final CreateDurationDefault value) {
+      form.autoDuration = value.isAuto;
+      if (value.seconds case final int seconds) {
+        form.durationSeconds = seconds;
+      }
+    }
+    if (defaults.generateAudio case final bool value) {
+      form.generateAudio = value;
+      // Asking for silence here is as deliberate as reaching for the switch,
+      // so a model that supports audio must not turn it back on.
+      tab.generateAudioExplicitlyDisabled = !value;
+    }
+    if (defaults.draft case final bool value) form.draft = value;
   }
 
   void _rememberGenerationPreferences(

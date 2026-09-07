@@ -16,6 +16,8 @@ import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/settings_tabs.dart';
+
 /// Every converted control answers the same two questions while it works:
 /// is it disabled, and is the 14 px mark on screen?
 Finder get _spinner => find.byType(BusySpinner);
@@ -665,6 +667,7 @@ void main() {
       size: const Size(900, 2600),
     );
     await tester.pumpAndSettle();
+    await openSettingsTab(tester, SettingsTab.data);
 
     final tile = find.byKey(const ValueKey('clear-Clear history'));
     await tester.ensureVisible(tile);

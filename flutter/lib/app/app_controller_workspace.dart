@@ -124,6 +124,21 @@ extension AppControllerWorkspace on AppController {
     await navigate(AppSection.references);
   }
 
+  /// Which desk of the Settings screen is showing. Session-only, like the
+  /// References desk: Settings always opens on General after a relaunch.
+  void setSettingsTab(SettingsTab value) {
+    if (settingsTab == value) return;
+    settingsTab = value;
+    notifyListeners();
+  }
+
+  /// Opens Settings on [tab], for the prompts that already know which desk
+  /// they are sending the director to.
+  Future<void> openSettings(SettingsTab tab) async {
+    settingsTab = tab;
+    await navigate(AppSection.settings);
+  }
+
   void setAestheticSearch(String value) {
     if (aestheticSearch == value) return;
     aestheticSearch = value;

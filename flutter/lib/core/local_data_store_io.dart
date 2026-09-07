@@ -7,6 +7,9 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'api_transcript.dart';
+import 'api_transcript_store.dart';
+import 'api_transcript_store_io.dart';
 import 'asset_extensions.dart';
 import 'asset_stream.dart';
 import 'atomic_file.dart';
@@ -14,7 +17,8 @@ import 'durable_data_store.dart';
 import 'library_file_io.dart';
 import 'models.dart';
 
-class LocalDataStore implements DurableDataStore, StreamingAssetStore {
+class LocalDataStore
+    implements DurableDataStore, StreamingAssetStore, ApiTranscriptStore {
   LocalDataStore({Directory? documentsDirectory})
     : _documentsOverride = documentsDirectory;
 
@@ -107,6 +111,32 @@ class LocalDataStore implements DurableDataStore, StreamingAssetStore {
   Future<Directory> _assets() async => Directory(
     '${(await _file()).parent.path}${Platform.pathSeparator}assets',
   );
+
+  /// Provider transcripts live beside the library, never inside it.
+  Future<Directory> _apiTranscriptDirectory() async => Directory(
+    '${(await _file()).parent.path}'
+    '${Platform.pathSeparator}${ApiTranscriptFileStore.directoryName}',
+  );
+
+  late final ApiTranscriptFileStore _apiTranscripts = ApiTranscriptFileStore(
+    _apiTranscriptDirectory,
+  );
+
+  @override
+  Future<void> appendApiRequest(ApiRequestRecord record) =>
+      _apiTranscripts.appendApiRequest(record);
+
+  @override
+  Future<List<ApiRequestRecord>> readApiRequests(String operationId) =>
+      _apiTranscripts.readApiRequests(operationId);
+
+  @override
+  Future<void> deleteApiRequests(String operationId) =>
+      _apiTranscripts.deleteApiRequests(operationId);
+
+  @override
+  Future<void> pruneApiTranscripts(Set<String> retainedOperationIds) =>
+      _apiTranscripts.pruneApiTranscripts(retainedOperationIds);
 
   Future<bool> exists() async => (await _file()).exists();
 
@@ -429,6 +459,11 @@ class LocalDataStore implements DurableDataStore, StreamingAssetStore {
     List<Generation> generations, [
     List<SavedReference> savedReferences = const <SavedReference>[],
   ]) => _serializeMetadata(() async {
+    // The same pass that forgets a deleted film's media forgets the API
+    // transcript it left behind.
+    await _apiTranscripts.pruneApiTranscripts(
+      retainedTranscriptIds(generations),
+    );
     final assets = await _assets();
     if (!await assets.exists()) return;
     final retained = _referencedAssets(generations, savedReferences)
@@ -453,6 +488,7 @@ class LocalDataStore implements DurableDataStore, StreamingAssetStore {
   Future<void> _clearAssets() async {
     final assets = await _assets();
     if (await assets.exists()) await assets.delete(recursive: true);
+    await _apiTranscripts.deleteAllApiRequests();
     _pendingAssetIds.clear();
   }
 

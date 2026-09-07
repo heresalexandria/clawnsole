@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/app_links.dart';
+import '../core/create_defaults.dart';
 import '../core/google_drive.dart';
 import '../core/models.dart';
 import '../core/prompt_rewrite.dart';
@@ -17,6 +18,8 @@ import 'busy_button.dart';
 import 'claw_mark.dart';
 import 'common_widgets.dart';
 import 'panels.dart';
+import 'provider_model_picker.dart';
+import 'section_tabs.dart';
 import 'formatters.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -49,67 +52,550 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ) ??
       false;
 
+  AppController get controller => widget.controller;
+
+  /// The desks on the rail, in order.
+  ///
+  /// Sync is dropped entirely without Drive: the encrypted settings vault
+  /// that shares the desk with it comes from the same gateways, so a build
+  /// without `supportsGoogleDrive` has neither control to show.
+  List<SettingsTab> get _tabs => <SettingsTab>[
+    SettingsTab.general,
+    SettingsTab.defaults,
+    SettingsTab.aiRewrite,
+    SettingsTab.storage,
+    if (controller.supportsGoogleDrive) SettingsTab.sync,
+    SettingsTab.data,
+  ];
+
+  static IconData _icon(SettingsTab tab) => switch (tab) {
+    SettingsTab.general => Icons.tune_rounded,
+    SettingsTab.defaults => Icons.playlist_add_check_rounded,
+    SettingsTab.aiRewrite => Icons.auto_awesome_rounded,
+    SettingsTab.storage => Icons.storage_rounded,
+    SettingsTab.sync => Icons.cloud_sync_rounded,
+    SettingsTab.data => Icons.delete_sweep_outlined,
+  };
+
+  /// Every desk is one column at every width: a tab holds one domain, so the
+  /// old 7/4 split had nothing left to balance.
+  List<Widget> _cards(SettingsTab tab) => switch (tab) {
+    SettingsTab.general => <Widget>[
+      _GenerationAppearanceCard(controller: controller),
+      _ProviderAccessCard(controller: controller),
+      const _AboutSection(),
+    ],
+    SettingsTab.defaults => <Widget>[
+      _CreateDefaultsCard(controller: controller),
+    ],
+    SettingsTab.aiRewrite => <Widget>[_AiRewriteCard(controller: controller)],
+    SettingsTab.storage => <Widget>[
+      _StorageSection(controller: controller),
+      _LibraryRoomPanel(controller: controller),
+    ],
+    SettingsTab.sync => <Widget>[_GoogleDriveSection(controller: controller)],
+    SettingsTab.data => <Widget>[
+      _ClearDataCard(controller: controller, confirm: _confirm),
+    ],
+  };
+
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final split = constraints.maxWidth >= 1050;
-      final main = Column(
-        children: <Widget>[
-          _GenerationAppearanceCard(controller: widget.controller),
-          const SizedBox(height: 18),
-          _ProviderAccessCard(controller: widget.controller),
-          const SizedBox(height: 18),
-          _AiRewriteCard(controller: widget.controller),
-          if (widget.controller.supportsGoogleDrive) ...<Widget>[
-            const SizedBox(height: 18),
-            _GoogleDriveSection(controller: widget.controller),
-          ],
-          const SizedBox(height: 18),
-          _StorageSection(controller: widget.controller),
-        ],
-      );
-      final side = _SettingsSide(
-        controller: widget.controller,
-        confirm: _confirm,
-      );
-      return SingleChildScrollView(
-        padding: EdgeInsets.all(constraints.maxWidth < 620 ? 16 : 28),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1320),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const Eyebrow('Personal setup', icon: Icons.tune_rounded),
-                const SizedBox(height: 10),
-                Text(
-                  'Settings.',
-                  style: Theme.of(context).textTheme.displayLarge,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  widget.controller.supportsGoogleDrive
-                      ? 'Manage appearance, Drive sync, and this device’s private keys.'
-                      : 'Manage appearance, updates, and Clawnsole’s private local data.',
-                ),
-                const SizedBox(height: 24),
-                if (split)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(flex: 7, child: main),
-                      const SizedBox(width: 20),
-                      Expanded(flex: 4, child: side),
+  Widget build(BuildContext context) => ListenableBuilder(
+    // The rail is the screen's own state, so a bare Settings screen switches
+    // desks without waiting for a caller to rebuild it.
+    listenable: controller,
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, constraints) {
+        final tabs = _tabs;
+        final selected = tabs.contains(controller.settingsTab)
+            ? controller.settingsTab
+            : SettingsTab.general;
+        final cards = _cards(selected);
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(constraints.maxWidth < 620 ? 16 : 28),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1320),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  const Eyebrow('Personal setup', icon: Icons.tune_rounded),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Settings.',
+                    style: Theme.of(context).textTheme.displayLarge,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    controller.supportsGoogleDrive
+                        ? 'Manage appearance, Drive sync, and this device’s private keys.'
+                        : 'Manage appearance, updates, and Clawnsole’s private local data.',
+                  ),
+                  const SizedBox(height: 24),
+                  SectionTabRail(
+                    semanticLabel: 'Settings desk',
+                    tabs: <SectionTab>[
+                      for (final tab in tabs)
+                        SectionTab(
+                          key: ValueKey<String>(tab.tabKey),
+                          label: tab.label,
+                          semanticLabel: '${tab.label} settings',
+                          icon: _icon(tab),
+                          selected: tab == selected,
+                          onTap: () => controller.setSettingsTab(tab),
+                        ),
                     ],
-                  )
-                else ...<Widget>[main, const SizedBox(height: 18), side],
-              ],
+                  ),
+                  const SizedBox(height: 20),
+                  for (var index = 0; index < cards.length; index += 1) ...[
+                    if (index > 0) const SizedBox(height: 18),
+                    cards[index],
+                  ],
+                ],
+              ),
             ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
+}
+
+/// The Defaults desk: what a new Create draft opens with.
+///
+/// Every row's first answer is **Last used**, which is the inheriting
+/// behaviour a blank tab has always had; anything else is an instruction the
+/// composer follows when it opens the next blank draft. Reuse, Extend and
+/// Enhance restore a film's own recipe and never consult this card.
+class _CreateDefaultsCard extends StatelessWidget {
+  const _CreateDefaultsCard({required this.controller});
+
+  final AppController controller;
+
+  CreateDefaults get _defaults => controller.createDefaults;
+
+  /// The model these choices are being made for: the one named here while the
+  /// catalog still has it, and otherwise the model the composer is on.
+  VideoModelDefinition get _model {
+    final provider = controller.providers
+        .where((item) => item.id == _defaults.providerId)
+        .firstOrNull;
+    return provider?.models
+            .where((item) => item.id == _defaults.modelId)
+            .firstOrNull ??
+        controller.selectedModel;
+  }
+
+  String get _modelLabel {
+    if (!_defaults.hasModel) return 'Last used';
+    final provider = controller.providers
+        .where((item) => item.id == _defaults.providerId)
+        .firstOrNull;
+    final model = provider?.models
+        .where((item) => item.id == _defaults.modelId)
+        .firstOrNull;
+    if (provider == null || model == null) return 'No longer available';
+    return '${provider.name} · ${model.label}';
+  }
+
+  /// The resolution the ratio and duration choices are read against.
+  String get _resolution {
+    final resolutions = _model.resolutions.map((item) => item.id).toList();
+    final chosen = _defaults.resolution;
+    if (chosen != null && resolutions.contains(chosen)) return chosen;
+    if (resolutions.contains(controller.form.resolution)) {
+      return controller.form.resolution;
+    }
+    return resolutions.isEmpty ? 'hd' : resolutions.first;
+  }
+
+  void _write(CreateDefaults value) =>
+      unawaited(controller.setCreateDefaults(value));
+
+  Future<void> _pickModel(BuildContext context) => showProviderModelPicker(
+    context,
+    controller,
+    selectedProviderId: _defaults.providerId,
+    selectedModelId: _defaults.modelId,
+    onSelected: (providerId, modelId) async => controller.setCreateDefaults(
+      _defaults.copyWith(providerId: providerId, modelId: modelId),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final model = _model;
+    final resolution = _resolution;
+    final ratios = model.aspectRatiosFor(resolution, mode: VideoMode.t2v);
+    final durations = model.durationRangeFor(resolution);
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              CircleAvatar(
+                backgroundColor: context.colors.primaryContainer,
+                child: Icon(
+                  Icons.playlist_add_check_rounded,
+                  color: context.colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'New drafts start with…',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Say what a fresh draft should open with, or leave a row '
+                      'on Last used.',
+                      style: TextStyle(color: context.colors.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _DefaultRow(
+            label: 'Format',
+            hint: 'How the Direction field is written.',
+            child: _FormatSegments(
+              value: _defaults.screenplayMode,
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearScreenplayMode: true)
+                    : _defaults.copyWith(screenplayMode: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Model',
+            hint: 'The provider and model a new draft opens on.',
+            trailing: _defaults.hasModel
+                ? IconButton(
+                    key: const ValueKey('create-default-model-clear'),
+                    tooltip: 'Back to last used',
+                    onPressed: () =>
+                        _write(_defaults.copyWith(clearModel: true)),
+                    icon: const Icon(Icons.close_rounded, size: 17),
+                  )
+                : null,
+            child: OutlinedButton.icon(
+              key: const ValueKey('create-default-model'),
+              onPressed: () => unawaited(_pickModel(context)),
+              icon: const Icon(Icons.expand_more_rounded, size: 17),
+              iconAlignment: IconAlignment.end,
+              label: Text(_modelLabel, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Frame',
+            hint: 'Aspect ratio.',
+            child: _DefaultDropdown<String>(
+              fieldKey: const ValueKey('create-default-aspect-ratio'),
+              value: _defaults.aspectRatio,
+              values: ratios,
+              labelOf: (ratio) => ratio == 'auto' ? 'Auto' : ratio,
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearAspectRatio: true)
+                    : _defaults.copyWith(aspectRatio: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Finish',
+            hint: 'Resolution.',
+            child: _DefaultDropdown<String>(
+              fieldKey: const ValueKey('create-default-resolution'),
+              value: _defaults.resolution,
+              values: model.resolutions.map((item) => item.id).toList(),
+              labelOf: (id) =>
+                  model.resolutions
+                      .where((item) => item.id == id)
+                      .firstOrNull
+                      ?.label ??
+                  id,
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearResolution: true)
+                    : _defaults.copyWith(resolution: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Duration',
+            hint: 'How long a new draft asks for.',
+            child: _DefaultDropdown<CreateDurationDefault>(
+              fieldKey: const ValueKey('create-default-duration'),
+              value: _defaults.duration,
+              values: <CreateDurationDefault>[
+                if (model.supportsAutoDuration)
+                  const CreateDurationDefault.auto(),
+                for (
+                  var seconds = durations.minimumSeconds;
+                  seconds <= durations.maximumSeconds;
+                  seconds += durations.stepSeconds
+                )
+                  CreateDurationDefault.seconds(seconds),
+              ],
+              labelOf: (duration) =>
+                  duration.isAuto ? 'Auto' : '${duration.seconds} s',
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearDuration: true)
+                    : _defaults.copyWith(duration: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Audio',
+            hint: 'Whether new drafts ask for sound.',
+            child: _DefaultDropdown<bool>(
+              fieldKey: const ValueKey('create-default-audio'),
+              value: _defaults.generateAudio,
+              values: const <bool>[true, false],
+              labelOf: (value) => value ? 'On' : 'Off',
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearGenerateAudio: true)
+                    : _defaults.copyWith(generateAudio: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Fast draft',
+            hint: 'Quick, cheaper renders at HD.',
+            child: _DefaultDropdown<bool>(
+              fieldKey: const ValueKey('create-default-draft'),
+              value: _defaults.draft,
+              values: const <bool>[true, false],
+              labelOf: (value) => value ? 'On' : 'Off',
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearDraft: true)
+                    : _defaults.copyWith(draft: value),
+              ),
+            ),
+          ),
+          _DefaultRow(
+            label: 'Aesthetic',
+            hint: 'A definition appended to every new draft.',
+            child: _DefaultDropdown<String>(
+              fieldKey: const ValueKey('create-default-aesthetic'),
+              value: _defaults.aestheticReferenceId,
+              values: <String>[
+                CreateDefaults.noAesthetic,
+                for (final item in controller.aestheticReferences) item.id,
+              ],
+              labelOf: (id) => id == CreateDefaults.noAesthetic
+                  ? 'None'
+                  : controller.aestheticReferences
+                            .where((item) => item.id == id)
+                            .firstOrNull
+                            ?.title ??
+                        'No longer available',
+              onChanged: (value) => _write(
+                value == null
+                    ? _defaults.copyWith(clearAesthetic: true)
+                    : _defaults.copyWith(aestheticReferenceId: value),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Last used carries over whatever the previous draft had. Reuse, '
+            'Extend and Enhance keep the film’s own settings, and the chosen '
+            'model still has the last word on a combination it cannot take. '
+            'Where new films are saved lives on the Storage desk.',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.4,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+          if (!_defaults.isEmpty) ...<Widget>[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('create-defaults-reset'),
+                onPressed: () => _write(CreateDefaults.none),
+                icon: const Icon(Icons.restart_alt_rounded, size: 17),
+                label: const Text('Reset to last used'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// One setting on the Defaults desk: its name on the left, its control on the
+/// right, stacked instead when the room is too narrow to read them side by
+/// side.
+class _DefaultRow extends StatelessWidget {
+  const _DefaultRow({
+    required this.label,
+    required this.hint,
+    required this.child,
+    this.trailing,
+  });
+
+  final String label;
+  final String hint;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          hint,
+          style: TextStyle(
+            fontSize: 11,
+            color: context.colors.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+    final control = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(child: child),
+        if (trailing != null) trailing!,
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: LayoutBuilder(
+        builder: (context, constraints) => constraints.maxWidth < 460
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  name,
+                  const SizedBox(height: 8),
+                  Align(alignment: Alignment.centerLeft, child: control),
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Expanded(child: name),
+                  const SizedBox(width: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 340),
+                    child: control,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Plaintext / Screenplay / Last used, with Last used first because it is the
+/// answer a director who has not thought about it already has.
+class _FormatSegments extends StatelessWidget {
+  const _FormatSegments({required this.value, required this.onChanged});
+
+  final bool? value;
+  final ValueChanged<bool?> onChanged;
+
+  @override
+  // Three segments want a little more than the desk's control column at
+  // desk widths; scaling the whole control down a few percent keeps every
+  // word whole where a scroll view would clip "Screenplay" at the edge.
+  Widget build(BuildContext context) => FittedBox(
+    fit: BoxFit.scaleDown,
+    alignment: Alignment.centerRight,
+    child: SegmentedButton<String>(
+      key: const ValueKey('create-default-format'),
+      showSelectedIcon: false,
+      segments: const <ButtonSegment<String>>[
+        ButtonSegment<String>(value: 'inherit', label: Text('Last used')),
+        ButtonSegment<String>(value: 'plaintext', label: Text('Plaintext')),
+        ButtonSegment<String>(value: 'screenplay', label: Text('Screenplay')),
+      ],
+      selected: <String>{
+        switch (value) {
+          null => 'inherit',
+          true => 'screenplay',
+          false => 'plaintext',
+        },
+      },
+      onSelectionChanged: (choice) => onChanged(switch (choice.single) {
+        'screenplay' => true,
+        'plaintext' => false,
+        _ => null,
+      }),
+    ),
+  );
+}
+
+/// A Defaults-desk dropdown whose first entry is always Last used.
+///
+/// A stored answer the current model no longer offers stays selectable rather
+/// than breaking the field: the composer normalizes it when it opens a draft,
+/// and the director can see what they asked for until they change it.
+class _DefaultDropdown<T extends Object> extends StatelessWidget {
+  const _DefaultDropdown({
+    required this.fieldKey,
+    required this.value,
+    required this.values,
+    required this.labelOf,
+    required this.onChanged,
+  });
+
+  final Key fieldKey;
+  final T? value;
+  final List<T> values;
+  final String Function(T value) labelOf;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final options = <T>[
+      ...values,
+      if (value != null && !values.contains(value)) value as T,
+    ];
+    return DropdownButtonFormField<T?>(
+      key: fieldKey,
+      initialValue: value,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      ),
+      items: <DropdownMenuItem<T?>>[
+        DropdownMenuItem<T?>(value: null, child: const Text('Last used')),
+        for (final option in options)
+          DropdownMenuItem<T?>(
+            value: option,
+            child: Text(labelOf(option), overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
 }
 
 class _GenerationAppearanceCard extends StatelessWidget {
@@ -652,7 +1138,7 @@ class _StorageSectionState extends State<_StorageSection> {
                     if (!controller.googleDriveConnected) ...<Widget>[
                       const SizedBox(height: 2),
                       Text(
-                        'Connect Google Drive below to save new items there.',
+                        'Connect Google Drive on the Sync desk to save new items there.',
                         style: TextStyle(
                           fontSize: 11,
                           color: context.colors.onSurfaceVariant,
@@ -1742,11 +2228,12 @@ class _Stat extends StatelessWidget {
   );
 }
 
-class _SettingsSide extends StatelessWidget {
-  const _SettingsSide({required this.controller, required this.confirm});
+/// What the library has room for, on the Storage desk beside the figures it
+/// describes.
+class _LibraryRoomPanel extends StatelessWidget {
+  const _LibraryRoomPanel({required this.controller});
 
   final AppController controller;
-  final Future<bool> Function(String title, String detail) confirm;
 
   @override
   Widget build(BuildContext context) {
@@ -1799,7 +2286,23 @@ class _SettingsSide extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 15),
+      ],
+    );
+  }
+}
+
+/// The Data desk: the three actions that take something away.
+class _ClearDataCard extends StatelessWidget {
+  const _ClearDataCard({required this.controller, required this.confirm});
+
+  final AppController controller;
+  final Future<bool> Function(String title, String detail) confirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
         SurfaceCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1862,38 +2365,49 @@ class _SettingsSide extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 15),
-        for (final provider in videoProviders) ...<Widget>[
-          OutlinedButton.icon(
-            key: ValueKey('provider-documentation-${provider.id}'),
-            onPressed: () => unawaited(launchUrl(Uri.parse(provider.docsUrl))),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: Text(
-              provider.id == bflProvider.id
-                  ? 'FLUX 3 documentation'
-                  : '${provider.name} documentation',
-            ),
-          ),
-          const SizedBox(height: 8),
-        ],
-        OutlinedButton.icon(
-          onPressed: () =>
-              unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
-          icon: const Icon(Icons.privacy_tip_outlined, size: 16),
-          label: const Text('Privacy policy'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: () =>
-              showLicensePage(context: context, applicationName: 'Clawnsole'),
-          icon: const Icon(Icons.article_outlined, size: 16),
-          label: const Text('Open source licenses'),
-        ),
-        const SizedBox(height: 15),
-        const _CreatorCard(),
       ],
     );
   }
+}
+
+/// The General desk's tail: where to read more, and who made this.
+class _AboutSection extends StatelessWidget {
+  const _AboutSection();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: <Widget>[
+      for (final provider in videoProviders) ...<Widget>[
+        OutlinedButton.icon(
+          key: ValueKey('provider-documentation-${provider.id}'),
+          onPressed: () => unawaited(launchUrl(Uri.parse(provider.docsUrl))),
+          icon: const Icon(Icons.open_in_new_rounded, size: 16),
+          label: Text(
+            provider.id == bflProvider.id
+                ? 'FLUX 3 documentation'
+                : '${provider.name} documentation',
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+      OutlinedButton.icon(
+        onPressed: () =>
+            unawaited(launchUrl(Uri.parse(clawnsolePrivacyPolicyUrl))),
+        icon: const Icon(Icons.privacy_tip_outlined, size: 16),
+        label: const Text('Privacy policy'),
+      ),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () =>
+            showLicensePage(context: context, applicationName: 'Clawnsole'),
+        icon: const Icon(Icons.article_outlined, size: 16),
+        label: const Text('Open source licenses'),
+      ),
+      const SizedBox(height: 15),
+      const _CreatorCard(),
+    ],
+  );
 }
 
 class _CreatorCard extends StatelessWidget {

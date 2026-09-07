@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'api_transcript.dart';
 import 'composer_tabs.dart';
 import 'models.dart';
 import 'native_gateway.dart';
@@ -200,6 +201,15 @@ abstract interface class MediaPreviewGateway {
 /// at startup instead of being discovered at submit time.
 abstract interface class LocalGenerationAvailabilityGateway {
   Future<bool> localGenerationAvailable();
+}
+
+/// The raw provider traffic one film produced, for troubleshooting.
+///
+/// Transcripts are device-local: the device that made the calls is the only
+/// one that recorded them, they are never synced to Drive, and a film opened
+/// on another device honestly reports having none.
+abstract interface class ApiTranscriptGateway {
+  Future<List<ApiRequestRecord>> readApiRequests(String localId);
 }
 
 /// System notifications for work that finishes while the app is out of view.

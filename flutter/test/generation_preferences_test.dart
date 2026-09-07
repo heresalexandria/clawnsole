@@ -72,6 +72,10 @@ void main() {
         audio: false,
       );
       expect(next.form.safetyTolerance, 3);
+      // The format and the aesthetic are the film's, not the model's: they
+      // follow the director into the next draft.
+      expect(next.form.screenplayMode, isTrue);
+      expect(next.form.aestheticReferenceId, 'warm-light');
       _expectBlank(next);
       expect(source.form.prompt, 'A private story.');
       expect(source.form.references, hasLength(1));
@@ -126,6 +130,71 @@ void main() {
       expect(controller.form.draft, isTrue);
       expect(controller.form.generateAudio, isFalse);
       _expectBlank(controller.activeComposerTab);
+    },
+  );
+
+  test('a new draft opens in the format the last one used', () async {
+    final controller = await _controller();
+    controller.setScreenplayMode(true);
+    controller.selectAestheticReference('warm-light');
+
+    final screenplay = controller.addComposerTab();
+    expect(screenplay.form.screenplayMode, isTrue);
+    expect(screenplay.form.aestheticReferenceId, 'warm-light');
+    expect(screenplay.form.prompt, isEmpty);
+
+    // Nothing has been directed in the new tab yet, so Reuse, Extend and
+    // Enhance may still fill it in place rather than opening another.
+    expect(screenplay.isBlank, isTrue);
+
+    controller.setScreenplayMode(false);
+    controller.selectAestheticReference(null);
+    final plaintext = controller.addComposerTab();
+    expect(plaintext.form.screenplayMode, isFalse);
+    expect(plaintext.form.aestheticReferenceId, isNull);
+    expect(plaintext.isBlank, isTrue);
+  });
+
+  test('the replacement for the last closed tab keeps its format', () async {
+    final controller = await _controller();
+    controller.setScreenplayMode(true);
+    controller.selectAestheticReference('warm-light');
+
+    controller.closeComposerTab(controller.activeComposerTabId);
+
+    expect(controller.form.screenplayMode, isTrue);
+    expect(controller.form.aestheticReferenceId, 'warm-light');
+    expect(controller.activeComposerTab.isBlank, isTrue);
+  });
+
+  test(
+    'switching model inside a draft leaves the format and aesthetic alone',
+    () async {
+      final controller = await _controller();
+      await controller.selectProviderModel('ltx', 'ltx-2-3-fast');
+      controller.updateForm((form) => form.durationSeconds = 18);
+      controller.setScreenplayMode(true);
+      controller.selectAestheticReference('warm-light');
+
+      // The per-model record still restores its own controls, and carries no
+      // opinion at all about the format.
+      await controller.selectModel('ltx-2-3-pro');
+      controller.updateForm((form) => form.durationSeconds = 6);
+      expect(controller.form.screenplayMode, isTrue);
+      expect(controller.form.aestheticReferenceId, 'warm-light');
+
+      await controller.selectModel('ltx-2-3-fast');
+      expect(controller.form.durationSeconds, 18);
+      expect(controller.form.screenplayMode, isTrue);
+      expect(controller.form.aestheticReferenceId, 'warm-light');
+
+      // A new draft on the pro model still gets the pro model's controls.
+      final next = controller.addComposerTab();
+      expect(next.form.screenplayMode, isTrue);
+      await controller.selectModel('ltx-2-3-pro');
+      expect(controller.form.durationSeconds, 6);
+      expect(controller.form.screenplayMode, isTrue);
+      expect(next.form.prompt, isEmpty);
     },
   );
 
@@ -790,10 +859,10 @@ void _expectSettings(
   expect(form.generateAudio, audio);
 }
 
+/// No direction and nothing attached. The format and the chosen aesthetic are
+/// deliberately absent: they inherit from the draft the tab was opened from.
 void _expectBlank(ComposerTab tab) {
   expect(tab.form.prompt, isEmpty);
-  expect(tab.form.screenplayMode, isFalse);
-  expect(tab.form.aestheticReferenceId, isNull);
   expect(tab.form.screenplayLinkedCharacters, isEmpty);
   expect(tab.form.screenplayCharacterAliases, isEmpty);
   expect(tab.form.draftCharacterNames, isEmpty);

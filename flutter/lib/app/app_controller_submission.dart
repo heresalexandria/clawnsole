@@ -82,7 +82,7 @@ extension AppControllerSubmission on AppController {
       showNotice(
         'Connect Google Drive before generating to your Drive library.',
       );
-      unawaited(navigate(AppSection.settings));
+      unawaited(openSettings(SettingsTab.sync));
       return;
     }
 

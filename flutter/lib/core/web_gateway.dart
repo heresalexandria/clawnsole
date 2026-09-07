@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
 import 'bfl_api.dart';
 import 'composer_tabs.dart';
 import 'data_location.dart';
@@ -37,6 +38,7 @@ class WebGateway
         ProviderCatalogCacheGateway,
         ComposerTabsGateway,
         PromptRewriteGateway,
+        ApiTranscriptGateway,
         LibraryOrganizationGateway,
         ReferenceLibraryGateway,
         ReferenceVideoEditingGateway,
@@ -833,6 +835,29 @@ class WebGateway
       ),
     );
     return Generation.fromJson(_map(payload['generation']));
+  }
+
+  /// The companion makes this renderer's provider calls, so it is the only
+  /// side that can have recorded them. Nothing is cached here: a transcript
+  /// grows while a film renders.
+  @override
+  Future<List<ApiRequestRecord>> readApiRequests(String localId) async {
+    final payload = _map(
+      await _read(
+        await _client.get(
+          _url('/generations/${Uri.encodeComponent(localId)}/api-requests'),
+        ),
+      ),
+    );
+    final raw = payload['requests'];
+    if (raw is! List) return const <ApiRequestRecord>[];
+    return <ApiRequestRecord>[
+      for (final entry in raw)
+        if (entry is Map<Object?, Object?>)
+          ApiRequestRecord.fromJson(
+            entry.map((key, value) => MapEntry('$key', value)),
+          ),
+    ];
   }
 
   @override

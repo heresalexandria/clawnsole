@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'api_transcript.dart';
+import 'api_transcript_store.dart';
 import 'asset_extensions.dart';
 import 'device_identity.dart';
 import 'durable_data_store.dart';
@@ -17,7 +19,11 @@ import 'stream_discard.dart';
 /// Presents local and Google Drive records as one library while keeping their
 /// persistence and retained media physically separate.
 class HybridDataStore
-    implements DurableDataStore, ComposerWorkspaceStore, StreamingAssetStore {
+    implements
+        DurableDataStore,
+        ComposerWorkspaceStore,
+        StreamingAssetStore,
+        ApiTranscriptStore {
   HybridDataStore({
     required DurableDataStore local,
     GoogleDriveStore? drive,
@@ -623,6 +629,24 @@ class HybridDataStore
   Future<Uri> assetUri(AssetReference reference) => reference.kind == 'drive'
       ? _drive.assetUri(reference)
       : _local.assetUri(reference);
+
+  // API transcripts describe calls this device made, so they stay with the
+  // local library and never ride along to Drive.
+  @override
+  Future<void> appendApiRequest(ApiRequestRecord record) =>
+      _local.appendApiRequest(record);
+
+  @override
+  Future<List<ApiRequestRecord>> readApiRequests(String operationId) =>
+      _local.readApiRequests(operationId);
+
+  @override
+  Future<void> deleteApiRequests(String operationId) =>
+      _local.deleteApiRequests(operationId);
+
+  @override
+  Future<void> pruneApiTranscripts(Set<String> retainedOperationIds) =>
+      _local.pruneApiTranscripts(retainedOperationIds);
 
   @override
   Future<void> pruneAssets(

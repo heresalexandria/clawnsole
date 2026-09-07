@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/settings_tabs.dart';
+
 void main() {
   test('settings writes retry a pending encrypted vault sync', () async {
     final gateway = _VaultGateway(SettingsVaultState.pending);
@@ -271,6 +273,8 @@ Future<void> _pumpSettings(
     ),
   );
   await tester.pumpAndSettle();
+  // The vault shares the Sync desk with the Drive library it travels beside.
+  await openSettingsTab(tester, SettingsTab.sync);
 }
 
 class _VaultGateway

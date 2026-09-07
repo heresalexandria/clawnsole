@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'api_transcript.dart';
 import 'provider_submission.dart';
 import 'generation_status.dart';
 
@@ -19,7 +20,7 @@ class ProviderException implements Exception {
 
 class BflApi {
   BflApi({http.Client? client, Uri? baseUrl})
-    : _client = client ?? http.Client(),
+    : _client = recordingProviderClient(client ?? http.Client()),
       _baseUrl = baseUrl ?? Uri.parse('https://api.bfl.ai');
 
   final http.Client _client;

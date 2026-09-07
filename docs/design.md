@@ -503,8 +503,18 @@ is not overwritten by a new session.
 
 Last-used controls are separate from draft content: ratio, duration and Auto,
 resolution, audio, frame rate, draft quality, safety, timing, and upscale controls
-are remembered per provider/model. Blank tabs leave Direction, format, seed,
-references, aesthetic selection, and source media empty. Editing only an older
+are remembered per provider/model. Blank tabs leave Direction, seed,
+references, and source media empty, but **inherit the format
+(Plaintext/Screenplay) and the chosen aesthetic from the draft they were
+opened from** — those are decisions about the film, not knobs belonging to a
+model, so they never travel in the per-model record and switching model inside
+a draft leaves the format alone. What a tab opened with is not yet work done in
+it, so Reuse, Extend and Enhance may still seed such a tab in place.
+**Settings › Defaults** can replace any of that inheritance with a fixed
+answer: the model comes first (its own remembered controls are what the rest
+is laid over), then each named default, then the usual normalization against
+the model's capabilities. Reuse, Extend and Enhance restore a film's own
+recipe and never consult the defaults. Editing only an older
 tab's prompt does not replace newer remembered controls. Explicit control edits
 and Generate update defaults; choosing another model restores its own defaults
 and checks them against current capabilities. Settings writes are coalesced while
@@ -625,6 +635,23 @@ generation-mode rule above still stands — tabs never select a mode.
   figure at a glance, with the realized/estimated wording, USD
   conversion, balance trail, and quote-vs-realized lines in a small
   anchored popover on tap.
+- **A film can show its API requests.** For anything that reached a
+  provider, the ⋯ menu offers *API Requests*
+  (`lib/ui/api_requests_modal.dart`): a film-modal-sized dialog listing every
+  call Clawnsole made for that film on this device — `#3 · 18:22:41 · GET
+  /v1/jobs/job-1 · 200 · 412 ms`, with its purpose (submit, poll, balance,
+  result) and provider underneath. A row accordions open onto the complete
+  request (URL, headers, body) and response (status, headers, body) in
+  monospace selectable blocks that scroll inside their own box, each row
+  carrying a **Copy** key and the header a **Copy all** that puts the whole
+  transcript — film id, provider and model, created, status, then every
+  request — on the clipboard as plain text for a bug report. Nothing shown is
+  a secret or a payload: credentials read `«redacted»` and uploaded frames,
+  base64 and media bodies read `«image/png 1.2 MB»`. The footer says where
+  the transcript lives, because it lives only here: transcripts are recorded
+  by the device that made the calls and are never synced, so a film opened on
+  another device says so plainly instead of implying nothing was sent.
+
 - **Extend writes the next scene.** On a delivered film whose model takes a
   reference video, the ⋯ menu offers *Extend*: it opens the film the way
   Reuse does — same model, settings, folder, and aesthetic — but attaches the
@@ -732,6 +759,47 @@ settings sync, so a key saved on one device follows to the others. On desktop th
 sees them: the companion holds the key and makes the vendor call; native
 builds call the vendor directly. The last-used vendor, model, and effort are
 remembered per vendor in preferences.
+
+### The Settings desk
+
+Settings is **six folder tabs** under the *Personal setup* eyebrow and the
+*Settings.* heading — the References desk's construction (`SectionTabRail`),
+so idle tabs are raised console keys on a hairline rule and the open desk is
+cut from the surface beneath it with a brass lip. Each desk is a single column
+at every width inside the same 1320-px column (the old 7/4 split had nothing
+left to balance once each tab held one domain); on a phone the rail scrolls
+horizontally rather than wrapping. The desks, in rail order:
+
+- **General** — generation placeholder appearance, provider access, the
+  provider documentation / privacy / licenses links, and the *Made by
+  Alexandria* card.
+- **Defaults** — one card, *New drafts start with…*, a row per setting
+  (format, model, frame, finish, duration, audio, fast draft, aesthetic).
+  Every control's first answer is **Last used**, which is the inheriting
+  behaviour above; anything else is an instruction the composer follows when
+  it opens the next blank draft. The model row raises the same
+  `showProviderModelPicker` dialog the composer does, writing to the default
+  instead of the draft; the value lists offer only what the chosen model
+  supports, and the aesthetic row adds an explicit **None** beside Last used.
+  A *Reset to last used* key appears once anything is set. The record
+  (`CreateDefaults`, `AppPreferences.createDefaults`) is all-nullable and
+  omitted from the settings JSON while empty, so an untouched studio's
+  preferences keep their shape. Two neighbouring preferences deliberately stay
+  where they are rather than being mirrored here: the save-to destination
+  lives on the Storage desk and *Normalize visual references* on the composer.
+- **AI Rewrite** — one masked key field per vendor.
+- **Storage** — project-data figures, default destination, the two cache
+  caps, the data file and its reveal/relocate keys, and *Room to stretch.*
+- **Sync** — the Google Drive library and, inside it, the encrypted
+  settings-vault panel. **The whole desk is absent without Drive**: every
+  gateway that offers the vault offers Drive too, so a build without
+  `supportsGoogleDrive` has neither control to show.
+- **Data** — clear history, reset preferences, delete everything.
+
+Which desk is open is session-only, like the References desk: Settings always
+reopens on General. A prompt that already knows where it is sending the
+director calls `openSettings(SettingsTab.sync)` rather than plain
+`navigate` — the "connect Drive before generating there" refusal does.
 
 ## 9. Version & updates
 
