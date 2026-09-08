@@ -1699,8 +1699,25 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
   @override
   void initState() {
     super.initState();
-    // Attachments already on the form (a restored draft) show as collapsed
-    // header previews; only media arriving after this point auto-opens.
+    // Restored attachments stay compact unless a clip still needs measuring.
+    // Its expanded tile uses the existing bounded metadata loader; mounting
+    // another hidden media surface just for the meter would duplicate work.
+    // A restored Drive set may require full native downloads to probe. Leave
+    // opening those tiles to the user rather than fetching the set for meters.
+    final hasDriveReferences = controller.form.references.any(
+      (reference) =>
+          (reference.asset?.retained ?? reference.retained)?.kind == 'drive',
+    );
+    _referencesOpen =
+        !hasDriveReferences &&
+        controller.form.references.any(
+          (reference) =>
+              reference.kind != MediaReferenceKind.image &&
+              reference.durationSeconds == null &&
+              (reference.source.trim().isNotEmpty ||
+                  reference.asset != null ||
+                  reference.retained != null),
+        );
     _lastFrameCount = controller.form.keyframes.length;
     _lastReferenceCount = controller.form.references.length;
   }
@@ -1717,7 +1734,8 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
     _lastReferenceCount = form.references.length;
     final showFrames =
         controller.keyframeLimit > 0 || form.keyframes.isNotEmpty;
-    final showReferences = model.supportsMediaReferences;
+    final showReferences =
+        model.supportsMediaReferences || form.references.isNotEmpty;
     final actions = <Widget>[
       if (widget.videoAction != null) widget.videoAction!,
       if (widget.draftAction != null) widget.draftAction!,
@@ -1817,6 +1835,9 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
                   ? 'None'
                   : '${form.references.length} attached',
               error: conflicted,
+              persistentSummary: form.references.isEmpty
+                  ? null
+                  : _ReferenceCapacityGauges(controller: controller),
               child: _ReferencesSection(controller: controller),
             ),
           );
@@ -1922,7 +1943,8 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
 
 /// One collapsible guidance section: the header row carries the section
 /// label, tiny previews of what is attached, and a status word; the full
-/// editing surface (tiles, gauges, add buttons) lives in the body.
+/// editing surface (tiles, add buttons) lives in the body. Capacity readings
+/// stay visible with the header so collapsing never hides attached usage.
 class _GuidanceAccordion extends StatelessWidget {
   const _GuidanceAccordion({
     required this.toggleKey,
@@ -1933,6 +1955,7 @@ class _GuidanceAccordion extends StatelessWidget {
     required this.child,
     this.previews = const <Widget>[],
     this.summary,
+    this.persistentSummary,
     this.error = false,
     super.key,
   });
@@ -1945,6 +1968,7 @@ class _GuidanceAccordion extends StatelessWidget {
   final Widget child;
   final List<Widget> previews;
   final String? summary;
+  final Widget? persistentSummary;
   final bool error;
 
   @override
@@ -2038,6 +2062,11 @@ class _GuidanceAccordion extends StatelessWidget {
               ),
             ),
           ),
+          if (persistentSummary != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(11, 2, 11, 3),
+              child: persistentSummary,
+            ),
           AnimatedSize(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
@@ -2469,10 +2498,6 @@ class _ReferencesSection extends StatelessWidget {
             ),
           ),
         ],
-        if (!setAside) ...<Widget>[
-          const SizedBox(height: 10),
-          _ReferenceCapacityGauges(controller: controller),
-        ],
         for (final note in notes) ...<Widget>[
           const SizedBox(height: 5),
           Text(note, style: noteStyle),
@@ -2518,7 +2543,6 @@ class _ReferenceCapacityGauges extends StatelessWidget {
     }
     for (final kind in MediaReferenceKind.values) {
       final maximum = controller.referenceLimit(kind);
-      if (maximum <= 0) continue;
       final attached = form.references
           .where((reference) => reference.kind == kind)
           .toList();
@@ -2534,36 +2558,44 @@ class _ReferenceCapacityGauges extends StatelessWidget {
         _ReferenceCapacityGauge(
           key: ValueKey('reference-capacity-${kind.name}-count'),
           label: kindLabel,
-          value: attached.length / maximum,
+          value: maximum > 0 ? attached.length / maximum : double.infinity,
           valueLabel: '${attached.length} / $maximum added',
         ),
       );
-      // Under the count, the same gauge again for the seconds a model
-      // publishes for this kind: 12 s / 30 s, with the bar reading the
-      // budget the same way.
+      if (kind == MediaReferenceKind.image) continue;
+      // Duration is useful even when the catalog does not publish a total
+      // budget. Keep the reading visible without inventing a limit or an
+      // animated progress bar that would never finish.
       final maximumSeconds = controller.referenceSecondsLimit(kind);
-      if (maximumSeconds == null) continue;
+      final hasSecondsLimit = maximumSeconds != null && maximumSeconds > 0;
       final used = controller.referenceSecondsUsed(kind);
       final unknown = controller.referenceSecondsPending(kind);
+      final usedLabel = unknown == 0
+          ? formatMediaDuration(used)
+          : used > 0
+          ? '${formatMediaDuration(used)} + ?'
+          : '?';
+      final limitLabel = hasSecondsLimit
+          ? formatMediaDuration(maximumSeconds.toDouble())
+          : 'limit unspecified';
+      final explanations = <String>[
+        if (unknown > 0)
+          unknown == 1
+              ? 'Duration unavailable for one clip.'
+              : 'Duration unavailable for $unknown clips.',
+        if (!hasSecondsLimit)
+          'This model does not specify a total reference duration limit.',
+      ];
       gauges.add(
         _ReferenceCapacityGauge(
           key: ValueKey('reference-capacity-${kind.name}-duration'),
           label:
               '${kind == MediaReferenceKind.audio ? 'Audio' : 'Video'} '
               'duration',
-          value: used / maximumSeconds,
-          // A clip whose duration is still being read leaves the figure
-          // unknowable rather than merely small, so the used reading says
-          // so outright instead of quietly under-counting.
-          valueLabel: unknown > 0
-              ? '? / ${formatMediaDuration(maximumSeconds.toDouble())}'
-              : '${formatMediaDuration(used)} / '
-                    '${formatMediaDuration(maximumSeconds.toDouble())}',
-          tooltip: unknown == 0
-              ? null
-              : unknown == 1
-              ? 'Reading one clip’s duration…'
-              : 'Reading $unknown clips’ durations…',
+          value: hasSecondsLimit ? used / maximumSeconds : null,
+          incomplete: unknown > 0,
+          valueLabel: '$usedLabel / $limitLabel',
+          tooltip: explanations.isEmpty ? null : explanations.join(' '),
         ),
       );
     }
@@ -2586,13 +2618,15 @@ class _ReferenceCapacityGauge extends StatelessWidget {
     required this.label,
     required this.value,
     required this.valueLabel,
+    this.incomplete = false,
     this.tooltip,
     super.key,
   });
 
   final String label;
-  final double value;
+  final double? value;
   final String valueLabel;
+  final bool incomplete;
 
   /// Explains an unknowable reading, e.g. a duration still being measured.
   final String? tooltip;
@@ -2600,15 +2634,15 @@ class _ReferenceCapacityGauge extends StatelessWidget {
   /// A gauge runs quiet until the budget is nearly spent, warns in brass
   /// over nine tenths, and reads madder once it is past full — the same
   /// three tones for a count and for a duration.
-  Color? _tone(BuildContext context) => !value.isFinite || value <= .9
+  Color? _tone(BuildContext context) => value == null || value! <= .9
       ? null
-      : value > 1.0001
+      : value! > 1.0001
       ? context.colors.error
       : context.tokens.brass;
 
   @override
   Widget build(BuildContext context) {
-    final progress = value.isFinite ? value.clamp(0.0, 1.0) : 0.0;
+    final progress = value?.clamp(0.0, 1.0) ?? 0.0;
     final tone = _tone(context);
     final reading = Text(
       valueLabel,
@@ -2619,21 +2653,26 @@ class _ReferenceCapacityGauge extends StatelessWidget {
       ),
     );
     return Semantics(
+      excludeSemantics: true,
       label: '$label, $valueLabel${tooltip == null ? '' : ', $tooltip'}',
-      value: '${(progress * 100).round()}%',
+      value: value == null || !value!.isFinite
+          ? null
+          : '${incomplete ? 'At least ' : ''}${(progress * 100).round()}%',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 2,
             children: <Widget>[
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: tone,
-                  ),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: tone,
                 ),
               ),
               if (tooltip == null)
