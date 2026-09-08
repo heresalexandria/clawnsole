@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/app_theme.dart';
 import 'composer_tab_rail.dart' show railRuleColor;
 import 'hardware.dart';
+import 'paint_cache.dart';
 
 /// One tab on a [SectionTabRail].
 class SectionTab {
@@ -205,17 +206,19 @@ class _SectionTabKey extends StatelessWidget {
 
 /// Strokes a tab's shoulders and sides and leaves the foot open onto the
 /// rule. The tab in front also gets a brass lip along its top.
+final PathCache<Size> _tabOutlines = PathCache<Size>();
+
 class _SectionTabOutlinePainter extends CustomPainter {
   const _SectionTabOutlinePainter({required this.color, this.lip});
 
   final Color color;
   final Color? lip;
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  /// The silhouette for a tab of [size]: shoulders, sides, open foot.
+  static Path _outline(Size size) {
     const inset = .5;
     const r = _radius;
-    final path = Path()
+    return Path()
       ..moveTo(inset, size.height)
       ..lineTo(inset, r)
       ..arcToPoint(const Offset(r, inset), radius: const Radius.circular(r))
@@ -225,6 +228,14 @@ class _SectionTabOutlinePainter extends CustomPainter {
         radius: const Radius.circular(r),
       )
       ..lineTo(size.width - inset, size.height);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const r = _radius;
+    // Tabs repaint with every hover on the rail; their outlines are cut once
+    // per size and kept.
+    final path = _tabOutlines.obtain(size, () => _outline(size));
     canvas.drawPath(
       path,
       Paint()

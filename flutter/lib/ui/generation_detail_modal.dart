@@ -21,6 +21,7 @@ import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'library_folders.dart';
 import 'library_screen.dart';
+import 'motion_isolate.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'video_save_sheet.dart';
 
@@ -893,13 +894,17 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  AnimatedRotation(
-                    turns: _providerDetailsOpen ? .5 : 0,
-                    duration: const Duration(milliseconds: 160),
-                    child: Icon(
-                      Icons.expand_more_rounded,
-                      size: 18,
-                      color: context.colors.onSurfaceVariant,
+                  MotionIsolate(
+                    width: 18,
+                    height: 18,
+                    child: AnimatedRotation(
+                      turns: _providerDetailsOpen ? .5 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: Icon(
+                        Icons.expand_more_rounded,
+                        size: 18,
+                        color: context.colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],

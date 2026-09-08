@@ -1,4 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+import 'motion_clock.dart';
+import 'motion_isolate.dart';
 
 /// A determinate-looking bar for work that has a trustworthy duration estimate
 /// but no byte or stage progress signal.
@@ -6,6 +11,12 @@ import 'package:flutter/material.dart';
 /// It advances to 90% over [expectedDuration] and waits there until the owning
 /// future replaces it. Loading surfaces pair it with a spinner, so overdue work
 /// never looks frozen and the bar never falsely announces completion.
+///
+/// The bar advances on a [MotionClock] — at most 24 updates a second, and
+/// none while the app is inactive, the route is covered, or the bar is
+/// scrolled out of view — rather than on a vsync ticker that would ask the
+/// engine for a frame every 8 ms for the whole load. It sits in a
+/// [MotionIsolate], so give it a parent that fixes its width.
 class EstimatedProgressBar extends StatefulWidget {
   const EstimatedProgressBar({
     required this.expectedDuration,
@@ -26,11 +37,18 @@ class EstimatedProgressBar extends StatefulWidget {
   State<EstimatedProgressBar> createState() => _EstimatedProgressBarState();
 }
 
-class _EstimatedProgressBarState extends State<EstimatedProgressBar>
-    with SingleTickerProviderStateMixin {
+class _EstimatedProgressBarState extends State<EstimatedProgressBar> {
   static const double _waitingPoint = .9;
 
-  late final AnimationController _progress = AnimationController(vsync: this);
+  // The bar has nothing left to animate once it reaches the waiting point,
+  // so the tick that paints that frame also parks the clock.
+  late final MotionClock _clock = MotionClock(
+    onTick: (_) {
+      if (_value >= _waitingPoint) _clock.suspend();
+    },
+  );
+  Duration _elapsedAtAttach = Duration.zero;
+  Duration _clockAtAttach = Duration.zero;
 
   @override
   void initState() {
@@ -44,47 +62,67 @@ class _EstimatedProgressBarState extends State<EstimatedProgressBar>
     if (oldWidget.expectedDuration != widget.expectedDuration ||
         oldWidget.startedAt != widget.startedAt) {
       _restart();
+      _syncClock();
     }
   }
 
-  void _restart() {
-    _progress.stop();
-    final expectedMicros = widget.expectedDuration.inMicroseconds;
-    if (expectedMicros <= 0) {
-      _progress.value = _waitingPoint;
-      return;
-    }
-    final elapsed = DateTime.now().difference(widget.startedAt);
-    final elapsedFraction =
-        elapsed.inMicroseconds.clamp(0, expectedMicros) / expectedMicros;
-    _progress.value = elapsedFraction * _waitingPoint;
-    final remaining = widget.expectedDuration - elapsed;
-    if (remaining > Duration.zero) {
-      _progress.animateTo(
-        _waitingPoint,
-        duration: remaining,
-        curve: Curves.linear,
-      );
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncClock();
+  }
+
+  /// Work that is already overdue never starts the pacer: its pinned value
+  /// is painted by the ordinary build.
+  void _syncClock() {
+    if (_value >= _waitingPoint) {
+      _clock.suspend();
+    } else {
+      _clock.attach(context);
     }
   }
 
   @override
   void dispose() {
-    _progress.dispose();
+    _clock.dispose();
     super.dispose();
   }
 
+  void _restart() {
+    _elapsedAtAttach = DateTime.now().difference(widget.startedAt);
+    _clockAtAttach = _clock.elapsed;
+  }
+
+  /// How far along the work is: the wall clock in the app, the animation
+  /// clock in a test where wall time stands still — whichever is further.
+  double get _value {
+    final expectedMicros = widget.expectedDuration.inMicroseconds;
+    if (expectedMicros <= 0) return _waitingPoint;
+    final wall = DateTime.now().difference(widget.startedAt);
+    final ticked = _elapsedAtAttach + (_clock.elapsed - _clockAtAttach);
+    final elapsed = wall > ticked ? wall : ticked;
+    final fraction =
+        elapsed.inMicroseconds.clamp(0, expectedMicros) / expectedMicros;
+    return math.min(_waitingPoint, fraction * _waitingPoint);
+  }
+
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _progress,
-    builder: (context, _) => LinearProgressIndicator(
-      value: _progress.value,
-      color: widget.color,
-      backgroundColor: widget.backgroundColor,
-      minHeight: widget.minHeight,
-      borderRadius: BorderRadius.circular(99),
-      semanticsLabel: 'Estimated loading progress',
-      semanticsValue: '${(_progress.value * 100).round()}%',
+  Widget build(BuildContext context) => MotionIsolate(
+    height: widget.minHeight,
+    child: ValueListenableBuilder<int>(
+      valueListenable: _clock.frame,
+      builder: (context, _, _) {
+        final value = _value;
+        return LinearProgressIndicator(
+          value: value,
+          color: widget.color,
+          backgroundColor: widget.backgroundColor,
+          minHeight: widget.minHeight,
+          borderRadius: BorderRadius.circular(99),
+          semanticsLabel: 'Estimated loading progress',
+          semanticsValue: '${(value * 100).round()}%',
+        );
+      },
     ),
   );
 }

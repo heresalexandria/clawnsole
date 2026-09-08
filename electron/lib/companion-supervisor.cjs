@@ -20,6 +20,11 @@ const STABLE_AFTER_MS = 10 * 60 * 1000;
 // companion reopens the same secure store with the same session token. A
 // second failure before the companion has stayed up for STABLE_AFTER_MS is
 // reported through onFailed so the shell can ask the user what to do.
+//
+// The first launch may also name a preferred port: keeping the renderer
+// origin stable across launches keeps Chromium's per-origin HTTP cache,
+// CacheStorage and WebAssembly code cache warm instead of re-populating them
+// every time the app opens. onReady reports the port that was actually bound.
 class CompanionSupervisor {
   #child = null;
   #port = null;
@@ -54,6 +59,8 @@ class CompanionSupervisor {
     restartDelayMs = RESTART_DELAY_MS,
     maxRestarts = 1,
     stableAfterMs = STABLE_AFTER_MS,
+    preferredPort = null,
+    onReady = () => {},
   }) {
     if (typeof executable !== "string" || !executable) {
       throw new TypeError("A companion executable is required.");
@@ -72,6 +79,9 @@ class CompanionSupervisor {
     this.log = log;
     this.onRestarted = onRestarted;
     this.onFailed = onFailed;
+    this.onReady = onReady;
+    this.preferredPort = Number.isInteger(preferredPort) && preferredPort > 0
+      && preferredPort < 65_536 ? preferredPort : null;
     this.spawn = spawn;
     this.findOpenPort = findOpenPort;
     this.waitForServer = waitForServer;
@@ -96,7 +106,7 @@ class CompanionSupervisor {
     }
     if (this.#startPromise) return this.#startPromise;
     if (this.running) return Promise.resolve(this.url);
-    this.#startPromise = this.#launch(null).finally(() => {
+    this.#startPromise = this.#launch(this.preferredPort).finally(() => {
       this.#startPromise = null;
     });
     return this.#startPromise;
@@ -186,6 +196,7 @@ class CompanionSupervisor {
       this.#healthFailures = 0;
       this.#scheduleHealth();
       writeLifecycle(this.log, "companion-ready");
+      this.#notify("onReady", port);
       return url;
     };
     try {

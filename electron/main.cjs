@@ -39,6 +39,9 @@ const { VaultKeyCache } = require("./lib/vault-key-cache.cjs");
 const { bundledCompanionArguments } = require("./lib/companion-launch.cjs");
 const { CompanionLog } = require("./lib/companion-log.cjs");
 const { CompanionSupervisor } = require("./lib/companion-supervisor.cjs");
+const { readPreferredPort, rememberPort } = require("./lib/companion-port.cjs");
+const { clearRendererOriginStorage } = require("./lib/renderer-storage.cjs");
+const { buildDiagnosticsReport } = require("./lib/diagnostics-report.cjs");
 const {
   NAVIGATE_CHANNEL,
   buildApplicationMenuTemplate,
@@ -78,6 +81,7 @@ const BRIDGE_MEMBERS = [
 
 let mainWindow = null;
 let rendererDiagnostics = null;
+let rendererRecovery = null;
 let companion = null;
 let companionLog = null;
 let companionSession = null;
@@ -91,6 +95,10 @@ let companionToken = "";
 app.setName(APP_NAME);
 const smokeProfile = configureSmokeProfile(app, { smoke: IS_SMOKE_TEST });
 if (smokeProfile) console.log(`Clawnsole smoke profile: ${smokeProfile}`);
+// The renderer bundle, its wasm engine and cached media all live on one
+// loopback origin. A fixed cache budget keeps Chromium from re-evaluating the
+// cache size on every launch; a stable port (below) keeps the entries valid.
+app.commandLine.appendSwitch("disk-cache-size", String(512 * 1024 * 1024));
 
 function companionLogger() {
   if (!companionLog) {
@@ -125,6 +133,7 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
   const rendererDirectory = path.join(process.resourcesPath, "renderer");
   const companionEnvironment = { ...process.env };
   delete companionEnvironment.CLAWNSOLE_COMPANION_TOKEN;
+  const userData = app.getPath("userData");
   companion = new CompanionSupervisor({
     executable: path.join(process.resourcesPath, "companion", "clawnsole_companion"),
     argumentsFor: (port) => bundledCompanionArguments({
@@ -137,6 +146,10 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
     env: companionEnvironment,
     bootstrapLine: companionBootstrapLine(deviceKey, requestToken),
     log: companionLogger(),
+    // The last bound port is preferred so the renderer origin, and with it
+    // Chromium's per-origin caches, survive from one launch to the next.
+    preferredPort: readPreferredPort(userData),
+    onReady: (port) => rememberPort(userData, port),
     onRestarted: (restart) => adoptCompanionUrl(restart),
     onFailed: (reason) => reportCompanionFailure(reason),
   });
@@ -157,8 +170,12 @@ async function adoptCompanionUrl({ url, changedUrl }) {
   rendererUrl = url;
   companionSession?.rebind(url);
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (changedUrl) await mainWindow.loadURL(url);
-  else mainWindow.webContents.reload();
+  if (changedUrl) {
+    await clearRendererOriginStorage(session.defaultSession, url);
+    await mainWindow.loadURL(url);
+  } else {
+    mainWindow.webContents.reload();
+  }
 }
 
 async function reportCompanionFailure(reason) {
@@ -231,7 +248,42 @@ function installApplicationMenu() {
       mainWindow.webContents.reload();
     }),
     showLogs: () => shell.showItemInFolder(companionLogger().file),
+    saveDiagnosticsReport: () =>
+      void runShellAction("diagnostics-report-failed", saveDiagnosticsReport),
   })));
+}
+
+// Help > Save Diagnostics Report… bundles both companion logs, Clawnsole's
+// macOS crash reports, runtime versions and process metrics into one text
+// file the user chooses where to save. The dialog says what it may contain.
+async function saveDiagnosticsReport() {
+  const report = buildDiagnosticsReport({
+    logDirectory: app.getPath("logs"),
+    reportDirectories: [
+      path.join(app.getPath("home"), "Library", "Logs", "DiagnosticReports"),
+      path.join("/Library", "Logs", "DiagnosticReports"),
+    ],
+    rendererDirectory: app.isPackaged ? path.join(process.resourcesPath, "renderer") : null,
+    versions: process.versions,
+    platform: process.platform,
+    arch: process.arch,
+    systemVersion: typeof process.getSystemVersion === "function"
+      ? process.getSystemVersion() : null,
+    appMetrics: () => app.getAppMetrics(),
+  });
+  const options = {
+    title: "Save Clawnsole Diagnostics Report",
+    message: "The report may contain your computer's name and file paths.",
+    defaultPath: path.join(app.getPath("downloads"), report.fileName),
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  };
+  const choice = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options);
+  if (choice.canceled || !choice.filePath) return;
+  fs.writeFileSync(choice.filePath, report.text, "utf8");
+  writeLifecycle(lifecycleLog, "diagnostics-report-saved");
+  shell.showItemInFolder(choice.filePath);
 }
 
 function showMessage(options) {
@@ -619,11 +671,19 @@ async function createMainWindow() {
     getRendererUrl: () => rendererUrl,
     openExternal: (url) => runShellAction("open-external-failed", () => shell.openExternal(url)),
   });
+  // A Flutter engine that aborts inside WebAssembly, or freezes while
+  // throwing, leaves a live renderer process that Chromium never reports
+  // gone. Diagnostics infer it and the recovery budget reloads the window.
+  let recovery = null;
   const diagnostics = new RendererDiagnostics({
     contents: window.webContents, log: lifecycleLog, getAppMetrics: () => app.getAppMetrics(),
+    onAlert: (kind, details) => {
+      if (kind !== "engine-dead" && kind !== "heap-critical") return;
+      if (!isQuitting) recovery?.recoverFrom(details?.reason);
+    },
   });
   rendererDiagnostics = diagnostics;
-  installRendererRecovery({
+  recovery = installRendererRecovery({
     window,
     log: lifecycleLog,
     showMessage: (options) => dialog.showMessageBox(window, options),
@@ -634,16 +694,21 @@ async function createMainWindow() {
     },
     quit: () => app.quit(),
   });
+  rendererRecovery = recovery;
   window.once("ready-to-show", () => {
     if (!window.isDestroyed() && !isQuitting) window.show();
   });
   window.on("closed", () => {
     diagnostics.dispose();
     if (rendererDiagnostics === diagnostics) rendererDiagnostics = null;
+    if (rendererRecovery === recovery) rendererRecovery = null;
     if (mainWindow === window) mainWindow = null;
   });
   mainWindow = window;
   try {
+    // A stable origin must not let a service worker from an earlier bundle
+    // answer for this one; the app keeps nothing in browser storage.
+    await clearRendererOriginStorage(session.defaultSession, rendererUrl);
     await window.loadURL(rendererUrl);
     return window;
   } catch (error) {

@@ -24,6 +24,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../app/app_theme.dart';
 import 'hardware.dart';
+import 'paint_cache.dart';
 
 /// Radius of the bezel's outer corner: nearly square, like the real thing.
 const double _outerRadius = 5;
@@ -230,6 +231,15 @@ class HardwareLitButtonState extends State<HardwareLitButton>
   bool _pressed = false;
   bool _focused = false;
 
+  /// The key's shaders, built once per size and light and reused across
+  /// paints; a lit lamp's lens still changes with the filament, and those
+  /// entries cycle out through the cache's own disposal.
+  final ShaderCache<Object> _shaders = ShaderCache<Object>(capacity: 24);
+
+  /// The frost speckle mapped onto the lens, once per lens rectangle.
+  final Map<Rect, (List<Offset>, List<Offset>)> _frostPoints =
+      <Rect, (List<Offset>, List<Offset>)>{};
+
   bool get _enabled => widget.onPressed != null;
 
   /// How lit the lens is right now: 0 with everything off, 1 at the lamps'
@@ -289,6 +299,7 @@ class HardwareLitButtonState extends State<HardwareLitButton>
     _lamp.dispose();
     _contact.dispose();
     _hoverLift.dispose();
+    _shaders.clear();
     super.dispose();
   }
 
@@ -463,6 +474,8 @@ class HardwareLitButtonState extends State<HardwareLitButton>
             hover: _hoverLift.value,
             pressed: _pressed,
             focusGlow: _focused ? context.tokens.brass : null,
+            shaders: _shaders,
+            frostPoints: _frostPoints,
           ),
           // widthFactor 1 hugs the legend when the parent leaves room, and
           // still fills a stretched column, where the incoming width is tight.
@@ -483,7 +496,9 @@ class HardwareLitButtonState extends State<HardwareLitButton>
         minHeight: widget.height,
         maxHeight: widget.height,
       ),
-      child: face,
+      // The lamps repaint on their own picture while lit, so the warm-up
+      // and the breath never re-record the console around the key.
+      child: RepaintBoundary(child: face),
     );
 
     // A dark, unlit key reads as out of service; a lit one is working, so it
@@ -551,9 +566,15 @@ class _IndicatorPainter extends CustomPainter {
     required this.hover,
     required this.pressed,
     required this.focusGlow,
+    required this.shaders,
+    required this.frostPoints,
   });
 
   final bool dark;
+
+  /// Owned by the key's state; see [HardwareLitButtonState].
+  final ShaderCache<Object> shaders;
+  final Map<Rect, (List<Offset>, List<Offset>)> frostPoints;
 
   /// The steady light in the lens, 0 to 1: what the structure of the cap —
   /// its edge catch, its tooth, its ink — is lit by.
@@ -681,11 +702,14 @@ class _IndicatorPainter extends CustomPainter {
     canvas.drawRRect(
       outer,
       Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[_bezelTop, _bezelBottom],
-        ).createShader(rect),
+        ..shader = shaders.obtain(
+          ('bezel', rect),
+          () => const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[_bezelTop, _bezelBottom],
+          ).createShader(rect),
+        ),
     );
     // The bevel: one hairline inside the outer edge, lit at top-left.
     canvas.drawRRect(
@@ -693,16 +717,19 @@ class _IndicatorPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .16 : .24),
-            Colors.white.withValues(alpha: .03),
-            Colors.black.withValues(alpha: .35),
-          ],
-          stops: const <double>[0, .5, 1],
-        ).createShader(rect),
+        ..shader = shaders.obtain(
+          ('bevel', rect, dark),
+          () => LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              Colors.white.withValues(alpha: dark ? .16 : .24),
+              Colors.white.withValues(alpha: .03),
+              Colors.black.withValues(alpha: .35),
+            ],
+            stops: const <double>[0, .5, 1],
+          ).createShader(rect),
+        ),
     );
     // The outer keyline where the frame meets the panel.
     canvas.drawRRect(
@@ -721,29 +748,40 @@ class _IndicatorPainter extends CustomPainter {
     canvas.drawRect(
       lensRect,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            _lift(_plastic(_lensTopIdle, _lensTopLit, _lensTopFlash, body)),
-            _lift(
-              _plastic(_lensBottomIdle, _lensBottomLit, _lensBottomFlash, body),
-            ),
-          ],
-        ).createShader(lensRect),
+        ..shader = shaders.obtain(
+          ('lens', lensRect, body, hover),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              _lift(_plastic(_lensTopIdle, _lensTopLit, _lensTopFlash, body)),
+              _lift(
+                _plastic(
+                  _lensBottomIdle,
+                  _lensBottomLit,
+                  _lensBottomFlash,
+                  body,
+                ),
+              ),
+            ],
+          ).createShader(lensRect),
+        ),
     );
     // The diffuser lightens toward the middle even with the lamps off.
     canvas.drawRect(
       lensRect,
       Paint()
-        ..shader = RadialGradient(
-          center: const Alignment(0, .1),
-          radius: .9,
-          colors: <Color>[
-            Colors.white.withValues(alpha: .07),
-            Colors.white.withValues(alpha: 0),
-          ],
-        ).createShader(lensRect),
+        ..shader = shaders.obtain(
+          ('diffuser', lensRect),
+          () => RadialGradient(
+            center: const Alignment(0, .1),
+            radius: .9,
+            colors: <Color>[
+              Colors.white.withValues(alpha: .07),
+              Colors.white.withValues(alpha: 0),
+            ],
+          ).createShader(lensRect),
+        ),
     );
   }
 
@@ -762,68 +800,83 @@ class _IndicatorPainter extends CustomPainter {
           ];
     // The lamps' glow, wide and soft — one remove further through the
     // diffuser than the filaments themselves, so it answers a beat later.
+    // The lamps change with every breath of the filament, so their shaders
+    // are made for the frame and released with it rather than cached.
     final halo = _halo;
     for (final center in centers) {
       final radius = math.max(height * 1.15, width * .34);
-      canvas.drawCircle(
-        center,
-        radius,
-        Paint()
-          ..shader = RadialGradient(
-            colors: <Color>[
-              _lamp.withValues(alpha: _alpha(.58, halo)),
-              _lamp.withValues(alpha: _alpha(.21, halo)),
-              _lamp.withValues(alpha: 0),
-            ],
-            stops: const <double>[0, .45, 1],
-          ).createShader(Rect.fromCircle(center: center, radius: radius)),
+      _drawWithShader(
+        RadialGradient(
+          colors: <Color>[
+            _lamp.withValues(alpha: _alpha(.58, halo)),
+            _lamp.withValues(alpha: _alpha(.21, halo)),
+            _lamp.withValues(alpha: 0),
+          ],
+          stops: const <double>[0, .45, 1],
+        ).createShader(Rect.fromCircle(center: center, radius: radius)),
+        (paint) => canvas.drawCircle(center, radius, paint),
       );
     }
     // The hot spots where the filaments sit closest to the diffuser. These
     // lead: nothing stands between them and the wire.
     for (final center in centers) {
       final radius = height * .42;
-      canvas.drawCircle(
-        center,
-        radius,
-        Paint()
-          ..shader = RadialGradient(
-            colors: <Color>[
-              const Color(0xFFFCE3F4).withValues(alpha: _alpha(.46, glow)),
-              _lamp.withValues(alpha: _alpha(.28, glow)),
-              _lamp.withValues(alpha: 0),
-            ],
-            stops: const <double>[0, .35, 1],
-          ).createShader(Rect.fromCircle(center: center, radius: radius)),
+      _drawWithShader(
+        RadialGradient(
+          colors: <Color>[
+            const Color(0xFFFCE3F4).withValues(alpha: _alpha(.46, glow)),
+            _lamp.withValues(alpha: _alpha(.28, glow)),
+            _lamp.withValues(alpha: 0),
+          ],
+          stops: const <double>[0, .35, 1],
+        ).createShader(Rect.fromCircle(center: center, radius: radius)),
+        (paint) => canvas.drawCircle(center, radius, paint),
       );
     }
     // The thick edges of the block stay a little darker than its middle.
     canvas.drawRect(
       lensRect,
       Paint()
-        ..shader = LinearGradient(
-          colors: <Color>[
-            _shade.withValues(alpha: .28 * lit),
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: 0),
-            _shade.withValues(alpha: .28 * lit),
-          ],
-          stops: const <double>[0, .18, .82, 1],
-        ).createShader(lensRect),
+        ..shader = shaders.obtain(
+          ('edges', lensRect, lit),
+          () => LinearGradient(
+            colors: <Color>[
+              _shade.withValues(alpha: .28 * lit),
+              _shade.withValues(alpha: 0),
+              _shade.withValues(alpha: 0),
+              _shade.withValues(alpha: .28 * lit),
+            ],
+            stops: const <double>[0, .18, .82, 1],
+          ).createShader(lensRect),
+        ),
     );
+  }
+
+  static void _drawWithShader(ui.Shader shader, void Function(Paint) draw) {
+    try {
+      draw(Paint()..shader = shader);
+    } finally {
+      shader.dispose();
+    }
   }
 
   // Frosted plastic has tooth: a fine, even speckle over the whole lens.
   void _paintFrost(Canvas canvas, Rect lensRect) {
-    final light = <Offset>[];
-    final deep = <Offset>[];
-    for (var i = 0; i < _frost.length; i++) {
-      final point = lensRect.topLeft.translate(
-        _frost[i].dx * lensRect.width,
-        _frost[i].dy * lensRect.height,
-      );
-      (i.isEven ? light : deep).add(point);
-    }
+    final (light, deep) = frostPoints.putIfAbsent(lensRect, () {
+      final light = <Offset>[];
+      final deep = <Offset>[];
+      for (var i = 0; i < _frost.length; i++) {
+        final point = lensRect.topLeft.translate(
+          _frost[i].dx * lensRect.width,
+          _frost[i].dy * lensRect.height,
+        );
+        (i.isEven ? light : deep).add(point);
+      }
+      // The lens moves a pixel when pressed; keep a couple of mappings, not
+      // a history of every size the key has been.
+      if (frostPoints.length >= 4) frostPoints.remove(frostPoints.keys.first);
+      return (light, deep);
+    });
     canvas.drawPoints(
       ui.PointMode.points,
       light,
@@ -848,16 +901,19 @@ class _IndicatorPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.1
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Colors.white.withValues(alpha: .26 + .1 * lit),
-            Colors.white.withValues(alpha: .04),
-            _shade.withValues(alpha: .34),
-          ],
-          stops: const <double>[0, .55, 1],
-        ).createShader(lensRect),
+        ..shader = shaders.obtain(
+          ('edge', lensRect, lit),
+          () => LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              Colors.white.withValues(alpha: .26 + .1 * lit),
+              Colors.white.withValues(alpha: .04),
+              _shade.withValues(alpha: .34),
+            ],
+            stops: const <double>[0, .55, 1],
+          ).createShader(lensRect),
+        ),
     );
   }
 

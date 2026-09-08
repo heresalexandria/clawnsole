@@ -42,6 +42,7 @@ import 'package:clawnsole/ui/media_thumbnail.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:clawnsole/ui/settings_screen.dart';
 import 'package:clawnsole/ui/update_available_chip.dart';
+import 'package:clawnsole/ui/paced_progress_indicator.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
@@ -2072,7 +2073,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Loading preview'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    expect(find.byType(PacedCircularProgressIndicator), findsWidgets);
     final progressHost = find.byKey(
       const ValueKey('media-loading-estimated-progress'),
     );
@@ -6257,23 +6258,16 @@ void main() {
     final label = tester.widget<Text>(find.text('Update Available'));
     expect(label.style?.color, Colors.white);
 
-    final ink = tester.widget<Ink>(
-      find.ancestor(
-        of: find.byKey(const Key('update-available-chip')),
-        matching: find.byType(Ink),
-      ),
-    );
-    final before =
-        (ink.decoration! as BoxDecoration).gradient! as RadialGradient;
+    final glow =
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(const Key('update-available-glow')),
+                )
+                .painter!
+            as UpdateGlowPainter;
+    final before = glow.gradient;
     await tester.pump(const Duration(seconds: 1));
-    final animatedInk = tester.widget<Ink>(
-      find.ancestor(
-        of: find.byKey(const Key('update-available-chip')),
-        matching: find.byType(Ink),
-      ),
-    );
-    final after =
-        (animatedInk.decoration! as BoxDecoration).gradient! as RadialGradient;
+    final after = glow.gradient;
     expect(after.center, isNot(before.center));
 
     await tester.tap(find.byKey(const Key('update-available-chip')));

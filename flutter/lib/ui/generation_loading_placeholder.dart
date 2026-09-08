@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/generation_timing.dart';
 import '../core/models.dart';
+import 'motion_clock.dart';
+import 'paint_cache.dart';
 
 // Recorded canvas commands retain their own shader reference. Release the
 // temporary owner after recording instead of waiting for JavaScript GC to
@@ -17,6 +19,16 @@ void _paintWithShader(ui.Shader shader, void Function(Paint) draw) {
   } finally {
     shader.dispose();
   }
+}
+
+/// What both placeholder painters expose to the page-repaint probe: the
+/// frame listenable their repaint follows, so a test can tell the surface
+/// animated without counting pixels.
+abstract class GenerationPlaceholderPainter extends CustomPainter {
+  GenerationPlaceholderPainter({required Listenable super.repaint});
+
+  /// Bumped once per animation frame by the placeholder's [MotionClock].
+  ValueListenable<int> get frame;
 }
 
 double generationAspectRatio(String value) {
@@ -128,18 +140,18 @@ class _BroadcastStaticSurface extends StatefulWidget {
       _BroadcastStaticSurfaceState();
 }
 
-class _BroadcastStaticSurfaceState extends State<_BroadcastStaticSurface>
-    with SingleTickerProviderStateMixin {
+class _BroadcastStaticSurfaceState extends State<_BroadcastStaticSurface> {
   static const int _noiseFrameCount = 16;
+  static const Duration _period = Duration(seconds: 4);
   static Future<List<ui.Image>>? _noiseFuture;
   static List<ui.Image>? _noiseCache;
 
-  late final AnimationController _ticker = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 4),
-  );
+  /// 24 frames a second, paused whenever the card cannot be seen. The snow
+  /// used to ride a vsync ticker: 120 pictures a second on a desktop display,
+  /// each one leaking native gradients the finalizer never caught up with.
+  final MotionClock _clock = MotionClock();
+  final ShaderCache<Object> _shaders = ShaderCache<Object>(capacity: 8);
   List<ui.Image> _frames = _noiseCache ?? const <ui.Image>[];
-  bool _reduceMotion = false;
 
   @override
   void initState() {
@@ -155,18 +167,20 @@ class _BroadcastStaticSurfaceState extends State<_BroadcastStaticSurface>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (_reduceMotion) {
-      _ticker.stop();
-    } else if (!_ticker.isAnimating) {
-      _ticker.repeat();
-    }
+    _clock.attach(context);
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _clock.dispose();
+    _shaders.clear();
     super.dispose();
+  }
+
+  double _phase() {
+    if (_clock.isStatic) return .317;
+    final micros = _clock.elapsed.inMicroseconds % _period.inMicroseconds;
+    return micros / _period.inMicroseconds;
   }
 
   static Future<List<ui.Image>> _makeNoiseFrames() => Future.wait(
@@ -220,22 +234,30 @@ class _BroadcastStaticSurfaceState extends State<_BroadcastStaticSurface>
     key: ValueKey('generation-loading-static-${widget.itemId}'),
     painter: _BroadcastStaticPainter(
       frames: _frames,
-      ticker: _ticker,
-      phase: () => _reduceMotion ? .317 : _ticker.value,
+      frame: _clock.frame,
+      phase: _phase,
+      shaders: _shaders,
     ),
   );
 }
 
-class _BroadcastStaticPainter extends CustomPainter {
+class _BroadcastStaticPainter extends GenerationPlaceholderPainter {
   _BroadcastStaticPainter({
     required this.frames,
-    required this.ticker,
+    required this.frame,
     required this.phase,
-  }) : super(repaint: ticker);
+    required this.shaders,
+  }) : super(repaint: frame);
 
   final List<ui.Image> frames;
-  final AnimationController ticker;
+
+  @override
+  final ValueListenable<int> frame;
   final double Function() phase;
+
+  /// Shaders that depend only on the surface size — the vignette, the sheen,
+  /// the hum bar's shape — built once per size and reused every frame.
+  final ShaderCache<Object> shaders;
 
   void _drawNoise(
     Canvas canvas,
@@ -389,10 +411,13 @@ class _BroadcastStaticPainter extends CustomPainter {
       size.width,
       center + halfHeight,
     );
-    _paintWithShader(
-      ui.Gradient.linear(
-        Offset(0, rect.top),
-        Offset(0, rect.bottom),
+    // The bar's shading is the same every frame; only its position moves.
+    // Keep one gradient per size in local coordinates and slide the canvas.
+    final shader = shaders.obtain(
+      ('hum', halfHeight),
+      () => ui.Gradient.linear(
+        Offset.zero,
+        Offset(0, halfHeight * 2),
         const <Color>[
           Color(0x00000000),
           Color(0x28000000),
@@ -402,8 +427,14 @@ class _BroadcastStaticPainter extends CustomPainter {
         ],
         const <double>[0, .22, .5, .72, 1],
       ),
-      (paint) => canvas.drawRect(rect, paint),
     );
+    canvas.save();
+    canvas.translate(0, rect.top);
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, halfHeight * 2),
+      Paint()..shader = shader,
+    );
+    canvas.restore();
     canvas.drawRect(
       Rect.fromLTWH(0, center - halfHeight * .82, size.width, 1.2),
       Paint()..color = const Color(0x3FFFFFFF),
@@ -494,23 +525,40 @@ class _BroadcastStaticPainter extends CustomPainter {
         ..color = const Color(0x120A2130)
         ..blendMode = BlendMode.color,
     );
-    _paintWithShader(
-      ui.Gradient.radial(
-        Offset(size.width * .5, size.height * .44),
-        size.longestSide * .72,
-        const <Color>[Color(0x00000000), Color(0x00000000), Color(0xA8000000)],
-        const <double>[0, .52, 1],
-      ),
-      (paint) => canvas.drawRect(bounds, paint),
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = shaders.obtain(
+          ('vignette', size),
+          () => ui.Gradient.radial(
+            Offset(size.width * .5, size.height * .44),
+            size.longestSide * .72,
+            const <Color>[
+              Color(0x00000000),
+              Color(0x00000000),
+              Color(0xA8000000),
+            ],
+            const <double>[0, .52, 1],
+          ),
+        ),
     );
-    _paintWithShader(
-      ui.Gradient.linear(
-        Offset(size.width * .03, 0),
-        Offset(size.width * .58, size.height * .68),
-        const <Color>[Color(0x21EAF7FF), Color(0x07EAF7FF), Color(0x00FFFFFF)],
-        const <double>[0, .38, 1],
-      ),
-      (paint) => canvas.drawRect(bounds, paint..blendMode = BlendMode.screen),
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = shaders.obtain(
+          ('sheen', size),
+          () => ui.Gradient.linear(
+            Offset(size.width * .03, 0),
+            Offset(size.width * .58, size.height * .68),
+            const <Color>[
+              Color(0x21EAF7FF),
+              Color(0x07EAF7FF),
+              Color(0x00FFFFFF),
+            ],
+            const <double>[0, .38, 1],
+          ),
+        )
+        ..blendMode = BlendMode.screen,
     );
     final glass = RRect.fromRectAndRadius(
       bounds.deflate(1),
@@ -527,7 +575,7 @@ class _BroadcastStaticPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _BroadcastStaticPainter oldDelegate) =>
-      oldDelegate.frames != frames;
+      oldDelegate.frames != frames || oldDelegate.shaders != shaders;
 }
 
 /// "Cyclone": silk ribbons painted into a slowly rotating feedback field, so
@@ -542,27 +590,23 @@ class _CycloneSurface extends StatefulWidget {
   State<_CycloneSurface> createState() => _CycloneSurfaceState();
 }
 
-class _CycloneSurfaceState extends State<_CycloneSurface>
-    with SingleTickerProviderStateMixin {
+class _CycloneSurfaceState extends State<_CycloneSurface> {
   static const double _stepSeconds = 1 / 30;
   static const int _warmupSteps = 26;
   static const int _staticSteps = 110;
 
-  late final AnimationController _ticker = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 8),
-  )..addListener(_onTick);
-  final ValueNotifier<int> _frame = ValueNotifier<int>(0);
+  /// The feedback field steps at 30 Hz from the clock's 24 fps ticks (at
+  /// most three steps a tick), so the ribbons move at the pace they were
+  /// tuned for while the engine records a picture only 24 times a second.
+  late final MotionClock _clock = MotionClock(onTick: _onTick);
+  final ShaderCache<Object> _shaders = ShaderCache<Object>(capacity: 8);
 
   static Future<ui.Image>? _grainFuture;
   static ui.Image? _grainCache;
   ui.Image? _grain;
 
   _CycloneField? _field;
-  Duration _lastElapsed = Duration.zero;
-  double _clock = 0;
   double _simTime = 0;
-  bool _reduceMotion = false;
 
   @override
   void initState() {
@@ -579,37 +623,26 @@ class _CycloneSurfaceState extends State<_CycloneSurface>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (_reduceMotion) {
-      _ticker.stop();
-    } else if (!_ticker.isAnimating) {
-      _lastElapsed = Duration.zero;
-      _ticker.repeat();
-    }
+    _clock.attach(context);
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
-    _frame.dispose();
+    _clock.dispose();
+    _shaders.clear();
     _field?.dispose();
     super.dispose();
   }
 
-  void _onTick() {
-    final elapsed = _ticker.lastElapsedDuration ?? Duration.zero;
-    final dt = (elapsed - _lastElapsed).inMicroseconds / 1e6;
-    if (dt <= 0) return;
-    _lastElapsed = elapsed;
-    _clock += dt;
+  void _onTick(Duration elapsed) {
+    final clock = elapsed.inMicroseconds / 1e6;
     var steps = 0;
-    while (_clock - _simTime >= _stepSeconds && steps < 3) {
+    while (clock - _simTime >= _stepSeconds && steps < 3) {
       _field?.step(_simTime);
       _simTime += _stepSeconds;
       steps++;
     }
-    if (_clock - _simTime >= _stepSeconds) _simTime = _clock;
-    if (steps > 0) _frame.value++;
+    if (clock - _simTime >= _stepSeconds) _simTime = clock;
   }
 
   void _ensureField(double aspect) {
@@ -617,7 +650,7 @@ class _CycloneSurfaceState extends State<_CycloneSurface>
     if (current != null && (current.aspect / aspect - 1).abs() < .04) return;
     current?.dispose();
     final field = _CycloneField(aspect);
-    final warmup = _reduceMotion ? _staticSteps : _warmupSteps;
+    final warmup = _clock.isStatic ? _staticSteps : _warmupSteps;
     for (var i = 0; i < warmup; i++) {
       field.step(_simTime);
       _simTime += _stepSeconds;
@@ -625,7 +658,11 @@ class _CycloneSurfaceState extends State<_CycloneSurface>
     _field = field;
   }
 
-  double _chaseAngle() => _reduceMotion ? 2.4 : (_clock % 8) / 8 * math.pi * 2;
+  double _chaseAngle() {
+    if (_clock.isStatic) return 2.4;
+    final seconds = _clock.elapsed.inMicroseconds / 1e6;
+    return (seconds % 8) / 8 * math.pi * 2;
+  }
 
   static Future<ui.Image> _makeGrain() {
     const side = 96;
@@ -667,9 +704,10 @@ class _CycloneSurfaceState extends State<_CycloneSurface>
         key: ValueKey('generation-loading-cyclone-${widget.item.localId}'),
         painter: _CyclonePainter(
           field: _field!,
-          frame: _frame,
+          frame: _clock.frame,
           chaseAngle: _chaseAngle,
           grain: _grain,
+          shaders: _shaders,
         ),
       );
     },
@@ -691,6 +729,9 @@ class _CycloneField {
   late final int width;
   late final int height;
   ui.Image? image;
+
+  /// One ribbon gradient per band, sized to the field once.
+  final List<ui.Shader?> _ribbons = List<ui.Shader?>.filled(3, null);
 
   static const List<Color> _colors = <Color>[
     Color(0xFF2B49FF),
@@ -745,26 +786,25 @@ class _CycloneField {
       }
       final c0 = _colors[i % _colors.length];
       final c1 = _colors[(i + 2) % _colors.length];
-      _paintWithShader(
-        ui.Gradient.linear(
-          Offset.zero,
-          Offset(w, 0),
-          <Color>[
-            c0.withValues(alpha: 0),
-            c0.withValues(alpha: .05),
-            c1.withValues(alpha: .05),
-            c1.withValues(alpha: 0),
-          ],
-          const <double>[0, .3, .7, 1],
-        ),
-        (paint) => canvas.drawPath(
-          path,
-          paint
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = h * (.1 + .055 * i)
-            ..strokeCap = StrokeCap.round
-            ..blendMode = BlendMode.plus,
-        ),
+      final ribbon = _ribbons[i] ??= ui.Gradient.linear(
+        Offset.zero,
+        Offset(w, 0),
+        <Color>[
+          c0.withValues(alpha: 0),
+          c0.withValues(alpha: .05),
+          c1.withValues(alpha: .05),
+          c1.withValues(alpha: 0),
+        ],
+        const <double>[0, .3, .7, 1],
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..shader = ribbon
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = h * (.1 + .055 * i)
+          ..strokeCap = StrokeCap.round
+          ..blendMode = BlendMode.plus,
       );
     }
 
@@ -782,21 +822,32 @@ class _CycloneField {
   void dispose() {
     image?.dispose();
     image = null;
+    for (var i = 0; i < _ribbons.length; i++) {
+      _ribbons[i]?.dispose();
+      _ribbons[i] = null;
+    }
   }
 }
 
-class _CyclonePainter extends CustomPainter {
+class _CyclonePainter extends GenerationPlaceholderPainter {
   _CyclonePainter({
     required this.field,
     required this.frame,
     required this.chaseAngle,
     required this.grain,
+    required this.shaders,
   }) : super(repaint: frame);
 
   final _CycloneField field;
-  final ValueNotifier<int> frame;
+
+  @override
+  final ValueListenable<int> frame;
   final double Function() chaseAngle;
   final ui.Image? grain;
+
+  /// The vignette and the grain tile depend only on the size (and the grain
+  /// image); the chased border alone is rebuilt each frame and released.
+  final ShaderCache<Object> shaders;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -835,26 +886,38 @@ class _CyclonePainter extends CustomPainter {
       );
     }
 
-    _paintWithShader(
-      ui.Gradient.radial(
-        Offset(size.width * .5, size.height * .44),
-        size.longestSide * .72,
-        const <Color>[Color(0x00000000), Color(0x00000000), Color(0x85000000)],
-        const <double>[0, .52, 1],
-      ),
-      (paint) => canvas.drawRect(bounds, paint),
+    canvas.drawRect(
+      bounds,
+      Paint()
+        ..shader = shaders.obtain(
+          ('vignette', size),
+          () => ui.Gradient.radial(
+            Offset(size.width * .5, size.height * .44),
+            size.longestSide * .72,
+            const <Color>[
+              Color(0x00000000),
+              Color(0x00000000),
+              Color(0x85000000),
+            ],
+            const <double>[0, .52, 1],
+          ),
+        ),
     );
 
     if (grain case final noise?) {
-      _paintWithShader(
-        ui.ImageShader(
-          noise,
-          TileMode.repeated,
-          TileMode.repeated,
-          Matrix4.identity().storage,
-        ),
-        (paint) =>
-            canvas.drawRect(bounds, paint..blendMode = BlendMode.overlay),
+      canvas.drawRect(
+        bounds,
+        Paint()
+          ..shader = shaders.obtain(
+            ('grain', noise),
+            () => ui.ImageShader(
+              noise,
+              TileMode.repeated,
+              TileMode.repeated,
+              Matrix4.identity().storage,
+            ),
+          )
+          ..blendMode = BlendMode.overlay,
       );
     }
 
@@ -897,5 +960,7 @@ class _CyclonePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CyclonePainter oldDelegate) =>
-      oldDelegate.field != field || oldDelegate.grain != grain;
+      oldDelegate.field != field ||
+      oldDelegate.grain != grain ||
+      oldDelegate.shaders != shaders;
 }

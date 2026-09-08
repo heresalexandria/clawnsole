@@ -5,6 +5,7 @@ const rendererWindow = window;
 
 const DIAGNOSTIC_EVENTS = new Set([
   "flutter-error", "flutter-platform-error", "flutter-ready", "flutter-health",
+  "flutter-engine-stalled", "flutter-motion-constrained", "flutter-lifecycle",
   "web-error", "web-unhandled-rejection", "webgl-context-lost",
   "webgl-context-restored", "bootstrap-error",
 ]);
@@ -13,7 +14,15 @@ const HEALTH_FIELDS = [
   "canvasKitHeapBytes", "canvasKitDecodeCacheBytes", "canvasKitDecodeCacheLimitBytes",
   "appActive",
   "flutterErrorsSuppressed",
+  "lifecycleState", "documentHidden", "framesSinceLastHealth", "motionConstrained", "heapPressure",
 ];
+// Numeric fields each Flutter-originated event may carry across the bridge.
+const EVENT_FIELDS = {
+  "flutter-health": HEALTH_FIELDS,
+  "flutter-engine-stalled": ["lastFrameAgeMs", "errorsInWindow"],
+  "flutter-motion-constrained": ["heapBytes"],
+  "flutter-lifecycle": ["lifecycleState"],
+};
 const diagnosticNow = Date.now;
 const diagnosticWindows = new Map();
 
@@ -43,8 +52,9 @@ function reportDiagnostic(payload) {
     const clean = { event: payload.event };
     if (typeof payload.errorType === "string") clean.errorType = payload.errorType.slice(0, 64);
     if (typeof payload.stack === "string") clean.stack = payload.stack.slice(0, 32768);
-    if (payload.event === "flutter-health") {
-      for (const key of HEALTH_FIELDS) {
+    const fields = EVENT_FIELDS[payload.event];
+    if (fields) {
+      for (const key of fields) {
         if (typeof payload[key] === "number" && Number.isFinite(payload[key])) clean[key] = payload[key];
       }
     }

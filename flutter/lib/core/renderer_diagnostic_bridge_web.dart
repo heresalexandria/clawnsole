@@ -18,8 +18,32 @@ extension type _CanvasKitMemory._(JSObject _) implements JSObject {
   external JSNumber getDecodeCacheLimitBytes();
 }
 
+@JS('document')
+external _VisibilityDocument? get _document;
+
+extension type _VisibilityDocument._(JSObject _) implements JSObject {
+  external JSAny? get visibilityState;
+}
+
 _CanvasKitMemory? _observedCanvasKit;
 final _failedNativeCounters = <String>{};
+
+/// Accepts only a finite, non-negative, safe-integer byte count.
+int? _byteCount(JSNumber? value) {
+  final bytes = value?.toDartDouble;
+  if (bytes == null ||
+      !bytes.isFinite ||
+      bytes < 0 ||
+      bytes > 9007199254740991) {
+    return null;
+  }
+  return bytes.round();
+}
+
+// Read the scalar byteLength in JavaScript. Converting HEAPU8 itself to Dart
+// would copy the entire Wasm heap, potentially several gigabytes.
+int? _heapBytes(_CanvasKitMemory kit) =>
+    _byteCount(kit.heap?.getProperty<JSNumber?>('byteLength'.toJS));
 
 void _addCanvasKitMemory(Map<String, Object> diagnostic) {
   try {
@@ -36,13 +60,8 @@ void _addCanvasKitMemory(Map<String, Object> diagnostic) {
     }) {
       if (nativeCounter && _failedNativeCounters.contains(key)) return;
       try {
-        final bytes = read()?.toDartDouble;
-        if (bytes != null &&
-            bytes.isFinite &&
-            bytes >= 0 &&
-            bytes <= 9007199254740991) {
-          diagnostic[key] = bytes.round();
-        }
+        final bytes = _byteCount(read());
+        if (bytes != null) diagnostic[key] = bytes;
       } on Object {
         // Different engine releases may omit or reject an optional metric.
         // A corrupted Wasm engine can also throw here. Do not repeatedly enter
@@ -51,8 +70,6 @@ void _addCanvasKitMemory(Map<String, Object> diagnostic) {
       }
     }
 
-    // Read the scalar byteLength in JavaScript. Converting HEAPU8 itself to
-    // Dart would copy the entire Wasm heap, potentially several gigabytes.
     add(
       'canvasKitHeapBytes',
       () => kit.heap?.getProperty<JSNumber?>('byteLength'.toJS),
@@ -74,6 +91,36 @@ void _addCanvasKitMemory(Map<String, Object> diagnostic) {
   } on Object {
     // Missing CanvasKit or an unavailable renderer is diagnostic information
     // only; it must not prevent the ordinary health record from being sent.
+  }
+}
+
+/// The allocated CanvasKit Wasm heap size in bytes, read as a scalar without
+/// entering native code or copying the heap. Null when CanvasKit is absent.
+int? readCanvasKitHeapBytes() {
+  try {
+    final kit = _canvasKit;
+    if (kit == null) return null;
+    return _heapBytes(kit);
+  } on Object {
+    return null;
+  }
+}
+
+/// 1 when the document is hidden, 0 when visible, -1 when unknown.
+int readDocumentHidden() {
+  try {
+    final state = _document?.visibilityState;
+    if (state == null || !state.typeofEquals('string')) return -1;
+    switch ((state as JSString).toDart) {
+      case 'hidden':
+        return 1;
+      case 'visible':
+        return 0;
+      default:
+        return -1;
+    }
+  } on Object {
+    return -1;
   }
 }
 

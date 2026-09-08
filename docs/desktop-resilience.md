@@ -61,6 +61,30 @@ renderer state cannot survive a process crash. Recovery does not submit another
 paid generation. Intentional repeated Generate activations with identical inputs
 continue to create separate takes.
 
+A live renderer process whose Flutter engine has stopped drawing shares that
+budget. The September 2026 field log showed the CanvasKit wasm heap growing to
+its 2 GiB cap, an Emscripten abort inside `SkPictureRecorder`, and then a
+blank window for three and a half hours with the frame count frozen and about
+7,000 errors per minute, while Electron never received `render-process-gone`
+because the process was still alive. The shell now treats three signals as an
+engine death and reloads the window through the same one-silent-reload-then-
+dialog budget, recording `renderer-engine-dead` with a fixed reason:
+
+- `engine-abort`: a console message matching an Emscripten abort.
+- `frames-frozen`: at least two consecutive `flutter-health` records with no
+  new frames while the app is active and errors keep arriving (Flutter's own
+  suppressed-error counter moved, or 1,000 or more errors in the minute).
+  Flutter's matching in-app verdict, `flutter-engine-stalled`, is recorded as
+  corroboration and never reloads by itself.
+- `heap-critical`: the wasm heap at or above 1.5 GiB.
+
+Nothing else reloads a live renderer: heap growth alone is only recorded, an
+isolated error is only recorded, and a frozen frame count with no errors is an
+idle screen. Repeated triggers are ignored while a reload or the "Clawnsole
+Stopped Drawing" dialog is pending, and each trigger re-arms only for a new
+document or once frames resume. The recovery smoke drives this path on a real
+window alongside the six process crashes.
+
 Unexpected shell exceptions are observed for diagnostics, without suppressing
 Node's fatal behavior or continuing after unknown main-process corruption.
 Known detached operations catch their own failures. A failed smoke launch exits
@@ -109,6 +133,38 @@ immediately with atomic replacement and backup; there is no new debounce or
 durability delay. This eliminates redundant writes, not all whole-library
 serialization or legitimate media traffic.
 
+### Library write volume
+
+A rendering film changes the library on every status poll (every 4–8 s), so
+each changed save is the desktop companion's steady-state disk cost. Before
+this pass one save of a ~1.5 MB library wrote the file twice — the staged
+temporary for the new revision and a second full copy for `.bak`, both
+flushed — and read it about six times (the unchanged-save comparison, a
+second read inside the backup preparation, and the recovery sweep re-reading
+and re-decoding `.bak` on every call), about 3 MB dirtied per poll, ≈670 KB/s;
+macOS attributed 2.1 GB of writes to the companion over seven hours.
+
+Now one changed save writes the library once. The `.bak` is a hard link to the
+previous inode (`link(2)`, `CreateHardLinkW` on NTFS; never `dart:io`'s
+`Link`, which is a symlink and would follow the canonical name to the new
+revision). The rename that follows only swaps the canonical *name* to the new
+inode, so the canonical file exists at every instant and the old inode lives
+on as `.bak` unchanged — a directory entry instead of 1.5 MB. Filesystems that
+refuse links (FAT/exFAT, some shares) fall back to the copy. The previous
+contents are read once and handed to the backup preparation; the legacy
+credential/diagnostic scrub still writes a fresh `.bak` when it changes
+anything. The recovery sweep still runs after every save, including the no-op
+path, but a `.bak`/`.corrupt-*` copy it has already found clean is trusted by
+size and modification stamp and is only stat-ed; a copy that changed on disk
+is read and sanitized again. Per changed poll: ~1.5 MB written, ~1.5 MB read,
+one JSON decode of the previous revision (shared by the schema check and the
+scrub). Measured on a 1.4 MB library (30 changed saves, macOS APFS): 81.7 MiB
+written before, 40.9 MiB after, and the per-save `.bak` re-read (1.4 MB every
+save, changed or not) gone; 33 ms per changed save became 17 ms and a no-op
+save 14 ms became 9 ms. Regression tests count whole-file writes, copies and
+reads per save through `IOOverrides` (`atomic_file_test.dart`) and prove the
+link shares the inode (`hard_link_test.dart`).
+
 ## Local diagnostics
 
 The existing `companion.log` and one rotated predecessor retain shell version,
@@ -124,6 +180,33 @@ the corresponding macOS DiagnosticReports entry. Match timestamps, product
 version and process identity before attributing a failure. An absent report is
 not proof that no failure occurred; a disk-write report with no action taken is
 not proof that the OS killed the application.
+
+**Help → Save Diagnostics Report…** gathers both log files, the newest twelve
+Clawnsole crash reports from the user and system DiagnosticReports folders,
+runtime versions, the renderer version and current process metrics into one
+text file (5 MiB per file, 40 MiB total). Crash reports and file paths are
+copied verbatim, so the bundle may contain the computer's name and file paths;
+the save dialog states this. It is written only where the user chooses and is
+never uploaded.
+
+The minute sample additionally records frames per minute, the wasm heap size,
+and, because the renderer is built with `FLUTTER_WEB_ENABLE_INSTRUMENTATION`,
+the engine's own object counters (created, deleted, leaked and live per label,
+with per-minute deltas). Derived `renderer-engine-stalled`,
+`renderer-heap-growth` and `renderer-error-storm` records name the condition
+that was met with numbers only. The preload's window-level
+`webglcontextlost` listener cannot see the CanvasKit context, which lives on
+an OffscreenCanvas inside the `flt-glass-pane` shadow root; the
+`graphics-context-lost` console category and a GPU `electron-child-gone`
+record are the signals that matter. See
+[desktop diagnostics](desktop-diagnostics.md) for the exact record shapes.
+
+The packaged companion reuses its last port (`companion-port.json`) so the
+renderer origin, and with it Chromium's per-origin HTTP cache, CacheStorage and
+wasm code cache, survive between launches instead of being rewritten each time;
+the field profile had accumulated 74 loopback origins and roughly 2 GB of cache
+writes per day. The shell pins the disk cache to 512 MiB. A taken port still
+falls back to a random one exactly as before.
 
 ## Verification and repeatable experiments
 
@@ -217,3 +300,123 @@ on total process memory. Mounted gallery cards, active playback, compositor
 resources, and reference editing still require memory. Synthetic regression
 coverage and a fresh native simulator launch do not establish the sole cause
 of an observed whole-machine freeze or substitute for a long live session.
+
+## Continuous motion on the desktop renderer
+
+The macOS shell renders Flutter web with CanvasKit, where every `ui.Gradient`,
+`ImageShader`, `ColorFilter` and `MaskFilter.blur` a painter creates is a Wasm
+allocation that only a JavaScript finalizer frees — and the finalizer only runs
+when the JavaScript heap grows, which a steadily repainting page does not make
+it do. A single spinner that re-recorded the whole Create screen at 120 Hz
+leaked ~96 MiB/min of gradients until the 2 GiB Wasm cap aborted the engine and
+left the window blank. Four rules keep that from coming back.
+
+### 1. Repaint isolation
+
+No continuously animating widget may share a picture with the rest of the
+page.
+
+- Every vsync-driven site — Material's indeterminate `CircularProgressIndicator`
+  and `LinearProgressIndicator`, `RotationTransition`, `AnimatedRotation` while
+  it turns, `BusySpinner`, the loading placeholders in `MediaThumbnail` and the
+  video loader — sits in a `MotionIsolate` (`lib/ui/motion_isolate.dart`).
+  Since Flutter 3.27 a rebuild anywhere below a `LayoutBuilder` schedules that
+  builder's layout callback, which dirties every ancestor up to the nearest
+  relayout boundary; each of those re-runs layout and marks paint, so one 10 px
+  spinner inside a card re-recorded the page. `MotionIsolate` is a
+  `RepaintBoundary` around a tight-sized `LayoutBuilder`: the child's rebuilds
+  stay in that builder's scope and its repaint stays in that layer. Give it a
+  tight size (both dimensions, or one when the parent fixes the other); debug
+  builds assert it.
+- Long-lived indicators on cards (the status chip's ring, the progress bar
+  under a rendering film, the "Loading preview" ring) use
+  `PacedCircularProgressIndicator` / `PacedLinearProgressIndicator`
+  (`lib/ui/paced_progress_indicator.dart`): Material's own geometry, painted
+  from a `MotionClock` instead of a vsync ticker. Keep Material's widgets for
+  short-lived work (a button's busy mark) and the paced ones for anything that
+  can stay on screen for minutes.
+- The Create screen's major sections each record their own picture: the
+  heading, the composer (keyed per tab), the footer's model plaque and Generate
+  key, the Recent work section, and every generation card. `TexturePanel` and
+  `AppBackdrop` keep their photographs in their own layers, with a second
+  boundary between the texture and its content. The top bar and the screen body
+  are separate pictures too.
+- Painters that change every frame take their motion through a
+  `CustomPainter.repaint` listenable, never through a per-frame rebuild.
+
+### 2. Painter allocation hygiene
+
+Hot painters create shaders and geometry once per (size, theme inputs) and
+reuse them across paints:
+
+- `ShaderCache` / `PathCache` (`lib/ui/paint_cache.dart`) are small LRU stores
+  that dispose what they evict. A `State` owns one and clears it in `dispose`;
+  stateless painters share a module-level cache.
+- The machined knob (`paintMachinedKnob`) draws about the origin on a
+  translated canvas, so one rim/face/dome set serves every slider position.
+  The groove track, switch well, Generate key bezel/lens/edges, and the model
+  selector plate and key all cache by rectangle and room light. The lamps
+  behind a lit Generate key change with the filament, so those shaders are
+  created per frame and disposed with it.
+- The stitched panel border and the tab-rail silhouettes are cut once per size.
+  `TexturePanel` hands the engine one `ColorFilter` instance per tint.
+- Nothing that repaints continuously blurs: `MaskFilter.blur` leaks a native
+  object per draw in this engine. The update chip's shadow is painted once at a
+  fixed hue for that reason; the Generate key's blurred seating shadow is
+  acceptable because the key only repaints while lit.
+- `test/support/shader_recording_canvas.dart` records shaders and mask filters
+  without rendering. `paintTwice(painter.paint, size)` reports what a second
+  paint created that the first did not; `test/painter_shader_reuse_test.dart`
+  asserts that set is empty (or disposed) for every hot painter.
+
+### 3. Placeholder cadence and pause policy
+
+`MotionClock` (`lib/ui/motion_clock.dart`) drives the rendering placeholders
+(both styles), the paced indicators, the estimated progress bar, and the update
+chip's glow. It is a timer, not a ticker: at most 24 frames a second, and one
+shared timer for every running clock so several surfaces cost one frame per
+tick. It pauses entirely — no timer, no frames — when:
+
+- the document is hidden, paused, or detached — an unfocused-but-visible
+  desktop window is merely `inactive` and keeps animating, since its work is
+  still in view;
+- the route it sits on is not current (a detail modal above the studio stops
+  the card underneath, so the film is animated once, not twice);
+- the widget is outside any enclosing scroll viewport (judged in each
+  viewport's own coordinates; re-checked on scroll, on every tick, and at 4 Hz
+  while scrolled away);
+- the `MotionPolicy` forbids motion: the person asked for reduced motion, or
+  the renderer's memory brake latched.
+
+`MotionPolicyScope` (`lib/ui/motion_policy.dart`) is provided from
+`ClawnsoleApp`'s `MaterialApp.builder`, fed by `ReducedMotionWatcher`
+(`lib/core/reduced_motion.dart`: `prefers-reduced-motion` on the web via
+`matchMedia`, followed live; a stub elsewhere, where
+`MediaQuery.disableAnimations` already carries the preference) and by
+`RendererDiagnostics.motionConstrained`. Under either, a placeholder draws one
+static frame. `MotionPolicy.of(context)` folds in the ambient media query, so
+native targets need no scope.
+
+### 4. Verifying with the renderer soak
+
+`tool/renderer_soak.dart` renders a grid of placeholders with no controller or
+library (`?style=broadcastStatic|cyclone&cards=12`, plus `&reduceMotion=1` or
+`&constrained=1` to exercise the policy) and publishes `window.__soakFrames`,
+the count of Flutter frames completed, for a runner to read.
+
+The reproduction harness used for this fix rsyncs `flutter/` into a copy built
+with the CI SDK (3.47) plus engine object counters, serves a copy of a library
+with one generation forced pending from a companion on a spare port, and runs
+an offscreen Electron window at 120 Hz printing JSON lines: CanvasKit heap,
+rAF rate, Flutter frames per minute from `flutter-health`, and native object
+counters (`Gradient.linear Created/Leaked`, `ColorFilter …`, …). Profile
+builds also print `repaint-origin:`, `layout-origin:` and `build-origin:`
+chains from an instrumented `rendering/object.dart` and
+`widgets/framework.dart`; the first ancestor tagged `[RB]` is the boundary that
+gets re-recorded. Run it with a window tall enough to show the pending card
+(the default 980 px window keeps Recent work below the fold, where the
+placeholder now correctly pauses). Healthy numbers: heap flat after warm-up
+over three minutes, gradient and colour-filter creation flat at steady state,
+Flutter frames ≈ 24/s with a placeholder on screen (rAF still reads 120), and
+repaint origins limited to the placeholder's and indicators' own boundaries.
+Never point the companion at `~/Library` data.

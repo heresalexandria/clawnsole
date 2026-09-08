@@ -88,12 +88,16 @@ test("diagnostics bridge bounds stack payloads and excludes arbitrary content be
   const { exposed, sent } = loadPreload();
   exposed.clawnsole.reportDiagnostic({ event: "flutter-error", errorType: "StateError", stack: "x".repeat(40000), message: "secret", url: "secret" });
   exposed.clawnsole.reportDiagnostic({ event: "private-event", stack: "secret" });
-  exposed.clawnsole.reportDiagnostic({ event: "flutter-health", frameCount: 10, cacheBytes: Infinity, privateMetric: 42, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000 });
-  assert.equal(sent.length, 2);
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-health", frameCount: 10, cacheBytes: Infinity, privateMetric: 42, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000, heapPressure: 2 });
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-engine-stalled", lastFrameAgeMs: 130000, errorsInWindow: 7000, frameCount: 5, message: "secret" });
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-lifecycle", lifecycleState: 3 });
+  assert.equal(sent.length, 4);
+  assert.deepEqual(sent[2].payload, { event: "flutter-engine-stalled", lastFrameAgeMs: 130000, errorsInWindow: 7000 });
+  assert.deepEqual(sent[3].payload, { event: "flutter-lifecycle", lifecycleState: 3 });
   assert.equal(sent[0].channel, "clawnsole:diagnostic");
   assert.deepEqual(Object.keys(sent[0].payload).sort(), ["errorType", "event", "stack"]);
   assert.equal(sent[0].payload.stack.length, 32768);
-  assert.deepEqual(sent[1].payload, { event: "flutter-health", frameCount: 10, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000 });
+  assert.deepEqual(sent[1].payload, { event: "flutter-health", frameCount: 10, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000, heapPressure: 2 });
 });
 
 test("browser errors and graphics context events forward diagnostics without suppressing normal handling", () => {

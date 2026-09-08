@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:clawnsole/core/atomic_file.dart';
+import 'package:clawnsole/core/hard_link.dart';
 import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
@@ -15,10 +16,136 @@ void main() {
   });
 
   tearDown(() async {
+    hardLinkOverrideForTesting = null;
     if (await root.exists()) await root.delete(recursive: true);
   });
 
   File target() => File('${root.path}/clawnsole.json');
+
+  /// Runs [body] with every `File` the code under test opens counted, so a
+  /// test can assert how many whole-file writes, copies and reads one save
+  /// costs. Counts are keyed by the file name's suffix class: the staged
+  /// `.tmp`, the canonical library, or its `.bak` recovery copy.
+  Future<_FileTraffic> traffic(Future<void> Function() body) async {
+    final counter = _FileTraffic();
+    await IOOverrides.runWithIOOverrides(body, _CountingOverrides(counter));
+    return counter;
+  }
+
+  test(
+    'a changed library save links the previous revision instead of copying',
+    () async {
+      const older = StoredData(
+        preferences: AppPreferences(themeMode: AppThemeMode.dark),
+      );
+      const newer = StoredData();
+      await writeLibraryTextAtomically(target(), older.encode());
+
+      final counted = await traffic(
+        () => writeLibraryTextAtomically(target(), newer.encode()),
+      );
+
+      // One whole-file write (the staged temporary), no second copy of the
+      // previous revision and no re-read of what the caller already had.
+      expect(counted.writes, {'.tmp': 1});
+      expect(counted.copies, isEmpty);
+      expect(counted.reads, {'clawnsole.json': 1});
+      final backup = File(backupPath(target()));
+      expect(await backup.readAsString(), older.encode());
+      expect(await FileSystemEntity.isLink(backup.path), isFalse);
+      expect(await target().readAsString(), newer.encode());
+
+      // The two names now hold different inodes: an in-place edit of the
+      // canonical file cannot leak into the recovery copy.
+      await target().writeAsString('{"generations":[]}', flush: true);
+      expect(await backup.readAsString(), older.encode());
+
+      // The next different revision keeps the one before it, readable, and the
+      // corrupt-file fallback still finds it.
+      await writeLibraryTextAtomically(target(), newer.encode());
+      expect(await backup.readAsString(), '{"generations":[]}');
+      await target().writeAsString('{"broken', flush: true);
+      expect(
+        await readTextWithFallback(target(), StoredData.decode),
+        isA<StoredData>(),
+      );
+    },
+  );
+
+  test(
+    'a refused hard link falls back to copying the previous revision',
+    () async {
+      hardLinkOverrideForTesting = (_, _) => false;
+      await writeTextAtomically(target(), 'first');
+
+      final counted = await traffic(
+        () => writeTextAtomically(target(), 'second'),
+      );
+
+      expect(counted.copies, {'clawnsole.json': 1});
+      expect(counted.writes, {'.tmp': 1});
+      expect(await File(backupPath(target())).readAsString(), 'first');
+      expect(await target().readAsString(), 'second');
+    },
+  );
+
+  test(
+    'unchanged saves neither rewrite nor re-read a clean recovery copy',
+    () async {
+      const older = StoredData(
+        preferences: AppPreferences(themeMode: AppThemeMode.dark),
+      );
+      const newer = StoredData();
+      await writeLibraryTextAtomically(target(), older.encode());
+      await writeLibraryTextAtomically(target(), newer.encode());
+
+      final counted = await traffic(() async {
+        for (var index = 0; index < 20; index++) {
+          await writeLibraryTextAtomically(target(), newer.encode());
+        }
+      });
+
+      // The canonical file is read once per save (the on-disk comparison is
+      // the documented contract); the recovery copy is only stat-ed.
+      expect(counted.writes, isEmpty);
+      expect(counted.copies, isEmpty);
+      expect(counted.reads, {'clawnsole.json': 20});
+
+      // A recovery copy that changed on disk (restore, external edit) is read
+      // and checked once more, then trusted by stamp again.
+      final backup = File(backupPath(target()));
+      await backup.setLastModified(DateTime.utc(2020));
+      final rechecked = await traffic(() async {
+        await writeLibraryTextAtomically(target(), newer.encode());
+        await writeLibraryTextAtomically(target(), newer.encode());
+      });
+      expect(rechecked.reads, {'clawnsole.json': 2, 'clawnsole.json.bak': 1});
+      expect(rechecked.writes, isEmpty);
+    },
+  );
+
+  test(
+    'a sanitized previous revision is still written out, not linked',
+    () async {
+      const data = StoredData();
+      await target().writeAsString(
+        jsonEncode({...data.toJson(), 'apiKey': 'legacy-secret'}),
+        flush: true,
+      );
+
+      final counted = await traffic(
+        () => writeLibraryTextAtomically(target(), data.encode()),
+      );
+
+      expect(counted.copies, isEmpty);
+      expect(counted.writes, {'.tmp': 2});
+      expect(
+        await File(backupPath(target())).readAsString(),
+        isNot(contains('legacy-secret')),
+      );
+      expect(await target().readAsString(), data.encode());
+    },
+  );
 
   test(
     'write keeps the previous contents as a backup and no temp files',
@@ -300,6 +427,117 @@ class _RenameFailureFile implements File {
   @override
   Future<FileSystemEntity> delete({bool recursive = false}) =>
       delegate.delete(recursive: recursive);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// Whole-file operations seen through [_CountingOverrides], keyed by the file
+/// name (`.tmp` for any staged temporary) so a test can state the exact cost
+/// of one save.
+final class _FileTraffic {
+  final writes = <String, int>{};
+  final copies = <String, int>{};
+  final reads = <String, int>{};
+
+  static String classify(String path) {
+    final name = path.split(Platform.pathSeparator).last;
+    return name.endsWith('.tmp') ? '.tmp' : name;
+  }
+
+  void count(Map<String, int> bucket, String path) {
+    bucket.update(classify(path), (value) => value + 1, ifAbsent: () => 1);
+  }
+}
+
+final class _CountingOverrides extends IOOverrides {
+  _CountingOverrides(this.traffic);
+  final _FileTraffic traffic;
+
+  @override
+  File createFile(String path) =>
+      _CountingFile(super.createFile(path), traffic);
+
+  // `Directory.list` builds its entries outside the override zone, so the
+  // recovery sweep's reads of `.bak` would otherwise escape the count.
+  @override
+  Directory createDirectory(String path) =>
+      _CountingDirectory(super.createDirectory(path), traffic);
+}
+
+class _CountingDirectory implements Directory {
+  _CountingDirectory(this.delegate, this.traffic);
+  final Directory delegate;
+  final _FileTraffic traffic;
+
+  @override
+  String get path => delegate.path;
+  @override
+  Future<bool> exists() => delegate.exists();
+  @override
+  Future<Directory> create({bool recursive = false}) =>
+      delegate.create(recursive: recursive);
+  @override
+  Stream<FileSystemEntity> list({
+    bool recursive = false,
+    bool followLinks = true,
+  }) => delegate
+      .list(recursive: recursive, followLinks: followLinks)
+      .map((entry) => entry is File ? _CountingFile(entry, traffic) : entry);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// A `File` that forwards to the real one and records the operations that
+/// move whole-file bytes. Members the code under test does not use throw
+/// through [noSuchMethod], keeping the count honest if the writer changes.
+class _CountingFile implements File {
+  _CountingFile(this.delegate, this.traffic);
+  final File delegate;
+  final _FileTraffic traffic;
+
+  @override
+  String get path => delegate.path;
+  @override
+  Uri get uri => delegate.uri;
+  @override
+  Directory get parent => delegate.parent;
+  @override
+  Future<bool> exists() => delegate.exists();
+  @override
+  Future<FileStat> stat() => delegate.stat();
+  @override
+  Future<FileSystemEntity> delete({bool recursive = false}) =>
+      delegate.delete(recursive: recursive);
+  @override
+  Future<File> rename(String newPath) => delegate.rename(newPath);
+  @override
+  Future<String> readAsString({Encoding encoding = utf8}) {
+    traffic.count(traffic.reads, path);
+    return delegate.readAsString(encoding: encoding);
+  }
+
+  @override
+  Future<File> writeAsString(
+    String contents, {
+    FileMode mode = FileMode.write,
+    Encoding encoding = utf8,
+    bool flush = false,
+  }) {
+    traffic.count(traffic.writes, path);
+    return delegate.writeAsString(
+      contents,
+      mode: mode,
+      encoding: encoding,
+      flush: flush,
+    );
+  }
+
+  @override
+  Future<File> copy(String newPath) {
+    traffic.count(traffic.copies, path);
+    return delegate.copy(newPath);
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

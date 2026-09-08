@@ -10,6 +10,7 @@ import '../core/models.dart';
 import '../core/provider_catalog.dart';
 import 'busy_button.dart';
 import 'common_widgets.dart';
+import 'motion_isolate.dart';
 
 /// Opens the film's API transcript: every provider request Clawnsole made
 /// for it on this device, with the payloads it sent and the answers it got.
@@ -271,13 +272,17 @@ class _ApiRequestsModalState extends State<_ApiRequestsModal> {
                       ),
                       icon: const Icon(Icons.copy_rounded, size: 16),
                     ),
-                    AnimatedRotation(
-                      turns: open ? .5 : 0,
-                      duration: const Duration(milliseconds: 160),
-                      child: Icon(
-                        Icons.expand_more_rounded,
-                        size: 18,
-                        color: context.colors.onSurfaceVariant,
+                    MotionIsolate(
+                      width: 18,
+                      height: 18,
+                      child: AnimatedRotation(
+                        turns: open ? .5 : 0,
+                        duration: const Duration(milliseconds: 160),
+                        child: Icon(
+                          Icons.expand_more_rounded,
+                          size: 18,
+                          color: context.colors.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ],

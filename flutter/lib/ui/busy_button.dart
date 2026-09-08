@@ -3,6 +3,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'motion_isolate.dart';
+
 /// Clawnsole's one busy mark: a 14 px ring drawn with a 2 px stroke in the
 /// host's current foreground colour, so a working control reads as the same
 /// control rather than as a stray brand-coloured ornament.
@@ -24,8 +26,9 @@ class BusySpinner extends StatelessWidget {
   final Color? color;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: size,
+  Widget build(BuildContext context) => MotionIsolate(
+    width: size,
+    height: size,
     child: CircularProgressIndicator(
       strokeWidth: kBusySpinnerStroke,
       color: color ?? IconTheme.of(context).color,

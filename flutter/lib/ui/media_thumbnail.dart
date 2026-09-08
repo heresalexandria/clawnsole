@@ -8,6 +8,7 @@ import '../core/gateway.dart';
 import '../core/models.dart';
 import 'media_duration_loader.dart';
 import 'media_preview_work.dart';
+import 'paced_progress_indicator.dart';
 import 'video_frame_loader.dart';
 import 'video_metadata_loader.dart';
 
@@ -483,7 +484,7 @@ class _ThumbnailPlaceholder extends StatelessWidget {
       child: loading
           ? const SizedBox.square(
               dimension: 16,
-              child: CircularProgressIndicator(strokeWidth: 1.8),
+              child: PacedCircularProgressIndicator(strokeWidth: 1.8),
             )
           : Icon(
               icon,

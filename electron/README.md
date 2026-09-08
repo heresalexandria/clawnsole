@@ -54,8 +54,11 @@ come from the active local renderer before handing a URL to macOS.
   screen. Reload Studio replaces the renderer while leaving the companion
   running. Force Reload and Toggle DevTools remain development-only.
 - **Help** opens the privacy policy, terms of use, and issue tracker through
-  the same external-URL allowlist as every other link, and **Show Logs** reveals
-  the local diagnostic log even when the studio cannot draw.
+  the same external-URL allowlist as every other link, **Show Logs** reveals
+  the local diagnostic log even when the studio cannot draw, and **Save
+  Diagnostics Report…** writes one text bundle (both logs, Clawnsole's macOS
+  crash reports, versions and process metrics) wherever the user chooses. The
+  bundle may contain the computer's name and file paths; the dialog says so.
 
 Clawnsole follows the macOS lifecycle: closing the window does not quit, the
 companion keeps serving while the app is windowless, Dock activation rebuilds
@@ -89,10 +92,32 @@ A renderer that crashes is reloaded once; a second crash offers **Reload** or
 An alive renderer can still fail to draw. Bounded diagnostics in the same log
 record Flutter/browser errors, graphics context loss, executable stack locations,
 and once-per-minute process CPU/memory and Flutter frame/cache/CanvasKit heap
-metrics. Error storms are capped before IPC and again before disk writes, with
-suppressed counts retained. These records omit exception messages, prompts,
-media, credentials, and full URLs. No debugging port is opened automatically.
-See [desktop diagnostics](../docs/desktop-diagnostics.md) for investigation steps.
+metrics, plus the engine's own object counters (the web build sets
+`FLUTTER_WEB_ENABLE_INSTRUMENTATION`). Error storms are capped before IPC and
+again before disk writes, with suppressed counts retained. These records omit
+exception messages, prompts, media, credentials, and full URLs. No debugging
+port is opened automatically.
+
+`lib/renderer-diagnostics.cjs` also derives alerts from consecutive health
+records. A Flutter engine that aborted inside WebAssembly, froze its frame
+count while errors keep arriving in the foreground, or whose wasm heap reached
+1.5 GiB is reported to `lib/renderer-recovery.cjs` as engine-dead, and the
+window is reloaded through the same one-silent-reload-then-dialog budget as a
+process crash ("Clawnsole Stopped Drawing"). Heap growth alone, isolated
+errors and idle screens never reload anything. The window-level
+`webglcontextlost` listener cannot see CanvasKit's OffscreenCanvas context;
+the `graphics-context-lost` console category and GPU process loss are the
+signals to read. `scripts/soak-renderer.cjs` is a development tool that
+samples heap, frame rate and engine counters for a URL in an isolated profile.
+See [desktop diagnostics](../docs/desktop-diagnostics.md) for record shapes,
+the reload rules, and soak instructions.
+
+The packaged companion reuses the port it bound last time
+(`companion-port.json` in Application Support) so Chromium's cached media for
+that origin stays valid between launches; a taken port falls back to a random
+one. Because the origin is stable, the renderer is built without a service
+worker and the shell clears any worker or CacheStorage left on the origin
+before every load, so an update can never be shadowed by a cached bundle.
 
 Canonical web builds include source maps alongside the internal renderer so
 recorded JavaScript locations can be mapped to the exact packaged Dart sources.

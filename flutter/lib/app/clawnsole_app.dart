@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/app_version.dart';
 import '../core/models.dart';
 import '../core/gateway.dart';
+import '../core/reduced_motion.dart';
 import '../core/shell_bridge.dart';
 import '../core/store_update.dart';
 import '../core/update_status.dart';
@@ -17,6 +18,8 @@ import '../ui/create_screen.dart';
 import '../ui/claw_mark.dart';
 import '../ui/formatters.dart';
 import '../ui/library_screen.dart';
+import '../ui/motion_isolate.dart';
+import '../ui/motion_policy.dart';
 import '../ui/panels.dart';
 import '../ui/providers_screen.dart';
 import '../ui/references_screen.dart';
@@ -26,6 +29,7 @@ import '../ui/update_available_chip.dart';
 import '../ui/update_dialog.dart';
 import 'app_controller.dart';
 import 'app_theme.dart';
+import 'renderer_diagnostics.dart';
 
 class ClawnsoleApp extends StatefulWidget {
   const ClawnsoleApp({
@@ -76,6 +80,11 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
   /// carries it: a Drive retry is visibly under way, not ignored.
   final ValueNotifier<bool> _noticeActionRunning = ValueNotifier<bool>(false);
   StreamSubscription<String>? _shellNavigation;
+
+  /// The platform's reduce-motion preference, followed live. Flutter web
+  /// never maps it onto `MediaQuery.disableAnimations`, so the studio's
+  /// continuous decorations read it through the [MotionPolicyScope] below.
+  final ReducedMotionWatcher _reducedMotion = ReducedMotionWatcher();
 
   @override
   void initState() {
@@ -128,6 +137,7 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
     unawaited(_shellNavigation?.cancel());
     _updateStatus.removeListener(_handleUpdateStatus);
     _noticeActionRunning.dispose();
+    _reducedMotion.dispose();
     controller.dispose();
     super.dispose();
   }
@@ -250,34 +260,44 @@ class _ClawnsoleAppState extends State<ClawnsoleApp>
       // Override that once so multiline fields never trap the software keyboard.
       // The desktop shortcuts live here too so they work from any route,
       // including the fullscreen prompt editor.
-      builder: (context, child) => Shortcuts(
-        shortcuts: const <ShortcutActivator, Intent>{
-          SingleActivator(LogicalKeyboardKey.enter, meta: true):
-              GenerateIntent(),
-          SingleActivator(LogicalKeyboardKey.enter, control: true):
-              GenerateIntent(),
-          SingleActivator(LogicalKeyboardKey.comma, meta: true):
-              OpenSettingsIntent(),
-          SingleActivator(LogicalKeyboardKey.comma, control: true):
-              OpenSettingsIntent(),
-        },
-        child: Actions(
-          actions: <Type, Action<Intent>>{
-            EditableTextTapOutsideIntent:
-                CallbackAction<EditableTextTapOutsideIntent>(
-                  onInvoke: (intent) {
-                    intent.focusNode.unfocus();
-                    return null;
-                  },
-                ),
-            OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
-              onInvoke: (_) {
-                unawaited(controller.navigate(AppSection.settings));
-                return null;
-              },
-            ),
+      // Continuous decoration (rendering placeholders, the update chip's
+      // glow, estimated bars) follows one policy: the person's reduce-motion
+      // preference, and the renderer's own memory brake from the diagnostics
+      // installed above this app. Either holds every such surface still.
+      builder: (context, child) => MotionPolicyScope(
+        reduceMotion: _reducedMotion.reduceMotion,
+        constrained: RendererDiagnosticsScope.maybeOf(
+          context,
+        )?.motionConstrained,
+        child: Shortcuts(
+          shortcuts: const <ShortcutActivator, Intent>{
+            SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                GenerateIntent(),
+            SingleActivator(LogicalKeyboardKey.enter, control: true):
+                GenerateIntent(),
+            SingleActivator(LogicalKeyboardKey.comma, meta: true):
+                OpenSettingsIntent(),
+            SingleActivator(LogicalKeyboardKey.comma, control: true):
+                OpenSettingsIntent(),
           },
-          child: child ?? const SizedBox.shrink(),
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              EditableTextTapOutsideIntent:
+                  CallbackAction<EditableTextTapOutsideIntent>(
+                    onInvoke: (intent) {
+                      intent.focusNode.unfocus();
+                      return null;
+                    },
+                  ),
+              OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
+                onInvoke: (_) {
+                  unawaited(controller.navigate(AppSection.settings));
+                  return null;
+                },
+              ),
+            },
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
       home: AnimatedBuilder(
@@ -394,14 +414,18 @@ class _AppShell extends StatelessWidget {
               Expanded(
                 child: Column(
                   children: <Widget>[
-                    _TopBar(
-                      controller: controller,
-                      updateStatus: updateStatus,
-                      compact: !wide,
-                      themeMode: themeMode,
-                      onThemeModeChanged: onThemeModeChanged,
+                    // The bar and the screen record separate pictures: a
+                    // chip changing up here never re-records the studio.
+                    RepaintBoundary(
+                      child: _TopBar(
+                        controller: controller,
+                        updateStatus: updateStatus,
+                        compact: !wide,
+                        themeMode: themeMode,
+                        onThemeModeChanged: onThemeModeChanged,
+                      ),
                     ),
-                    Expanded(child: body),
+                    Expanded(child: RepaintBoundary(child: body)),
                   ],
                 ),
               ),
@@ -455,8 +479,9 @@ class _LoadingSplash extends StatelessWidget {
               style: TextStyle(color: context.colors.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            SizedBox(
+            MotionIsolate(
               width: 96,
+              height: 3,
               child: LinearProgressIndicator(
                 minHeight: 3,
                 borderRadius: BorderRadius.circular(99),

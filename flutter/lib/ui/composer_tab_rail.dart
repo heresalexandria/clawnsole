@@ -7,6 +7,7 @@ import '../app/app_theme.dart';
 import 'busy_button.dart';
 import 'formatters.dart';
 import 'hardware.dart';
+import 'paint_cache.dart';
 
 /// The Create heading's tab rail: one tab per open draft plus a "+" tab,
 /// standing on a hairline rule that runs on to [trailing] (the model plaque)
@@ -301,17 +302,19 @@ BoxDecoration _tabFill(BuildContext context, {required bool selected}) {
 /// Strokes a tab's shoulders and sides and leaves the foot open. The tab in
 /// front also gets a brass lip: a short, slightly heavier line along its
 /// top between the shoulders — jewelry, not a fill.
+final PathCache<Size> _tabOutlines = PathCache<Size>();
+
 class _TabOutlinePainter extends CustomPainter {
   const _TabOutlinePainter({required this.color, this.lip});
 
   final Color color;
   final Color? lip;
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  /// The silhouette for a tab of [size]: shoulders, sides, open foot.
+  static Path _outline(Size size) {
     const inset = .5;
     const r = _tabRadius;
-    final path = Path()
+    return Path()
       ..moveTo(inset, size.height)
       ..lineTo(inset, r)
       ..arcToPoint(const Offset(r, inset), radius: const Radius.circular(r))
@@ -321,6 +324,14 @@ class _TabOutlinePainter extends CustomPainter {
         radius: const Radius.circular(r),
       )
       ..lineTo(size.width - inset, size.height);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const r = _tabRadius;
+    // Tabs repaint with every hover on the rail; their outlines are cut once
+    // per size and kept.
+    final path = _tabOutlines.obtain(size, () => _outline(size));
     canvas.drawPath(
       path,
       Paint()

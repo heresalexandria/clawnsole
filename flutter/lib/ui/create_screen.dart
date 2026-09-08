@@ -28,6 +28,7 @@ import 'inline_video.dart';
 import 'library_screen.dart';
 import 'media_picker_source.dart';
 import 'media_thumbnail.dart';
+import 'motion_isolate.dart';
 import 'panels.dart';
 import 'prompt_character_counter.dart';
 import 'prompt_rewrite_dialog.dart';
@@ -131,21 +132,30 @@ class _CreateScreenState extends State<CreateScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    _CreateHeading(controller: controller),
+                    // Each major section records its own picture, so a
+                    // pending card's motion or a chip flipping in the
+                    // heading never re-records the composer's hardware.
+                    RepaintBoundary(
+                      child: _CreateHeading(controller: controller),
+                    ),
                     SizedBox(height: short ? 8 : 18),
                     // Each tab owns its disclosure panels and field state, so
                     // switching drafts rebuilds the composer from scratch.
-                    KeyedSubtree(
-                      key: ValueKey<String>(
-                        'composer-${controller.activeComposerTabId}',
+                    RepaintBoundary(
+                      child: KeyedSubtree(
+                        key: ValueKey<String>(
+                          'composer-${controller.activeComposerTabId}',
+                        ),
+                        child: _Composer(controller: controller),
                       ),
-                      child: _Composer(controller: controller),
                     ),
                     SizedBox(height: short ? 12 : 24),
-                    _RecentWork(
-                      controller: controller,
-                      itemLimit: _itemLimit,
-                      onLoadMore: _loadMore,
+                    RepaintBoundary(
+                      child: _RecentWork(
+                        controller: controller,
+                        itemLimit: _itemLimit,
+                        onLoadMore: _loadMore,
+                      ),
                     ),
                   ],
                 ),
@@ -1389,8 +1399,9 @@ Future<void> _showGenerationFolderDialog(
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                   },
             icon: saving
-                ? const SizedBox.square(
-                    dimension: 14,
+                ? const MotionIsolate(
+                    width: 14,
+                    height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.create_new_folder_outlined),
@@ -2170,13 +2181,17 @@ class _GuidanceAccordion extends StatelessWidget {
                           ),
                   ),
                   const SizedBox(width: 6),
-                  AnimatedRotation(
-                    turns: expanded ? .5 : 0,
-                    duration: const Duration(milliseconds: 160),
-                    child: Icon(
-                      Icons.expand_more_rounded,
-                      size: 18,
-                      color: colors.onSurfaceVariant,
+                  MotionIsolate(
+                    width: 18,
+                    height: 18,
+                    child: AnimatedRotation(
+                      turns: expanded ? .5 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: Icon(
+                        Icons.expand_more_rounded,
+                        size: 18,
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
@@ -2867,8 +2882,9 @@ class _PendingGuidanceTile extends StatelessWidget {
                   ? ClawnsoleColors.plumInk
                   : context.colors.surfaceContainer,
               child: const Center(
-                child: SizedBox.square(
-                  dimension: 18,
+                child: MotionIsolate(
+                  width: 18,
+                  height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ),
@@ -2998,8 +3014,9 @@ class _ReferenceTile extends StatelessWidget {
                     child: ColoredBox(
                       color: Colors.black.withValues(alpha: .3),
                       child: const Center(
-                        child: SizedBox.square(
-                          dimension: 18,
+                        child: MotionIsolate(
+                          width: 18,
+                          height: 18,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: Colors.white,
@@ -3263,8 +3280,9 @@ class _DraftReferenceRenameDialogState
         key: const ValueKey('save-prompt-reference-name'),
         onPressed: _saving ? null : _save,
         child: _saving
-            ? const SizedBox.square(
-                dimension: 14,
+            ? const MotionIsolate(
+                width: 14,
+                height: 14,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Text('Rename'),
@@ -5378,24 +5396,28 @@ class _ComposerFooter extends StatelessWidget {
       constraints: BoxConstraints(
         minWidth: _keyWidthFor(context, <String>[restLabel, _submittingLabel]),
       ),
-      child: HardwareLitButton(
-        key: const ValueKey<String>('generate-key'),
-        height: consoleControlHeight(context),
-        // Inked like the legend: white-filled engraving on the lens.
-        icon: const ClawMark(size: 16),
-        label: controller.submitting ? _submittingLabel : restLabel,
-        lit: controller.submitting,
-        onPressed: controller.submitting
-            ? null
-            : () => unawaited(
-                _submitWithProviderRetentionWarning(context, controller),
-              ),
+      child: RepaintBoundary(
+        child: HardwareLitButton(
+          key: const ValueKey<String>('generate-key'),
+          height: consoleControlHeight(context),
+          // Inked like the legend: white-filled engraving on the lens.
+          icon: const ClawMark(size: 16),
+          label: controller.submitting ? _submittingLabel : restLabel,
+          lit: controller.submitting,
+          onPressed: controller.submitting
+              ? null
+              : () => unawaited(
+                  _submitWithProviderRetentionWarning(context, controller),
+                ),
+        ),
       ),
     );
     // The model plaque sits in the footer, directly before Generate: the
     // last thing the eye checks before rendering, inside the draft it
     // belongs to rather than off in the heading.
-    final plaque = _ProviderPlaque(controller: controller);
+    final plaque = RepaintBoundary(
+      child: _ProviderPlaque(controller: controller),
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         // The plaque and the button together need real room; narrower
@@ -5635,17 +5657,21 @@ class _RecentWorkState extends State<_RecentWork> {
                       (item) => SizedBox(
                         key: ValueKey('recent-generation-${item.localId}'),
                         width: layout.tileWidth,
-                        child:
-                            controller.recentWorkViewMode ==
-                                GenerationViewMode.mini
-                            ? MiniGenerationCard(
-                                controller: controller,
-                                item: item,
-                              )
-                            : GenerationCard(
-                                controller: controller,
-                                item: item,
-                              ),
+                        // Each card is its own picture: a rendering card's
+                        // motion never re-records its finished neighbours.
+                        child: RepaintBoundary(
+                          child:
+                              controller.recentWorkViewMode ==
+                                  GenerationViewMode.mini
+                              ? MiniGenerationCard(
+                                  controller: controller,
+                                  item: item,
+                                )
+                              : GenerationCard(
+                                  controller: controller,
+                                  item: item,
+                                ),
+                        ),
                       ),
                     )
                     .toList(),

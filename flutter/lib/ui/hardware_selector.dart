@@ -16,10 +16,12 @@
 // gesture arena.
 
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
 import 'hardware.dart';
+import 'paint_cache.dart';
 
 /// Bezel thickness: the charcoal frame around the window, wide enough to
 /// hold a screw head in each corner.
@@ -284,6 +286,17 @@ class _HardwareSelectorState extends State<HardwareSelector> {
   bool _hovered = false;
   bool _pressed = false;
 
+  /// The plate's and the key's shaders, built once per size and light. The
+  /// key's settle animation cycles a few entries through; they are disposed
+  /// as they fall out.
+  final ShaderCache<Object> _shaders = ShaderCache<Object>(capacity: 24);
+
+  @override
+  void dispose() {
+    _shaders.clear();
+    super.dispose();
+  }
+
   bool get _isPressed => widget.pressed || _pressed;
 
   void _setPressed(bool value) {
@@ -341,7 +354,10 @@ class _HardwareSelectorState extends State<HardwareSelector> {
           ),
           child: CustomPaint(
             key: const ValueKey<String>('hardware-selector-frame'),
-            painter: HardwareSelectorFramePainter(brightness: brightness),
+            painter: HardwareSelectorFramePainter(
+              brightness: brightness,
+              shaders: _shaders,
+            ),
             child: Stack(
               children: <Widget>[
                 child!,
@@ -356,6 +372,7 @@ class _HardwareSelectorState extends State<HardwareSelector> {
                       brightness: brightness,
                       hover: hover,
                       press: press,
+                      shaders: _shaders,
                     ),
                   ),
                 ),
@@ -399,9 +416,17 @@ class _HardwareSelectorState extends State<HardwareSelector> {
 /// Paints the plate: charcoal bezel with its bevel and corner screws, and
 /// the display window recessed into it. The step key paints itself, on top.
 class HardwareSelectorFramePainter extends CustomPainter {
-  const HardwareSelectorFramePainter({required this.brightness});
+  const HardwareSelectorFramePainter({required this.brightness, this.shaders});
 
   final Brightness brightness;
+
+  /// Where the plate keeps its shaders between paints. Without one every
+  /// paint builds them afresh, which is fine for a test and wasteful on the
+  /// web, where each is a native allocation.
+  final ShaderCache<Object>? shaders;
+
+  ui.Shader _shader(Object key, ui.Shader Function() create) =>
+      shaders?.obtain(key, create) ?? create();
 
   /// The window gradient actually painted, so a test can read the surface
   /// rather than trust the theme.
@@ -430,11 +455,14 @@ class HardwareSelectorFramePainter extends CustomPainter {
     canvas.drawRRect(
       outer,
       Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[_bezelTop, _bezelBottom],
-        ).createShader(rect),
+        ..shader = _shader(
+          ('bezel', rect),
+          () => const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[_bezelTop, _bezelBottom],
+          ).createShader(rect),
+        ),
     );
     // The bevel: one hairline inside the outer edge, lit at top-left.
     canvas.drawRRect(
@@ -442,16 +470,19 @@ class HardwareSelectorFramePainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .16 : .24),
-            Colors.white.withValues(alpha: .03),
-            Colors.black.withValues(alpha: .35),
-          ],
-          stops: const <double>[0, .5, 1],
-        ).createShader(rect),
+        ..shader = _shader(
+          ('bevel', rect, dark),
+          () => LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              Colors.white.withValues(alpha: dark ? .16 : .24),
+              Colors.white.withValues(alpha: .03),
+              Colors.black.withValues(alpha: .35),
+            ],
+            stops: const <double>[0, .5, 1],
+          ).createShader(rect),
+        ),
     );
     // The outer keyline where the plate meets the card.
     canvas.drawRRect(
@@ -484,11 +515,14 @@ class HardwareSelectorFramePainter extends CustomPainter {
     canvas.drawRRect(
       window,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: windowColors,
-        ).createShader(windowRect),
+        ..shader = _shader(
+          ('window', windowRect, dark),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: windowColors,
+          ).createShader(windowRect),
+        ),
     );
 
     canvas.save();
@@ -499,28 +533,34 @@ class HardwareSelectorFramePainter extends CustomPainter {
     canvas.drawRect(
       windowRect,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            Colors.black.withValues(alpha: wellShadow),
-            Colors.black.withValues(alpha: 0),
-          ],
-          stops: const <double>[0, .32],
-        ).createShader(windowRect),
+        ..shader = _shader(
+          ('wellTop', windowRect, dark),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              Colors.black.withValues(alpha: wellShadow),
+              Colors.black.withValues(alpha: 0),
+            ],
+            stops: const <double>[0, .32],
+          ).createShader(windowRect),
+        ),
     );
     canvas.drawRect(
       windowRect,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: <Color>[
-            Colors.black.withValues(alpha: wellShadow * .6),
-            Colors.black.withValues(alpha: 0),
-          ],
-          stops: const <double>[0, .06],
-        ).createShader(windowRect),
+        ..shader = _shader(
+          ('wellLeft', windowRect, dark),
+          () => LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: <Color>[
+              Colors.black.withValues(alpha: wellShadow * .6),
+              Colors.black.withValues(alpha: 0),
+            ],
+            stops: const <double>[0, .06],
+          ).createShader(windowRect),
+        ),
     );
     if (dark) {
       // Smoked glass: one shallow reflection of the room across the top.
@@ -533,14 +573,17 @@ class HardwareSelectorFramePainter extends CustomPainter {
       canvas.drawRect(
         glass,
         Paint()
-          ..shader = LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: <Color>[
-              Colors.white.withValues(alpha: .05),
-              Colors.white.withValues(alpha: 0),
-            ],
-          ).createShader(glass),
+          ..shader = _shader(
+            ('glass', glass),
+            () => LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: <Color>[
+                Colors.white.withValues(alpha: .05),
+                Colors.white.withValues(alpha: 0),
+              ],
+            ).createShader(glass),
+          ),
       );
     }
     // The bottom lip of the cut catches the room light.
@@ -579,14 +622,20 @@ class HardwareSelectorFramePainter extends CustomPainter {
         center,
         _screwRadius,
         Paint()
-          ..shader = RadialGradient(
-            center: const Alignment(-.4, -.45),
-            radius: 1,
-            colors: dark
-                ? const <Color>[_metalMid, _metalDark, Color(0xFF3B3936)]
-                : const <Color>[_metalLight, _metalMid, _metalDark],
-            stops: const <double>[0, .6, 1],
-          ).createShader(Rect.fromCircle(center: center, radius: _screwRadius)),
+          ..shader = _shader(
+            ('screw', center, dark),
+            () =>
+                RadialGradient(
+                  center: const Alignment(-.4, -.45),
+                  radius: 1,
+                  colors: dark
+                      ? const <Color>[_metalMid, _metalDark, Color(0xFF3B3936)]
+                      : const <Color>[_metalLight, _metalMid, _metalDark],
+                  stops: const <double>[0, .6, 1],
+                ).createShader(
+                  Rect.fromCircle(center: center, radius: _screwRadius),
+                ),
+          ),
       );
       // The slot, cut straight across.
       final direction = Offset(math.cos(angles[i]), math.sin(angles[i]));
@@ -623,9 +672,16 @@ class HardwareSelectorKeyPainter extends CustomPainter {
     required this.brightness,
     required this.hover,
     required this.press,
+    this.shaders,
   });
 
   final Brightness brightness;
+
+  /// See [HardwareSelectorFramePainter.shaders].
+  final ShaderCache<Object>? shaders;
+
+  ui.Shader _shader(Object key, ui.Shader Function() create) =>
+      shaders?.obtain(key, create) ?? create();
 
   /// How far the cursor's brightening has settled, 0 to 1.
   final double hover;
@@ -667,16 +723,19 @@ class HardwareSelectorKeyPainter extends CustomPainter {
     canvas.drawRRect(
       key,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            Color.lerp(top, Colors.white, .08 * hover)!,
-            Color.lerp(mid, Colors.white, .08 * hover)!,
-            Color.lerp(bottom, Colors.black, .12 * press)!,
-          ],
-          stops: const <double>[0, .55, 1],
-        ).createShader(keyRect),
+        ..shader = _shader(
+          ('key', keyRect, hover, press, dark),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              Color.lerp(top, Colors.white, .08 * hover)!,
+              Color.lerp(mid, Colors.white, .08 * hover)!,
+              Color.lerp(bottom, Colors.black, .12 * press)!,
+            ],
+            stops: const <double>[0, .55, 1],
+          ).createShader(keyRect),
+        ),
     );
     // The bevel and the keyline.
     canvas.drawRRect(
@@ -684,16 +743,19 @@ class HardwareSelectorKeyPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..shader = LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[
-            Colors.white.withValues(alpha: dark ? .3 : .5),
-            Colors.white.withValues(alpha: 0),
-            Colors.black.withValues(alpha: .25),
-          ],
-          stops: const <double>[0, .5, 1],
-        ).createShader(keyRect),
+        ..shader = _shader(
+          ('keyBevel', keyRect, dark),
+          () => LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              Colors.white.withValues(alpha: dark ? .3 : .5),
+              Colors.white.withValues(alpha: 0),
+              Colors.black.withValues(alpha: .25),
+            ],
+            stops: const <double>[0, .5, 1],
+          ).createShader(keyRect),
+        ),
     );
     canvas.drawRRect(
       key,

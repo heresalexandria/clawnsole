@@ -22,7 +22,9 @@ function harness({ answers = [], now = () => 0, ...options } = {}) {
     },
   };
   const queue = [...answers];
-  installRendererRecovery({
+  const records = [];
+  const recovery = installRendererRecovery({
+    log: { write: (_label, entry) => records.push(entry) },
     window,
     now,
     showMessage: async (message) => {
@@ -35,7 +37,7 @@ function harness({ answers = [], now = () => 0, ...options } = {}) {
     quit: () => actions.push("quit"),
     ...options,
   });
-  return { actions, events, prompts };
+  return { actions, events, prompts, records, recovery };
 }
 
 const flush = () => new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
@@ -252,4 +254,94 @@ test("a companion reload invalidates a pending crash answer without resetting th
   await flush();
   assert.equal(prompts.length, 2, "loading alone must not reset the crash-loop budget");
   assert.deepEqual(actions, ["reload", "reload"]);
+});
+
+// A live process whose Flutter engine aborted or froze never emits
+// render-process-gone; diagnostics report it through recoverFrom instead.
+test("a dead engine is reloaded silently once and logged with its fixed reason", async () => {
+  const { actions, events, prompts, records, recovery } = harness();
+  assert.equal(typeof recovery.dispose, "function");
+  assert.equal(recovery.recoverFrom("engine-abort"), true);
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+  assert.deepEqual(prompts, []);
+  assert.deepEqual(records, [
+    "renderer-engine-dead {\"reason\":\"engine-abort\",\"exitCode\":null,\"type\":\"Renderer\"}",
+    "renderer-reload",
+  ]);
+  assert.doesNotMatch(JSON.stringify(records), /unknown/);
+  events.emit("did-finish-load");
+  assert.equal(recovery.recoverFrom("frames-frozen"), true);
+  await flush();
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].title, "Clawnsole Stopped Drawing");
+  assert.equal(prompts[0].message, "Clawnsole's studio stopped drawing.");
+  assert.match(prompts[0].detail, /reload/i);
+  assert.match(prompts[0].detail, /saved drafts and library data/i);
+  assert.deepEqual(prompts[0].buttons, ["Reload", "Quit"]);
+  assert.deepEqual(actions, ["reload", "reload"], "Reload restores the window");
+});
+
+test("engine and process failures share one reload budget and one dialog", async () => {
+  const { actions, events, prompts, recovery } = harness({ answers: [1] });
+  events.emit("render-process-gone", {}, { reason: "crashed" });
+  await flush();
+  recovery.recoverFrom("heap-critical");
+  await flush();
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].title, "Clawnsole Stopped Drawing");
+  assert.deepEqual(actions, ["reload", "quit"]);
+});
+
+test("a stable window regains its silent engine reload after five minutes", async () => {
+  let clock = 0;
+  const { actions, prompts, recovery } = harness({ now: () => clock });
+  recovery.recoverFrom("frames-frozen");
+  await flush();
+  clock = STABLE_AFTER_MS;
+  recovery.recoverFrom("frames-frozen");
+  await flush();
+  assert.deepEqual(prompts, []);
+  assert.deepEqual(actions, ["reload", "reload"]);
+});
+
+test("repeated engine triggers are ignored while a reload or prompt is pending", async () => {
+  let answer;
+  const { actions, events, prompts, records, recovery } = harness({
+    answers: [() => new Promise((resolve) => { answer = resolve; })],
+  });
+  recovery.recoverFrom("engine-abort");
+  recovery.recoverFrom("engine-abort");
+  recovery.recoverFrom("frames-frozen");
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+  events.emit("did-finish-load");
+  recovery.recoverFrom("frames-frozen");
+  await flush();
+  recovery.recoverFrom("frames-frozen");
+  recovery.recoverFrom("heap-critical");
+  assert.equal(prompts.length, 1);
+  assert.equal(records.filter((entry) => entry.startsWith("renderer-engine-dead ")).length, 6);
+  answer({ response: 0 });
+  await flush();
+  assert.deepEqual(actions, ["reload", "reload"]);
+});
+
+test("an engine failure closes the hang prompt and unknown reasons or closed windows are refused", async () => {
+  const { actions, events, prompts, recovery } = harness({
+    answers: [() => new Promise(() => {})],
+  });
+  events.emit("unresponsive");
+  await flush();
+  assert.equal(prompts.length, 1);
+  assert.equal(recovery.recoverFrom("frames-frozen"), true);
+  assert.equal(prompts[0].signal.aborted, true);
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
+  assert.equal(recovery.recoverFrom("secret reason"), false);
+  assert.equal(recovery.recoverFrom("crashed"), false, "process reasons belong to render-process-gone");
+  events.emit("destroyed");
+  assert.equal(recovery.recoverFrom("engine-abort"), false);
+  await flush();
+  assert.deepEqual(actions, ["reload"]);
 });

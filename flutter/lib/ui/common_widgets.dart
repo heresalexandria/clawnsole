@@ -24,6 +24,7 @@ import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'media_thumbnail.dart';
 import 'media_preview_work.dart';
+import 'paced_progress_indicator.dart';
 import 'prompt_rewrite_dialog.dart';
 import 'timeline_strip.dart';
 import 'video_frame_loader.dart';
@@ -811,7 +812,7 @@ class StatusBadge extends StatelessWidget {
           ] else if (item.isWorking) ...<Widget>[
             SizedBox.square(
               dimension: 10,
-              child: CircularProgressIndicator(
+              child: PacedCircularProgressIndicator(
                 strokeWidth: 1.5,
                 color: foreground,
               ),
@@ -2746,7 +2747,7 @@ class _MediaPlaceholder extends StatelessWidget {
               if (loading)
                 SizedBox.square(
                   dimension: 24,
-                  child: CircularProgressIndicator(
+                  child: PacedCircularProgressIndicator(
                     strokeWidth: 2.3,
                     color: foreground,
                   ),
@@ -2982,165 +2983,174 @@ class ActivityCard extends StatelessWidget {
         GenerationThumbnailFooter(item: item, inset: 8),
       ],
     );
-    return SurfaceCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-            child: isGeneratingVideo || hasMedia
-                ? InlineVideoMediaBox(
-                    playbackId: item.localId,
-                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
-                    preview: preview,
-                  )
-                : SizedBox(height: 110, child: preview),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(13),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Expanded(
-                      child: GenerationPrompt(
-                        controller: controller,
-                        prompt: item.displayPrompt,
-                        collapsedLines: 2,
-                        style: Theme.of(context).textTheme.titleMedium,
-                        reserveCollapsedHeight: true,
+    return RepaintBoundary(
+      child: SurfaceCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(15),
+              ),
+              child: isGeneratingVideo || hasMedia
+                  ? InlineVideoMediaBox(
+                      playbackId: item.localId,
+                      aspectRatio: generationAspectRatio(
+                        item.config.aspectRatio,
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    StorageBadge(storage: item.storage, compact: true),
-                    const SizedBox(width: 6),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        relativeTime(item.createdAt),
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: context.colors.onSurfaceVariant,
+                      preview: preview,
+                    )
+                  : SizedBox(height: 110, child: preview),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: GenerationPrompt(
+                          controller: controller,
+                          prompt: item.displayPrompt,
+                          collapsedLines: 2,
+                          style: Theme.of(context).textTheme.titleMedium,
+                          reserveCollapsedHeight: true,
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      StorageBadge(storage: item.storage, compact: true),
+                      const SizedBox(width: 6),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          relativeTime(item.createdAt),
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 9),
+                  GenerationSpecChips(item: item),
+                  if (item.config.keyframes?.isNotEmpty == true ||
+                      item.config.references?.isNotEmpty == true ||
+                      item.config.source != null) ...<Widget>[
+                    const SizedBox(height: 8),
+                    ReferenceInputsStrip(controller: controller, item: item),
+                  ],
+                  if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
+                    const SizedBox(height: 8),
+                    PacedLinearProgressIndicator(
+                      value: progress == null ? null : progress / 100,
+                      minHeight: 5,
+                      borderRadius: BorderRadius.circular(99),
+                      backgroundColor: context.colors.surfaceContainerHigh,
+                      color: context.colors.primary,
                     ),
                   ],
-                ),
-                const SizedBox(height: 9),
-                GenerationSpecChips(item: item),
-                if (item.config.keyframes?.isNotEmpty == true ||
-                    item.config.references?.isNotEmpty == true ||
-                    item.config.source != null) ...<Widget>[
-                  const SizedBox(height: 8),
-                  ReferenceInputsStrip(controller: controller, item: item),
-                ],
-                if (item.isWorking && !item.isStatusUnavailable) ...<Widget>[
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: progress == null ? null : progress / 100,
-                    minHeight: 5,
-                    borderRadius: BorderRadius.circular(99),
-                    backgroundColor: context.colors.surfaceContainerHigh,
-                    color: context.colors.primary,
-                  ),
-                ],
-                // A dead render already carries its error on the thumbnail
-                // band; repeating it below would just double the obituary.
-                if (GenerationStatusDetails.shouldShow(item) &&
-                    !GenerationErrorThumbnail.shouldShow(item)) ...<Widget>[
-                  const SizedBox(height: 8),
-                  GenerationStatusDetails(item: item),
-                ],
-                const SizedBox(height: 10),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Wrap(
-                        spacing: 7,
-                        runSpacing: 7,
-                        children: <Widget>[
-                          if (hasMedia)
-                            BusyFilledButton.tonalIcon(
-                              key: ValueKey('activity-save-${item.localId}'),
-                              busyLabel: 'Saving…',
-                              onPressed: () => saveGenerationVideo(
-                                context,
-                                controller,
-                                item,
-                              ),
-                              icon: const Icon(
-                                Icons.download_rounded,
-                                size: 15,
-                              ),
-                              label: const Text('Save'),
-                            ),
-                          if (controller.canReuse(item))
-                            ListenableBuilder(
-                              listenable: controller.busy,
-                              builder: (context, _) => BusyOutlinedButton.icon(
-                                key: ValueKey('activity-reuse-${item.localId}'),
-                                busy: controller.busy.isBusy(
-                                  'generation',
-                                  item.localId,
-                                ),
-                                onPressed: () => controller.busy.run(
-                                  'generation',
-                                  item.localId,
-                                  () => controller.reuse(item),
+                  // A dead render already carries its error on the thumbnail
+                  // band; repeating it below would just double the obituary.
+                  if (GenerationStatusDetails.shouldShow(item) &&
+                      !GenerationErrorThumbnail.shouldShow(item)) ...<Widget>[
+                    const SizedBox(height: 8),
+                    GenerationStatusDetails(item: item),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Wrap(
+                          spacing: 7,
+                          runSpacing: 7,
+                          children: <Widget>[
+                            if (hasMedia)
+                              BusyFilledButton.tonalIcon(
+                                key: ValueKey('activity-save-${item.localId}'),
+                                busyLabel: 'Saving…',
+                                onPressed: () => saveGenerationVideo(
+                                  context,
+                                  controller,
+                                  item,
                                 ),
                                 icon: const Icon(
-                                  Icons.replay_rounded,
+                                  Icons.download_rounded,
                                   size: 15,
                                 ),
-                                label: Text(
-                                  item.isFailed && !item.hasDeliveredMedia
-                                      ? 'Retry'
-                                      : 'Reuse',
+                                label: const Text('Save'),
+                              ),
+                            if (controller.canReuse(item))
+                              ListenableBuilder(
+                                listenable: controller.busy,
+                                builder: (context, _) =>
+                                    BusyOutlinedButton.icon(
+                                      key: ValueKey(
+                                        'activity-reuse-${item.localId}',
+                                      ),
+                                      busy: controller.busy.isBusy(
+                                        'generation',
+                                        item.localId,
+                                      ),
+                                      onPressed: () => controller.busy.run(
+                                        'generation',
+                                        item.localId,
+                                        () => controller.reuse(item),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.replay_rounded,
+                                        size: 15,
+                                      ),
+                                      label: Text(
+                                        item.isFailed && !item.hasDeliveredMedia
+                                            ? 'Retry'
+                                            : 'Reuse',
+                                      ),
+                                    ),
+                              ),
+                            if (controller.canRewrite(item))
+                              OutlinedButton.icon(
+                                key: const ValueKey('activity-rewrite'),
+                                onPressed: () => unawaited(
+                                  showPromptRewriteDialog(
+                                    context,
+                                    controller: controller,
+                                    item: item,
+                                  ),
                                 ),
-                              ),
-                            ),
-                          if (controller.canRewrite(item))
-                            OutlinedButton.icon(
-                              key: const ValueKey('activity-rewrite'),
-                              onPressed: () => unawaited(
-                                showPromptRewriteDialog(
-                                  context,
-                                  controller: controller,
-                                  item: item,
+                                icon: const Icon(
+                                  Icons.auto_awesome_outlined,
+                                  size: 15,
                                 ),
+                                label: const Text('AI Rewrite'),
                               ),
-                              icon: const Icon(
-                                Icons.auto_awesome_outlined,
-                                size: 15,
-                              ),
-                              label: const Text('AI Rewrite'),
+                            GenerationStatusButton(
+                              controller: controller,
+                              item: item,
+                              compact: true,
                             ),
-                          GenerationStatusButton(
-                            controller: controller,
-                            item: item,
-                            compact: true,
-                          ),
-                          GenerationCostChip(item: item),
-                        ],
+                            GenerationCostChip(item: item),
+                          ],
+                        ),
                       ),
-                    ),
-                    GenerationActionsMenu(
-                      controller: controller,
-                      item: item,
-                      includeSave: false,
-                      includeReuse: false,
-                      includeRewrite: false,
-                      includeCheckStatus: false,
-                    ),
-                  ],
-                ),
-              ],
+                      GenerationActionsMenu(
+                        controller: controller,
+                        item: item,
+                        includeSave: false,
+                        includeReuse: false,
+                        includeRewrite: false,
+                        includeCheckStatus: false,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

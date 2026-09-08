@@ -141,6 +141,7 @@ jobs:
         run: >-
           flutter build web --release
           --dart-define=CLAWNSOLE_PROXY_URL=
+          --dart-define=FLUTTER_WEB_ENABLE_INSTRUMENTATION=true
           --dart-define=CLAWNSOLE_SITE_URL=${{ env.CLAWNSOLE_SITE_URL }}
 
   electron:
