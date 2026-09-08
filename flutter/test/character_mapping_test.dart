@@ -206,6 +206,9 @@ void main() {
       expect(controller.form.prompt, 'Alice turns.\n\nALICE: @other');
       controller.updateForm((form) => form.prompt += '\nAlice sits.');
       expect(controller.characterMappingReferences('ALICE'), ['Alice.png']);
+      expect(controller.characterHasAuthoredMapping('alice'), isTrue);
+      expect(controller.characterReferenceText, isEmpty);
+      expect(controller.promptWithCast, controller.form.prompt);
       // Clearing the cast is done in the editor, and it sticks through typing.
       await controller.saveCharacterMapping(
         scriptName: 'ALICE',
@@ -239,6 +242,43 @@ void main() {
       expect(controller.form.references, hasLength(1));
     },
   );
+
+  for (final screenplayMode in [false, true]) {
+    test(
+      'authored aliases suppress inherited casting in ${screenplayMode ? 'screenplay' : 'plaintext'}',
+      () {
+        final controller = _controller();
+        addTearDown(controller.dispose);
+        controller.form
+          ..screenplayMode = screenplayMode
+          ..characterMappings['HERO'] = ['Earlier clip']
+          ..screenplayCharacterAliases['ALEXANDRIA'] = 'HERO';
+        const direction = 'Extend @Film.\n\nAlexandria: @Different clip';
+
+        controller.updatePrompt(direction);
+        controller.syncScreenplayCharacterMappings();
+
+        expect(controller.form.prompt, direction);
+        expect(controller.promptWithCast, direction);
+        expect(controller.generationPrompt, direction);
+        expect(controller.generatedCharacterReferenceText, isEmpty);
+        expect(controller.characterHasAuthoredMapping('alexandria'), isTrue);
+        expect(controller.characterHasAuthoredMapping('hero'), isTrue);
+        expect(controller.characterHasAuthoredMapping('other'), isFalse);
+        expect(controller.characterMappingReferences('ALEXANDRIA'), [
+          'Earlier clip',
+        ]);
+        expect(controller.form.characterMappings, {
+          'HERO': ['Earlier clip'],
+        });
+
+        // Removing only the authored declaration reveals the stored choice.
+        controller.updatePrompt('Extend @Film.');
+        expect(controller.characterHasAuthoredMapping('HERO'), isFalse);
+        expect(controller.characterReferenceText, 'HERO: @Earlier clip');
+      },
+    );
+  }
 
   test(
     'explicit clearing and a different-reference override beat defaults',

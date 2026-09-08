@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../app/app_theme.dart';
 import '../core/models.dart';
 import '../core/screenplay.dart';
 import 'busy_button.dart';
@@ -110,8 +111,10 @@ class _CharactersDialogState extends State<_CharactersDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Cast the characters in this direction. The casting is kept '
-                'out of the prompt box and sent with it.',
+                'Cast the characters in this direction. Saved mappings add '
+                'character reference text unless the main prompt already '
+                'supplies that character\'s references. Edited character '
+                'reference text is used as written.',
               ),
               const SizedBox(height: 16),
               if (characters.isEmpty)
@@ -145,6 +148,9 @@ class _CharactersDialogState extends State<_CharactersDialog> {
                             .characterMappingReferences(character)
                             .map((name) => '@$name')
                             .join(' · '),
+                      if (!controller.hasCharacterReferenceTextOverride &&
+                          controller.characterHasAuthoredMapping(character))
+                        'Set in prompt · Saved mapping not appended',
                     ].join('\n'),
                   ),
                   trailing: const Icon(Icons.edit_outlined),
@@ -307,6 +313,9 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final typed = normalizeCharacterName(_name.text);
+    final setInPrompt =
+        !controller.hasCharacterReferenceTextOverride &&
+        controller.characterHasAuthoredMapping(typed);
     final searched = _candidates.where(_matchesSearch).toList();
     final visible =
         searched
@@ -356,6 +365,24 @@ class _CharacterMappingEditorState extends State<_CharacterMappingEditor> {
                     helperMaxLines: 2,
                   ),
                 ),
+                if (setInPrompt) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Set in prompt. The main prompt supplies this character\'s '
+                    'references, so this saved mapping is not appended. '
+                    'You can still edit the saved mapping here.',
+                    key: const ValueKey('mapping-set-in-prompt'),
+                    style: TextStyle(color: context.colors.onSurfaceVariant),
+                  ),
+                ] else if (controller.hasCharacterReferenceTextOverride) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your edited character reference text is used as written. '
+                    'Changes here only update the saved mapping.',
+                    key: const ValueKey('mapping-custom-text-status'),
+                    style: TextStyle(color: context.colors.onSurfaceVariant),
+                  ),
+                ],
                 if (widget.character.isNotEmpty)
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,

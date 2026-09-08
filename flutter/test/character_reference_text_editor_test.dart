@@ -61,6 +61,46 @@ String _text(WidgetTester tester, [Finder? scope]) =>
     tester.widget<TextFormField>(_textField(scope)).controller!.text;
 
 void main() {
+  testWidgets(
+    'manual casting keeps the added-text editor visible and both fields intact',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1100));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = _controller();
+      const manual = 'ALICE: @Manual Clip\n\n$_prompt';
+      controller.form.prompt = manual;
+      try {
+        await _mount(tester, controller);
+        expect(find.byKey(_toggleKey), findsOneWidget);
+        expect(find.text('Not added'), findsOneWidget);
+        await _tap(tester, find.byKey(_toggleKey));
+        expect(_text(tester), isEmpty);
+        expect(controller.promptWithCast, manual);
+
+        const edited = 'ALICE: @Portrait\nUse this only for her coat.  ';
+        await tester.enterText(_textField(), edited);
+        await tester.pumpAndSettle();
+        expect(controller.form.prompt, manual);
+        controller.updatePrompt('$manual\nShe opens the door.');
+        await tester.pump(AppController.promptSettleDelay);
+        await tester.pumpAndSettle();
+        expect(_text(tester), edited);
+        expect(controller.characterReferenceText, edited);
+        expect(controller.form.prompt, '$manual\nShe opens the door.');
+
+        await _tap(tester, find.byKey(_resetKey));
+        expect(_text(tester), isEmpty);
+        expect(controller.form.prompt, '$manual\nShe opens the door.');
+        expect(controller.promptWithCast, controller.form.prompt);
+        expect(find.byKey(_toggleKey), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+      }
+    },
+  );
+
   for (final width in [390.0, 1200.0]) {
     testWidgets('character text is editable and resettable at width $width', (
       tester,

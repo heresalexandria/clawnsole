@@ -1427,7 +1427,9 @@ class _CharacterReferenceTextAccordion extends StatefulWidget {
   final AppController controller;
 
   static bool visibleFor(AppController controller) =>
-      controller.generatedCharacterReferenceText.isNotEmpty ||
+      controller.form.characterMappings.values.any(
+        (references) => references.isNotEmpty,
+      ) ||
       controller.hasCharacterReferenceTextOverride;
 
   @override
@@ -1450,10 +1452,10 @@ class _CharacterReferenceTextAccordionState
       labelMaxLines: 3,
       expanded: _open,
       onToggle: () => setState(() => _open = !_open),
-      summary: custom
-          ? controller.characterReferenceText.trim().isEmpty
-                ? 'Not added'
-                : 'Edited'
+      summary: controller.characterReferenceText.trim().isEmpty
+          ? 'Not added'
+          : custom
+          ? 'Edited'
           : 'From mappings',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1478,7 +1480,9 @@ class _CharacterReferenceTextAccordionState
           ),
           const SizedBox(height: 6),
           Text(
-            'These words are added to the prompt you submit.',
+            custom
+                ? 'These words are added as edited. Your main prompt stays unchanged.'
+                : 'These words are added to your prompt. A mapping written in the main prompt replaces the generated mapping for that character.',
             style: TextStyle(
               fontSize: 11,
               color: context.colors.onSurfaceVariant,

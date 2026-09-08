@@ -32,6 +32,7 @@ final _transition = RegExp(
   caseSensitive: false,
 );
 final _mapping = RegExp(r'^\s*[^\n:]+:\s*@[^\n]+$');
+final _authoredMappingReference = RegExp(r'(?:^|\s)@[^\s@]+');
 
 bool isScreenplayMapping(String line) => _mapping.hasMatch(line);
 
@@ -258,12 +259,61 @@ String stripScreenplayMappings(String prompt) {
   return kept.join('\n');
 }
 
-/// The casting block appended to the direction at submission: one line per
-/// cast member holding at least one reference, names in alphabetical order.
-List<String> screenplayCastLines(Map<String, List<String>> mappings) {
+/// Names whose casting is already authored in [prompt], including either side
+/// of a script-to-casting alias. Reading these names never changes either text
+/// or saved casting; removing an authored line can reveal the saved cast again.
+Set<String> screenplayAuthoredMappingNames(
+  String prompt, {
+  Map<String, String> characterAliases = const {},
+}) {
+  if (!prompt.contains('@')) return const {};
+  final authored = <String>{};
+  for (final line in prompt.split('\n')) {
+    final colon = line.indexOf(':');
+    if (colon < 0) continue;
+    if (!_authoredMappingReference.hasMatch(line.substring(colon + 1))) {
+      continue;
+    }
+    final name = normalizeCharacterName(line.substring(0, colon));
+    if (name.isEmpty || screenplayCharacterNameProblem(name) != null) {
+      continue;
+    }
+    // Authored casting can describe which person a reference supplies, such
+    // as "ALICE: the pilot from @Previous scene". It need not be the strict
+    // legacy NAME: @reference format used to recover saved mapping metadata.
+    // Require a distinct @mention so ordinary email addresses do not count.
+    authored.add(name);
+  }
+  return {
+    ...authored,
+    for (final entry in characterAliases.entries)
+      if (authored.contains(normalizeCharacterName(entry.key)) ||
+          authored.contains(normalizeCharacterName(entry.value))) ...{
+        normalizeCharacterName(entry.key),
+        normalizeCharacterName(entry.value),
+      },
+  };
+}
+
+/// The generated casting block appended to the direction at submission: one
+/// line per cast member holding at least one reference, in alphabetical order.
+/// Authored mappings take precedence over generated lines for the same name.
+/// Explicitly edited reference text is user-owned and must bypass this helper.
+List<String> screenplayCastLines(
+  Map<String, List<String>> mappings, {
+  String authoredPrompt = '',
+  Map<String, String> characterAliases = const {},
+}) {
+  final authored = screenplayAuthoredMappingNames(
+    authoredPrompt,
+    characterAliases: characterAliases,
+  );
   final names = mappings.keys.where((name) {
     final references = mappings[name];
-    return name.isNotEmpty && references != null && references.isNotEmpty;
+    return name.isNotEmpty &&
+        references != null &&
+        references.isNotEmpty &&
+        !authored.contains(normalizeCharacterName(name));
   }).toList()..sort();
   return [
     for (final name in names)

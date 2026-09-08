@@ -62,7 +62,17 @@ extension ScreenplayAuthoring on AppController {
   }
 
   /// The casting block as it will be appended at submission.
-  List<String> get castLines => screenplayCastLines(form.characterMappings);
+  List<String> get castLines => screenplayCastLines(
+    form.characterMappings,
+    authoredPrompt: form.prompt,
+    characterAliases: form.screenplayCharacterAliases,
+  );
+
+  bool characterHasAuthoredMapping(String scriptOrMappingName) =>
+      screenplayAuthoredMappingNames(
+        form.prompt,
+        characterAliases: form.screenplayCharacterAliases,
+      ).contains(normalizeCharacterName(scriptOrMappingName));
 
   String get generatedCharacterReferenceText => castLines.join('\n');
 
@@ -459,9 +469,10 @@ extension ScreenplayAuthoring on AppController {
     final mappedNames = form.characterMappings.keys.toSet();
     // An authored casting line already supplies instructions for this name.
     // Leave it in place without appending a second, possibly conflicting cast.
-    final inlineNames = screenplayMappings(
+    final inlineNames = screenplayAuthoredMappingNames(
       form.prompt,
-    ).keys.map(normalizeCharacterName).toSet();
+      characterAliases: form.screenplayCharacterAliases,
+    );
     for (final entry in names.entries) {
       final name = entry.key;
       if (inlineNames.contains(name) ||

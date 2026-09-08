@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-const _direction = 'EXT. HARBOR\n\nALICE: @Source Video\n\nAlice waits.\n';
+const _direction = 'EXT. HARBOR\n\nSOURCE: @Source Video\n\nAlice waits.\n';
 const _custom = 'Use the reference for appearance only.\n Keep this spacing.\n';
 const _generated = 'ALICE: @Alice.mp4';
 const _snapshot = LocalSnapshot(
@@ -93,76 +93,110 @@ void main() {
     },
   );
 
-  for (final override in <String?>[null, '', _custom]) {
-    test(
-      'submission and reuse preserve ${override == null
-          ? 'automatic'
-          : override.isEmpty
-          ? 'empty'
-          : 'edited'} character text',
-      () async {
-        final submissions = <Map<String, dynamic>>[];
-        final gateway = WebGateway(
-          baseUrl: Uri.parse('http://127.0.0.1:8787'),
-          client: MockClient((request) async {
-            switch (request.url.path) {
-              case '/account':
-                return http.Response(jsonEncode({'provider': 'runway'}), 200);
-              case '/generations':
-                final body = jsonDecode(request.body) as Map<String, dynamic>;
-                submissions.add(body);
-                return http.Response(
-                  jsonEncode({'generation': body['record']}),
-                  201,
-                );
-              case '/composer-tabs':
-                return http.Response('{}', 200);
-              case '/action':
-                return http.Response(jsonEncode(_snapshot.toJson()), 200);
-              default:
-                throw StateError('Unexpected fixture request.');
-            }
-          }),
-        );
-        final controller = _controller(gateway);
-        addTearDown(controller.dispose);
-        controller.form
-          ..prompt = _direction
-          ..characterMappings['ALICE'] = ['Alice.mp4'];
-        if (override != null) controller.updateCharacterReferenceText(override);
-        final composed = override == ''
-            ? _direction
-            : '${_direction.trimRight()}\n\n${override ?? _generated}';
-        final expected = composed.trim();
-        expect(controller.promptWithCast, composed);
-        expect(controller.generationPrompt, expected);
-        await controller.submit(providerRetentionRiskAcknowledged: true);
-        expect(submissions, hasLength(1), reason: controller.notice);
-        final record = Generation.fromJson(
-          Map<String, Object?>.from(submissions.single['record'] as Map),
-        );
-        expect(record.prompt, expected);
-        expect(record.config.authoredPrompt, _direction);
-        expect(record.config.characterReferenceTextOverride, override);
-        expect(record.config.characterMappings, {
-          'ALICE': ['Alice.mp4'],
-        });
-        final copiedConfig = GenerationConfig.fromJson(
-          record.config.copyWith().toJson(),
-        );
-        expect(copiedConfig.authoredPrompt, _direction);
-        expect(copiedConfig.characterReferenceTextOverride, override);
-        expect(copiedConfig.characterMappings, record.config.characterMappings);
-        controller.addComposerTab();
-        await controller.reuse(record);
-        expect(controller.form.prompt, _direction);
-        expect(controller.characterReferenceText, override ?? _generated);
-        expect(controller.generationPrompt, expected);
-        controller.resetCharacterReferenceText();
-        expect(controller.characterReferenceText, _generated);
-        expect(controller.form.prompt, _direction);
-      },
-    );
+  test('edited reference text keeps conflicting authored choices verbatim', () {
+    final controller = _controller(_UnusedGateway());
+    addTearDown(controller.dispose);
+    const direction = 'Extend @Film.\n\nALICE: @New clip\n';
+    const edited = '  ALICE: @Another clip\nKeep this explicit choice.\n';
+    controller.form
+      ..prompt = direction
+      ..characterMappings['ALICE'] = ['Earlier clip'];
+
+    controller.updateCharacterReferenceText(edited);
+
+    expect(controller.characterHasAuthoredMapping('ALICE'), isTrue);
+    expect(controller.generatedCharacterReferenceText, isEmpty);
+    expect(controller.characterReferenceText, edited);
+    expect(controller.form.prompt, direction);
+    expect(controller.promptWithCast, '${direction.trimRight()}\n\n$edited');
+    expect(controller.form.characterMappings, {
+      'ALICE': ['Earlier clip'],
+    });
+    controller.resetCharacterReferenceText();
+    expect(controller.promptWithCast, direction);
+  });
+
+  for (final (direction, generated) in [
+    (_direction, _generated),
+    (_direction.replaceFirst('SOURCE:', 'ALICE:'), ''),
+  ]) {
+    for (final override in <String?>[null, '', _custom]) {
+      test(
+        'submission and reuse preserve ${generated.isEmpty ? 'authored casting with' : 'unrelated inline text with'} ${override == null
+            ? 'automatic'
+            : override.isEmpty
+            ? 'empty'
+            : 'edited'} character text',
+        () async {
+          final submissions = <Map<String, dynamic>>[];
+          final gateway = WebGateway(
+            baseUrl: Uri.parse('http://127.0.0.1:8787'),
+            client: MockClient((request) async {
+              switch (request.url.path) {
+                case '/account':
+                  return http.Response(jsonEncode({'provider': 'runway'}), 200);
+                case '/generations':
+                  final body = jsonDecode(request.body) as Map<String, dynamic>;
+                  submissions.add(body);
+                  return http.Response(
+                    jsonEncode({'generation': body['record']}),
+                    201,
+                  );
+                case '/composer-tabs':
+                  return http.Response('{}', 200);
+                case '/action':
+                  return http.Response(jsonEncode(_snapshot.toJson()), 200);
+                default:
+                  throw StateError('Unexpected fixture request.');
+              }
+            }),
+          );
+          final controller = _controller(gateway);
+          addTearDown(controller.dispose);
+          controller.form
+            ..prompt = direction
+            ..characterMappings['ALICE'] = ['Alice.mp4'];
+          if (override != null) {
+            controller.updateCharacterReferenceText(override);
+          }
+          final referenceText = override ?? generated;
+          final composed = referenceText.isEmpty
+              ? direction
+              : '${direction.trimRight()}\n\n$referenceText';
+          final expected = composed.trim();
+          expect(controller.promptWithCast, composed);
+          expect(controller.generationPrompt, expected);
+          await controller.submit(providerRetentionRiskAcknowledged: true);
+          expect(submissions, hasLength(1), reason: controller.notice);
+          final record = Generation.fromJson(
+            Map<String, Object?>.from(submissions.single['record'] as Map),
+          );
+          expect(record.prompt, expected);
+          expect(record.config.authoredPrompt, direction);
+          expect(record.config.characterReferenceTextOverride, override);
+          expect(record.config.characterMappings, {
+            'ALICE': ['Alice.mp4'],
+          });
+          final copiedConfig = GenerationConfig.fromJson(
+            record.config.copyWith().toJson(),
+          );
+          expect(copiedConfig.authoredPrompt, direction);
+          expect(copiedConfig.characterReferenceTextOverride, override);
+          expect(
+            copiedConfig.characterMappings,
+            record.config.characterMappings,
+          );
+          controller.addComposerTab();
+          await controller.reuse(record);
+          expect(controller.form.prompt, direction);
+          expect(controller.characterReferenceText, override ?? generated);
+          expect(controller.generationPrompt, expected);
+          controller.resetCharacterReferenceText();
+          expect(controller.characterReferenceText, generated);
+          expect(controller.form.prompt, direction);
+        },
+      );
+    }
   }
 
   test('a rewrite for a closed tab is retained in a separate draft', () {
@@ -197,7 +231,7 @@ void main() {
         ..prompt = _direction
         ..characterMappings['ALICE'] = ['Alice.mp4'];
       controller.updateCharacterReferenceText(_custom);
-      const rewritten = 'EXT. HARBOR\n\nALICE: @Source Video\n\nAlice leaves.';
+      const rewritten = 'EXT. HARBOR\n\nSOURCE: @Source Video\n\nAlice leaves.';
       controller.applyRewrittenDirection(
         const PromptRewriteResult(
           prompt: rewritten,

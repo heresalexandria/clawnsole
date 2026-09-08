@@ -59,6 +59,74 @@ Future<void> _pumpCreate(WidgetTester tester, AppController controller) async {
 Finder _tile(String name) => find.widgetWithText(CheckboxListTile, '@$name');
 
 void main() {
+  testWidgets(
+    'phone cast marks authored mappings without hiding edit controls',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = _controller();
+      addTearDown(controller.dispose);
+      const prompt = 'Continue the scene.\nALEXANDRIA: @different.png';
+      controller.form
+        ..prompt = prompt
+        ..characterMappings['ALEXANDRIA'] = [
+          'one.png',
+          'two.png',
+          'three.png',
+          'four.png',
+        ]
+        ..characterMappings['HERO'] = ['hero.png'];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildClawnsoleTheme(Brightness.light),
+          home: Scaffold(
+            body: Padding(
+              padding: const EdgeInsets.all(16),
+              child: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) => CastRow(controller: controller),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final chip = find.byKey(const ValueKey('cast-chip-ALEXANDRIA'));
+      expect(
+        find.descendant(of: chip, matching: find.text('In prompt')),
+        findsOneWidget,
+      );
+      expect(find.text('In prompt'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('cast-edit-ALEXANDRIA')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('cast-remove-ALEXANDRIA')),
+        findsOneWidget,
+      );
+      expect(tester.getRect(chip).right, lessThanOrEqualTo(304));
+      expect(tester.takeException(), isNull);
+
+      for (final override in ['ALEXANDRIA: @custom.png', '']) {
+        controller.updateCharacterReferenceText(override);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(find.text('In prompt'), findsNothing);
+        expect(controller.characterReferenceText, override);
+        expect(controller.form.prompt, prompt);
+      }
+      controller.resetCharacterReferenceText();
+      await tester.pumpAndSettle();
+      expect(find.text('In prompt'), findsOneWidget);
+      controller.updateForm((form) => form.prompt = 'Continue the scene.');
+      await tester.pumpAndSettle();
+      expect(find.text('In prompt'), findsNothing);
+      expect(controller.form.characterMappings['ALEXANDRIA'], hasLength(4));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test('authored casting lines remain fully editable in the direction', () {
     final controller = _controller(references: [_saved('portrait.png')]);
     addTearDown(controller.dispose);

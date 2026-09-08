@@ -76,6 +76,17 @@ or an intentionally empty block. Edited text stays as written when automatic
 casting changes; **Reset to mappings** explicitly regenerates it from the Cast
 row and Characters modal. Lines written in the main prompt stay in that box.
 
+A mapping written in the main prompt, such as `ALEXANDRIA: @another clip`,
+takes precedence over generated casting for that character, including a cast
+inherited by **Extend**. Names and script-to-cast aliases are matched without
+case sensitivity. The saved mapping and attached media remain available, but
+no conflicting generated line is appended. Removing the authored mapping makes
+the saved mapping eligible again. The Cast row marks this state **In prompt**,
+and the character-reference editor remains available to show that no text is
+being added. An explicitly edited character-reference block is also authored
+text: it is never filtered or rewritten automatically. Resetting it regenerates
+only the mappings not already supplied in the main prompt.
+
 The edited block persists with active, inactive, and closed tabs and travels with
 per-device drafts through Drive. New generations retain the authored direction
 and character-reference edit separately so reuse restores both. Composer schema
@@ -151,10 +162,11 @@ renderer calls, or inline media.
 
 Stored-data schema 25 adds optional reference character names and generation
 screenplay mode; older records retain their media and default to unassigned,
-prose-mode records. Composer schema 6 stores the cast as its own record field
-instead of casting lines inside the prompt; a workspace written by an older
-build has its lines absorbed on restore, and older builds refuse a schema-6
-workspace rather than silently dropping casts.
+prose-mode records. Composer schema 6 introduced a separate cast record field.
+Schema 7 preserves authored mapping lines in older workspaces instead of
+absorbing them on restore, and adds the independently editable
+character-reference block. Older builds refuse an unsupported workspace schema
+rather than silently dropping fields.
 Composer schema 4 also carries tabs and aesthetic selections through Drive,
 retaining compact attachment layouts; since per-device drafts, each device
 publishes its own strip and other devices open copies from the

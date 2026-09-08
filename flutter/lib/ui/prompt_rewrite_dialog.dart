@@ -120,10 +120,14 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
         : film.config.authoredPrompt == null
         ? film.prompt
         : appendAestheticText(film.config.authoredPrompt!, film.aestheticText);
-    _characterReferenceText = _film == null
+    _characterReferenceText = film == null
         ? controller.characterReferenceText
-        : _film!.config.characterReferenceTextOverride ??
-              screenplayCastLines(_film!.config.characterMappings).join('\n');
+        : film.config.characterReferenceTextOverride ??
+              screenplayCastLines(
+                film.config.characterMappings,
+                authoredPrompt: film.config.authoredPrompt ?? film.prompt,
+                characterAliases: film.config.screenplayCharacterAliases,
+              ).join('\n');
     _provider =
         controller.preferredRewriteProvider ??
         _connected.firstOrNull ??

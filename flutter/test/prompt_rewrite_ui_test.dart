@@ -448,6 +448,43 @@ void main() {
     },
   );
 
+  testWidgets('film rewrite omits generated casting overridden by its script', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway();
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    const direction = '$_prompt\n\nAlexandria: @New clip';
+    final film = Generation.fromJson({
+      ..._film().toJson(),
+      'prompt': '$direction\n\nOTHER: @Lantern',
+      'config': {
+        ..._film().config.toJson(),
+        'authoredPrompt': direction,
+        'screenplayCharacterAliases': {'ALEXANDRIA': 'HERO'},
+        'characterMappings': {
+          'HERO': ['Earlier clip'],
+          'OTHER': ['Lantern'],
+        },
+      },
+    });
+    await _openDialog(tester, controller, item: film);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-direction')),
+      'Slow the camera.',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+    await tester.pumpAndSettle();
+
+    final request = gateway.rewriteRequests.single;
+    expect(request.originalPrompt, direction);
+    expect(request.characterReferenceText, 'OTHER: @Lantern');
+    expect(film.config.characterMappings['HERO'], ['Earlier clip']);
+    await _expireNotice(tester);
+  });
+
   testWidgets('a rewrite lands its prompt in the composer with a notice', (
     tester,
   ) async {

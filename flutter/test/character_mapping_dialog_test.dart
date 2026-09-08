@@ -116,6 +116,62 @@ Future<void> _save(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('authored mapping status keeps the saved mapping editable', (
+    tester,
+  ) async {
+    const prompt = 'Continue the scene.\nALEXANDRIA: @different.png';
+    final controller = _controller(
+      prompt: prompt,
+      references: [_reference('portrait.png'), _reference('other.png')],
+    );
+    controller.form.characterMappings['ALEXANDRIA'] = ['portrait.png'];
+    await _openDialog(tester, controller);
+    expect(
+      find.textContaining('Set in prompt · Saved mapping not appended'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(ListTile, 'ALEXANDRIA'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mapping-set-in-prompt')), findsOneWidget);
+    expect(_selected(tester, 'portrait.png'), isTrue);
+    await _toggle(tester, 'portrait.png');
+    await _toggle(tester, 'other.png');
+    await _save(tester);
+    expect(controller.form.characterMappings['ALEXANDRIA'], ['other.png']);
+    expect(controller.form.prompt, prompt);
+    expect(controller.promptWithCast, prompt);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('custom character text is not described as suppressed', (
+    tester,
+  ) async {
+    const prompt = 'ALEXANDRIA: @different.png';
+    const custom = 'ALEXANDRIA: @custom.png';
+    final controller = _controller(
+      prompt: prompt,
+      references: [_reference('portrait.png')],
+    );
+    controller.form
+      ..characterMappings['ALEXANDRIA'] = ['portrait.png']
+      ..characterReferenceTextOverride = custom;
+    await _openDialog(tester, controller);
+    expect(find.textContaining('Set in prompt ·'), findsNothing);
+    await tester.tap(find.widgetWithText(ListTile, 'ALEXANDRIA'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mapping-set-in-prompt')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('mapping-custom-text-status')),
+      findsOneWidget,
+    );
+    await _toggle(tester, 'portrait.png');
+    await _save(tester);
+    expect(controller.form.prompt, prompt);
+    expect(controller.characterReferenceText, custom);
+    expect(controller.promptWithCast, '$prompt\n\n$custom');
+    expect(tester.takeException(), isNull);
+  });
+
   for (final scenario in [
     (label: 'blank screenplay', prompt: '', screenplay: true),
     (

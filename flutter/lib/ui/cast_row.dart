@@ -138,15 +138,21 @@ class CastRow extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              for (final name in names)
-                _CastChip(controller: controller, name: name),
-              _AddCastAction(controller: controller),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                for (final name in names)
+                  _CastChip(
+                    controller: controller,
+                    name: name,
+                    maxWidth: constraints.maxWidth,
+                  ),
+                _AddCastAction(controller: controller),
+              ],
+            ),
           ),
         ),
       ],
@@ -155,10 +161,15 @@ class CastRow extends StatelessWidget {
 }
 
 class _CastChip extends StatelessWidget {
-  const _CastChip({required this.controller, required this.name});
+  const _CastChip({
+    required this.controller,
+    required this.name,
+    required this.maxWidth,
+  });
 
   final AppController controller;
   final String name;
+  final double maxWidth;
 
   Future<void> _edit(BuildContext context) => showCharacterMappingEditor(
     context,
@@ -185,12 +196,19 @@ class _CastChip extends StatelessWidget {
     final references = controller.form.characterMappings[name] ?? const [];
     final shown = references.take(CastRow._visibleThumbs).toList();
     final extra = references.length - shown.length;
+    final setInPrompt =
+        !controller.hasCharacterReferenceTextOverride &&
+        controller.characterHasAuthoredMapping(name);
+    final promptStatus =
+        'The main prompt supplies $name\'s references. '
+        'This saved mapping is not appended.';
     return Semantics(
       explicitChildNodes: true,
       child: Semantics(
         container: true,
         button: true,
         label: 'Edit $name casting',
+        value: setInPrompt ? promptStatus : null,
         onTap: () => unawaited(_edit(context)),
         child: HardwareTouchTarget(
           onTap: () => unawaited(_edit(context)),
@@ -201,6 +219,7 @@ class _CastChip extends StatelessWidget {
             child: Semantics(
               explicitChildNodes: true,
               child: Container(
+                constraints: BoxConstraints(maxWidth: maxWidth),
                 padding: const EdgeInsets.fromLTRB(4, 4, 3, 4),
                 decoration: BoxDecoration(
                   color: context.colors.surfaceContainerLow,
@@ -256,13 +275,36 @@ class _CastChip extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    ExcludeSemantics(
-                      child: Text(
-                        name,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: context.colors.onSurface,
+                    Flexible(
+                      child: ExcludeSemantics(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: context.colors.onSurface,
+                              ),
+                            ),
+                            if (setInPrompt)
+                              Tooltip(
+                                message: promptStatus,
+                                child: Text(
+                                  'In prompt',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: context.colors.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
