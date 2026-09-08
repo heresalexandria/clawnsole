@@ -5,10 +5,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
+import '../core/aesthetic_reference.dart';
 import '../core/models.dart';
 import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
 import '../core/reference_prompts.dart';
+import '../core/screenplay.dart';
 import 'filter_menu.dart';
 import 'prompt_rewrite_frames.dart';
 
@@ -86,6 +88,7 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
   /// lands there even if the director has moved on to another tab.
   late final String _draftTabId;
   late final String _originalPrompt;
+  late final String _characterReferenceText;
 
   /// Key entry, shown until a rewrite provider has a key on this device.
   RewriteProvider _keyProvider = RewriteProvider.openai;
@@ -109,9 +112,18 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
     super.initState();
     final controller = widget.controller;
     _draftTabId = controller.activeComposerTabId;
-    // The cast goes over the wire with the direction, so the model keeps the
-    // casting context a film's stored prompt would have carried anyway.
-    _originalPrompt = _film?.prompt ?? controller.promptWithCast;
+    // Preserve the separately edited reference block as context. The reply
+    // replaces only the main direction, so it must not echo that block.
+    final film = _film;
+    _originalPrompt = film == null
+        ? controller.form.prompt
+        : film.config.authoredPrompt == null
+        ? film.prompt
+        : appendAestheticText(film.config.authoredPrompt!, film.aestheticText);
+    _characterReferenceText = _film == null
+        ? controller.characterReferenceText
+        : _film!.config.characterReferenceTextOverride ??
+              screenplayCastLines(_film!.config.characterMappings).join('\n');
     _provider =
         controller.preferredRewriteProvider ??
         _connected.firstOrNull ??
@@ -278,7 +290,8 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
         providerId: base.providerId,
         modelId: base.modelId,
         effort: base.effort,
-        originalPrompt: film.prompt,
+        originalPrompt: _originalPrompt,
+        characterReferenceText: _characterReferenceText,
         screenplayMode: film.config.screenplayMode,
         direction: base.direction,
         frames: _frames,
@@ -299,6 +312,7 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
       modelId: base.modelId,
       effort: base.effort,
       originalPrompt: _originalPrompt,
+      characterReferenceText: _characterReferenceText,
       screenplayMode: form.screenplayMode,
       direction: base.direction,
       targetProviderName: controller.selectedProvider.name,
@@ -346,7 +360,11 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
       // result and its notice still land, there is just nothing left to pop.
       if (mounted) navigator.pop();
       if (film == null) {
-        controller.applyRewrittenDirection(result, tabId: _draftTabId);
+        controller.applyRewrittenDirection(
+          result,
+          tabId: _draftTabId,
+          expectedPrompt: _originalPrompt,
+        );
         return;
       }
       final summary = result.summary.trim();

@@ -208,9 +208,7 @@ List<String> screenplayCompletions(
       .toList();
 }
 
-/// Reads casting lines out of text. The composer no longer keeps them in the
-/// editable prompt — this parses legacy workspaces, reused films, and pasted
-/// or rewritten text so [stripScreenplayMappings] can lift them into the cast.
+/// Reads casting lines in authored text without removing or rewriting them.
 Map<String, List<String>> screenplayMappings(String prompt) {
   final result = <String, List<String>>{};
   for (final line in prompt.split('\n').where(isScreenplayMapping)) {

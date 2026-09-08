@@ -91,9 +91,9 @@ class CharacterReferenceThumb extends StatelessWidget {
 }
 
 /// The casting strip above the guidance/settings pair: who is in this
-/// direction, what they look like, and one tap to recast them. It is the only
-/// place the casting block is visible while writing — the prompt itself never
-/// holds it.
+/// direction, what they look like, and one tap to recast them. The neighboring
+/// character reference text editor shows the words these mappings add to the
+/// submitted prompt.
 ///
 /// Hidden entirely until at least one character holds a reference, so a fresh
 /// composer keeps the heading through Generate above the fold.

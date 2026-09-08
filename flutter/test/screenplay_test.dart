@@ -331,9 +331,9 @@ void main() {
         (form) => form.prompt = 'ALEXANDRIA enters.\n\nALEXANDRIA: @custom',
       );
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA sits.');
-      expect(controller.form.prompt, isNot(contains('@')));
+      expect(controller.form.prompt, contains('ALEXANDRIA: @custom'));
       expect(controller.form.characterMappings, {
-        'ALEXANDRIA': ['custom'],
+        'ALEXANDRIA': ['alx.mp4'],
       });
       controller.removeReference(controller.form.references.single.id);
       controller.updateForm((form) => form.prompt += '\nALEXANDRIA leaves.');

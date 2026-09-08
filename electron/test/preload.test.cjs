@@ -7,7 +7,7 @@ const test = require("node:test");
 
 // The preload runs inside Electron, so the real module is swapped for a
 // recorder that captures the renderer contract it publishes.
-function loadPreload({ invokeResult } = {}) {
+function loadPreload({ invokeResult, now = Date.now } = {}) {
   const exposed = {};
   const invoked = [];
   const listeners = new Map();
@@ -25,7 +25,9 @@ function loadPreload({ invokeResult } = {}) {
     contextBridge: {
       exposeInMainWorld: (key, value) => {
         exposed[key] = value;
+        rendererWindow[key] = value;
       },
+      executeInMainWorld: ({ func }) => func(),
     },
     ipcRenderer: {
       send: (channel, payload) => sent.push({ channel, payload }),
@@ -44,6 +46,8 @@ function loadPreload({ invokeResult } = {}) {
 
   const load = Module._load;
   const previousWindow = global.window;
+  const previousNow = Date.now;
+  Date.now = now;
   global.window = rendererWindow;
   Module._load = function (request, ...rest) {
     if (request === "electron") return electron;
@@ -55,6 +59,7 @@ function loadPreload({ invokeResult } = {}) {
     require(preloadPath);
   } finally {
     Module._load = load;
+    Date.now = previousNow;
     if (previousWindow === undefined) delete global.window;
     else global.window = previousWindow;
   }
@@ -79,6 +84,45 @@ function textElement(overrides = {}) {
   };
 }
 
+test("diagnostics bridge bounds stack payloads and excludes arbitrary content before IPC", () => {
+  const { exposed, sent } = loadPreload();
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-error", errorType: "StateError", stack: "x".repeat(40000), message: "secret", url: "secret" });
+  exposed.clawnsole.reportDiagnostic({ event: "private-event", stack: "secret" });
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-health", frameCount: 10, cacheBytes: Infinity, privateMetric: 42, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000 });
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].channel, "clawnsole:diagnostic");
+  assert.deepEqual(Object.keys(sent[0].payload).sort(), ["errorType", "event", "stack"]);
+  assert.equal(sent[0].payload.stack.length, 32768);
+  assert.deepEqual(sent[1].payload, { event: "flutter-health", frameCount: 10, canvasKitHeapBytes: 2147483648, flutterErrorsSuppressed: 253000 });
+});
+
+test("browser errors and graphics context events forward diagnostics without suppressing normal handling", () => {
+  const { rendererListeners, sent } = loadPreload();
+  const event = { error: { name: "TypeError", stack: " at run (main.js:1:2)", message: "secret" },
+    reason: "secret rejection", preventDefault() { assert.fail("must preserve browser behavior"); } };
+  rendererListeners.get("error")(event);
+  rendererListeners.get("unhandledrejection")(event);
+  rendererListeners.get("webglcontextlost")(event);
+  rendererListeners.get("webglcontextrestored")(event);
+  assert.deepEqual(sent.map((call) => call.payload), [
+    { event: "web-error", errorType: "TypeError", stack: " at run (main.js:1:2)" },
+    { event: "web-unhandled-rejection" }, { event: "webgl-context-lost" }, { event: "webgl-context-restored" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(sent), /secret/);
+});
+
+test("an error storm is bounded before IPC and the next health event carries its suppressed total", () => {
+  let clock = 0;
+  const { exposed, sent, rendererListeners } = loadPreload({ now: () => clock });
+  for (let i = 0; i < 10_000; i += 1) exposed.clawnsole.reportDiagnostic({ event: "flutter-error", stack: "x".repeat(100) });
+  assert.equal(sent.length, 31);
+  clock = 60_000;
+  exposed.clawnsole.reportDiagnostic({ event: "flutter-health", frameCount: 50 });
+  assert.deepEqual(sent.at(-2).payload, { event: "flutter-error", suppressed: 9969 });
+  assert.deepEqual(sent.at(-1).payload, { event: "flutter-health", frameCount: 50 });
+  assert.doesNotThrow(() => rendererListeners.get("error")({ get error() { throw new Error("hostile getter"); } }));
+});
+
 test("the preload publishes the renderer update bridge", async () => {
   const { exposed, invoked } = loadPreload();
   const bridge = exposed.clawnsole;
@@ -96,6 +140,7 @@ test("the preload publishes the renderer update bridge", async () => {
   assert.equal(typeof bridge.chooseDataDirectory, "function");
   assert.equal(typeof bridge.notify, "function");
   assert.equal(typeof bridge.onNavigate, "function");
+  assert.equal(typeof bridge.reportDiagnostic, "function");
 
   await bridge.checkForUpdate();
   await bridge.checkForUpdate(true);

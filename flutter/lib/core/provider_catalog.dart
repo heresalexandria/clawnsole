@@ -1143,6 +1143,9 @@ const _kreaProvider = VideoProviderDefinition(
       maxImageReferences: 30,
       maxVideoReferences: 10,
       maxAudioReferences: 10,
+      // Compatibility fallback when Krea omits the model's aggregate input
+      // duration; explicit remote catalog limits take precedence.
+      maxReferenceVideoSeconds: 30,
       supportsSeed: true,
     ),
     VideoModelDefinition(

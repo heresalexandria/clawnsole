@@ -59,18 +59,15 @@ Future<void> _pumpCreate(WidgetTester tester, AppController controller) async {
 Finder _tile(String name) => find.widgetWithText(CheckboxListTile, '@$name');
 
 void main() {
-  test('a pasted casting line lands in the cast, not the direction', () {
+  test('authored casting lines remain fully editable in the direction', () {
     final controller = _controller(references: [_saved('portrait.png')]);
     addTearDown(controller.dispose);
 
     controller.updateForm(
       (form) => form.prompt = 'A stranger waits.\n\nHERO: @portrait.png',
     );
-
-    expect(controller.form.prompt, 'A stranger waits.');
-    expect(controller.form.characterMappings, {
-      'HERO': ['portrait.png'],
-    });
+    expect(controller.form.prompt, 'A stranger waits.\n\nHERO: @portrait.png');
+    expect(controller.form.characterMappings, isEmpty);
     expect(
       controller.promptWithCast,
       'A stranger waits.\n\nHERO: @portrait.png',

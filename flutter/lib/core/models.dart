@@ -304,6 +304,9 @@ class GenerationConfig {
     this.exactTiming = false,
     this.screenplayMode = false,
     this.screenplayCharacterAliases = const {},
+    this.authoredPrompt,
+    this.characterMappings = const {},
+    this.characterReferenceTextOverride,
     this.keyframes,
     this.references,
     this.referenceTask = MediaReferenceTask.reference,
@@ -326,6 +329,14 @@ class GenerationConfig {
   final bool exactTiming;
   final bool screenplayMode;
   final Map<String, String> screenplayCharacterAliases;
+
+  /// The exact direction before separately editable reference/aesthetic text
+  /// is appended. Null identifies legacy records that stored only the result.
+  final String? authoredPrompt;
+  final Map<String, List<String>> characterMappings;
+
+  /// Null derives from mappings; empty text explicitly disables the block.
+  final String? characterReferenceTextOverride;
   final List<KeyframeLabel>? keyframes;
   final List<MediaReferenceLabel>? references;
   final MediaReferenceTask referenceTask;
@@ -360,6 +371,9 @@ class GenerationConfig {
     exactTiming: exactTiming,
     screenplayMode: screenplayMode,
     screenplayCharacterAliases: screenplayCharacterAliases,
+    authoredPrompt: authoredPrompt,
+    characterMappings: characterMappings,
+    characterReferenceTextOverride: characterReferenceTextOverride,
     keyframes: keyframes ?? this.keyframes,
     references: references ?? this.references,
     referenceTask: referenceTask ?? this.referenceTask,
@@ -384,6 +398,10 @@ class GenerationConfig {
     if (screenplayMode) 'screenplayMode': true,
     if (screenplayCharacterAliases.isNotEmpty)
       'screenplayCharacterAliases': screenplayCharacterAliases,
+    if (authoredPrompt != null) 'authoredPrompt': authoredPrompt,
+    if (characterMappings.isNotEmpty) 'characterMappings': characterMappings,
+    if (characterReferenceTextOverride != null)
+      'characterReferenceTextOverride': characterReferenceTextOverride,
     if (keyframes != null)
       'keyframes': keyframes!.map((frame) => frame.toJson()).toList(),
     if (references != null)
@@ -447,6 +465,22 @@ class GenerationConfig {
       frameRate: (json['frameRate'] as num?)?.toInt() ?? 24,
       exactTiming: json['exactTiming'] == true,
       screenplayMode: json['screenplayMode'] == true,
+      authoredPrompt: json['authoredPrompt'] is String
+          ? json['authoredPrompt']! as String
+          : null,
+      characterReferenceTextOverride:
+          json['characterReferenceTextOverride'] is String
+          ? json['characterReferenceTextOverride']! as String
+          : null,
+      characterMappings: json['characterMappings'] is Map
+          ? {
+              for (final entry in (json['characterMappings']! as Map).entries)
+                if (entry.key is String && entry.value is List)
+                  entry.key as String: (entry.value as List)
+                      .whereType<String>()
+                      .toList(),
+            }
+          : const {},
       screenplayCharacterAliases: json['screenplayCharacterAliases'] is Map
           ? {
               for (final entry

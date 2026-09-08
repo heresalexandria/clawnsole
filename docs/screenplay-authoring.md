@@ -3,7 +3,8 @@
 A compact single-row header contains the Plaintext / Screenplay selector, an
 icon-only Clear control, the used/max character count, and an icon-only Expand
 control. A 3-pixel bar below the count fills green, then orange at 80% and red
-at 95%, with a gray unused track. The count includes added aesthetic direction.
+at 95%, with a gray unused track. The count includes character-reference text
+and added aesthetic direction.
 Its tooltip and accessibility label give the remaining or exceeded allowance;
 when a provider publishes no maximum, the editor's 50,000-character cap is shown
 and explicitly identified as an editor limit.
@@ -39,13 +40,16 @@ indentation in plain text. This is
 an authoring editor, without print pagination or production scheduling tools.
 Turning Screenplay off preserves the text. Copy includes the direction and the
 casting block appended to it, exactly as a generation receives them. AI rewrite
-is sent the same combined text and is asked to preserve screenplay structure and
-casting, with the usual review and undo flow; casting lines echoed back in a
-rewrite are absorbed into the cast rather than left in the editor.
+receives the main direction and separate character-reference context. It returns
+revised direction while the editable character-reference block stays intact,
+with the usual review and undo flow. Older films retain their stored combined
+prompt when no separate authored direction was recorded.
 
 In either format, type **@** to list attached references beside the cursor.
 Type part of a reference name to filter, use Up/Down to highlight a reference,
-and press Enter to insert its highlighted tag. This also works in the expanded
+and press Enter to insert its highlighted tag. Selecting a reference preserves
+the rest of the line and script; typing, settling, changing settings, and opening
+Characters never extract or remove authored mapping lines. This also works in the expanded
 editor and stays available independently of automatic character detection.
 Moving the cursor through existing tags does not open autocomplete. Plaintext
 uses ordinary text-field cursor movement and wrapping, including Shift selection
@@ -64,14 +68,20 @@ attaches automatically and the character joins the draft's cast:
 ALEXANDRIA: @alx.mp4
 ```
 
-That line is never part of the editable prompt. The cast is separate draft
-state, shown in the composer's Cast row and the Characters modal, and appended
-silently at submission after the direction and before any aesthetic text — the
-same way an aesthetic is appended. It counts toward the prompt character budget
-and appears in the stored prompt of the film it produced. A casting line pasted
-or typed into the prompt box, restored from a workspace written before composer
-schema 6, or reused from an older film, is absorbed into the cast and removed
-from the editable text along with the blank line it sat behind.
+The generated block appears in the collapsible **Character reference text** field,
+separate from the main prompt. It is appended after the direction and before
+any aesthetic text and counts toward the prompt character budget. Expand the
+field to inspect and freely edit the exact text, including custom instructions
+or an intentionally empty block. Edited text stays as written when automatic
+casting changes; **Reset to mappings** explicitly regenerates it from the Cast
+row and Characters modal. Lines written in the main prompt stay in that box.
+
+The edited block persists with active, inactive, and closed tabs and travels with
+per-device drafts through Drive. New generations retain the authored direction
+and character-reference edit separately so reuse restores both. Composer schema
+7 reads older workspaces without removing their prompt text; all devices should
+update before editing the new workspace format. Older clients reject schema 7
+instead of saving a copy that silently discards these edits.
 
 Removing the reference also removes it from every cast entry and suppresses
 automatic reattachment in that draft. To cast it again, attach the reference and
@@ -100,7 +110,7 @@ parser as the editor and also lists known reference names mentioned in action.
 Unmatched uppercase words do not become cast members. Opening Characters
 reconciles matching references in an existing screenplay, so restored scripts
 do not require another keystroke to show their casting. Explicitly added
-characters and absorbed casting lines remain listed in either format. Each row
+characters remain listed in either format. Each row
 shows the character's mapped media as stacked thumbnails beside its name.
 Use **Add character** at any time, including before writing a prompt, for
 non-speaking roles or manual Plaintext casting. Entering a matching name

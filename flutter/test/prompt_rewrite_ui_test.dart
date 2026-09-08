@@ -149,6 +149,9 @@ void main() {
     final controller = _controller(gateway);
     addTearDown(controller.dispose);
     controller.updateForm((form) => form.prompt = _prompt);
+    controller.updateCharacterReferenceText(
+      'Use @Lantern for appearance only.',
+    );
 
     await _openDraftDialog(tester, controller);
     expect(find.byKey(const ValueKey('rewrite-frame-caption')), findsNothing);
@@ -163,6 +166,7 @@ void main() {
 
     final request = gateway.rewriteRequests.single;
     expect(request.originalPrompt, _prompt);
+    expect(request.characterReferenceText, 'Use @Lantern for appearance only.');
     expect(request.frames, isEmpty);
     expect(request.targetProviderName, controller.selectedProvider.name);
     expect(request.targetModelName, controller.selectedModel.label);
@@ -170,6 +174,10 @@ void main() {
     expect(request.aspectRatio, controller.form.aspectRatio);
 
     expect(controller.form.prompt, 'A slower dolly past a warm lantern.');
+    expect(
+      controller.characterReferenceText,
+      'Use @Lantern for appearance only.',
+    );
     expect(controller.notice, 'Direction rewritten: Warmed the lantern.');
     expect(controller.noticeAction, AppNoticeAction.undoDirectionRewrite);
     expect(controller.noticeActionLabel, 'Undo');
@@ -210,6 +218,58 @@ void main() {
     );
     await _expireNotice(tester);
   });
+
+  testWidgets(
+    'typing after dismissing an in-flight rewrite preserves both drafts',
+    (tester) async {
+      await _sized(tester, const Size(1400, 1600));
+      final response = Completer<PromptRewriteResult>();
+      final gateway = _gateway()..deferredRewrite = response;
+      final controller = _controller(gateway);
+      addTearDown(controller.dispose);
+      controller.updateForm((form) => form.prompt = _prompt);
+      controller.updateCharacterReferenceText(
+        'Keep the character instructions.',
+      );
+      final originalTab = controller.activeComposerTab;
+      await _openDraftDialog(tester, controller);
+      await tester.enterText(
+        find.byKey(const ValueKey('rewrite-direction')),
+        'Slow the camera.',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+      await tester.pump();
+      Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(AlertDialog), findsNothing);
+      controller.updatePrompt('The director keeps writing a new scene.');
+      response.complete(
+        const PromptRewriteResult(
+          prompt: 'A slower dolly past the harbor.',
+          summary: 'Slowed the camera.',
+          providerId: 'openai',
+          modelId: 'test',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.activeComposerTabId, originalTab.id);
+      expect(
+        originalTab.form.prompt,
+        'The director keeps writing a new scene.',
+      );
+      expect(controller.composerTabs, hasLength(2));
+      final recovered = controller.composerTabs.last;
+      expect(recovered.form.prompt, 'A slower dolly past the harbor.');
+      expect(
+        recovered.form.characterReferenceTextOverride,
+        'Keep the character instructions.',
+      );
+      expect(controller.notice, contains('saved in a new tab'));
+      await _expireNotice(tester);
+    },
+  );
 
   testWidgets('the Direction header carries the rewrite wand', (tester) async {
     await _sized(tester, const Size(1400, 2000));
@@ -345,6 +405,46 @@ void main() {
       );
       await tester.pump();
       expect(_submitButton(tester).onPressed, isNotNull);
+    },
+  );
+
+  testWidgets(
+    'film rewrite preserves separate character instructions and aesthetic context',
+    (tester) async {
+      await _sized(tester, const Size(1400, 1600));
+      final gateway = _gateway();
+      final controller = _controller(gateway);
+      addTearDown(controller.dispose);
+      const casting = 'Use @Lantern for appearance only.\nKeep the scar.';
+      const aesthetic = 'Warm amber light.';
+      final film = Generation.fromJson({
+        ..._film().toJson(),
+        'prompt': '$_prompt\n\n$casting\n\n$aesthetic',
+        'aestheticText': aesthetic,
+        'config': {
+          ..._film().config.toJson(),
+          'authoredPrompt': _prompt,
+          'characterReferenceTextOverride': casting,
+          'characterMappings': {
+            'HERO': ['Lantern'],
+          },
+        },
+      });
+      await _openDialog(tester, controller, item: film);
+      await tester.enterText(
+        find.byKey(const ValueKey('rewrite-direction')),
+        'Slow the camera.',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+      await tester.pumpAndSettle();
+      final request = gateway.rewriteRequests.single;
+      expect(request.originalPrompt, '$_prompt\n\n$aesthetic');
+      expect(request.characterReferenceText, casting);
+      expect(controller.form.prompt, 'A slower dolly past a warm lantern.');
+      expect(controller.characterReferenceText, casting);
+      expect(controller.generatedCharacterReferenceText, 'HERO: @Lantern');
+      await _expireNotice(tester);
     },
   );
 
@@ -683,6 +783,7 @@ Future<void> _openDialog(
   AppController controller, {
   Brightness brightness = Brightness.light,
   List<RewriteFrame> frames = const <RewriteFrame>[],
+  Generation? item,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -694,7 +795,7 @@ Future<void> _openDialog(
               showPromptRewriteDialog(
                 context,
                 controller: controller,
-                item: _film(),
+                item: item ?? _film(),
                 frameSampler: (_, _) async => frames,
               ),
             ),
@@ -824,6 +925,7 @@ class _RewriteGateway
   final Map<String, String> savedKeys = <String, String>{};
   final List<String> clearedKeys = <String>[];
   PromptRewriteException? rewriteError;
+  Completer<PromptRewriteResult>? deferredRewrite;
   PromptRewriteException? listError;
 
   @override
@@ -843,6 +945,7 @@ class _RewriteGateway
   ) async {
     rewriteRequests.add(request);
     if (rewriteError != null) throw rewriteError!;
+    if (deferredRewrite != null) return deferredRewrite!.future;
     return PromptRewriteResult(
       prompt: 'A slower dolly past a warm lantern.',
       summary: 'Warmed the lantern.',

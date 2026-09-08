@@ -191,6 +191,9 @@ jobs:
       - name: Exercise renderer crash recovery in an isolated profile
         working-directory: electron
         run: ./node_modules/.bin/electron scripts/smoke-recovery.cjs
+      - name: Exercise renderer diagnostics in an isolated profile
+        working-directory: electron
+        run: ./node_modules/.bin/electron scripts/smoke-diagnostics.cjs
       - name: Verify smoke failures exit unsuccessfully
         working-directory: electron
         shell: bash

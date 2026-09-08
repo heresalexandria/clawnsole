@@ -87,7 +87,7 @@ class ProviderCatalogBundle {
         if (!_availableForVersion(modelManifest['availability'], appVersion)) {
           continue;
         }
-        final model = _parseModel(modelManifest);
+        final model = _parseModel(modelManifest, providerId: id);
         if (!modelIds.add(model.id)) {
           throw ProviderCatalogManifestException(
             'Provider "$id" contains model "${model.id}" more than once.',
@@ -403,7 +403,22 @@ VideoProviderDefinition _parseProvider(
   );
 }
 
-VideoModelDefinition _parseModel(Map<String, Object?> manifest) {
+VideoModelDefinition _parseModel(
+  Map<String, Object?> manifest, {
+  required String providerId,
+}) {
+  final id = _requiredString(manifest, 'id');
+  // An incomplete remote or cached catalog must not erase an audited input
+  // budget. Match the exact provider and route, never a label or family name.
+  // Incoming limits remain authoritative, including resolution overrides.
+  final bundled = bundledVideoProviders
+      .where((provider) => provider.id == providerId)
+      .firstOrNull
+      ?.models
+      .where((model) => model.id == id)
+      .firstOrNull;
+  final maxVideoReferences = _integer(manifest['max_video_references']) ?? 0;
+  final maxAudioReferences = _integer(manifest['max_audio_references']) ?? 0;
   final modes = _list(
     manifest['modes'],
   ).map(_videoMode).toList(growable: false);
@@ -423,7 +438,7 @@ VideoModelDefinition _parseModel(Map<String, Object?> manifest) {
     );
   }
   return VideoModelDefinition(
-    id: _requiredString(manifest, 'id'),
+    id: id,
     canonicalModelId: _optionalString(manifest, 'canonical_model_id'),
     label: _requiredString(manifest, 'label'),
     description: _requiredString(manifest, 'description'),
@@ -445,23 +460,37 @@ VideoModelDefinition _parseModel(Map<String, Object?> manifest) {
     maxInputImagePixels: _positiveInteger(manifest, 'max_input_image_pixels'),
     maxInputImageBytes: _positiveInteger(manifest, 'max_input_image_bytes'),
     maxImageReferences: _integer(manifest['max_image_references']) ?? 0,
-    maxVideoReferences: _integer(manifest['max_video_references']) ?? 0,
-    maxAudioReferences: _integer(manifest['max_audio_references']) ?? 0,
+    maxVideoReferences: maxVideoReferences,
+    maxAudioReferences: maxAudioReferences,
     maxTotalReferences: _integer(manifest['max_total_references']),
     maxReferencesByMode: _referenceLimits(manifest['max_references_by_mode']),
     framesExclusiveWithReferences: _boolean(
       manifest,
       'frames_exclusive_with_references',
     ),
-    maxReferenceVideoSeconds: _integer(manifest['max_reference_video_seconds']),
-    maxReferenceAudioSeconds: _integer(manifest['max_reference_audio_seconds']),
+    maxReferenceVideoSeconds:
+        _integer(manifest['max_reference_video_seconds']) ??
+        (maxVideoReferences > 0 ? bundled?.maxReferenceVideoSeconds : null),
+    maxReferenceAudioSeconds:
+        _integer(manifest['max_reference_audio_seconds']) ??
+        (maxAudioReferences > 0 ? bundled?.maxReferenceAudioSeconds : null),
     minReferenceAudioSeconds: _integer(manifest['min_reference_audio_seconds']),
-    maxReferenceVideoSecondsByResolution: _stringIntegerMap(
-      manifest['max_reference_video_seconds_by_resolution'],
-    ),
-    maxReferenceAudioSecondsByResolution: _stringIntegerMap(
-      manifest['max_reference_audio_seconds_by_resolution'],
-    ),
+    maxReferenceVideoSecondsByResolution:
+        manifest.containsKey('max_reference_video_seconds_by_resolution')
+        ? _stringIntegerMap(
+            manifest['max_reference_video_seconds_by_resolution'],
+          )
+        : maxVideoReferences > 0
+        ? bundled?.maxReferenceVideoSecondsByResolution ?? const {}
+        : const {},
+    maxReferenceAudioSecondsByResolution:
+        manifest.containsKey('max_reference_audio_seconds_by_resolution')
+        ? _stringIntegerMap(
+            manifest['max_reference_audio_seconds_by_resolution'],
+          )
+        : maxAudioReferences > 0
+        ? bundled?.maxReferenceAudioSecondsByResolution ?? const {}
+        : const {},
     requiresVisualReferenceForAudio: _boolean(
       manifest,
       'requires_visual_reference_for_audio',

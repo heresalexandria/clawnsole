@@ -11,13 +11,11 @@ const HELP_LINKS = Object.freeze([
   },
 ]);
 
-// Reload and DevTools stay out of packaged builds: the renderer is a local
-// Flutter bundle, so a reload only ever re-fetches the same files, and
-// DevTools would expose the companion session to anyone at the keyboard.
+// Developer tools remain separate from the native recovery action, which must
+// also be reachable when a packaged Flutter renderer is blank.
 function developmentViewItems(isPackaged) {
   if (isPackaged) return [];
   return [
-    { role: "reload" },
     { role: "forceReload" },
     { role: "toggleDevTools" },
     { type: "separator" },
@@ -30,6 +28,8 @@ function buildApplicationMenuTemplate({
   checkForUpdates,
   openSettings,
   openExternalUrl,
+  reloadStudio,
+  showLogs,
 }) {
   return [
     {
@@ -58,6 +58,8 @@ function buildApplicationMenuTemplate({
       label: "View",
       submenu: [
         ...developmentViewItems(isPackaged),
+        { label: "Reload Studio", accelerator: "CmdOrCtrl+R", click: () => reloadStudio() },
+        { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
         { role: "zoomOut" },
@@ -68,10 +70,14 @@ function buildApplicationMenuTemplate({
     { role: "windowMenu" },
     {
       role: "help",
-      submenu: HELP_LINKS.map(({ label, url }) => ({
-        label,
-        click: () => openExternalUrl(url),
-      })),
+      submenu: [
+        ...HELP_LINKS.map(({ label, url }) => ({
+          label,
+          click: () => openExternalUrl(url),
+        })),
+        { type: "separator" },
+        { label: "Show Logs", click: () => showLogs() },
+      ],
     },
   ];
 }

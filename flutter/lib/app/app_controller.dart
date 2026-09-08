@@ -332,6 +332,9 @@ class GenerationFormState {
   /// cast (mapping) names; values are prompt names of attached references.
   /// They are appended to the prompt at submission, like the aesthetic text.
   final Map<String, List<String>> characterMappings = {};
+
+  /// Null follows the mappings; an empty string deliberately appends nothing.
+  String? characterReferenceTextOverride;
   String aspectRatio = '16:9';
   bool autoDuration = false;
   int durationSeconds = 8;
@@ -479,6 +482,7 @@ class ComposerTab {
       form.screenplayMode == openedScreenplayMode &&
       form.aestheticReferenceId == openedAestheticReferenceId &&
       form.aestheticCustomText == null &&
+      form.characterReferenceTextOverride == null &&
       form.characterMappings.isEmpty &&
       form.keyframes.isEmpty &&
       form.references.isEmpty &&
@@ -649,13 +653,7 @@ class AppController extends ChangeNotifier {
 
   /// The direction an AI Rewrite replaced in place, kept one notice tap
   /// away until the director moves on.
-  ({
-    String tabId,
-    String previous,
-    String rewritten,
-    Map<String, List<String>> cast,
-  })?
-  _directionRewriteUndo;
+  ({String tabId, String previous, String rewritten})? _directionRewriteUndo;
   bool loading = true;
   bool submitting = false;
   bool refreshingCredits = false;
@@ -938,9 +936,8 @@ class AppController extends ChangeNotifier {
   /// file write behind every keystroke.
   static const Duration composerTabsSaveDebounce = Duration(milliseconds: 750);
 
-  /// How long typing pauses before a keystroke's derived work runs: casting
-  /// lines lifted out of the text, screenplay reference casting, the cost
-  /// estimate, and the studio-wide rebuild that shows them.
+  /// How long typing pauses before screenplay reference casting, the cost
+  /// estimate, and the studio-wide rebuild settle.
   static const Duration promptSettleDelay = Duration(milliseconds: 300);
 
   bool get _persistsComposerTabs =>
@@ -978,8 +975,8 @@ class AppController extends ChangeNotifier {
   ValueListenable<int> get promptEdits => _promptEditRevision;
 
   /// The keystroke path. Only the text changes here; everything derived from
-  /// it — casting lines lifted out of the prompt, screenplay reference
-  /// casting, the cost estimate, and the rest of the studio — settles once
+  /// it — screenplay reference casting, the cost estimate, and the rest of
+  /// the studio — settles once
   /// typing pauses for [promptSettleDelay] or at the next save point.
   /// Nothing on this path notifies the studio, so a keystroke never rebuilds
   /// it; the field owns its own text.
@@ -992,6 +989,10 @@ class AppController extends ChangeNotifier {
       tab.form.screenplayLinkedCharacters.clear();
       tab.form.screenplayCharacterAliases.clear();
     }
+    _queuePromptSettle(tab);
+  }
+
+  void _queuePromptSettle(ComposerTab tab) {
     if (_promptSettlePending != null && !identical(_promptSettlePending, tab)) {
       _settlePromptEdits();
     }
@@ -1012,7 +1013,6 @@ class AppController extends ChangeNotifier {
     _promptSettlePending = null;
     if (tab == null || _disposed) return;
     _inComposerTab(tab, () {
-      absorbPromptMappings();
       _syncScreenplayReferences();
       _invalidateProviderEstimate();
     });
@@ -1030,6 +1030,7 @@ class AppController extends ChangeNotifier {
     aestheticCustomText: tab.form.aestheticCustomText,
     screenplayLinkedCharacters: tab.form.screenplayLinkedCharacters.toList(),
     screenplayCharacterAliases: Map.of(tab.form.screenplayCharacterAliases),
+    characterReferenceTextOverride: tab.form.characterReferenceTextOverride,
     characterMappings: {
       for (final entry in tab.form.characterMappings.entries)
         if (entry.value.isNotEmpty) entry.key: List.of(entry.value),
@@ -1284,6 +1285,7 @@ class AppController extends ChangeNotifier {
       ..screenplayMode = record.screenplayMode
       ..aestheticReferenceId = record.aestheticReferenceId
       ..aestheticCustomText = record.aestheticCustomText
+      ..characterReferenceTextOverride = record.characterReferenceTextOverride
       ..aspectRatio = record.aspectRatio
       ..autoDuration = record.autoDuration
       ..durationSeconds = record.durationSeconds
@@ -1304,8 +1306,6 @@ class AppController extends ChangeNotifier {
       ..seed = record.seed
       ..videoUrl = record.videoUrl
       ..draftUrl = record.draftUrl;
-    // Workspaces written before schema 6 keep their cast inside the prompt.
-    _inComposerTab(tab, absorbPromptMappings);
     // The record has no separate "muted by hand" flag; a saved false is one.
     tab.generateAudioExplicitlyDisabled = !record.generateAudio;
     _selectCompatibleModel();
@@ -2366,6 +2366,12 @@ class AppController extends ChangeNotifier {
         form.mode == VideoMode.v2v &&
         selectedModel.sourceGuidanceRequiresTimestamps;
     return GenerationConfig(
+      authoredPrompt: form.prompt,
+      characterReferenceTextOverride: form.characterReferenceTextOverride,
+      characterMappings: {
+        for (final entry in form.characterMappings.entries)
+          entry.key: List.of(entry.value),
+      },
       screenplayMode: form.screenplayMode,
       screenplayCharacterAliases: Map.of(form.screenplayCharacterAliases),
       aspectRatio: upscaling ? 'auto' : form.aspectRatio,
@@ -4825,40 +4831,22 @@ class AppController extends ChangeNotifier {
     final tab = _draftTab;
     // Saved and generated candidates carry their measured duration, so the
     // seconds budget is decided here — before any media is read or hydrated.
-    // Candidates are walked in order: the ones that fit are taken, and the
-    // ones left out are reported together in one notice.
-    final selected = <ReferenceCandidate>[];
+    // Validate and append in order so only actual additions spend capacity.
+    // A duplicate or invalid name must not reserve seconds or a slot that
+    // could otherwise be used by the next candidate in the same selection.
     final refusals = <String>[];
-    var claimedCount = 0;
-    var claimedSeconds = .0;
-    for (final candidate in candidates.where((item) => item.kind == kind)) {
-      final verdict = checkReferenceBudget(
-        kind,
-        durationSeconds: candidate.durationSeconds,
-        pendingCount: claimedCount,
-        pendingSeconds: claimedSeconds,
-      );
-      if (!verdict.allowed) {
-        refusals.add(verdict.refusal!);
-        continue;
-      }
-      selected.add(candidate);
-      claimedCount += 1;
-      claimedSeconds += candidate.durationSeconds ?? 0;
-    }
-    _noteReferenceRefusals(refusals);
-    if (selected.isEmpty) return;
+    var added = false;
     // Drafts appear immediately; media bytes hydrate on the background work
     // queue so choosing saved references never blocks further adds — even
     // when the media has to come down from Google Drive first.
     final hydrating = <(String, ReferenceCandidate)>[];
     _inComposerTab(tab, () {
-      for (final candidate in selected) {
+      for (final candidate in candidates.where((item) => item.kind == kind)) {
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
             )) {
-          showNotice('“${candidate.name}” is already attached.');
+          refusals.add('“${candidate.name}” is already attached.');
           continue;
         }
         final promptName = candidate.generated
@@ -4871,7 +4859,15 @@ class AppController extends ChangeNotifier {
                 excludeSavedReferenceId: candidate.id,
               );
         if (nameProblem != null) {
-          showNotice(nameProblem);
+          refusals.add(nameProblem);
+          continue;
+        }
+        final verdict = checkReferenceBudget(
+          kind,
+          durationSeconds: candidate.durationSeconds,
+        );
+        if (!verdict.allowed) {
+          refusals.add(verdict.refusal!);
           continue;
         }
         final draftId = _uid();
@@ -4892,16 +4888,20 @@ class AppController extends ChangeNotifier {
             durationSeconds: candidate.durationSeconds,
           ),
         ];
+        added = true;
         if (candidate.asset.isLocal) {
           hydrating.add((draftId, candidate));
           _hydratingReferenceDraftIds.add(draftId);
         }
       }
+      if (!added) return;
       _selectCompatibleModel();
       _normalizeFormForModel();
       _invalidateProviderEstimate();
       _scheduleComposerTabsSave();
     });
+    _noteReferenceRefusals(refusals);
+    if (!added) return;
     notifyListeners();
     if (hydrating.isEmpty) return;
     _beginReferenceUpload('Loading ${kind.pluralLabel}…');
@@ -5155,9 +5155,7 @@ class AppController extends ChangeNotifier {
     final previousSettings = _generationSettings(_draftTab);
     final previousPrompt = form.prompt;
     update(form);
-    // Casting lines can only arrive in the editable text now — pasted, or
-    // typed by hand. They belong to the cast, so they move there at once.
-    absorbPromptMappings();
+    // Preserve authored text, including incomplete character references.
     final settingsEdited = previousSettings != _generationSettings(_draftTab);
     if (previousPrompt.trim().isNotEmpty && form.prompt.trim().isEmpty) {
       form.screenplayLinkedCharacters.clear();
@@ -8374,14 +8372,23 @@ class AppController extends ChangeNotifier {
         ..clear()
         ..addAll(item.config.screenplayCharacterAliases);
       form.draftCharacterNames.clear();
-      if (takesPrompt) form.characterMappings.clear();
       if (takesPrompt) {
+        form.characterMappings
+          ..clear()
+          ..addAll({
+            for (final entry in item.config.characterMappings.entries)
+              entry.key: List.of(entry.value),
+          });
         form
           ..aestheticReferenceId = aesthetic!.referenceId
-          ..aestheticCustomText = aesthetic.customText;
+          ..aestheticCustomText = aesthetic.customText
+          ..characterReferenceTextOverride =
+              item.config.characterReferenceTextOverride;
       }
       form
-        ..prompt = takesPrompt ? aesthetic!.prompt : form.prompt
+        ..prompt = takesPrompt
+            ? item.config.authoredPrompt ?? aesthetic!.prompt
+            : form.prompt
         ..screenplayMode = item.config.screenplayMode
         ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
@@ -8425,9 +8432,6 @@ class AppController extends ChangeNotifier {
                 durableSource?.kind == 'remote'
             ? durableSource!.value
             : '';
-      // A film stores the prompt it was submitted with, casting block and
-      // all; reusing it puts that block back where it is edited.
-      if (takesPrompt) absorbPromptMappings();
       _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
         item,
       );
@@ -8480,8 +8484,6 @@ class AppController extends ChangeNotifier {
             ..aestheticCustomText = null;
         }
         tab.form.prompt = stripped;
-        // A rewrite echoes the casting block back; it belongs to the cast.
-        absorbPromptMappings();
       }
       tab.sourceGenerationId = item.localId;
       tab.rewriteSummary = rewriteSummary;
@@ -8662,6 +8664,19 @@ class AppController extends ChangeNotifier {
     // already carries them in its footage.
     final castNames = <String>{};
     final carried = _inComposerTab(tab, () {
+      // Older films saved casting only in their submitted prompt. Read those
+      // lines as metadata for the next scene without stripping authored text
+      // from the film or any existing draft. New records already carry their
+      // casting separately, including intentional edits to the text block.
+      if (item.config.authoredPrompt == null) {
+        for (final entry in screenplayMappings(form.prompt).entries) {
+          form.characterMappings.putIfAbsent(
+            entry.key,
+            () => entry.value.toSet().toList(),
+          );
+          form.screenplayLinkedCharacters.add(entry.key);
+        }
+      }
       castNames.addAll(<String>{
         for (final entry in form.characterMappings.values)
           for (final value in entry) value.toLowerCase(),

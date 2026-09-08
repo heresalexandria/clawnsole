@@ -297,29 +297,30 @@ void main() {
     );
     expect(notifications, 1, reason: 'one settle per pause');
 
-    // A casting line typed into the text is lifted into the cast on
-    // settle, and the debounced save carries the settled text.
+    // Authored casting lines stay in the editor across pauses and saves,
+    // even when their syntax also resembles an imported legacy cast block.
     controller.updatePrompt('A slow pan.\n\nVINNY: @Vinny.mp4');
     expect(controller.form.prompt, contains('VINNY:'));
     await Future<void>.delayed(
       AppController.composerTabsSaveDebounce + const Duration(milliseconds: 60),
     );
-    expect(controller.form.prompt, 'A slow pan.');
-    expect(controller.form.characterMappings['VINNY'], ['Vinny.mp4']);
-    expect(gateway.saves.last.tabs.single.prompt, 'A slow pan.');
-    expect(gateway.saves.last.tabs.single.characterMappings['VINNY'], [
-      'Vinny.mp4',
-    ]);
+    expect(controller.form.prompt, 'A slow pan.\n\nVINNY: @Vinny.mp4');
+    expect(controller.form.characterMappings, isEmpty);
+    expect(
+      gateway.saves.last.tabs.single.prompt,
+      'A slow pan.\n\nVINNY: @Vinny.mp4',
+    );
+    expect(gateway.saves.last.tabs.single.characterMappings, isEmpty);
 
     // Save points settle at once: a tab switch writes the settled draft.
     controller.updatePrompt('A slow pan.\n\nMARA: @Mara.png');
     controller.addComposerTab();
     await _settle();
-    expect(gateway.saves.last.tabs.first.prompt, 'A slow pan.');
     expect(
-      gateway.saves.last.tabs.first.characterMappings.keys,
-      contains('MARA'),
+      gateway.saves.last.tabs.first.prompt,
+      'A slow pan.\n\nMARA: @Mara.png',
     );
+    expect(gateway.saves.last.tabs.first.characterMappings, isEmpty);
   });
 
   test('leaving the foreground publishes the strip at once', () async {
@@ -964,12 +965,10 @@ void main() {
         controller.activateComposerTab('script');
         expect(controller.form.screenplayMode, isTrue);
         expect(controller.form.references.single.savedReferenceId, 'alx');
-        // A workspace written before schema 6 keeps its cast inside the
-        // prompt; restoring lifts it out and leaves the direction alone.
-        expect(controller.form.prompt, 'ALEXANDRIA enters.');
-        expect(controller.form.characterMappings, {
-          'HERO': ['alx.mp4'],
-        });
+        // Older workspaces retain their complete authored direction. Opening
+        // them must not parse away lines that still belong to the script.
+        expect(controller.form.prompt, 'ALEXANDRIA enters.\n\nHERO: @alx.mp4');
+        expect(controller.form.characterMappings, isEmpty);
         expect(
           controller.promptWithCast,
           'ALEXANDRIA enters.\n\nHERO: @alx.mp4',

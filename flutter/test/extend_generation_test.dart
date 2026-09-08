@@ -219,6 +219,83 @@ void main() {
     expect(controller.notice, contains('Seedance 2.0'));
   });
 
+  test(
+    'legacy extension reads casting without changing the reused draft',
+    () async {
+      final controller = _controller();
+      addTearDown(controller.dispose);
+      const prompt = 'A sloth climbs.\n\nHERO: @Sloth\nRIVAL: @Moth';
+      final film = _film(
+        title: 'Rooftop chase',
+        prompt: prompt,
+        references: [
+          _reference('A prop', MediaReferenceKind.video, seconds: 4),
+          _reference('Sloth', MediaReferenceKind.video, seconds: 4),
+          _reference('Moth', MediaReferenceKind.video, seconds: 4),
+        ],
+      );
+
+      await controller.reuse(film);
+      final original = controller.activeComposerTab;
+      expect(original.form.prompt, prompt);
+      expect(original.form.characterMappings, isEmpty);
+
+      await controller.extend(film);
+
+      expect(controller.activeComposerTab, isNot(same(original)));
+      expect(original.form.prompt, prompt);
+      expect(original.form.characterMappings, isEmpty);
+      expect(controller.form.prompt, 'Extend @Rooftop chase.');
+      expect(controller.form.characterMappings, {
+        'HERO': ['Sloth'],
+        'RIVAL': ['Moth'],
+      });
+      expect(controller.form.references.map((item) => item.promptName), [
+        'Rooftop chase',
+        'Sloth',
+        'Moth',
+      ]);
+    },
+  );
+
+  test(
+    'extension preserves saved casting and the edited reference block',
+    () async {
+      final controller = _controller();
+      addTearDown(controller.dispose);
+      const authoredPrompt = 'A sloth climbs.\n\nHERO: @Sloth';
+      const referenceText = 'HERO: @Moth\nKeep the silver wings.';
+      await controller.extend(
+        _film(
+          title: 'Rooftop chase',
+          prompt: '$authoredPrompt\n\n$referenceText',
+          authoredPrompt: authoredPrompt,
+          characterMappings: const {
+            'HERO': ['Moth'],
+          },
+          characterReferenceTextOverride: referenceText,
+          references: [
+            _reference('A prop', MediaReferenceKind.video, seconds: 4),
+            _reference('Sloth', MediaReferenceKind.video, seconds: 4),
+            _reference('Moth', MediaReferenceKind.video, seconds: 4),
+          ],
+        ),
+      );
+
+      expect(controller.form.references.map((item) => item.promptName), [
+        'Rooftop chase',
+        'Moth',
+        'A prop',
+      ]);
+      expect(controller.form.characterMappings, {
+        'HERO': ['Moth'],
+      });
+      expect(controller.characterReferenceText, referenceText);
+      expect(controller.form.prompt, 'Extend @Rooftop chase.');
+      expect(controller.notice, contains('1 reference left out'));
+    },
+  );
+
   test('extend never lands on top of a draft in progress', () async {
     final controller = _controller();
     addTearDown(controller.dispose);
@@ -276,6 +353,9 @@ Generation _film({
   GenerationOutputKind outputKind = GenerationOutputKind.video,
   String? aestheticReferenceId,
   String? aestheticText,
+  String? authoredPrompt,
+  Map<String, List<String>> characterMappings = const {},
+  String? characterReferenceTextOverride,
   List<MediaReferenceLabel> references = const <MediaReferenceLabel>[],
 }) {
   final now = DateTime.utc(2026, 9, 1);
@@ -296,6 +376,9 @@ Generation _film({
       safetyTolerance: 2,
       draft: false,
       screenplayMode: screenplayMode,
+      authoredPrompt: authoredPrompt,
+      characterMappings: characterMappings,
+      characterReferenceTextOverride: characterReferenceTextOverride,
       references: references.isEmpty ? null : references,
     ),
     aestheticReferenceId: aestheticReferenceId,

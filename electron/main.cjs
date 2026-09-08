@@ -44,6 +44,7 @@ const {
   buildApplicationMenuTemplate,
 } = require("./lib/application-menu.cjs");
 const { installRendererRecovery } = require("./lib/renderer-recovery.cjs");
+const { RendererDiagnostics, installDiagnosticIpc } = require("./lib/renderer-diagnostics.cjs");
 const { runShellTask, writeLifecycle, writeStartup } = require("./lib/lifecycle-log.cjs");
 const {
   NOTIFY_CHANNEL,
@@ -72,9 +73,11 @@ const BRIDGE_MEMBERS = [
   "openExternalUrl",
   "revealDataFolder",
   "chooseDataDirectory",
+  "reportDiagnostic",
 ];
 
 let mainWindow = null;
+let rendererDiagnostics = null;
 let companion = null;
 let companionLog = null;
 let companionSession = null;
@@ -141,6 +144,7 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
 }
 
 function stopBundledRenderer() {
+  rendererDiagnostics?.dispose();
   companion?.stop();
   companion = null;
   companionLog?.close();
@@ -221,6 +225,12 @@ function installApplicationMenu() {
     checkForUpdates: () => void runShellAction("update-check-failed", () => checkForUpdates({ manual: true })),
     openSettings: () => openSection("settings"),
     openExternalUrl: (url) => openMenuUrl(url),
+    reloadStudio: () => void runShellAction("renderer-manual-reload-failed", () => {
+      if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return;
+      writeLifecycle(lifecycleLog, "renderer-manual-reload");
+      mainWindow.webContents.reload();
+    }),
+    showLogs: () => shell.showItemInFolder(companionLogger().file),
   })));
 }
 
@@ -518,6 +528,7 @@ function installRendererBridge() {
     getRendererUrl: () => rendererUrl,
   });
   const handle = guardedRendererHandler(ipcMain, isTrustedEvent);
+  installDiagnosticIpc(ipcMain, isTrustedEvent, () => rendererDiagnostics);
   installNativeTextContextMenu({ BrowserWindow, Menu, clipboard, ipcMain, isTrustedEvent });
   handle("clawnsole:update:check", async (_event, force = false) =>
     updater.summarize(await updater.check({ force: force === true })));
@@ -608,6 +619,10 @@ async function createMainWindow() {
     getRendererUrl: () => rendererUrl,
     openExternal: (url) => runShellAction("open-external-failed", () => shell.openExternal(url)),
   });
+  const diagnostics = new RendererDiagnostics({
+    contents: window.webContents, log: lifecycleLog, getAppMetrics: () => app.getAppMetrics(),
+  });
+  rendererDiagnostics = diagnostics;
   installRendererRecovery({
     window,
     log: lifecycleLog,
@@ -623,6 +638,8 @@ async function createMainWindow() {
     if (!window.isDestroyed() && !isQuitting) window.show();
   });
   window.on("closed", () => {
+    diagnostics.dispose();
+    if (rendererDiagnostics === diagnostics) rendererDiagnostics = null;
     if (mainWindow === window) mainWindow = null;
   });
   mainWindow = window;
