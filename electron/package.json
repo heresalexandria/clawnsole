@@ -1,6 +1,6 @@
 {
   "name": "clawnsole-electron",
-  "version": "0.59.2",
+  "version": "0.59.3",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
