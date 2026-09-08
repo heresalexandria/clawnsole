@@ -157,6 +157,45 @@ void main() {
   });
 
   group('every add path asks the budget first', () {
+    test(
+      'an already attached selection does not spend the batch budget',
+      () async {
+        final controller = _director();
+        addTearDown(controller.dispose);
+        final existing = _savedCandidate('existing', 13);
+        await controller.addReferenceCandidates(MediaReferenceKind.video, [
+          existing,
+        ]);
+
+        await controller.addReferenceCandidates(MediaReferenceKind.video, [
+          existing,
+          _savedCandidate('new', 12),
+        ]);
+
+        expect(controller.form.referenceCount(MediaReferenceKind.video), 2);
+        expect(controller.referenceSecondsUsed(MediaReferenceKind.video), 25);
+        expect(controller.notice, contains('already attached'));
+      },
+    );
+
+    test(
+      'a duplicate within a pick spends only one slot and duration',
+      () async {
+        final controller = _director(model: 'seedance2');
+        addTearDown(controller.dispose);
+        final first = _savedCandidate('first', 7);
+
+        await controller.addReferenceCandidates(MediaReferenceKind.video, [
+          first,
+          first,
+          _savedCandidate('second', 8),
+        ]);
+
+        expect(controller.form.referenceCount(MediaReferenceKind.video), 2);
+        expect(controller.referenceSecondsUsed(MediaReferenceKind.video), 15);
+      },
+    );
+
     test('a saved candidate that overruns the budget never lands', () async {
       final controller = _director();
       _attachVideos(controller, <double?>[25]);
@@ -303,10 +342,7 @@ void main() {
     testWidgets('unpublished duration limits still show static readings', (
       tester,
     ) async {
-      final controller = _director(
-        provider: 'krea',
-        model: 'bytedance/seedance-2-5',
-      );
+      final controller = _director(provider: 'krea', model: 'alibaba/wan-3.0');
       addTearDown(controller.dispose);
       controller.form.references = <MediaReferenceDraft>[
         _restoredReference('video', MediaReferenceKind.video, seconds: 12),
@@ -315,8 +351,8 @@ void main() {
       ];
       await _mountCreate(tester, controller);
 
-      expect(_reading(tester, 'video-count').data, '2 / 10 added');
-      expect(_reading(tester, 'audio-count').data, '1 / 10 added');
+      expect(_reading(tester, 'video-count').data, '2 / 5 added');
+      expect(_reading(tester, 'audio-count').data, '1 / 5 added');
       expect(
         _reading(tester, 'video-duration').data,
         '12 s + ? / limit unspecified',
@@ -608,6 +644,22 @@ ReferenceCandidate _candidate(String id, double seconds) => ReferenceCandidate(
   generated: true,
   durationSeconds: seconds,
 );
+
+ReferenceCandidate _savedCandidate(String id, double seconds) =>
+    ReferenceCandidate(
+      id: id,
+      name: 'Saved $id',
+      kind: MediaReferenceKind.video,
+      asset: AssetReference(
+        kind: 'remote',
+        value: 'https://cdn.test/$id.mp4',
+        label: 'Saved $id',
+        contentType: 'video/mp4',
+      ),
+      createdAt: DateTime.utc(2026, 9, 7),
+      generated: false,
+      durationSeconds: seconds,
+    );
 
 MediaReferenceDraft _restoredReference(
   String id,

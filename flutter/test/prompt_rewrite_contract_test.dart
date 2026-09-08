@@ -6,6 +6,59 @@ import 'package:clawnsole/core/prompt_rewrite_router.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'separate casting context survives the companion request and stays out of rewrite output',
+    () {
+      for (final casting in <String?>[
+        null,
+        '',
+        ' HERO: @Portrait\nKeep the scar. ',
+      ]) {
+        final request = PromptRewriteRequest(
+          providerId: 'openai',
+          modelId: 'gpt-5.5',
+          originalPrompt: 'INT. STUDIO - DAY\nHERO walks in.',
+          direction: 'Slow the entrance.',
+          characterReferenceText: casting,
+          screenplayMode: true,
+        );
+        final decoded = PromptRewriteRequest.fromJson(
+          jsonDecode(jsonEncode(request.toJson())) as Map<String, Object?>,
+        );
+        expect(decoded.characterReferenceText, casting);
+        expect(decoded.originalPrompt, request.originalPrompt);
+        final brief = buildRewriteBrief(decoded);
+        final instructions = buildRewriteInstructions(decoded);
+        if (casting == null) {
+          expect(brief, isNot(contains('CHARACTER REFERENCE CONTEXT')));
+          expect(
+            request.toJson().containsKey('characterReferenceText'),
+            isFalse,
+          );
+        } else {
+          expect(
+            brief,
+            contains('CHARACTER REFERENCE CONTEXT (preserved separately):'),
+          );
+          expect(
+            brief,
+            contains(casting.isEmpty ? '(Intentionally empty.)' : casting),
+          );
+          expect(instructions, contains('return only the revised direction'));
+          expect(instructions, contains('Do not copy, append, or edit'));
+          expect(
+            instructions,
+            contains('Keep the separate character reference context out'),
+          );
+          expect(
+            instructions,
+            contains('already authored inside the original prompt unchanged'),
+          );
+        }
+      }
+    },
+  );
+
   test('rewrite providers expose ids, consoles, and effort vocabularies', () {
     expect(rewriteProviderIds, <String>['openai', 'anthropic']);
     expect(RewriteProvider.byId('openai'), RewriteProvider.openai);

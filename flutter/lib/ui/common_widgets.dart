@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' as ui;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +25,7 @@ import 'inline_video.dart';
 import 'media_thumbnail.dart';
 import 'media_preview_work.dart';
 import 'prompt_rewrite_dialog.dart';
+import 'timeline_strip.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
 import 'video_save_sheet.dart';
@@ -656,8 +656,20 @@ class _GenerationPromptState extends State<GenerationPrompt> {
           maxLines: widget.collapsedLines,
           textDirection: TextDirection.ltr,
           textScaler: MediaQuery.textScalerOf(context),
-        )..layout(maxWidth: available);
-        final truncated = painter.didExceedMaxLines;
+        );
+        final bool truncated;
+        final double preferredLineHeight;
+        try {
+          painter.layout(maxWidth: available);
+          truncated = painter.didExceedMaxLines;
+          preferredLineHeight = widget.reserveCollapsedHeight && !_expanded
+              ? painter.preferredLineHeight
+              : 0;
+        } finally {
+          // This temporary measurement owns native paragraphs outside the
+          // rendered Text widget. Rebuilding a card must release them now.
+          painter.dispose();
+        }
         final promptText = Text(
           widget.prompt,
           maxLines: _expanded ? null : widget.collapsedLines,
@@ -690,8 +702,7 @@ class _GenerationPromptState extends State<GenerationPrompt> {
                       ? ConstrainedBox(
                           constraints: BoxConstraints(
                             minHeight:
-                                painter.preferredLineHeight *
-                                widget.collapsedLines,
+                                preferredLineHeight * widget.collapsedLines,
                           ),
                           child: promptText,
                         )
@@ -2387,7 +2398,7 @@ class _CachedVideoPreviewState extends State<_CachedVideoPreview> {
         }
         if (frames.isEmpty) return null;
         final timeline = frames.length > 1
-            ? await _composeTimelineStrip(frames)
+            ? await composeTimelineStrip(frames)
             : null;
         return GeneratedVideoPreview(
           thumbnail: frames.first,
@@ -2592,57 +2603,6 @@ class _DeferredFuture<T> implements Future<T> {
   @override
   Future<T> whenComplete(FutureOr<void> Function() action) =>
       _future.whenComplete(action);
-}
-
-Future<Uint8List?> _composeTimelineStrip(List<Uint8List> frames) async {
-  if (frames.isEmpty) return null;
-  final images = <ui.Image>[];
-  try {
-    for (final bytes in frames) {
-      final codec = await ui.instantiateImageCodec(bytes);
-      images.add((await codec.getNextFrame()).image);
-      codec.dispose();
-    }
-    const cellWidth = 160.0;
-    const height = 90.0;
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-    for (var index = 0; index < images.length; index += 1) {
-      final image = images[index];
-      final sourceAspect = image.width / image.height;
-      final targetAspect = cellWidth / height;
-      final source = sourceAspect > targetAspect
-          ? ui.Rect.fromLTWH(
-              (image.width - image.height * targetAspect) / 2,
-              0,
-              image.height * targetAspect,
-              image.height.toDouble(),
-            )
-          : ui.Rect.fromLTWH(
-              0,
-              (image.height - image.width / targetAspect) / 2,
-              image.width.toDouble(),
-              image.width / targetAspect,
-            );
-      canvas.drawImageRect(
-        image,
-        source,
-        ui.Rect.fromLTWH(index * cellWidth, 0, cellWidth, height),
-        ui.Paint(),
-      );
-    }
-    final strip = await recorder.endRecording().toImage(
-      (cellWidth * images.length).round(),
-      height.round(),
-    );
-    final data = await strip.toByteData(format: ui.ImageByteFormat.png);
-    strip.dispose();
-    return data?.buffer.asUint8List();
-  } finally {
-    for (final image in images) {
-      image.dispose();
-    }
-  }
 }
 
 class GenerationInputPreview extends StatefulWidget {

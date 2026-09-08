@@ -89,6 +89,27 @@ a ceiling; it never crops them. Omit the fields for recommendations,
 output-resolution limits, or provider-side automatic resizing that does not
 establish a dependable input ceiling.
 
+`max_reference_video_seconds` and `max_reference_audio_seconds` are aggregate
+input budgets across the attached clips of that type. They are independent of
+the output `max_duration`. If a remote or cached manifest omits one of these
+budgets, the app uses the compiled budget for the exact same provider ID and
+model route, provided that input type is still enabled. Explicit manifest
+values and resolution overrides take precedence. Unknown routes and matching
+display names or model families do not inherit another route's budget.
+Omitted resolution-budget mappings also retain the compiled mapping; an
+explicit mapping, including an empty one, replaces it completely.
+
+Krea's `bytedance/seedance-2-5` has a 30-second aggregate reference-video
+compatibility fallback. [Krea's API guide](https://www.krea.ai/blog/seedance-2-5-api-access-guide-features-code-examples-for-long-form-video)
+publishes the 10-video count and a separate 4–30-second **output** duration;
+it does not state an aggregate input duration. The fallback was selected for
+Clawnsole's Seedance 2.5 compatibility behavior, corroborated by
+[Pika's Seedance 2.5 input contract](https://dev.pika.art/models/bytedance/seedance-2.5/reference-to-video),
+which explicitly caps combined reference video at 30 seconds. This is a
+fallback, not a claim that Krea's API declares the limit. Krea's unpublished
+audio budget and other models' unpublished totals remain unspecified; do not
+derive them from output durations or reference counts.
+
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
 in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `krea`, `ltx`, or

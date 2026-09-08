@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('future workspace schemas cannot silently discard draft fields', () {
     expect(
-      () => ComposerTabsState.fromJson({'schemaVersion': 7}),
+      () => ComposerTabsState.fromJson({'schemaVersion': 8}),
       throwsUnsupportedError,
     );
     expect(

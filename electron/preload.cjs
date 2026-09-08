@@ -3,6 +3,55 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const rendererWindow = window;
 
+const DIAGNOSTIC_EVENTS = new Set([
+  "flutter-error", "flutter-platform-error", "flutter-ready", "flutter-health",
+  "web-error", "web-unhandled-rejection", "webgl-context-lost",
+  "webgl-context-restored", "bootstrap-error",
+]);
+const HEALTH_FIELDS = [
+  "frameCount", "lastFrameAgeMs", "cacheBytes", "cacheImages", "liveImages", "pendingImages",
+  "canvasKitHeapBytes", "canvasKitDecodeCacheBytes", "canvasKitDecodeCacheLimitBytes",
+  "appActive",
+  "flutterErrorsSuppressed",
+];
+const diagnosticNow = Date.now;
+const diagnosticWindows = new Map();
+
+// Only fixed fields cross the bridge. The main process independently validates
+// and redacts stacks before writing its bounded log. Bound IPC traffic too: an
+// error storm must not fill the shell's message queue with repeated stacks.
+function reportDiagnostic(payload) {
+  try {
+    if (!payload || !DIAGNOSTIC_EVENTS.has(payload.event)) return;
+    const at = diagnosticNow();
+    for (const [event, bucket] of diagnosticWindows) {
+      if (at - bucket.startedAt < 60_000) continue;
+      if (bucket.suppressed) ipcRenderer.send("clawnsole:diagnostic", { event, suppressed: bucket.suppressed });
+      diagnosticWindows.delete(event);
+    }
+    let bucket = diagnosticWindows.get(payload.event);
+    if (!bucket) {
+      bucket = { startedAt: at, sent: 0, suppressed: 0 };
+      diagnosticWindows.set(payload.event, bucket);
+    }
+    // At most 31 detailed events plus one delayed summary per type/minute.
+    if (bucket.sent >= 31) {
+      bucket.suppressed = Math.min(1e9, bucket.suppressed + 1);
+      return;
+    }
+    bucket.sent += 1;
+    const clean = { event: payload.event };
+    if (typeof payload.errorType === "string") clean.errorType = payload.errorType.slice(0, 64);
+    if (typeof payload.stack === "string") clean.stack = payload.stack.slice(0, 32768);
+    if (payload.event === "flutter-health") {
+      for (const key of HEALTH_FIELDS) {
+        if (typeof payload[key] === "number" && Number.isFinite(payload[key])) clean[key] = payload[key];
+      }
+    }
+    ipcRenderer.send("clawnsole:diagnostic", clean);
+  } catch { /* Diagnostics must preserve the original error handling. */ }
+}
+
 const TEXT_CONTEXT_MENU_CHANNEL = "clawnsole:text-context-menu";
 const TEXT_INPUT_TYPES = new Set([
   "email",
@@ -103,6 +152,7 @@ function subscribe(channel, callback) {
 // `window.clawnsole` to offer in-place updates with download progress.
 contextBridge.exposeInMainWorld("clawnsole", {
   shell: "electron",
+  reportDiagnostic,
   checkForUpdate: (force = false) =>
     ipcRenderer.invoke("clawnsole:update:check", force === true),
   startUpdate: () => ipcRenderer.invoke("clawnsole:update:start"),
@@ -130,3 +180,26 @@ contextBridge.exposeInMainWorld("clawnsole", {
   // Settings… (⌘,) asks the app to show a section.
   onNavigate: (callback) => subscribe("clawnsole:navigate", callback),
 });
+
+// Error and promise rejection events belong to the world that threw them.
+// Register in the page's world, then cross back through the narrow, rate-limited
+// bridge. An isolated-world listener alone misses Flutter's JavaScript errors.
+try {
+  contextBridge.executeInMainWorld({ func: () => {
+    const report = window.clawnsole.reportDiagnostic;
+    const reportError = (event, property, type) => {
+      try {
+        const error = event[property];
+        report({ event: type, errorType: error?.name, stack: error?.stack });
+      } catch {
+        report({ event: type });
+      }
+    };
+    window.addEventListener("error", (event) => reportError(event, "error", "web-error"), true);
+    window.addEventListener("unhandledrejection", (event) => reportError(event, "reason", "web-unhandled-rejection"), true);
+    window.addEventListener("webglcontextlost", () => report({ event: "webgl-context-lost" }), true);
+    window.addEventListener("webglcontextrestored", () => report({ event: "webgl-context-restored" }), true);
+  } });
+} catch (error) {
+  reportDiagnostic({ event: "bootstrap-error", errorType: error?.name, stack: error?.stack });
+}

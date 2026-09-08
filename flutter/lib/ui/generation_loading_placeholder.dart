@@ -8,6 +8,17 @@ import 'package:flutter/material.dart';
 import '../core/generation_timing.dart';
 import '../core/models.dart';
 
+// Recorded canvas commands retain their own shader reference. Release the
+// temporary owner after recording instead of waiting for JavaScript GC to
+// notice the underlying native CanvasKit allocation.
+void _paintWithShader(ui.Shader shader, void Function(Paint) draw) {
+  try {
+    draw(Paint()..shader = shader);
+  } finally {
+    shader.dispose();
+  }
+}
+
 double generationAspectRatio(String value) {
   final parts = value.split(':');
   if (parts.length != 2) return 16 / 9;
@@ -378,21 +389,20 @@ class _BroadcastStaticPainter extends CustomPainter {
       size.width,
       center + halfHeight,
     );
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          Offset(0, rect.top),
-          Offset(0, rect.bottom),
-          const <Color>[
-            Color(0x00000000),
-            Color(0x28000000),
-            Color(0x72000000),
-            Color(0x36000000),
-            Color(0x00000000),
-          ],
-          const <double>[0, .22, .5, .72, 1],
-        ),
+    _paintWithShader(
+      ui.Gradient.linear(
+        Offset(0, rect.top),
+        Offset(0, rect.bottom),
+        const <Color>[
+          Color(0x00000000),
+          Color(0x28000000),
+          Color(0x72000000),
+          Color(0x36000000),
+          Color(0x00000000),
+        ],
+        const <double>[0, .22, .5, .72, 1],
+      ),
+      (paint) => canvas.drawRect(rect, paint),
     );
     canvas.drawRect(
       Rect.fromLTWH(0, center - halfHeight * .82, size.width, 1.2),
@@ -484,34 +494,23 @@ class _BroadcastStaticPainter extends CustomPainter {
         ..color = const Color(0x120A2130)
         ..blendMode = BlendMode.color,
     );
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          Offset(size.width * .5, size.height * .44),
-          size.longestSide * .72,
-          const <Color>[
-            Color(0x00000000),
-            Color(0x00000000),
-            Color(0xA8000000),
-          ],
-          const <double>[0, .52, 1],
-        ),
+    _paintWithShader(
+      ui.Gradient.radial(
+        Offset(size.width * .5, size.height * .44),
+        size.longestSide * .72,
+        const <Color>[Color(0x00000000), Color(0x00000000), Color(0xA8000000)],
+        const <double>[0, .52, 1],
+      ),
+      (paint) => canvas.drawRect(bounds, paint),
     );
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          Offset(size.width * .03, 0),
-          Offset(size.width * .58, size.height * .68),
-          const <Color>[
-            Color(0x21EAF7FF),
-            Color(0x07EAF7FF),
-            Color(0x00FFFFFF),
-          ],
-          const <double>[0, .38, 1],
-        )
-        ..blendMode = BlendMode.screen,
+    _paintWithShader(
+      ui.Gradient.linear(
+        Offset(size.width * .03, 0),
+        Offset(size.width * .58, size.height * .68),
+        const <Color>[Color(0x21EAF7FF), Color(0x07EAF7FF), Color(0x00FFFFFF)],
+        const <double>[0, .38, 1],
+      ),
+      (paint) => canvas.drawRect(bounds, paint..blendMode = BlendMode.screen),
     );
     final glass = RRect.fromRectAndRadius(
       bounds.deflate(1),
@@ -746,30 +745,36 @@ class _CycloneField {
       }
       final c0 = _colors[i % _colors.length];
       final c1 = _colors[(i + 2) % _colors.length];
-      canvas.drawPath(
-        path,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = h * (.1 + .055 * i)
-          ..strokeCap = StrokeCap.round
-          ..blendMode = BlendMode.plus
-          ..shader = ui.Gradient.linear(
-            Offset.zero,
-            Offset(w, 0),
-            <Color>[
-              c0.withValues(alpha: 0),
-              c0.withValues(alpha: .05),
-              c1.withValues(alpha: .05),
-              c1.withValues(alpha: 0),
-            ],
-            const <double>[0, .3, .7, 1],
-          ),
+      _paintWithShader(
+        ui.Gradient.linear(
+          Offset.zero,
+          Offset(w, 0),
+          <Color>[
+            c0.withValues(alpha: 0),
+            c0.withValues(alpha: .05),
+            c1.withValues(alpha: .05),
+            c1.withValues(alpha: 0),
+          ],
+          const <double>[0, .3, .7, 1],
+        ),
+        (paint) => canvas.drawPath(
+          path,
+          paint
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = h * (.1 + .055 * i)
+            ..strokeCap = StrokeCap.round
+            ..blendMode = BlendMode.plus,
+        ),
       );
     }
 
     final picture = recorder.endRecording();
-    final next = picture.toImageSync(width, height);
-    picture.dispose();
+    final ui.Image next;
+    try {
+      next = picture.toImageSync(width, height);
+    } finally {
+      picture.dispose();
+    }
     image?.dispose();
     image = next;
   }
@@ -830,32 +835,26 @@ class _CyclonePainter extends CustomPainter {
       );
     }
 
-    canvas.drawRect(
-      bounds,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          Offset(size.width * .5, size.height * .44),
-          size.longestSide * .72,
-          const <Color>[
-            Color(0x00000000),
-            Color(0x00000000),
-            Color(0x85000000),
-          ],
-          const <double>[0, .52, 1],
-        ),
+    _paintWithShader(
+      ui.Gradient.radial(
+        Offset(size.width * .5, size.height * .44),
+        size.longestSide * .72,
+        const <Color>[Color(0x00000000), Color(0x00000000), Color(0x85000000)],
+        const <double>[0, .52, 1],
+      ),
+      (paint) => canvas.drawRect(bounds, paint),
     );
 
     if (grain case final noise?) {
-      canvas.drawRect(
-        bounds,
-        Paint()
-          ..blendMode = BlendMode.overlay
-          ..shader = ui.ImageShader(
-            noise,
-            TileMode.repeated,
-            TileMode.repeated,
-            Matrix4.identity().storage,
-          ),
+      _paintWithShader(
+        ui.ImageShader(
+          noise,
+          TileMode.repeated,
+          TileMode.repeated,
+          Matrix4.identity().storage,
+        ),
+        (paint) =>
+            canvas.drawRect(bounds, paint..blendMode = BlendMode.overlay),
       );
     }
 
@@ -871,24 +870,26 @@ class _CyclonePainter extends CustomPainter {
         ..strokeWidth = 1
         ..color = const Color(0x218C96FF),
     );
-    canvas.drawRRect(
-      ring,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2
-        ..shader = SweepGradient(
-          transform: GradientRotation(chaseAngle()),
-          colors: const <Color>[
-            Color(0x004C6BFF),
-            Color(0x004C6BFF),
-            Color(0x0D4C6BFF),
-            Color(0xCC4C6BFF),
-            Color(0xF2B278FF),
-            Color(0xFFE1CDFF),
-            Color(0x00E1CDFF),
-          ],
-          stops: const <double>[0, .62, .72, .88, .97, .994, 1],
-        ).createShader(bounds),
+    _paintWithShader(
+      SweepGradient(
+        transform: GradientRotation(chaseAngle()),
+        colors: const <Color>[
+          Color(0x004C6BFF),
+          Color(0x004C6BFF),
+          Color(0x0D4C6BFF),
+          Color(0xCC4C6BFF),
+          Color(0xF2B278FF),
+          Color(0xFFE1CDFF),
+          Color(0x00E1CDFF),
+        ],
+        stops: const <double>[0, .62, .72, .88, .97, .994, 1],
+      ).createShader(bounds),
+      (paint) => canvas.drawRRect(
+        ring,
+        paint
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.2,
+      ),
     );
     canvas.restore();
     canvas.restore();

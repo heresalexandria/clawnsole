@@ -244,6 +244,7 @@ class PromptRewriteRequest {
     this.aspectRatio,
     this.mode,
     this.referenceMentions = const <String>[],
+    this.characterReferenceText,
     this.screenplayMode = false,
   });
 
@@ -271,6 +272,10 @@ class PromptRewriteRequest {
 
   /// Reference mentions such as `@Image 1` the prompt may use verbatim.
   final List<String> referenceMentions;
+
+  /// Casting context preserved separately by the editor. The rewrite returns
+  /// only the direction; null keeps the legacy combined-prompt contract.
+  final String? characterReferenceText;
   final bool screenplayMode;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -288,6 +293,8 @@ class PromptRewriteRequest {
     if (aspectRatio != null) 'aspectRatio': aspectRatio,
     if (mode != null) 'mode': mode,
     if (referenceMentions.isNotEmpty) 'referenceMentions': referenceMentions,
+    if (characterReferenceText != null)
+      'characterReferenceText': characterReferenceText,
   };
 
   factory PromptRewriteRequest.fromJson(Map<String, Object?> json) {
@@ -327,6 +334,9 @@ class PromptRewriteRequest {
           (json['referenceMentions'] as List<Object?>? ?? const <Object?>[])
               .whereType<String>()
               .toList(),
+      characterReferenceText: json['characterReferenceText'] is String
+          ? json['characterReferenceText']! as String
+          : null,
     );
   }
 }
@@ -462,6 +472,11 @@ String buildRewriteInstructions(PromptRewriteRequest request) {
       'result.',
     )
     ..writeln(
+      '- Preserve character-to-reference mapping lines already authored '
+      'inside the original prompt unless the director requests a casting '
+      'change.',
+    )
+    ..writeln(
       '- Reads as a single prompt in plain descriptive prose: no headings, '
       'lists, quotation marks, or notes about this revision, the frames, '
       'or the previous attempt.',
@@ -478,6 +493,14 @@ String buildRewriteInstructions(PromptRewriteRequest request) {
       '${request.referenceMentions.join(', ')}.',
     );
   }
+  if (request.characterReferenceText != null) {
+    buffer.writeln(
+      '- The separate CHARACTER REFERENCE CONTEXT is preserved by the '
+      'editor. Use it to understand the scene, but return only the revised '
+      'direction. Do not copy, append, or edit that separate casting block '
+      'in the returned prompt.',
+    );
+  }
   buffer
     ..writeln()
     ..write(
@@ -487,7 +510,12 @@ String buildRewriteInstructions(PromptRewriteRequest request) {
     );
   if (request.screenplayMode) {
     buffer.writeln(
-      'The prompt is a screenplay. Preserve screenplay layout: uppercase scene headings and character cues, indented dialogue and parentheticals, action paragraphs, and transitions. Keep character-to-reference mapping lines such as CHARACTER: @reference unchanged unless the director requests a casting change. Return the revised screenplay as the prompt, without code fences.',
+      'The prompt is a screenplay. Preserve screenplay layout: uppercase scene headings and character cues, indented dialogue and parentheticals, action paragraphs, and transitions. '
+      'Keep character-to-reference mapping lines such as CHARACTER: @reference '
+      'that are already authored inside the original prompt unchanged unless '
+      'the director requests a casting change. '
+      '${request.characterReferenceText == null ? '' : 'Keep the separate character reference context out of the returned screenplay. '}'
+      'Return the revised screenplay as the prompt, without code fences.',
     );
   }
   return buffer.toString();
@@ -513,7 +541,14 @@ String buildRewriteBrief(PromptRewriteRequest request) {
   buffer
     ..writeln('ORIGINAL PROMPT:')
     ..writeln(request.originalPrompt.trim())
-    ..writeln()
+    ..writeln();
+  if (request.characterReferenceText case final context?) {
+    buffer
+      ..writeln('CHARACTER REFERENCE CONTEXT (preserved separately):')
+      ..writeln(context.isEmpty ? '(Intentionally empty.)' : context)
+      ..writeln();
+  }
+  buffer
     ..writeln('CHANGE REQUEST:')
     ..write(request.direction.trim());
   return buffer.toString();

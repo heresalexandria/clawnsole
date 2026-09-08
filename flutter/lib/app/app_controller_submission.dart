@@ -3,12 +3,13 @@ part of 'app_controller.dart';
 /// A Generate activation captures one independent operation. The lock covers
 /// preparation and acceptance only: an identical later activation is a new job.
 extension AppControllerSubmission on AppController {
-  ComposerTab _captureSubmissionTab() {
-    final source = activeComposerTab;
+  /// Independent recipe for an in-flight submission or a recovered rewrite.
+  ComposerTab _copyComposerTab(ComposerTab source, {String? id}) {
     final tab = ComposerTab(
-      id: source.id,
+      id: id ?? source.id,
       providerId: source.providerId,
       modelId: source.modelId,
+      generateAudioExplicitlyDisabled: source.generateAudioExplicitlyDisabled,
       title: source.title,
       sourceGenerationId: source.sourceGenerationId,
       rewriteSummary: source.rewriteSummary,
@@ -17,12 +18,14 @@ extension AppControllerSubmission on AppController {
       createdAt: source.createdAt,
       updatedAt: source.updatedAt,
     );
+    tab.disabledReferences.addAll(source.disabledReferences);
     final value = source.form;
     tab.form
       ..prompt = value.prompt
       ..screenplayMode = value.screenplayMode
       ..aestheticReferenceId = value.aestheticReferenceId
       ..aestheticCustomText = value.aestheticCustomText
+      ..characterReferenceTextOverride = value.characterReferenceTextOverride
       ..screenplayLinkedCharacters.addAll(value.screenplayLinkedCharacters)
       ..screenplayCharacterAliases.addAll(value.screenplayCharacterAliases)
       ..draftCharacterNames.addAll(value.draftCharacterNames)
@@ -60,7 +63,7 @@ extension AppControllerSubmission on AppController {
     required bool providerRetentionRiskAcknowledged,
   }) async {
     if (submitting || _disposed) return;
-    // A keystroke's deferred work (cast lines, reference casting) must be in
+    // A keystroke's deferred reference casting must be in
     // the draft before anything reads the prompt to send.
     _settlePromptEdits();
     final problem = validate();
@@ -88,7 +91,7 @@ extension AppControllerSubmission on AppController {
 
     // Capture every recipe and routing choice before the first await, including
     // before hydration of a restored draft. Editing/switching tabs is still safe.
-    final tab = _captureSubmissionTab();
+    final tab = _copyComposerTab(activeComposerTab);
     _rememberGenerationPreferences(tab);
     _flushGenerationPreferencesSave();
     final provider = selectedProvider;

@@ -62,40 +62,49 @@ extension ScreenplayAuthoring on AppController {
   }
 
   /// The casting block as it will be appended at submission.
-  List<String> get castLines => screenplayCastLines(form.characterMappings);
+  List<String> get castLines => screenplayCastLines(
+    form.characterMappings,
+    authoredPrompt: form.prompt,
+    characterAliases: form.screenplayCharacterAliases,
+  );
+
+  bool characterHasAuthoredMapping(String scriptOrMappingName) =>
+      screenplayAuthoredMappingNames(
+        form.prompt,
+        characterAliases: form.screenplayCharacterAliases,
+      ).contains(normalizeCharacterName(scriptOrMappingName));
+
+  String get generatedCharacterReferenceText => castLines.join('\n');
+
+  String get characterReferenceText =>
+      form.characterReferenceTextOverride ?? generatedCharacterReferenceText;
+
+  bool get hasCharacterReferenceTextOverride =>
+      form.characterReferenceTextOverride != null;
+
+  void updateCharacterReferenceText(String text) {
+    if (form.characterReferenceTextOverride == text) return;
+    form.characterReferenceTextOverride = text;
+    _queuePromptSettle(_draftTab);
+  }
+
+  void resetCharacterReferenceText() {
+    if (!hasCharacterReferenceTextOverride) return;
+    form.characterReferenceTextOverride = null;
+    _invalidateProviderEstimate();
+    _scheduleComposerTabsSave();
+    notifyListeners();
+  }
 
   /// The direction plus its casting block. Everything that measures or sends
   /// the prompt — the counter, the limit, the estimate, the submitted input —
   /// goes through here (or [generationPrompt]), so a cast counts against the
   /// character limit without ever appearing in the editable text.
   String get promptWithCast {
-    final lines = castLines;
-    if (lines.isEmpty) return form.prompt;
+    final block = characterReferenceText;
+    if (block.isEmpty) return form.prompt;
     final direction = form.prompt.trimRight();
-    final block = lines.join('\n');
     return direction.isEmpty ? block : '$direction\n\n$block';
-  }
-
-  /// Lifts casting lines that arrived inside the prompt — a legacy workspace,
-  /// a reused film, a paste, an AI Rewrite — into [form.characterMappings] and
-  /// strips them from the editable text. Returns whether anything moved.
-  bool absorbPromptMappings() {
-    final absorbed = screenplayMappings(form.prompt);
-    if (absorbed.isEmpty) return false;
-    form.prompt = stripScreenplayMappings(form.prompt);
-    for (final entry in absorbed.entries) {
-      final name = normalizeCharacterName(entry.key);
-      if (name.isEmpty) continue;
-      if (entry.value.isEmpty) {
-        form.characterMappings.remove(name);
-      } else {
-        form.characterMappings[name] = entry.value.toSet().toList();
-      }
-      // A line that was written down is an explicit choice, exactly as it was
-      // when the prompt held it: automatic casting must not undo it.
-      form.screenplayLinkedCharacters.add(name);
-    }
-    return true;
   }
 
   /// The cast wins over library defaults, including an explicit removal.
@@ -379,6 +388,14 @@ extension ScreenplayAuthoring on AppController {
   /// characters it was cast as.
   void _renameCastReference(String previous, String name) {
     if (previous == name) return;
+    final custom = form.characterReferenceTextOverride;
+    if (custom != null) {
+      form.characterReferenceTextOverride = renameReferenceInPrompt(
+        custom,
+        oldName: previous,
+        newName: name,
+      );
+    }
     final renamed = <String, List<String>>{
       for (final entry in form.characterMappings.entries)
         entry.key: entry.value
@@ -433,8 +450,6 @@ extension ScreenplayAuthoring on AppController {
     final cast = castLines.join('\n');
     final references = form.references.length;
     final linked = form.screenplayLinkedCharacters.length;
-    // Self-healing for any path that seeded the prompt with casting lines.
-    absorbPromptMappings();
     _syncScreenplayReferences();
     if (prompt != form.prompt ||
         cast != castLines.join('\n') ||
@@ -452,8 +467,18 @@ extension ScreenplayAuthoring on AppController {
     }
     final names = _defaultCharacterReferences;
     final mappedNames = form.characterMappings.keys.toSet();
+    // An authored casting line already supplies instructions for this name.
+    // Leave it in place without appending a second, possibly conflicting cast.
+    final inlineNames = screenplayAuthoredMappingNames(
+      form.prompt,
+      characterAliases: form.screenplayCharacterAliases,
+    );
     for (final entry in names.entries) {
       final name = entry.key;
+      if (inlineNames.contains(name) ||
+          inlineNames.contains(characterMappingName(name))) {
+        continue;
+      }
       if (_hasExplicitCharacterMapping(name, mappedNames: mappedNames)) {
         // Remember restored/manual cast entries too, so deleting one is final.
         form.screenplayLinkedCharacters.add(name);

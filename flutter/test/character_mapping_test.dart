@@ -199,13 +199,16 @@ void main() {
         'ALICE': ['Alice.png'],
       });
       expect(controller.promptWithCast, 'Alice turns.\n\nALICE: @Alice.png');
-      // A pasted casting line is absorbed rather than left in the direction.
+      // A pasted casting line remains authored text, separate from the cast.
       controller.updateForm(
         (form) => form.prompt = 'Alice turns.\n\nALICE: @other',
       );
-      expect(controller.form.prompt, 'Alice turns.');
+      expect(controller.form.prompt, 'Alice turns.\n\nALICE: @other');
       controller.updateForm((form) => form.prompt += '\nAlice sits.');
-      expect(controller.characterMappingReferences('ALICE'), ['other']);
+      expect(controller.characterMappingReferences('ALICE'), ['Alice.png']);
+      expect(controller.characterHasAuthoredMapping('alice'), isTrue);
+      expect(controller.characterReferenceText, isEmpty);
+      expect(controller.promptWithCast, controller.form.prompt);
       // Clearing the cast is done in the editor, and it sticks through typing.
       await controller.saveCharacterMapping(
         scriptName: 'ALICE',
@@ -218,23 +221,64 @@ void main() {
     },
   );
 
-  test('an absorbed cast line overrides defaults without attaching them', () {
-    final controller = _controller(references: [_reference('Alice.png')]);
-    addTearDown(controller.dispose);
-    controller.form.screenplayMode = true;
-    controller.updateForm(
-      (form) => form.prompt = 'Alice turns.\n\nAlice: @custom',
-    );
+  test(
+    'an authored cast line does not acquire conflicting automatic casting',
+    () {
+      final controller = _controller(references: [_reference('Alice.png')]);
+      addTearDown(controller.dispose);
+      controller.form.screenplayMode = true;
+      controller.updateForm(
+        (form) => form.prompt = 'Alice turns.\n\nAlice: @custom',
+      );
 
-    expect(controller.form.prompt, 'Alice turns.');
-    expect(controller.characterMappingReferences('ALICE'), ['custom']);
-    controller.updateForm((form) => form.prompt += '\nAlice sits.');
-    expect(controller.form.references, isEmpty);
-    // Rewriting the direction leaves the cast alone; it is not prompt text.
-    controller.updateForm((form) => form.prompt = 'Alice turns.');
-    expect(controller.characterMappingReferences('ALICE'), ['custom']);
-    expect(controller.form.references, isEmpty);
-  });
+      expect(controller.form.prompt, 'Alice turns.\n\nAlice: @custom');
+      expect(controller.form.characterMappings, isEmpty);
+      expect(controller.characterReferenceText, isEmpty);
+      controller.updateForm((form) => form.prompt += '\nAlice sits.');
+      expect(controller.form.references, isEmpty);
+      // Removing the authored override allows automatic casting again.
+      controller.updateForm((form) => form.prompt = 'Alice turns.');
+      expect(controller.characterMappingReferences('ALICE'), ['Alice.png']);
+      expect(controller.form.references, hasLength(1));
+    },
+  );
+
+  for (final screenplayMode in [false, true]) {
+    test(
+      'authored aliases suppress inherited casting in ${screenplayMode ? 'screenplay' : 'plaintext'}',
+      () {
+        final controller = _controller();
+        addTearDown(controller.dispose);
+        controller.form
+          ..screenplayMode = screenplayMode
+          ..characterMappings['HERO'] = ['Earlier clip']
+          ..screenplayCharacterAliases['ALEXANDRIA'] = 'HERO';
+        const direction = 'Extend @Film.\n\nAlexandria: @Different clip';
+
+        controller.updatePrompt(direction);
+        controller.syncScreenplayCharacterMappings();
+
+        expect(controller.form.prompt, direction);
+        expect(controller.promptWithCast, direction);
+        expect(controller.generationPrompt, direction);
+        expect(controller.generatedCharacterReferenceText, isEmpty);
+        expect(controller.characterHasAuthoredMapping('alexandria'), isTrue);
+        expect(controller.characterHasAuthoredMapping('hero'), isTrue);
+        expect(controller.characterHasAuthoredMapping('other'), isFalse);
+        expect(controller.characterMappingReferences('ALEXANDRIA'), [
+          'Earlier clip',
+        ]);
+        expect(controller.form.characterMappings, {
+          'HERO': ['Earlier clip'],
+        });
+
+        // Removing only the authored declaration reveals the stored choice.
+        controller.updatePrompt('Extend @Film.');
+        expect(controller.characterHasAuthoredMapping('HERO'), isFalse);
+        expect(controller.characterReferenceText, 'HERO: @Earlier clip');
+      },
+    );
+  }
 
   test(
     'explicit clearing and a different-reference override beat defaults',

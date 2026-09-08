@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app_theme.dart';
@@ -235,6 +236,7 @@ class ReferencePromptField extends StatefulWidget {
     this.screenplayMode = false,
     this.characterNames = const [],
     this.toolbar,
+    this.hintText,
     super.key,
   });
 
@@ -249,6 +251,7 @@ class ReferencePromptField extends StatefulWidget {
   final bool screenplayMode;
   final List<String> characterNames;
   final Widget? toolbar;
+  final String? hintText;
 
   @override
   State<ReferencePromptField> createState() => _ReferencePromptFieldState();
@@ -276,6 +279,7 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   int? _screenplayHighlight;
   bool _allowFocusTraversal = false;
   bool _dismissScreenplaySuggestions = false;
+  bool _suggestionsRefreshPending = false;
 
   // Completions scan the whole script for character cues. They are read
   // several times per build and per key event, so they are computed once
@@ -376,6 +380,20 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
   }
 
   void _refreshSuggestions() {
+    // External draft changes can update the editing controller during build.
+    // OverlayPortal cannot show or hide in that phase; refresh once after the
+    // frame so resets and restored text cannot assert or leave a stale menu.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (!_suggestionsRefreshPending) {
+        _suggestionsRefreshPending = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _suggestionsRefreshPending = false;
+          if (mounted) _refreshSuggestions();
+        });
+      }
+      return;
+    }
     _preserveAncestorScrollForSelectAll();
     if (widget.screenplayMode && mounted) setState(() {});
     final value = _controller.value;
@@ -1027,11 +1045,13 @@ class _ReferencePromptFieldState extends State<ReferencePromptField> {
               widget.onChanged(value);
             },
             decoration: InputDecoration(
-              hintText: widget.screenplayMode
-                  ? 'INT. LOCATION - DAY\n\nDescribe the action. Tab to write a character.'
-                  : widget.references.isEmpty
-                  ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
-                  : 'A single continuous shot… type @ to mention an attached reference.',
+              hintText:
+                  widget.hintText ??
+                  (widget.screenplayMode
+                      ? 'INT. LOCATION - DAY\n\nDescribe the action. Tab to write a character.'
+                      : widget.references.isEmpty
+                      ? 'A single continuous shot… describe movement, framing, sound, and what must stay consistent.'
+                      : 'A single continuous shot… type @ to mention an attached reference.'),
               counterText: '',
               alignLabelWithHint: true,
             ),

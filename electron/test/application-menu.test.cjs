@@ -12,7 +12,7 @@ const {
 const { isAllowedExternalUrl } = require("../lib/runtime.cjs");
 
 function buildTemplate(overrides = {}) {
-  const calls = { updates: 0, settings: 0, opened: [] };
+  const calls = { updates: 0, settings: 0, opened: [], reloads: 0, logs: 0 };
   const template = buildApplicationMenuTemplate({
     appName: "Clawnsole",
     isPackaged: true,
@@ -23,6 +23,8 @@ function buildTemplate(overrides = {}) {
       calls.settings += 1;
     },
     openExternalUrl: (url) => calls.opened.push(url),
+    reloadStudio: () => calls.reloads += 1,
+    showLogs: () => calls.logs += 1,
     ...overrides,
   });
   return { calls, template };
@@ -64,6 +66,8 @@ test("Settings… sits in the app menu on the standard shortcut", () => {
 test("the View menu is explicit and hides developer tools when packaged", () => {
   const packaged = labelsOf(submenuOf(buildTemplate().template, "View"));
   assert.deepEqual(packaged, [
+    "Reload Studio",
+    "separator",
     "resetZoom",
     "zoomIn",
     "zoomOut",
@@ -74,8 +78,7 @@ test("the View menu is explicit and hides developer tools when packaged", () => 
   const development = labelsOf(
     submenuOf(buildTemplate({ isPackaged: false }).template, "View"),
   );
-  assert.deepEqual(development.slice(0, 3), [
-    "reload",
+  assert.deepEqual(development.slice(0, 2), [
     "forceReload",
     "toggleDevTools",
   ]);
@@ -99,8 +102,10 @@ test("Help links open through the shell's external allowlist", () => {
     "Clawnsole Privacy Policy",
     "Terms of Use",
     "Report an Issue…",
+    "separator",
+    "Show Logs",
   ]);
-  for (const item of help) item.click();
+  for (const item of help.filter((item) => HELP_LINKS.some((link) => link.label === item.label))) item.click();
   assert.deepEqual(calls.opened, [
     "https://clawnsole.app/privacy/",
     "https://clawnsole.app/tos/",
@@ -109,4 +114,15 @@ test("Help links open through the shell's external allowlist", () => {
   for (const { url } of HELP_LINKS) {
     assert.equal(isAllowedExternalUrl(url), true, `${url} must be allowlisted`);
   }
+});
+
+test("packaged recovery and logs work through native callbacks without the Flutter renderer", () => {
+  const { calls, template } = buildTemplate();
+  const reload = submenuOf(template, "View").find((item) => item.label === "Reload Studio");
+  assert.equal(reload.accelerator, "CmdOrCtrl+R");
+  reload.click();
+  submenuOf(template, "help").find((item) => item.label === "Show Logs").click();
+  assert.equal(calls.reloads, 1);
+  assert.equal(calls.logs, 1);
+  assert.deepEqual(calls.opened, []);
 });

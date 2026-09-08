@@ -50,12 +50,12 @@ come from the active local renderer before handing a URL to macOS.
   `clawnsole:navigate` channel, which the preload exposes as
   `window.clawnsole.onNavigate(callback)`. Flutter owns the destination; the
   shell only names the section.
-- **View** is explicit: actual size, zoom in, zoom out, and full screen.
-  Reload, Force Reload, and Toggle DevTools appear only in unpackaged builds —
-  a packaged renderer is a local bundle, and DevTools would expose the
-  companion session to anyone at the keyboard.
+- **View** includes **Reload Studio**, actual size, zoom in, zoom out, and full
+  screen. Reload Studio replaces the renderer while leaving the companion
+  running. Force Reload and Toggle DevTools remain development-only.
 - **Help** opens the privacy policy, terms of use, and issue tracker through
-  the same external-URL allowlist as every other link.
+  the same external-URL allowlist as every other link, and **Show Logs** reveals
+  the local diagnostic log even when the studio cannot draw.
 
 Clawnsole follows the macOS lifecycle: closing the window does not quit, the
 companion keeps serving while the app is windowless, Dock activation rebuilds
@@ -85,6 +85,18 @@ Development builds also echo the same lines to the terminal.
 
 A renderer that crashes is reloaded once; a second crash offers **Reload** or
 **Quit**, and a hung renderer offers **Wait** or **Relaunch**.
+
+An alive renderer can still fail to draw. Bounded diagnostics in the same log
+record Flutter/browser errors, graphics context loss, executable stack locations,
+and once-per-minute process CPU/memory and Flutter frame/cache/CanvasKit heap
+metrics. Error storms are capped before IPC and again before disk writes, with
+suppressed counts retained. These records omit exception messages, prompts,
+media, credentials, and full URLs. No debugging port is opened automatically.
+See [desktop diagnostics](../docs/desktop-diagnostics.md) for investigation steps.
+
+Canonical web builds include source maps alongside the internal renderer so
+recorded JavaScript locations can be mapped to the exact packaged Dart sources.
+Use the map from the affected app version, not a fresh build with another SDK.
 
 ## Signing and notarization
 

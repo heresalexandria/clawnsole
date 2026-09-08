@@ -53,6 +53,7 @@ class ComposerTabRecord {
     this.screenplayReferenceNames = const {},
     this.screenplayCharacterAliases = const {},
     this.characterMappings = const {},
+    this.characterReferenceTextOverride,
     this.providerId,
     this.modelId,
     this.aspectRatio = '16:9',
@@ -105,6 +106,10 @@ class ComposerTabRecord {
   /// names of the media references playing that character. Appended to the
   /// prompt at submission (schema 6).
   final Map<String, List<String>> characterMappings;
+
+  /// Edited casting text; null follows automatic mappings and an empty string
+  /// intentionally omits the block. Stored verbatim beginning with schema 7.
+  final String? characterReferenceTextOverride;
   final String? providerId;
   final String? modelId;
   final String aspectRatio;
@@ -149,6 +154,7 @@ class ComposerTabRecord {
   bool get isBlankDraft =>
       (title?.trim().isEmpty ?? true) &&
       prompt.trim().isEmpty &&
+      characterReferenceTextOverride == null &&
       videoUrl.trim().isEmpty &&
       draftUrl.trim().isEmpty &&
       !_holdsRetainedAssets(mediaConfig);
@@ -169,6 +175,8 @@ class ComposerTabRecord {
     Map<String, String>? screenplayReferenceNames,
     Map<String, String>? screenplayCharacterAliases,
     Map<String, List<String>>? characterMappings,
+    String? characterReferenceTextOverride,
+    bool clearCharacterReferenceTextOverride = false,
     String? providerId,
     String? modelId,
     String? aspectRatio,
@@ -218,6 +226,9 @@ class ComposerTabRecord {
     screenplayCharacterAliases:
         screenplayCharacterAliases ?? this.screenplayCharacterAliases,
     characterMappings: characterMappings ?? this.characterMappings,
+    characterReferenceTextOverride: clearCharacterReferenceTextOverride
+        ? null
+        : characterReferenceTextOverride ?? this.characterReferenceTextOverride,
     providerId: providerId ?? this.providerId,
     modelId: modelId ?? this.modelId,
     aspectRatio: aspectRatio ?? this.aspectRatio,
@@ -273,6 +284,8 @@ class ComposerTabRecord {
         for (final entry in characterMappings.entries)
           if (entry.value.isNotEmpty) entry.key: entry.value,
       },
+    if (characterReferenceTextOverride != null)
+      'characterReferenceTextOverride': characterReferenceTextOverride,
     if (providerId != null) 'provider': providerId,
     if (modelId != null) 'model': modelId,
     'aspectRatio': aspectRatio,
@@ -362,6 +375,10 @@ class ComposerTabRecord {
                       .toList(),
             }
           : const {},
+      characterReferenceTextOverride:
+          json['characterReferenceTextOverride'] is String
+          ? json['characterReferenceTextOverride']! as String
+          : null,
       providerId: text(json['provider']),
       modelId: text(json['model']),
       aspectRatio: text(json['aspectRatio']) ?? '16:9',
@@ -506,7 +523,11 @@ class ComposerTabsState {
   // Per-device drafts (deviceId, devices) are additive on 6: an older build
   // ignores them, keeps its own strip, and its top-level tabs are folded in
   // as the legacy device by [foldLegacyTabs].
-  static const int schemaVersion = 6;
+  // Version 7 stores editable casting text separately. A schema 6 reader must
+  // refuse it rather than publish a stripped copy that loses an explicit edit.
+  // Reading older versions migrates additively: an absent override stays null
+  // and therefore continues to use their automatic character mappings.
+  static const int schemaVersion = 7;
 
   final List<ComposerTabRecord> tabs;
   final String? activeTabId;

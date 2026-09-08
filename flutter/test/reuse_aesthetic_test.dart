@@ -150,7 +150,7 @@ void main() {
   });
 
   test(
-    'the casting block is still lifted out from under the aesthetic',
+    'legacy casting lines stay in the direction when reusing a film',
     () async {
       final controller = _controller();
       addTearDown(controller.dispose);
@@ -182,10 +182,8 @@ void main() {
         ),
       );
 
-      expect(controller.form.prompt, 'A sloth reads.');
-      expect(controller.form.characterMappings, {
-        'HERO': ['Sloth'],
-      });
+      expect(controller.form.prompt, 'A sloth reads.\n\nHERO: @Sloth');
+      expect(controller.form.characterMappings, isEmpty);
       expect(controller.selectedAestheticReference?.id, id);
       expect(
         controller.generationPrompt,

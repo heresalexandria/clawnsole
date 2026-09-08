@@ -428,11 +428,19 @@ class _ComposerState extends State<_Composer> {
             ),
             SizedBox(height: short ? 8 : 16),
           ],
-          // Who is cast, above the guidance/settings pair: the one place the
-          // casting is visible while writing, since the prompt no longer
-          // carries it. Absent entirely until a character holds a reference.
+          // The cast keeps its quick media controls beside the editable text
+          // that the mappings add to the submitted prompt.
           if (CastRow.visibleFor(controller)) ...<Widget>[
             CastRow(controller: controller),
+            SizedBox(height: short ? 8 : 12),
+          ],
+          if (_CharacterReferenceTextAccordion.visibleFor(controller)) ...[
+            _CharacterReferenceTextAccordion(
+              key: ValueKey(
+                'character-reference-text-${controller.activeComposerTabId}',
+              ),
+              controller: controller,
+            ),
             SizedBox(height: short ? 8 : 12),
           ],
           // The chosen aesthetic's own words, between the cast and the
@@ -1100,6 +1108,29 @@ class _FullscreenPromptEditor extends StatelessWidget {
                           onChanged: controller.updatePrompt,
                         ),
                       ),
+                      if (_CharacterReferenceTextAccordion.visibleFor(
+                        controller,
+                      )) ...[
+                        const SizedBox(height: 12),
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: math.max(
+                              40,
+                              (MediaQuery.sizeOf(context).height -
+                                      MediaQuery.viewInsetsOf(context).bottom) *
+                                  .4,
+                            ),
+                          ),
+                          child: SingleChildScrollView(
+                            child: _CharacterReferenceTextAccordion(
+                              key: ValueKey(
+                                'character-reference-text-fullscreen-${controller.activeComposerTabId}',
+                              ),
+                              controller: controller,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1386,6 +1417,94 @@ List<PromptReferenceOption> _promptReferenceOptions(AppController controller) {
         ),
       )
       .toList();
+}
+
+/// The mapping-generated text appended to the prompt, with an editable draft
+/// override. Collapsing keeps the exact text, including an intentional blank.
+class _CharacterReferenceTextAccordion extends StatefulWidget {
+  const _CharacterReferenceTextAccordion({required this.controller, super.key});
+
+  final AppController controller;
+
+  static bool visibleFor(AppController controller) =>
+      controller.form.characterMappings.values.any(
+        (references) => references.isNotEmpty,
+      ) ||
+      controller.hasCharacterReferenceTextOverride;
+
+  @override
+  State<_CharacterReferenceTextAccordion> createState() =>
+      _CharacterReferenceTextAccordionState();
+}
+
+class _CharacterReferenceTextAccordionState
+    extends State<_CharacterReferenceTextAccordion> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final custom = controller.hasCharacterReferenceTextOverride;
+    return _GuidanceAccordion(
+      toggleKey: const ValueKey('character-reference-text-toggle'),
+      icon: Icons.assignment_ind_outlined,
+      label: 'Character reference text',
+      labelMaxLines: 3,
+      expanded: _open,
+      onToggle: () => setState(() => _open = !_open),
+      summary: controller.characterReferenceText.trim().isEmpty
+          ? 'Not added'
+          : custom
+          ? 'Edited'
+          : 'From mappings',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            height: 160,
+            child: ReferencePromptField(
+              key: const ValueKey('character-reference-text-field'),
+              prompt: controller.characterReferenceText,
+              formRevision: controller.formRevision,
+              references: _promptReferenceOptions(controller),
+              expands: true,
+              hintText:
+                  'Write character guidance; type @ to mention an attached reference.',
+              onChanged: (value) {
+                controller.updateCharacterReferenceText(value);
+                // Only this small editor follows each keystroke. The studio
+                // keeps its existing debounced prompt-update behavior.
+                setState(() {});
+              },
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            custom
+                ? 'These words are added as edited. Your main prompt stays unchanged.'
+                : 'These words are added to your prompt. A mapping written in the main prompt replaces the generated mapping for that character.',
+            style: TextStyle(
+              fontSize: 11,
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+          if (custom)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('character-reference-text-reset'),
+                onPressed: () {
+                  controller.resetCharacterReferenceText();
+                  setState(() {});
+                },
+                icon: const Icon(Icons.undo_rounded, size: 16),
+                label: const Text('Reset to mappings'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The chosen aesthetic's definition, open to reading and editing in place.
@@ -1957,6 +2076,7 @@ class _GuidanceAccordion extends StatelessWidget {
     this.summary,
     this.persistentSummary,
     this.error = false,
+    this.labelMaxLines = 1,
     super.key,
   });
 
@@ -1970,6 +2090,7 @@ class _GuidanceAccordion extends StatelessWidget {
   final String? summary;
   final Widget? persistentSummary;
   final bool error;
+  final int labelMaxLines;
 
   @override
   Widget build(BuildContext context) {
@@ -2008,7 +2129,7 @@ class _GuidanceAccordion extends StatelessWidget {
                   Flexible(
                     child: Text(
                       label.toUpperCase(),
-                      maxLines: 1,
+                      maxLines: labelMaxLines,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 10.5,
