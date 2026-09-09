@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/app_theme.dart';
+import 'paint_cache.dart';
 
 /// Skeuomorphic console hardware: machined knobs, recessed grooves, metal
 /// toggles, and counter readouts.
@@ -167,6 +168,17 @@ Color hardwareLitPlum(Brightness brightness) => _litPlum(brightness);
 List<Color> brushedSteelStops(Brightness brightness) =>
     brightness == Brightness.dark ? _brushedDark : _brushedLight;
 
+/// The knob's machining, keyed by radius and room light. A knob's gradients
+/// never depend on where it sits, so the canvas is moved to the knob rather
+/// than the shader to its centre; one set of native shaders then serves every
+/// slider position and every repaint. Evicted entries are disposed.
+final ShaderCache<(String, double, bool)> _knobShaders =
+    ShaderCache<(String, double, bool)>(capacity: 24);
+
+/// Shaders for recessed grooves and wells, keyed by the rectangle they shade.
+final ShaderCache<(String, Rect, bool)> _wellShaders =
+    ShaderCache<(String, Rect, bool)>(capacity: 24);
+
 /// Paints the machined knob: knurled rim, brushed face, and an optional lit
 /// indicator line. Shared by the slider thumb and the switch handle.
 void paintMachinedKnob(
@@ -179,6 +191,31 @@ void paintMachinedKnob(
   Color? focusGlow,
 }) {
   final dark = brightness == Brightness.dark;
+  // Everything below is drawn about the origin: the shaders are shared across
+  // knobs of the same radius, and a translated canvas rasterises exactly as a
+  // shader anchored at the centre would.
+  canvas.save();
+  canvas.translate(center.dx, center.dy);
+  _paintMachinedKnobAtOrigin(
+    canvas,
+    radius,
+    dark: dark,
+    indicator: indicator,
+    indicatorAngle: indicatorAngle,
+    focusGlow: focusGlow,
+  );
+  canvas.restore();
+}
+
+void _paintMachinedKnobAtOrigin(
+  Canvas canvas,
+  double radius, {
+  required bool dark,
+  required Color? indicator,
+  required double indicatorAngle,
+  required Color? focusGlow,
+}) {
+  const center = Offset.zero;
 
   // Keyboard focus: a brass halo around the rim, the way a lamp catches the
   // edge of a knob. Painted first so the knob itself stays untouched.
@@ -215,13 +252,16 @@ void paintMachinedKnob(
     center,
     radius,
     Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: dark
-            ? const <Color>[Color(0xFF6E7175), Color(0xFF2E3033)]
-            : const <Color>[Color(0xFF9EA1A5), Color(0xFF4A4C50)],
-      ).createShader(rimRect),
+      ..shader = _knobShaders.obtain(
+        ('rim', radius, dark),
+        () => LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: dark
+              ? const <Color>[Color(0xFF6E7175), Color(0xFF2E3033)]
+              : const <Color>[Color(0xFF9EA1A5), Color(0xFF4A4C50)],
+        ).createShader(rimRect),
+      ),
   );
   // …textured with alternating cut marks.
   final knurls = math.max(22, (radius * 2.4).round());
@@ -250,26 +290,32 @@ void paintMachinedKnob(
     center,
     faceRadius,
     Paint()
-      ..shader = SweepGradient(
-        transform: const GradientRotation(-.6),
-        colors: dark ? _brushedDark : _brushedLight,
-      ).createShader(faceRect),
+      ..shader = _knobShaders.obtain(
+        ('face', radius, dark),
+        () => SweepGradient(
+          transform: const GradientRotation(-.6),
+          colors: dark ? _brushedDark : _brushedLight,
+        ).createShader(faceRect),
+      ),
   );
   // Dome shading: light falls from the upper left.
   canvas.drawCircle(
     center,
     faceRadius,
     Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(-.4, -.5),
-        radius: 1.15,
-        colors: <Color>[
-          Colors.white.withValues(alpha: dark ? .18 : .32),
-          Colors.transparent,
-          Colors.black.withValues(alpha: .18),
-        ],
-        stops: const <double>[0, .55, 1],
-      ).createShader(faceRect),
+      ..shader = _knobShaders.obtain(
+        ('dome', radius, dark),
+        () => RadialGradient(
+          center: const Alignment(-.4, -.5),
+          radius: 1.15,
+          colors: <Color>[
+            Colors.white.withValues(alpha: dark ? .18 : .32),
+            Colors.transparent,
+            Colors.black.withValues(alpha: .18),
+          ],
+          stops: const <double>[0, .55, 1],
+        ).createShader(faceRect),
+      ),
   );
   // Seat line between rim and face.
   canvas.drawCircle(
@@ -629,24 +675,30 @@ class _RecessedGrooveTrack extends SliderTrackShape with BaseSliderTrackShape {
     // Inner shadow along the top edge of the slot.
     canvas.save();
     canvas.clipRRect(groove);
+    final shadowRect = Rect.fromLTWH(
+      rect.left,
+      rect.top,
+      rect.width,
+      rect.height * .55,
+    );
     canvas.drawRect(
-      Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * .55),
+      shadowRect,
       Paint()
-        ..shader =
-            LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: <Color>[
-                Colors.black.withValues(
-                  alpha: _wellShadowAlpha(
-                    dark ? Brightness.dark : Brightness.light,
-                  ),
+        ..shader = _wellShaders.obtain(
+          ('groove', shadowRect, dark),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              Colors.black.withValues(
+                alpha: _wellShadowAlpha(
+                  dark ? Brightness.dark : Brightness.light,
                 ),
-                Colors.transparent,
-              ],
-            ).createShader(
-              Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * .55),
-            ),
+              ),
+              Colors.transparent,
+            ],
+          ).createShader(shadowRect),
+        ),
     );
     canvas.restore();
   }
@@ -1079,14 +1131,17 @@ class _SwitchPainter extends CustomPainter {
     canvas.drawRect(
       shadowRect,
       Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: <Color>[
-            Colors.black.withValues(alpha: _wellShadowAlpha(brightness)),
-            Colors.transparent,
-          ],
-        ).createShader(shadowRect),
+        ..shader = _wellShaders.obtain(
+          ('switch', shadowRect, dark),
+          () => LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: <Color>[
+              Colors.black.withValues(alpha: _wellShadowAlpha(brightness)),
+              Colors.transparent,
+            ],
+          ).createShader(shadowRect),
+        ),
     );
     canvas.restore();
 

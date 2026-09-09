@@ -108,6 +108,32 @@ function settle(times = 6) {
   });
 }
 
+// The shell persists the last bound port so the renderer origin, and the
+// Chromium caches keyed on it, survive from one launch to the next.
+test("the first launch prefers the remembered port and reports the bound one", async (t) => {
+  const ready = [];
+  const { spawned, supervisor } = build(t, { ports: [43123, 43124], overrides: {
+    preferredPort: 43124, onReady: (port) => ready.push(port),
+  } });
+  assert.equal(await supervisor.start(), "http://127.0.0.1:43124");
+  assert.deepEqual(spawned[0].args, ["--port", "43124", "--secure-bootstrap"]);
+  await settle();
+  assert.deepEqual(ready, [43124]);
+});
+
+test("a taken or invalid remembered port falls back without failing the launch", async (t) => {
+  const ready = [];
+  const taken = build(t, { ports: [43123], overrides: { preferredPort: 50000, onReady: (port) => ready.push(port) } });
+  assert.equal(await taken.supervisor.start(), "http://127.0.0.1:43123");
+  for (const preferredPort of [0, 70_000, "43123", 1.5, null]) {
+    const invalid = build(t, { ports: [43123], overrides: { preferredPort } });
+    assert.equal(invalid.supervisor.preferredPort, null, String(preferredPort));
+    invalid.supervisor.stop();
+  }
+  await settle();
+  assert.deepEqual(ready, [43123]);
+});
+
 test("the supervisor rejects an unusable configuration", () => {
   const valid = {
     executable: "/companion",

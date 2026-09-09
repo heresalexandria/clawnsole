@@ -4,6 +4,11 @@ const PROCESS_REASONS = new Set([
   "clean-exit", "abnormal-exit", "killed", "crashed", "oom", "launch-failed",
   "integrity-failure", "memory-eviction",
 ]);
+// Reasons a live renderer process is treated as dead even though Chromium
+// never reported render-process-gone: the Flutter engine aborted inside
+// WebAssembly, stopped producing frames while throwing, or its wasm heap is
+// about to hit the 2 GiB cap.
+const ENGINE_REASONS = new Set(["engine-abort", "frames-frozen", "heap-critical"]);
 const PROCESS_TYPES = new Set([
   "GPU", "Utility", "Zygote", "Sandbox helper", "Pepper Plugin",
   "Pepper Plugin Broker", "Browser", "Renderer",
@@ -13,7 +18,8 @@ const PROCESS_TYPES = new Set([
 // copy exception messages, URLs, service names, or renderer content into them.
 function processDetails(details = {}) {
   return {
-    reason: PROCESS_REASONS.has(details.reason) ? details.reason : "unknown",
+    reason: PROCESS_REASONS.has(details.reason) || ENGINE_REASONS.has(details.reason)
+      ? details.reason : "unknown",
     exitCode: Number.isSafeInteger(details.exitCode) ? details.exitCode : null,
     type: PROCESS_TYPES.has(details.type) ? details.type : "unknown",
   };
@@ -44,4 +50,4 @@ function writeStartup(log, appVersion, electronVersion) {
   writeLifecycle(log, `shell-started app=${version(appVersion)} electron=${version(electronVersion)}`);
 }
 
-module.exports = { processDetails, runShellTask, writeLifecycle, writeStartup };
+module.exports = { ENGINE_REASONS, processDetails, runShellTask, writeLifecycle, writeStartup };

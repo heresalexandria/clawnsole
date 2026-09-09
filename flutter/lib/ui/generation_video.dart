@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import '../app/app_theme.dart';
 import '../app/app_controller.dart';
+import 'motion_isolate.dart';
 import 'video_controller.dart';
 import 'video_frame_loader.dart';
 import 'video_frame_timeline.dart';
@@ -839,12 +840,16 @@ class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder>
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  RotationTransition(
-                    turns: _turns,
-                    child: const Icon(
-                      Icons.hourglass_bottom_rounded,
-                      color: ClawnsoleColors.creamMuted,
-                      size: 30,
+                  MotionIsolate(
+                    width: 30,
+                    height: 30,
+                    child: RotationTransition(
+                      turns: _turns,
+                      child: const Icon(
+                        Icons.hourglass_bottom_rounded,
+                        color: ClawnsoleColors.creamMuted,
+                        size: 30,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -853,8 +858,9 @@ class _VideoLoadingPlaceholderState extends State<_VideoLoadingPlaceholder>
                     style: const TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   const SizedBox(height: 14),
-                  SizedBox(
+                  MotionIsolate(
                     width: 190,
+                    height: 4,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(999),
                       child: LinearProgressIndicator(

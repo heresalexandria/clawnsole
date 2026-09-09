@@ -86,6 +86,30 @@ void main() {
     }
   });
 
+  test('the heap watchdog reads the same scalar byte length', () {
+    final previousKit = _canvasKit;
+    try {
+      _canvasKit = null;
+      expect(readCanvasKitHeapBytes(), isNull);
+      _canvasKit = JSObject();
+      expect(readCanvasKitHeapBytes(), isNull);
+      final heap = JSObject()..setProperty('byteLength'.toJS, 1073741824.toJS);
+      _canvasKit = JSObject()..setProperty('HEAPU8'.toJS, heap);
+      expect(readCanvasKitHeapBytes(), 1073741824);
+      heap.setProperty('byteLength'.toJS, double.nan.toJS);
+      expect(readCanvasKitHeapBytes(), isNull);
+      heap.setProperty('byteLength'.toJS, 'large'.toJS);
+      expect(readCanvasKitHeapBytes(), isNull);
+    } finally {
+      _canvasKit = previousKit;
+    }
+  });
+
+  test('document visibility is reported as a small code', () {
+    // A browser test page is a real document; only its visibility varies.
+    expect(readDocumentHidden(), anyOf(0, 1));
+  });
+
   test('unavailable CanvasKit counters do not suppress health reporting', () {
     final previous = _shell;
     final previousKit = _canvasKit;

@@ -1,19 +1,31 @@
 import 'dart:io';
 
+import 'hard_link.dart';
+
 /// Crash-safe replacement of a whole file.
 ///
 /// The canonical file must exist at every instant: the contents are written
 /// to a sibling temporary file, flushed, and then renamed over the target.
 /// `rename` replaces atomically on POSIX and Dart maps it to
 /// `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` on Windows, so no step ever leaves
-/// the target missing. Before the swap, the previous contents are copied to
+/// the target missing. Before the swap, the previous revision is kept at
 /// [backupPath] so a reader can fall back when the canonical file turns out
 /// missing or malformed (see [readTextWithFallback]).
+///
+/// The backup is normally a hard link to the current inode rather than a
+/// second copy of every byte: the rename that follows only swaps the
+/// canonical *name* to the new inode, so the old inode lives on under the
+/// backup name unchanged. Filesystems that refuse links get a copy instead.
+/// When [prepareBackup] rewrites the previous contents (legacy credential or
+/// diagnostic scrubbing) the rewritten text is written out as before. A
+/// caller that has already read the file can hand the text over as
+/// [previousContents] so it is not read a second time.
 Future<void> writeTextAtomically(
   File file,
   String contents, {
   bool keepBackup = true,
   String Function(String contents)? prepareBackup,
+  String? previousContents,
 }) async {
   await file.parent.create(recursive: true);
   final temporary = File(
@@ -23,15 +35,7 @@ Future<void> writeTextAtomically(
     await temporary.writeAsString(contents, flush: true);
     if (keepBackup && await file.exists()) {
       try {
-        if (prepareBackup == null) {
-          await file.copy(backupPath(file));
-        } else {
-          await writeTextAtomically(
-            File(backupPath(file)),
-            prepareBackup(await file.readAsString()),
-            keepBackup: false,
-          );
-        }
+        await _keepPreviousRevision(file, prepareBackup, previousContents);
       } on FileSystemException {
         // A backup is insurance, never a reason to fail the write itself.
       }
@@ -48,6 +52,48 @@ Future<void> writeTextAtomically(
     }
   }
   unawaitedCleanup(file);
+}
+
+/// Keeps the revision currently at [file] under [backupPath] before the
+/// canonical name is swapped to the new contents.
+///
+/// A [prepareBackup] whose result differs from the previous text is written
+/// out as a fresh file. Otherwise the previous inode is linked under a
+/// temporary sibling name (a directory entry, no data written) — or copied
+/// there when the filesystem refuses links — and that sibling is renamed
+/// over the backup name. `link(2)` will not replace a name but `rename`
+/// does, atomically, so the previous revision is never absent and a copy
+/// interrupted mid-write never lands as the backup. The canonical file — the
+/// only copy that matters — exists throughout.
+Future<void> _keepPreviousRevision(
+  File file,
+  String Function(String contents)? prepareBackup,
+  String? previousContents,
+) async {
+  final backup = File(backupPath(file));
+  if (prepareBackup != null) {
+    final previous = previousContents ?? await file.readAsString();
+    final prepared = prepareBackup(previous);
+    if (prepared != previous) {
+      await writeTextAtomically(backup, prepared, keepBackup: false);
+      return;
+    }
+  }
+  final staged = File(
+    '${backup.path}.$pid.${DateTime.now().microsecondsSinceEpoch}.tmp',
+  );
+  try {
+    if (!createHardLink(file.path, staged.path)) {
+      await file.copy(staged.path);
+    }
+    await staged.rename(backup.path);
+  } finally {
+    try {
+      if (await staged.exists()) await staged.delete();
+    } on FileSystemException {
+      // Best effort; the temporary-file sweep removes stale leftovers.
+    }
+  }
 }
 
 /// The sibling file holding the previous contents of [file].

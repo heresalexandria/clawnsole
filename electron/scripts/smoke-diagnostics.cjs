@@ -26,7 +26,7 @@ function finish(error = null) {
   for (const window of windows) if (!window.isDestroyed()) window.destroy();
   server?.close();
   if (error) console.error(error);
-  else console.log("Diagnostics smoke passed: isolated browser errors, sanitized WASM stacks, bounded IPC, sender guards, native recovery menus, and disposal.");
+  else console.log("Diagnostics smoke passed: isolated browser errors, sanitized WASM stacks, bounded IPC, sender guards, engine counters, engine-abort alert, native recovery menus, and disposal.");
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* Teardown may still hold a file. */ }
   app.exit(error ? 1 : 0);
 }
@@ -45,6 +45,9 @@ app.whenReady().then(async () => {
       response.setHeader("Content-Type", "text/javascript");
       response.end(`window.runSmokeHooks = () => {
         console.warn('CanvasKit DO_NOT_LOG_SECRET');
+        console.log('Engine counters:\\n  Picture Created: 120\\n  Picture Deleted: 100\\n  Picture Leaked: 4\\n  DO_NOT_LOG_SECRET Created: 1\\n  Path Created: 7');
+        console.log('DO_NOT_LOG_SECRET plain log line');
+        console.error('Aborted(DO_NOT_LOG_SECRET). Build with -sASSERTIONS for more info.');
         setTimeout(function fixtureError(){throw new TypeError('DO_NOT_LOG_SECRET')}, 0);
         Promise.reject(new RangeError('DO_NOT_LOG_SECRET'));
         document.getElementById('surface').dispatchEvent(new Event('webglcontextlost'));
@@ -68,8 +71,10 @@ app.whenReady().then(async () => {
   };
   const window = createWindow();
   const entries = [];
+  const alerts = [];
   const diagnostics = new RendererDiagnostics({ contents: window.webContents,
-    log: { write: (_label, entry) => entries.push(JSON.parse(entry)) }, getAppMetrics: () => app.getAppMetrics() });
+    log: { write: (_label, entry) => entries.push(JSON.parse(entry)) }, getAppMetrics: () => app.getAppMetrics(),
+    onAlert: (kind, details) => alerts.push({ kind, ...details }) });
   const guard = rendererIpcGuard({ getWindow: () => window, getRendererUrl: () => url });
   const disposeIpc = installDiagnosticIpc(ipcMain, guard, () => diagnostics);
   let rejected = 0;
@@ -93,6 +98,9 @@ app.whenReady().then(async () => {
     console.error("Received diagnostic events:", entries.map((entry) => entry.event));
     throw error;
   }
+  await waitFor(() => alerts.length >= 1, "engine-abort alert");
+  assert.deepEqual(alerts, [{ kind: "engine-dead", reason: "engine-abort" }]);
+  assert.equal(entries.find((entry) => entry.event === "renderer-console-error").category, "engine-abort");
   assert.equal(entries.find((entry) => entry.event === "web-error").errorType, "TypeError");
   assert.ok(entries.find((entry) => entry.event === "web-error").frames.some((frame) => frame.source === "fixture.js" && frame.function === "fixtureError"));
   assert.equal(entries.find((entry) => entry.event === "web-unhandled-rejection").errorType, "RangeError");
@@ -119,19 +127,33 @@ app.whenReady().then(async () => {
   assert.equal(entries.some((entry) => entry.event === "bootstrap-error"), false);
   await window.loadURL(url);
   let logsOpened = 0;
+  let reportsSaved = 0;
   const menu = Menu.buildFromTemplate(buildApplicationMenuTemplate({
     appName: "Diagnostics Smoke", isPackaged: true, checkForUpdates() {}, openSettings() {}, openExternalUrl() {},
     reloadStudio: () => window.webContents.reload(), showLogs: () => logsOpened += 1,
+    saveDiagnosticsReport: () => reportsSaved += 1,
   }));
   Menu.setApplicationMenu(menu);
   const view = menu.items.find((item) => item.label === "View").submenu;
   const loaded = once(window.webContents, "did-finish-load");
   view.items.find((item) => item.label === "Reload Studio").click();
   await loaded;
-  menu.items.find((item) => item.role === "help").submenu.items.find((item) => item.label === "Show Logs").click();
+  const help = menu.items.find((item) => item.role === "help").submenu.items;
+  help.find((item) => item.label === "Show Logs").click();
+  help.find((item) => item.label === "Save Diagnostics Report…").click();
   assert.equal(logsOpened, 1);
+  assert.equal(reportsSaved, 1);
+  // The reload above started a new document, so replay the instrumented
+  // engine's counter message and confirm only its numbers reach the sample.
+  await window.webContents.executeJavaScript("window.runSmokeHooks(); true");
+  await waitFor(() => diagnostics.engineCounters.size === 2, "engine counters");
   diagnostics.sample();
-  assert.ok(entries.find((entry) => entry.event === "renderer-process-metrics").processes.some((process) => process.type === "Tab"));
+  const metrics = entries.find((entry) => entry.event === "renderer-process-metrics");
+  assert.ok(metrics.processes.some((process) => process.type === "Tab"));
+  assert.deepEqual(metrics.engineCounters, {
+    Picture: { created: 120, deleted: 100, leaked: 4, live: 16 },
+    Path: { created: 7, deleted: 0, leaked: 0, live: 7 },
+  });
   assert.doesNotMatch(JSON.stringify(entries), /DO_NOT_LOG_SECRET|example\.invalid|https?:|private\//);
   const destroyed = once(window.webContents, "destroyed");
   window.destroy();

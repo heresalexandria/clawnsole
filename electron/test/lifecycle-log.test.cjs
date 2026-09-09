@@ -1,7 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { processDetails, runShellTask, writeLifecycle } = require("../lib/lifecycle-log.cjs");
+const { ENGINE_REASONS, processDetails, runShellTask, writeLifecycle } = require("../lib/lifecycle-log.cjs");
 
 test("process breadcrumbs keep only allowlisted metadata", () => {
   assert.deepEqual(processDetails({
@@ -10,6 +10,15 @@ test("process breadcrumbs keep only allowlisted metadata", () => {
   }), { reason: "oom", type: "GPU", exitCode: 137 });
   assert.deepEqual(processDetails({ reason: "secret", type: "private", exitCode: "secret" }),
     { reason: "unknown", type: "unknown", exitCode: null });
+});
+
+test("engine-dead reasons are fixed names that survive the process allowlist", () => {
+  assert.deepEqual([...ENGINE_REASONS], ["engine-abort", "frames-frozen", "heap-critical"]);
+  for (const reason of ENGINE_REASONS) {
+    assert.deepEqual(processDetails({ reason, type: "Renderer" }),
+      { reason, type: "Renderer", exitCode: null });
+  }
+  assert.equal(processDetails({ reason: "engine-dead" }).reason, "unknown");
 });
 
 test("detached shell actions contain synchronous throws and rejected promises", async () => {

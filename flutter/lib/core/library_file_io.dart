@@ -10,26 +10,36 @@ import 'models.dart';
 /// credentials and unsafe diagnostics from app-owned recovery copies. This
 /// deliberately preserves unknown fields instead of round-tripping an older
 /// model schema over a newer library.
+///
+/// A library is saved on every generation poll, so the cost of one call is
+/// what the desktop companion dirties all day. The previous contents are read
+/// once (the unchanged-save comparison needs the real bytes on disk) and that
+/// one read feeds the schema check, the backup preparation and the recovery
+/// sweep; the backup itself is a hard link of the previous inode unless the
+/// sanitizer had to change it (see [writeTextAtomically]).
 Future<void> writeLibraryTextAtomically(File file, String contents) async {
   String? previousContents;
-  if (await file.exists()) {
+  Object? previousValue;
+  FileStat? previousStat;
+  final stat = await file.stat();
+  if (stat.type != FileSystemEntityType.notFound) {
+    previousStat = stat;
     previousContents = await file.readAsString();
-    Object? current;
     try {
-      current = jsonDecode(previousContents);
+      previousValue = jsonDecode(previousContents);
     } on FormatException {
       // Malformed metadata remains eligible for the existing backup recovery.
     }
-    final schema = current is Map<String, dynamic>
-        ? current['schemaVersion']
+    final schema = previousValue is Map<String, dynamic>
+        ? previousValue['schemaVersion']
         : null;
     if (schema is int && schema > StoredData.currentSchemaVersion) {
       throw UnsupportedError(
         'This library needs a newer Clawnsole version (schema $schema).',
       );
     }
-    final workspace = current is Map<String, dynamic>
-        ? current['composerTabs']
+    final workspace = previousValue is Map<String, dynamic>
+        ? previousValue['composerTabs']
         : null;
     final workspaceSchema = workspace is Map<String, dynamic>
         ? workspace['schemaVersion']
@@ -48,12 +58,45 @@ Future<void> writeLibraryTextAtomically(File file, String contents) async {
   // Keep the previous *different* revision as recovery insurance as well as
   // avoiding two whole-file writes and flushes on every no-op save.
   if (previousContents != contents) {
+    var backupIsPreviousRevision = false;
     await writeTextAtomically(
       file,
       contents,
-      prepareBackup: _sanitizedLibraryRecovery,
+      previousContents: previousContents,
+      prepareBackup: (previous) {
+        // The decoded tree from the schema check is reused when the writer
+        // hands back the same text it was given; anything else is decoded
+        // afresh rather than trusted.
+        final sanitized = _sanitizedLibraryRecovery(
+          previous,
+          decoded: identical(previous, previousContents) ? previousValue : null,
+        );
+        backupIsPreviousRevision = sanitized == previous;
+        return sanitized;
+      },
     );
+    if (backupIsPreviousRevision && previousStat != null) {
+      // The backup is the previous inode (or a copy of it), already known to
+      // be clean: the sweep below can trust it by stamp instead of reading and
+      // decoding it again.
+      _verifiedRecoveryCopies[backupPath(file)] = _stamp(previousStat);
+    }
   }
+  await _sanitizeRecoveryCopies(file);
+}
+
+typedef _RecoveryStamp = ({int size, DateTime modified});
+
+_RecoveryStamp _stamp(FileStat stat) =>
+    (size: stat.size, modified: stat.modified);
+
+/// Recovery copies this process has already read and found clean, by path and
+/// on-disk stamp. A copy whose size or modification time moved is read again,
+/// so an edit or restore from outside the process is still sanitized; an
+/// unchanged copy costs a stat, not a whole-library read and decode.
+final _verifiedRecoveryCopies = <String, _RecoveryStamp>{};
+
+Future<void> _sanitizeRecoveryCopies(File file) async {
   final name = file.uri.pathSegments.last;
   await for (final entry in file.parent.list()) {
     if (entry is! File) continue;
@@ -61,22 +104,28 @@ Future<void> writeLibraryTextAtomically(File file, String contents) async {
     if (sibling != '$name.bak' && !sibling.startsWith('$name.corrupt-')) {
       continue;
     }
+    var stat = await entry.stat();
+    if (_verifiedRecoveryCopies[entry.path] == _stamp(stat)) continue;
     final previous = await entry.readAsString();
     final sanitized = _sanitizedLibraryRecovery(previous);
     if (sanitized != previous) {
       await writeTextAtomically(entry, sanitized, keepBackup: false);
+      stat = await entry.stat();
     }
+    _verifiedRecoveryCopies[entry.path] = _stamp(stat);
   }
 }
 
-String _sanitizedLibraryRecovery(String source) {
-  Object? value;
-  try {
-    value = jsonDecode(source);
-  } on FormatException {
-    // An undecodable recovery copy may be the only remaining evidence needed
-    // to recover media metadata. Never destroy it by guessing at its contents.
-    return source;
+String _sanitizedLibraryRecovery(String source, {Object? decoded}) {
+  Object? value = decoded;
+  if (value == null) {
+    try {
+      value = jsonDecode(source);
+    } on FormatException {
+      // An undecodable recovery copy may be the only remaining evidence needed
+      // to recover media metadata. Never destroy it by guessing at its contents.
+      return source;
+    }
   }
   if (value is! Map<String, dynamic>) return source;
   var changed = value.containsKey('apiKeys') || value.containsKey('apiKey');

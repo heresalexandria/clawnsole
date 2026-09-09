@@ -30,6 +30,7 @@ function buildApplicationMenuTemplate({
   openExternalUrl,
   reloadStudio,
   showLogs,
+  saveDiagnosticsReport = () => {},
 }) {
   return [
     {
@@ -77,6 +78,7 @@ function buildApplicationMenuTemplate({
         })),
         { type: "separator" },
         { label: "Show Logs", click: () => showLogs() },
+        { label: "Save Diagnostics Report…", click: () => saveDiagnosticsReport() },
       ],
     },
   ];

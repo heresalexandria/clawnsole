@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app_theme.dart';
+import 'paint_cache.dart';
 
 /// The material a [TexturePanel] is upholstered or veneered with.
 enum PanelSurface { plumLeather, navyLeather, burlwood, hunterFelt }
@@ -67,6 +68,15 @@ extension PanelSurfaceMaterial on PanelSurface {
     };
   }
 
+  /// The [tint] as the one [ColorFilter] this surface ever hands the engine.
+  /// Filters compare by value, so an equal decoration never repaints; a
+  /// single instance also keeps the decoration cheap to compare.
+  ColorFilter? tintFilter(ClawnsoleTokens tokens) {
+    final color = tint(tokens);
+    if (color == null) return null;
+    return _tintFilters[color] ??= ColorFilter.mode(color, BlendMode.color);
+  }
+
   /// How strongly the photograph reads. Pale panels want a whisper of weave
   /// over their color; dark upholstery is the photograph itself.
   double textureOpacity(ClawnsoleTokens tokens) =>
@@ -105,6 +115,8 @@ extension PanelSurfaceMaterial on PanelSurface {
   };
 }
 
+final Map<Color, ColorFilter> _tintFilters = <Color, ColorFilter>{};
+
 /// An upholstered panel: leather, burlwood, or felt, optionally stitched.
 ///
 /// The leather and wood panels stay dark in both appearance modes, like the
@@ -134,7 +146,7 @@ class TexturePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final asset = surface.asset(tokens);
-    final tint = surface.tint(tokens);
+    final tintFilter = surface.tintFilter(tokens);
     Widget content = Padding(padding: padding, child: child);
     if (stitched) {
       content = CustomPaint(
@@ -145,41 +157,55 @@ class TexturePanel extends StatelessWidget {
         child: content,
       );
     }
-    return Container(
-      decoration: BoxDecoration(
-        color: surface.ground(tokens),
-        borderRadius: borderRadius,
-        image: asset == null
-            ? null
-            : DecorationImage(
-                image: AssetImage(asset),
-                fit: surface.tilesTexture(tokens) ? BoxFit.none : BoxFit.cover,
-                repeat: surface.tilesTexture(tokens)
-                    ? ImageRepeat.repeat
-                    : ImageRepeat.noRepeat,
-                opacity: surface.textureOpacity(tokens),
-                filterQuality: FilterQuality.medium,
-                colorFilter: tint == null
-                    ? null
-                    : ColorFilter.mode(tint, BlendMode.color),
-              ),
-        boxShadow: shadowed
-            ? <BoxShadow>[
-                BoxShadow(
-                  color: context.colors.shadow.withValues(
-                    // Pale panels sit on paper; they need lift, not drama.
-                    alpha: tokens.brightness == Brightness.dark ? .18 : .1,
-                  ),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
+    // Two pictures. The outer boundary keeps the page from re-recording the
+    // photograph (and its colour filter, a native object per paint on the
+    // web); the inner one keeps the panel's own content — ink splashes, a
+    // hovered key — from re-recording it either.
+    return RepaintBoundary(
+      child: Container(
+        decoration: BoxDecoration(
+          color: surface.ground(tokens),
+          borderRadius: borderRadius,
+          image: asset == null
+              ? null
+              : DecorationImage(
+                  image: AssetImage(asset),
+                  fit: surface.tilesTexture(tokens)
+                      ? BoxFit.none
+                      : BoxFit.cover,
+                  repeat: surface.tilesTexture(tokens)
+                      ? ImageRepeat.repeat
+                      : ImageRepeat.noRepeat,
+                  opacity: surface.textureOpacity(tokens),
+                  filterQuality: FilterQuality.medium,
+                  colorFilter: tintFilter,
                 ),
-              ]
-            : null,
+          boxShadow: shadowed
+              ? <BoxShadow>[
+                  BoxShadow(
+                    color: context.colors.shadow.withValues(
+                      // Pale panels sit on paper; they need lift, not drama.
+                      alpha: tokens.brightness == Brightness.dark ? .18 : .1,
+                    ),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
+        ),
+        child: RepaintBoundary(
+          child: Material(type: MaterialType.transparency, child: content),
+        ),
       ),
-      child: Material(type: MaterialType.transparency, child: content),
     );
   }
 }
+
+/// The dashed outlines already cut, by panel size and corner radius. A
+/// stitched panel repaints on every hover inside it; measuring the outline
+/// and extracting every dash again each time is work the eye never sees.
+final PathCache<(Size, BorderRadius)> _stitchOutlines =
+    PathCache<(Size, BorderRadius)>();
 
 /// Saddle-stitch border drawn just inside a panel's edge.
 class _StitchPainter extends CustomPainter {
@@ -188,27 +214,39 @@ class _StitchPainter extends CustomPainter {
   final Color color;
   final BorderRadius borderRadius;
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  static Path _cut(Size size, BorderRadius borderRadius) {
     const inset = 9.0;
     const dash = 5.5;
     const gap = 4.5;
     final rect = Offset.zero & size;
     final rrect = borderRadius.toRRect(rect).deflate(inset).shift(Offset.zero);
-    final path = Path()..addRRect(rrect);
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
-      ..strokeCap = StrokeCap.round;
-    for (final metric in path.computeMetrics()) {
+    final outline = Path()..addRRect(rrect);
+    final stitches = Path();
+    for (final metric in outline.computeMetrics()) {
       var distance = 0.0;
       while (distance < metric.length) {
         final end = (distance + dash).clamp(0, metric.length).toDouble();
-        canvas.drawPath(metric.extractPath(distance, end), paint);
+        stitches.addPath(metric.extractPath(distance, end), Offset.zero);
         distance = end + gap;
       }
     }
+    return stitches;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stitches = _stitchOutlines.obtain((
+      size,
+      borderRadius,
+    ), () => _cut(size, borderRadius));
+    canvas.drawPath(
+      stitches,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round,
+    );
   }
 
   @override
@@ -432,7 +470,9 @@ class AppBackdrop extends StatelessWidget {
           filterQuality: FilterQuality.medium,
         ),
       ),
-      child: child,
+      // The tiled texture is recorded once; whatever the screen does above
+      // it paints into its own picture.
+      child: RepaintBoundary(child: child),
     );
   }
 }

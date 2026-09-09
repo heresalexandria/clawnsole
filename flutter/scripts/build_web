@@ -17,10 +17,15 @@ require_command dart
 
 PROXY_URL="${CLAWNSOLE_PROXY_URL-}"
 
+# The companion serves this bundle from a loopback origin that now stays the
+# same across launches; a service worker there would outlive an update and keep
+# serving the previous bundle, so none is emitted.
 flutter build web \
   --release \
   --source-maps \
+  --pwa-strategy=none \
   --dart-define "CLAWNSOLE_PROXY_URL=$PROXY_URL" \
+  --dart-define "FLUTTER_WEB_ENABLE_INSTRUMENTATION=true" \
   "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
   "$@"
 

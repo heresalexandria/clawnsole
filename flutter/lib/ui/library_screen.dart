@@ -17,6 +17,7 @@ import 'generation_provenance.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'library_folders.dart';
+import 'paced_progress_indicator.dart';
 import 'video_save_sheet.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -991,7 +992,7 @@ class _GenerationCardState extends State<GenerationCard> {
             bottom: 0,
             left: 0,
             right: 0,
-            child: LinearProgressIndicator(
+            child: PacedLinearProgressIndicator(
               value: progress == null ? null : progress / 100,
               minHeight: 5,
               backgroundColor: Colors.white24,
@@ -1000,234 +1001,249 @@ class _GenerationCardState extends State<GenerationCard> {
           ),
       ],
     );
-    return SurfaceCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-            child: isGeneratingVideo || hasMedia
-                ? InlineVideoMediaBox(
-                    playbackId: item.localId,
-                    aspectRatio: generationAspectRatio(item.config.aspectRatio),
-                    preview: preview,
-                    idleChrome: hasMedia && !item.isImage
-                        ? GenerationIdleChrome(
-                            controller: widget.controller,
-                            item: item,
-                          )
-                        : null,
-                  )
-                : Stack(
-                    children: <Widget>[
-                      StaticMediaBox(
-                        aspectRatio: generationAspectRatio(
-                          item.config.aspectRatio,
-                        ),
-                        reserveChrome: !item.isImage,
-                        child: preview,
-                      ),
-                      // With no film to show, the media zone is dead space —
-                      // the status panel lives there instead of stretching
-                      // the card body past its delivered neighbors. A dead
-                      // render skips the panel: its error already sits on the
-                      // test-bars thumbnail band.
-                      if (!GenerationErrorThumbnail.shouldShow(item) &&
-                          GenerationStatusDetails.shouldShow(item))
-                        Positioned.fill(
-                          key: const ValueKey('generation-status-overlay'),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 52, 16, 16),
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 520,
-                                ),
-                                child: GenerationStatusDetails(
-                                  item: item,
-                                  maxProblemLines: 6,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-          ),
-          // The body is the way into the film's detail modal; the buttons
-          // and chips inside keep their own taps.
-          InkWell(
-            key: ValueKey<String>('generation-open-${item.localId}'),
-            onTap: () => unawaited(
-              showGenerationDetailModal(
-                context,
-                controller: widget.controller,
-                item: item,
+    return RepaintBoundary(
+      child: SurfaceCard(
+        padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(15),
               ),
-            ),
-            borderRadius: const BorderRadius.vertical(
-              bottom: Radius.circular(15),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (GenerationProvenance.applies(item)) ...<Widget>[
-                    GenerationProvenance(
-                      controller: widget.controller,
-                      item: item,
-                    ),
-                    const SizedBox(height: 7),
-                  ],
-                  GenerationPrompt(
-                    controller: widget.controller,
-                    prompt: item.displayPrompt,
-                    style: Theme.of(context).textTheme.titleLarge,
-                    reserveCollapsedHeight: true,
-                  ),
-                  if (folder != null || item.tags.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 9),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
+              child: isGeneratingVideo || hasMedia
+                  ? InlineVideoMediaBox(
+                      playbackId: item.localId,
+                      aspectRatio: generationAspectRatio(
+                        item.config.aspectRatio,
+                      ),
+                      preview: preview,
+                      idleChrome: hasMedia && !item.isImage
+                          ? GenerationIdleChrome(
+                              controller: widget.controller,
+                              item: item,
+                            )
+                          : null,
+                    )
+                  : Stack(
                       children: <Widget>[
-                        if (folder != null)
-                          ActionChip(
-                            avatar: const Icon(Icons.folder_outlined, size: 14),
-                            label: Text(folder.name),
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => widget.controller
-                                .setLibraryFolderView(folder.id),
+                        StaticMediaBox(
+                          aspectRatio: generationAspectRatio(
+                            item.config.aspectRatio,
                           ),
-                        ...item.tags
-                            .take(3)
-                            .map(
-                              (tag) => ActionChip(
-                                label: Text('#$tag'),
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () =>
-                                    widget.controller.setLibraryTag(tag),
+                          reserveChrome: !item.isImage,
+                          child: preview,
+                        ),
+                        // With no film to show, the media zone is dead space —
+                        // the status panel lives there instead of stretching
+                        // the card body past its delivered neighbors. A dead
+                        // render skips the panel: its error already sits on the
+                        // test-bars thumbnail band.
+                        if (!GenerationErrorThumbnail.shouldShow(item) &&
+                            GenerationStatusDetails.shouldShow(item))
+                          Positioned.fill(
+                            key: const ValueKey('generation-status-overlay'),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                52,
+                                16,
+                                16,
+                              ),
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 520,
+                                  ),
+                                  child: GenerationStatusDetails(
+                                    item: item,
+                                    maxProblemLines: 6,
+                                  ),
+                                ),
                               ),
                             ),
-                        if (item.tags.length > 3)
-                          Chip(
-                            label: Text('+${item.tags.length - 3}'),
-                            visualDensity: VisualDensity.compact,
                           ),
                       ],
                     ),
-                  ],
-                  const SizedBox(height: 11),
-                  GenerationSpecChips(item: item),
-                  if (item.config.keyframes?.isNotEmpty == true ||
-                      item.config.references?.isNotEmpty == true ||
-                      item.config.source != null) ...<Widget>[
-                    const SizedBox(height: 9),
-                    ReferenceInputsStrip(
-                      controller: widget.controller,
-                      item: item,
-                    ),
-                  ],
-                  if (GenerationStatusDetails.shouldShow(item) &&
-                      (hasMedia || isGeneratingVideo)) ...<Widget>[
-                    const SizedBox(height: 9),
-                    GenerationStatusDetails(item: item),
-                  ],
-                  if (item.deliveryExpired) ...<Widget>[
-                    const SizedBox(height: 9),
-                    Text(
-                      'The provider’s delivery link expired before the film could be retained; the record stays so you can reuse its settings.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 13),
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Wrap(
-                          spacing: 7,
-                          runSpacing: 7,
-                          children: <Widget>[
-                            if (item.resultAsset != null ||
-                                item.resultUrl != null)
-                              BusyFilledButton.tonalIcon(
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(88, 40),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 15,
-                                  ),
-                                ),
-                                onPressed: _save,
-                                icon: const Icon(
-                                  Icons.download_rounded,
-                                  size: 16,
-                                ),
-                                label: const Text('Save'),
-                              ),
-                            if (widget.controller.canReuse(item))
-                              ListenableBuilder(
-                                listenable: widget.controller.busy,
-                                builder: (context, _) =>
-                                    BusyOutlinedButton.icon(
-                                      key: ValueKey(
-                                        'library-reuse-${item.localId}',
-                                      ),
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size(88, 40),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 15,
-                                        ),
-                                      ),
-                                      busy: widget.controller.busy.isBusy(
-                                        'generation',
-                                        item.localId,
-                                      ),
-                                      onPressed: () => _busy(
-                                        () => widget.controller.reuse(item),
-                                      ),
-                                      icon: const Icon(
-                                        Icons.replay_rounded,
-                                        size: 16,
-                                      ),
-                                      label: Text(
-                                        item.isFailed && !item.hasDeliveredMedia
-                                            ? 'Retry'
-                                            : 'Reuse',
-                                      ),
-                                    ),
-                              ),
-                            GenerationStatusButton(
-                              controller: widget.controller,
-                              item: item,
-                            ),
-                            GenerationCostChip(item: item),
-                          ],
-                        ),
-                      ),
-                      GenerationActionsMenu(
+            ),
+            // The body is the way into the film's detail modal; the buttons
+            // and chips inside keep their own taps.
+            InkWell(
+              key: ValueKey<String>('generation-open-${item.localId}'),
+              onTap: () => unawaited(
+                showGenerationDetailModal(
+                  context,
+                  controller: widget.controller,
+                  item: item,
+                ),
+              ),
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(15),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    if (GenerationProvenance.applies(item)) ...<Widget>[
+                      GenerationProvenance(
                         controller: widget.controller,
                         item: item,
-                        includeSave: false,
-                        includeReuse: false,
-                        includeCheckStatus: false,
-                        onMove: move,
-                        onTag: tag,
-                        onVisibility: visibility,
-                        onDelete: () => unawaited(_remove()),
-                        onCopyToDrive: copyToDrive,
+                      ),
+                      const SizedBox(height: 7),
+                    ],
+                    GenerationPrompt(
+                      controller: widget.controller,
+                      prompt: item.displayPrompt,
+                      style: Theme.of(context).textTheme.titleLarge,
+                      reserveCollapsedHeight: true,
+                    ),
+                    if (folder != null || item.tags.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 9),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          if (folder != null)
+                            ActionChip(
+                              avatar: const Icon(
+                                Icons.folder_outlined,
+                                size: 14,
+                              ),
+                              label: Text(folder.name),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => widget.controller
+                                  .setLibraryFolderView(folder.id),
+                            ),
+                          ...item.tags
+                              .take(3)
+                              .map(
+                                (tag) => ActionChip(
+                                  label: Text('#$tag'),
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () =>
+                                      widget.controller.setLibraryTag(tag),
+                                ),
+                              ),
+                          if (item.tags.length > 3)
+                            Chip(
+                              label: Text('+${item.tags.length - 3}'),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
+                    const SizedBox(height: 11),
+                    GenerationSpecChips(item: item),
+                    if (item.config.keyframes?.isNotEmpty == true ||
+                        item.config.references?.isNotEmpty == true ||
+                        item.config.source != null) ...<Widget>[
+                      const SizedBox(height: 9),
+                      ReferenceInputsStrip(
+                        controller: widget.controller,
+                        item: item,
+                      ),
+                    ],
+                    if (GenerationStatusDetails.shouldShow(item) &&
+                        (hasMedia || isGeneratingVideo)) ...<Widget>[
+                      const SizedBox(height: 9),
+                      GenerationStatusDetails(item: item),
+                    ],
+                    if (item.deliveryExpired) ...<Widget>[
+                      const SizedBox(height: 9),
+                      Text(
+                        'The provider’s delivery link expired before the film could be retained; the record stays so you can reuse its settings.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 13),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Wrap(
+                            spacing: 7,
+                            runSpacing: 7,
+                            children: <Widget>[
+                              if (item.resultAsset != null ||
+                                  item.resultUrl != null)
+                                BusyFilledButton.tonalIcon(
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(88, 40),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 15,
+                                    ),
+                                  ),
+                                  onPressed: _save,
+                                  icon: const Icon(
+                                    Icons.download_rounded,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Save'),
+                                ),
+                              if (widget.controller.canReuse(item))
+                                ListenableBuilder(
+                                  listenable: widget.controller.busy,
+                                  builder: (context, _) =>
+                                      BusyOutlinedButton.icon(
+                                        key: ValueKey(
+                                          'library-reuse-${item.localId}',
+                                        ),
+                                        style: OutlinedButton.styleFrom(
+                                          minimumSize: const Size(88, 40),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 15,
+                                          ),
+                                        ),
+                                        busy: widget.controller.busy.isBusy(
+                                          'generation',
+                                          item.localId,
+                                        ),
+                                        onPressed: () => _busy(
+                                          () => widget.controller.reuse(item),
+                                        ),
+                                        icon: const Icon(
+                                          Icons.replay_rounded,
+                                          size: 16,
+                                        ),
+                                        label: Text(
+                                          item.isFailed &&
+                                                  !item.hasDeliveredMedia
+                                              ? 'Retry'
+                                              : 'Reuse',
+                                        ),
+                                      ),
+                                ),
+                              GenerationStatusButton(
+                                controller: widget.controller,
+                                item: item,
+                              ),
+                              GenerationCostChip(item: item),
+                            ],
+                          ),
+                        ),
+                        GenerationActionsMenu(
+                          controller: widget.controller,
+                          item: item,
+                          includeSave: false,
+                          includeReuse: false,
+                          includeCheckStatus: false,
+                          onMove: move,
+                          onTag: tag,
+                          onVisibility: visibility,
+                          onDelete: () => unawaited(_remove()),
+                          onCopyToDrive: copyToDrive,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

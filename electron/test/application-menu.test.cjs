@@ -12,7 +12,7 @@ const {
 const { isAllowedExternalUrl } = require("../lib/runtime.cjs");
 
 function buildTemplate(overrides = {}) {
-  const calls = { updates: 0, settings: 0, opened: [], reloads: 0, logs: 0 };
+  const calls = { updates: 0, settings: 0, opened: [], reloads: 0, logs: 0, reports: 0 };
   const template = buildApplicationMenuTemplate({
     appName: "Clawnsole",
     isPackaged: true,
@@ -25,6 +25,7 @@ function buildTemplate(overrides = {}) {
     openExternalUrl: (url) => calls.opened.push(url),
     reloadStudio: () => calls.reloads += 1,
     showLogs: () => calls.logs += 1,
+    saveDiagnosticsReport: () => calls.reports += 1,
     ...overrides,
   });
   return { calls, template };
@@ -104,6 +105,7 @@ test("Help links open through the shell's external allowlist", () => {
     "Report an Issue…",
     "separator",
     "Show Logs",
+    "Save Diagnostics Report…",
   ]);
   for (const item of help.filter((item) => HELP_LINKS.some((link) => link.label === item.label))) item.click();
   assert.deepEqual(calls.opened, [
@@ -122,7 +124,9 @@ test("packaged recovery and logs work through native callbacks without the Flutt
   assert.equal(reload.accelerator, "CmdOrCtrl+R");
   reload.click();
   submenuOf(template, "help").find((item) => item.label === "Show Logs").click();
+  submenuOf(template, "help").find((item) => item.label === "Save Diagnostics Report…").click();
   assert.equal(calls.reloads, 1);
   assert.equal(calls.logs, 1);
+  assert.equal(calls.reports, 1);
   assert.deepEqual(calls.opened, []);
 });

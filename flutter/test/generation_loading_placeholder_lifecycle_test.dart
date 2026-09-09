@@ -5,30 +5,75 @@ import 'package:clawnsole/ui/generation_loading_placeholder.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/shader_recording_canvas.dart';
+
 void main() {
   for (final style in GenerationPlaceholderStyle.values) {
-    testWidgets('${style.name} releases temporary shaders after every paint', (
-      tester,
-    ) async {
-      final painter = await _mountPainter(tester, style);
-      final canvas = _ShaderRecordingCanvas();
-      for (var frame = 0; frame < 30; frame++) {
-        painter.paint(canvas, const Size(320, 180));
-      }
-      expect(canvas.shaders.length, greaterThanOrEqualTo(60));
-      expect(canvas.shaders.every((shader) => shader.debugDisposed), isTrue);
+    testWidgets(
+      '${style.name} releases per-frame shaders and reuses the rest',
+      (tester) async {
+        final painter = await _mountPainter(tester, style);
+        const size = Size(320, 180);
 
-      // A failed draw must also release the temporary shader owner.
-      final failing = _ShaderRecordingCanvas(throwOnShader: true);
-      expect(
-        () => painter.paint(failing, const Size(320, 180)),
-        throwsStateError,
-      );
-      expect(failing.shaders, hasLength(1));
-      expect(failing.shaders.single.debugDisposed, isTrue);
-      await tester.pumpWidget(const SizedBox.shrink());
-    });
+        // Frame one: everything is new. Frame two: whatever the surface
+        // keeps (vignette, sheen, grain, the hum bar's shape) is the same
+        // object again, and whatever it builds per frame is disposed before
+        // the frame ends. Nothing new survives the second paint.
+        final report = paintTwice(painter.paint, size);
+        expect(report.first, isNotEmpty);
+        expect(report.leakedOnSecond, isEmpty);
+        expect(
+          report.second.intersection(report.first),
+          isNotEmpty,
+          reason: 'size-only shaders are kept across frames',
+        );
+        for (final shader in report.newOnSecond) {
+          expect(shader.debugDisposed, isTrue);
+        }
+
+        // Thirty frames later the picture is the same: the kept set does not
+        // grow, and nothing the frames created is left alive.
+        final canvas = ShaderRecordingCanvas();
+        for (var frame = 0; frame < 30; frame++) {
+          painter.paint(canvas, size);
+        }
+        final alive = canvas.distinctShaders
+            .where((shader) => !shader.debugDisposed)
+            .toSet();
+        expect(alive, equals(report.first.intersection(report.second)));
+        expect(
+          canvas.maskFilters,
+          isEmpty,
+          reason: 'a continuously repainting surface never blurs',
+        );
+
+        // A failed draw must also release a temporary shader owner.
+        final failing = ShaderRecordingCanvas(throwOnShader: true);
+        expect(() => painter.paint(failing, size), throwsStateError);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
   }
+
+  testWidgets('a failed draw releases the frame-only shader it was holding', (
+    tester,
+  ) async {
+    final painter = await _mountPainter(
+      tester,
+      GenerationPlaceholderStyle.cyclone,
+    );
+    // The cyclone's chased border is the one shader it builds each frame;
+    // warm the cache first so the failing draw lands on it.
+    painter.paint(ShaderRecordingCanvas(), const Size(320, 180));
+    final failing = _FailOnSweepCanvas();
+    expect(
+      () => painter.paint(failing, const Size(320, 180)),
+      throwsStateError,
+    );
+    expect(failing.failed, isNotNull);
+    expect(failing.failed!.debugDisposed, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 Future<CustomPainter> _mountPainter(
@@ -78,25 +123,19 @@ Future<CustomPainter> _mountPainter(
       .painter!;
 }
 
-class _ShaderRecordingCanvas implements Canvas {
-  _ShaderRecordingCanvas({this.throwOnShader = false});
+/// Fails the first stroked round-rect draw carrying a shader: the cyclone's
+/// per-frame chased border.
+class _FailOnSweepCanvas extends ShaderRecordingCanvas {
+  ui.Shader? failed;
 
-  final bool throwOnShader;
-  final List<ui.Shader> shaders = <ui.Shader>[];
-
-  void _record(Paint paint) {
-    final shader = paint.shader;
-    if (shader == null) return;
-    shaders.add(shader);
-    if (throwOnShader) throw StateError('Synthetic canvas failure');
+  @override
+  void drawRRect(RRect rrect, Paint paint) {
+    if (paint.shader != null &&
+        paint.style == PaintingStyle.stroke &&
+        failed == null) {
+      failed = paint.shader;
+      throw StateError('Synthetic canvas failure');
+    }
+    super.drawRRect(rrect, paint);
   }
-
-  @override
-  void drawRect(Rect rect, Paint paint) => _record(paint);
-
-  @override
-  void drawRRect(RRect rrect, Paint paint) => _record(paint);
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }
