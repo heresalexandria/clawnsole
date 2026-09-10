@@ -358,6 +358,13 @@ nav a:focus-visible,
   overflow: hidden;
 }
 
+.hero-copy h1 {
+  max-width: 16ch;
+  font-size: clamp(2.6rem, 4.8vw, 4.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+
 .hero-lede {
   max-width: 610px;
   margin-bottom: 18px;
@@ -371,7 +378,7 @@ nav a:focus-visible,
   max-width: 610px;
   margin-bottom: 28px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1.55;
 }
