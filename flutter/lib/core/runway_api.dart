@@ -198,6 +198,35 @@ class RunwayApi {
             'targetAspectRatio': input['aspect_ratio'],
           if (input['seed'] is num) 'seed': input['seed'],
         };
+      } else if (model == 'kling_4' || model == 'gemini_omni_flash_1.1') {
+        endpoint = '/v1/video_to_video';
+        payload = <String, Object?>{
+          'model': model,
+          'videoUri': source,
+          'promptText': prompt,
+          if (model == 'gemini_omni_flash_1.1') 'mode': 'edit',
+          if (images.isNotEmpty)
+            'references': images
+                .map((uri) => <String, Object?>{'uri': uri})
+                .toList(),
+        };
+        _addOutputGeometry(
+          payload,
+          model,
+          input,
+          imageRoute: model == 'kling_4',
+        );
+      } else if (model.startsWith('klingO3_')) {
+        endpoint = '/v1/video_to_video';
+        payload = <String, Object?>{
+          'model': model,
+          'promptVideo': source,
+          'promptText': prompt,
+          if (images.isNotEmpty)
+            'references': images
+                .map((uri) => <String, Object?>{'uri': uri})
+                .toList(),
+        };
       } else if (model == 'gemini_omni_flash') {
         endpoint = '/v1/video_to_video';
         payload = <String, Object?>{
@@ -236,6 +265,10 @@ class RunwayApi {
             'seedance2_mini',
             'hailuo3',
             'grok_imagine_1_5',
+            'wan3',
+            'wan3_prime',
+            'kling_4',
+            'gemini_omni_flash_1.1',
           }.contains(model);
       if (creativeReferences) {
         endpoint = '/v1/text_to_video';
@@ -261,6 +294,8 @@ class RunwayApi {
           input,
           prompt: prompt,
           images: guidance,
+          references: frameUris.isNotEmpty ? images : const <String>[],
+          videos: videos,
           audios: audios,
         );
       }
@@ -339,18 +374,28 @@ class RunwayApi {
       'model': model,
       if (prompt.isNotEmpty || model != 'seedance2_5') 'promptText': prompt,
       if (promptVideo != null) 'promptVideo': promptVideo,
-      if (model.startsWith('seedance'))
+      if (model.startsWith('seedance') ||
+          model.startsWith('wan3') ||
+          model.startsWith('kling3.') ||
+          model.startsWith('klingO3_'))
         'audio': input['generate_audio'] != false,
       if (model == 'veo3.1' || model == 'veo3.1_fast')
         'audio': input['generate_audio'] != false,
       if (input['duration'] is num) 'duration': input['duration'],
+      if (model == 'h3_max' && input['seed'] is num) 'seed': input['seed'],
       if (images.isNotEmpty)
         'references': images
             .map((uri) => <String, Object?>{'uri': uri})
             .toList(),
       if (videos.isNotEmpty)
         'referenceVideos': videos
-            .map((uri) => <String, Object?>{'type': 'video', 'uri': uri})
+            .map(
+              (uri) => <String, Object?>{
+                if (model != 'gemini_omni_flash_1.1' && model != 'kling_4')
+                  'type': 'video',
+                'uri': uri,
+              },
+            )
             .toList(),
       if (audios.isNotEmpty)
         'referenceAudio': audios
@@ -366,6 +411,8 @@ class RunwayApi {
     Map<String, Object?> input, {
     required String prompt,
     required List<String> images,
+    required List<String> references,
+    required List<String> videos,
     required List<String> audios,
   }) {
     final supportsLast = const <String>{
@@ -375,6 +422,18 @@ class RunwayApi {
       'seedance2_mini',
       'veo3.1',
       'veo3.1_fast',
+      'wan3',
+      'wan3_prime',
+      'h3_max',
+      'gemini_omni_flash_1.1',
+      'kling_4',
+      'kling2.5_turbo_pro',
+      'kling3.0_standard',
+      'kling3.0_pro',
+      'kling3.0_4k',
+      'klingO3_standard',
+      'klingO3_pro',
+      'klingO3_4k',
     }.contains(model);
     final promptImage = images.length == 1
         ? images.single
@@ -393,14 +452,32 @@ class RunwayApi {
         'promptText': prompt,
       if (model.startsWith('seedance') ||
           model == 'veo3.1' ||
-          model == 'veo3.1_fast')
+          model == 'veo3.1_fast' ||
+          model.startsWith('wan3') ||
+          model.startsWith('kling3.') ||
+          model.startsWith('klingO3_'))
         'audio': input['generate_audio'] != false,
       if (input['duration'] is num) 'duration': input['duration'],
+      if (references.isNotEmpty)
+        'references': references
+            .map((uri) => <String, Object?>{'uri': uri})
+            .toList(),
+      if (videos.isNotEmpty)
+        'referenceVideos': videos
+            .map(
+              (uri) => <String, Object?>{
+                if (model != 'gemini_omni_flash_1.1' && model != 'kling_4')
+                  'type': 'video',
+                'uri': uri,
+              },
+            )
+            .toList(),
       if (audios.isNotEmpty)
         'referenceAudio': audios
             .map((uri) => <String, Object?>{'type': 'audio', 'uri': uri})
             .toList(),
-      if (input['seed'] is num && (model == 'gen4.5' || model == 'gen4_turbo'))
+      if (input['seed'] is num &&
+          (model == 'gen4.5' || model == 'gen4_turbo' || model == 'h3_max'))
         'seed': input['seed'],
     };
     _addOutputGeometry(payload, model, input, imageRoute: true);
@@ -414,6 +491,125 @@ class RunwayApi {
     required bool imageRoute,
   }) {
     final resolution = input['resolution']?.toString() ?? 'hd';
+    final ratio = input['aspect_ratio']?.toString() ?? '16:9';
+    if (model == 'h3_max') {
+      payload['resolution'] = resolution == 'sd' ? '480p' : '768p';
+      return;
+    }
+    if (model == 'kling2.5_turbo_pro' && imageRoute) return;
+    if (model.startsWith('kling3.') ||
+        model.startsWith('klingO3_') ||
+        model == 'kling2.5_turbo_pro') {
+      final landscape = resolution == '4k'
+          ? '3840:2160'
+          : resolution == 'fhd'
+          ? '1920:1080'
+          : '1280:720';
+      payload['ratio'] = ratio == '1:1'
+          ? resolution == '4k'
+                ? '2880:2880'
+                : resolution == 'fhd'
+                ? '1440:1440'
+                : '960:960'
+          : ratio == '9:16'
+          ? landscape.split(':').reversed.join(':')
+          : landscape;
+      return;
+    }
+    if (model == 'kling_4') {
+      payload['ratio'] = imageRoute || ratio == 'auto'
+          ? resolution == 'fhd'
+                ? 'auto_1080p'
+                : 'auto_720p'
+          : (resolution == 'fhd'
+                ? const <String, String>{
+                    '16:9': '1920:1080',
+                    '9:16': '1080:1920',
+                    '1:1': '1440:1440',
+                    '21:9': '2200:940',
+                  }
+                : const <String, String>{
+                    '16:9': '1280:720',
+                    '9:16': '720:1280',
+                    '1:1': '940:940',
+                    '21:9': '1460:624',
+                  })[ratio];
+      return;
+    }
+    if (model.startsWith('wan3')) {
+      payload['ratio'] = imageRoute
+          ? 'auto_${_resolutionLabel(resolution)}'
+          : (switch (resolution) {
+              'sd' => const <String, String>{
+                '16:9': '832:480',
+                '4:3': '720:544',
+                '1:1': '624:624',
+                '3:4': '544:720',
+                '9:16': '480:832',
+              },
+              'fhd' => const <String, String>{
+                '16:9': '1920:1080',
+                '4:3': '1648:1248',
+                '1:1': '1440:1440',
+                '3:4': '1248:1648',
+                '9:16': '1080:1920',
+              },
+              _ => const <String, String>{
+                '16:9': '1280:720',
+                '4:3': '1104:832',
+                '1:1': '960:960',
+                '3:4': '832:1104',
+                '9:16': '720:1280',
+              },
+            })[ratio];
+      return;
+    }
+    if (model == 'grok_imagine_1_5_lite') {
+      payload['ratio'] = imageRoute
+          ? 'auto_${_resolutionLabel(resolution)}'
+          : (switch (resolution) {
+              'sd' => const <String, String>{
+                '16:9': '848:480',
+                '9:16': '480:848',
+                '1:1': '480:480',
+                '4:3': '640:480',
+                '3:4': '480:640',
+                '3:2': '720:480',
+                '2:3': '480:720',
+              },
+              'fhd' => const <String, String>{
+                '16:9': '1904:1072',
+                '9:16': '1072:1904',
+                '1:1': '1424:1424',
+                '4:3': '1648:1232',
+                '3:4': '1232:1648',
+                '3:2': '1744:1152',
+                '2:3': '1152:1744',
+              },
+              _ => const <String, String>{
+                '16:9': '1280:720',
+                '9:16': '720:1280',
+                '1:1': '720:720',
+                '4:3': '960:720',
+                '3:4': '720:960',
+                '3:2': '1088:720',
+                '2:3': '720:1088',
+              },
+            })[ratio];
+      return;
+    }
+    if (model == 'gemini_omni_flash_1.1') {
+      final landscape = switch (resolution) {
+        '360p' => '640:360',
+        'fhd' => '1920:1080',
+        '4k' => '3840:2160',
+        _ => '1280:720',
+      };
+      payload['ratio'] = ratio == '9:16'
+          ? landscape.split(':').reversed.join(':')
+          : landscape;
+      return;
+    }
     if (model == 'hailuo3') {
       payload['ratio'] = input['aspect_ratio'] == 'auto'
           ? imageRoute

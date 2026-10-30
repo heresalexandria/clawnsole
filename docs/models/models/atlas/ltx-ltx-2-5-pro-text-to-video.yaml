@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "ltx/ltx-2.5-pro/text-to-video",
+  "canonical_model_id": "ltx-2.5-pro",
+  "label": "LTX 2.5 Pro · Text",
+  "description": "LTX 2.5 Pro text-to-video generation.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "qhd",
+      "label": "1440p",
+      "detail": "2560 × 1440"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 2,
+  "max_keyframes": 0,
+  "usd_per_second": 0.12,
+  "supports_audio": true,
+  "supports_auto_duration": true,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "kling2.5_turbo_pro",
+  "canonical_model_id": "kling-2.5-turbo-pro",
+  "label": "Kling 2.5 Turbo Pro",
+  "description": "Fast text and first/last-frame generation.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 \u00d7 1080"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 10,
+  "duration_step": 5,
+  "max_keyframes": 2,
+  "usd_per_second": 0.12,
+  "reference_usd_per_second": 0.12,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "supports_audio": false,
+  "max_prompt_characters": 2500,
+  "aspect_ratios_by_mode": {
+    "i2v": [
+      "auto"
+    ]
+  }
+}

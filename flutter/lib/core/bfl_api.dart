@@ -70,9 +70,21 @@ class BflApi {
     BeforeGenerationSend? beforeSend,
   }) async {
     final upscale = model == 'flux-tools-video-upscale-v1';
-    final requestInput = Map<String, Object?>.from(input);
-    if (upscale) {
-      final video = requestInput['input_video'];
+    final edit = model == 'flux-tools-video-edit-v1';
+    final requestInput = edit
+        ? <String, Object?>{
+            'video': input['start_video'],
+            'prompt': input['prompt'],
+            if (input['safety_tolerance'] != null)
+              'safety_tolerance': input['safety_tolerance'],
+          }
+        : Map<String, Object?>.from(input);
+    if (!upscale && !edit && requestInput['resolution'] == '4k') {
+      requestInput['resolution'] = 'uhd';
+    }
+    if (upscale || edit) {
+      final field = edit ? 'video' : 'input_video';
+      final video = requestInput[field];
       if (video is String && video.startsWith('data:')) {
         final separator = video.indexOf(',');
         if (separator < 0) {
@@ -81,7 +93,7 @@ class BflApi {
             status: 400,
           );
         }
-        requestInput['input_video'] = video.substring(separator + 1);
+        requestInput[field] = video.substring(separator + 1);
       }
     }
     final encodedPayload = jsonEncode(requestInput);
@@ -90,7 +102,11 @@ class BflApi {
       await _request(
         _client.post(
           _baseUrl.resolve(
-            upscale ? '/v1/flux-tools/video-upscale-v1' : '/v1/flux-3-video',
+            upscale
+                ? '/v1/flux-tools/video-upscale-v1'
+                : edit
+                ? '/v1/flux-tools/video-edit-v1'
+                : '/v1/flux-3-video',
           ),
           headers: _headers(apiKey, json: true),
           body: encodedPayload,

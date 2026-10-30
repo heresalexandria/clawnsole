@@ -4873,7 +4873,7 @@ class _CostPreview extends StatelessWidget {
     final rateLabel = estimate.rateUsd == null
         ? null
         : '${formatUsdAmount(estimate.rateUsd!)} / ${estimate.rateUnit ?? 'second'}';
-    final afterMin = controller.credits == null
+    final afterMin = controller.credits == null || !estimate.isAvailable
         ? null
         : (controller.credits! -
                   (balanceUsesCredits
@@ -4881,7 +4881,7 @@ class _CostPreview extends StatelessWidget {
                       : estimate.maximumUsd))
               .clamp(0, double.infinity)
               .toDouble();
-    final afterMax = controller.credits == null
+    final afterMax = controller.credits == null || !estimate.isAvailable
         ? null
         : (controller.credits! -
                   (balanceUsesCredits
@@ -4889,13 +4889,14 @@ class _CostPreview extends StatelessWidget {
                       : estimate.minimumUsd))
               .clamp(0, double.infinity)
               .toDouble();
-    final basis =
-        '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
-        '${estimate.basis == 'artcraft-live-quote'
-            ? 'Live quote calculated from the current prompt and settings.'
-            : estimate.basis == 'input-derived-published-rate'
-            ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
-            : 'Calculated from the current pricing settings at the provider’s published or live rate.'}';
+    final basis = !estimate.isAvailable
+        ? estimate.basis
+        : '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
+              '${estimate.basis == 'artcraft-live-quote'
+                  ? 'Live quote calculated from the current prompt and settings.'
+                  : estimate.basis == 'input-derived-published-rate'
+                  ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
+                  : 'Calculated from the current pricing settings at the provider’s published or live rate.'}';
     final badge = Container(
       width: 30,
       height: 30,
@@ -4922,7 +4923,9 @@ class _CostPreview extends StatelessWidget {
         ),
         const SizedBox(height: 1),
         Text(
-          formatUsdAmountRange(estimate.minimumUsd, estimate.maximumUsd),
+          estimate.isAvailable
+              ? formatUsdAmountRange(estimate.minimumUsd, estimate.maximumUsd)
+              : 'Variable price',
           style: TextStyle(
             fontFamily: 'Fraunces',
             color: tokens.onMoney,

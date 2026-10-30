@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "kwaivgi/kling-v4.0/image-to-video",
+  "canonical_model_id": "kling-4.0",
+  "label": "Kling 4.0 · Frames",
+  "description": "Kling 4.0 generation from pinned frames. Native audio is always enabled.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 10,
+  "usd_per_second": 0.11,
+  "supports_audio": false,
+  "reference_usd_per_second": 0.11,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "prompt_optional_modes": [
+    "i2v"
+  ],
+  "max_input_image_bytes": 30000000,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_prompt_characters": 26000
+}

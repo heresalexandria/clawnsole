@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "h3_max",
+  "canonical_model_id": "minimax-h3-max",
+  "label": "H3 Max",
+  "description": "Fast text or first/last-frame video with native audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 \u00d7 480"
+    },
+    {
+      "id": "hd",
+      "label": "768p",
+      "detail": "1366 \u00d7 768"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.08,
+  "reference_usd_per_second": 0.08,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_prompt_characters": 6000,
+  "supports_seed": true
+}

@@ -28,10 +28,12 @@ class _KreaRouteSpec {
     this.sendsAudio = false,
     this.sendsSeed = false,
     this.sendsEndImage = false,
+    this.sendsStartImage = true,
     this.sendsStartVideo = false,
     this.sendsImageReferences = false,
     this.sendsVideoReferences = false,
     this.sendsAudioReferences = false,
+    this.sendsReferenceVideoSeconds = false,
     this.dimensionsFromResolution = false,
   });
 
@@ -51,10 +53,12 @@ class _KreaRouteSpec {
   final bool sendsAudio;
   final bool sendsSeed;
   final bool sendsEndImage;
+  final bool sendsStartImage;
   final bool sendsStartVideo;
   final bool sendsImageReferences;
   final bool sendsVideoReferences;
   final bool sendsAudioReferences;
+  final bool sendsReferenceVideoSeconds;
 
   /// The route takes explicit `width`/`height` computed from the selected
   /// resolution tier and aspect ratio (Luma Ray 2).
@@ -68,7 +72,8 @@ const _seedanceSpec = _KreaRouteSpec(
     'fhd': '1080p',
     '4k': '4k',
   },
-  sendsAudio: true,
+  // generate_audio was removed on 2026-10-30; these routes produce native
+  // audio without a mute flag.
   sendsSeed: true,
   sendsEndImage: true,
   sendsImageReferences: true,
@@ -100,7 +105,56 @@ const _ltxSpec = _KreaRouteSpec(
   sendsEndImage: true,
 );
 
+const _geminiOmniSpec = _KreaRouteSpec(
+  sendsImageReferences: true,
+  sendsVideoReferences: true,
+);
+
 const _kreaRouteSpecs = <String, _KreaRouteSpec>{
+  'black-forest-labs/flux-3-max': _KreaRouteSpec(
+    resolutionValues: <String, String>{'hd': '720p', 'fhd': '1080p'},
+    sendsAudio: true,
+    sendsSeed: true,
+    sendsEndImage: true,
+  ),
+  'black-forest-labs/flux-video-edit': _KreaRouteSpec(
+    sendsStartImage: false,
+    sendsAspectRatio: false,
+    sendsDuration: false,
+    sendsStartVideo: true,
+  ),
+  'kling/kling-4': _KreaRouteSpec(
+    resolutionValues: <String, String>{'hd': '720p', 'fhd': '1080p'},
+    sendsEndImage: true,
+    sendsImageReferences: true,
+    sendsVideoReferences: true,
+  ),
+  'minimax/h3-max-turbo': _KreaRouteSpec(
+    resolutionValues: <String, String>{
+      'sd': '480p',
+      'hd': '768p',
+      'fhd': '1080p',
+    },
+    sendsSeed: true,
+    sendsEndImage: true,
+  ),
+  'google/gemini-omni-flash': _geminiOmniSpec,
+  'google/gemini-omni-flash-1.1': _geminiOmniSpec,
+  'alibaba/wan-3.0-prime': _KreaRouteSpec(
+    resolutionValues: <String, String>{
+      'sd': '480p',
+      'hd': '720p',
+      'fhd': '1080p',
+    },
+    aspectRatioValues: <String, String>{'auto': 'adaptive'},
+    sendsAudio: true,
+    sendsSeed: true,
+    sendsEndImage: true,
+    sendsImageReferences: true,
+    sendsVideoReferences: true,
+    sendsAudioReferences: true,
+    sendsReferenceVideoSeconds: true,
+  ),
   'alibaba/wan-2.5': _KreaRouteSpec(
     resolutionValues: <String, String>{
       'sd': '480p',
@@ -125,7 +179,12 @@ const _kreaRouteSpecs = <String, _KreaRouteSpec>{
     sendsAudioReferences: true,
   ),
   'black-forest-labs/flux-3-video': _KreaRouteSpec(
-    resolutionValues: <String, String>{'hd': '720p', 'fhd': '1080p'},
+    resolutionValues: <String, String>{
+      'hd': '720p',
+      'fhd': '1080p',
+      'qhd': '1440p',
+      '4k': '2160p',
+    },
     sendsAudio: true,
     sendsEndImage: true,
     sendsStartVideo: true,
@@ -154,7 +213,11 @@ const _kreaRouteSpecs = <String, _KreaRouteSpec>{
     dimensionsFromResolution: true,
   ),
   'minimax/h3-max': _KreaRouteSpec(
-    resolutionValues: <String, String>{'sd': '480p', 'hd': '768p'},
+    resolutionValues: <String, String>{
+      'sd': '480p',
+      'hd': '768p',
+      'fhd': '1080p',
+    },
     sendsSeed: true,
     sendsEndImage: true,
   ),
@@ -166,6 +229,7 @@ const _kreaRouteSpecs = <String, _KreaRouteSpec>{
     sendsImageReferences: true,
     sendsVideoReferences: true,
     sendsAudioReferences: true,
+    sendsReferenceVideoSeconds: true,
   ),
   'runway/gen-4.5': _KreaRouteSpec(
     aspectRatioValues: <String, String>{
@@ -309,7 +373,9 @@ class KreaApi {
       );
     }
     final mode = input['mode']?.toString() ?? 't2v';
-    final frames = await _prepareSources(key, input['keyframes'], frames: true);
+    final frames = spec.sendsStartImage
+        ? await _prepareSources(key, input['keyframes'], frames: true)
+        : const <String>[];
     final images = spec.sendsImageReferences
         ? await _prepareSources(key, input['reference_images'])
         : const <String>[];
@@ -329,6 +395,7 @@ class KreaApi {
       );
     }
     final resolution = input['resolution']?.toString() ?? 'hd';
+    final referenceSeconds = input['reference_video_duration_seconds'];
     final payload = <String, Object?>{
       'prompt': _prompt(
         model,
@@ -344,6 +411,11 @@ class KreaApi {
       if (images.isNotEmpty) 'reference_images': images,
       if (videos.isNotEmpty) 'reference_videos': videos,
       if (audios.isNotEmpty) 'reference_audios': audios,
+      if (spec.sendsReferenceVideoSeconds &&
+          videos.isNotEmpty &&
+          referenceSeconds is num &&
+          (input['reference_video_duration_pending'] ?? 0) == 0)
+        'reference_video_seconds': referenceSeconds,
       if (spec.sendsDuration && input['duration'] is num)
         'duration': input['duration'],
       if (spec.resolutionValues[resolution] case final String value)

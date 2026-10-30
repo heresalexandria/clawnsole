@@ -7,6 +7,53 @@ import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'combined video budgets parse, fall back, and preserve audio budgets',
+    () {
+      final model = _parse('artcraft', 'wan_3p0');
+      expect(model.maxCombinedVideoSeconds, 30);
+      expect(
+        model.maxReferenceSeconds(
+          MediaReferenceKind.video,
+          'hd',
+          outputSeconds: 22,
+        ),
+        8,
+      );
+      expect(
+        model.maxReferenceSeconds(
+          MediaReferenceKind.audio,
+          'hd',
+          outputSeconds: 22,
+        ),
+        15,
+      );
+      final override = _parse(
+        'artcraft',
+        'wan_3p0',
+        fields: {'max_combined_video_seconds': 25},
+      );
+      expect(override.maxCombinedVideoSeconds, 25);
+      expect(_parse('artcraft', 'unknown').maxCombinedVideoSeconds, isNull);
+      expect(
+        _parse(
+          'artcraft',
+          'wan_3p0',
+          fields: {'max_video_references': 0},
+        ).maxCombinedVideoSeconds,
+        isNull,
+      );
+      expect(
+        () => _parse(
+          'artcraft',
+          'wan_3p0',
+          fields: {'max_combined_video_seconds': 0},
+        ),
+        throwsA(isA<ProviderCatalogManifestException>()),
+      );
+    },
+  );
+
   test('Krea Seedance 2.5 has the same fallback offline and in Pages', () {
     final bundled = bundledVideoProviders
         .singleWhere((provider) => provider.id == 'krea')

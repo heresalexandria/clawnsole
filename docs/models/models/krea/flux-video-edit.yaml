@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "black-forest-labs/flux-video-edit",
+  "canonical_model_id": "flux-video-edit",
+  "label": "FLUX Video Edit",
+  "description": "Edit any clip with a text prompt.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "Source",
+      "detail": "Matches source"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0,
+  "supports_start_frame": false,
+  "supports_end_frame": false,
+  "supports_audio": false,
+  "supports_seed": false,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_prompt_characters": 4096,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "source_input_label": "Video to edit",
+  "source_input_hint": "Attach the clip to edit. Its length and dimensions are preserved.",
+  "reference_usd_per_second": 0
+}

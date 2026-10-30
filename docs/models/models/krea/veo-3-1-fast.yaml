@@ -33,8 +33,8 @@
   "max_duration": 8,
   "duration_step": 2,
   "max_keyframes": 2,
-  "usd_per_second": 0.084,
-  "reference_usd_per_second": 0.084,
+  "usd_per_second": 0.08,
+  "reference_usd_per_second": 0.08,
   "supports_start_frame": true,
   "supports_end_frame": true,
   "max_image_references": 3

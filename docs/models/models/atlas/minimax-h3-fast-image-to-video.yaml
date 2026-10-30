@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "minimax/h3-fast/image-to-video",
+  "canonical_model_id": "hailuo-3-fast",
+  "label": "MiniMax H3 Fast · Frames",
+  "description": "MiniMax H3 Fast generation from pinned frames. Native audio is always enabled.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.044,
+  "supports_audio": false,
+  "reference_usd_per_second": 0.044,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

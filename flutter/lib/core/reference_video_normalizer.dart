@@ -333,6 +333,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
           kind: reference.kind,
           promptName: reference.promptName,
           referenceId: reference.referenceId,
+          durationSeconds: reference.durationSeconds,
         );
       }).toList();
       nextConfig = nextConfig.copyWith(references: references);
@@ -361,6 +362,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
           kind: reference.kind,
           promptName: reference.promptName,
           referenceId: reference.referenceId,
+          durationSeconds: reference.durationSeconds,
         );
       }).toList();
       nextConfig = nextConfig.copyWith(references: references);

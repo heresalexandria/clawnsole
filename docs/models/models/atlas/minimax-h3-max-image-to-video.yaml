@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "minimax/h3-max/image-to-video",
+  "canonical_model_id": "minimax-h3-max",
+  "label": "MiniMax H3 Max · Frames",
+  "description": "MiniMax H3 Max generation from pinned frames. Native audio is always enabled.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "768p",
+      "detail": "Native 768 px short edge"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.048,
+  "supports_audio": false,
+  "reference_usd_per_second": 0.048,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

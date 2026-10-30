@@ -257,6 +257,7 @@ void main() {
         form
           ..aspectRatio = '9:16'
           ..durationSeconds = 6
+          ..autoDuration = false
           ..resolution = 'hd';
       });
       controller.setGenerateAudio(true);

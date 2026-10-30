@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "kling/kling-4",
+  "canonical_model_id": "kling-4.0",
+  "label": "Kling 4.0",
+  "description": "Kling’s newest frontier model, up to 30s at 1080p.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "21:9"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.157,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_audio": false,
+  "supports_seed": false,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_image_references": 10,
+  "max_video_references": 5,
+  "reference_usd_per_second": 0.157
+}

@@ -33,6 +33,6 @@
   "max_duration": 15,
   "duration_step": 1,
   "max_keyframes": 0,
-  "usd_per_second": 0.039,
+  "usd_per_second": 0.045,
   "supports_auto_duration": true
 }

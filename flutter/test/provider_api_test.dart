@@ -827,6 +827,8 @@ void main() {
       'veo_3p1_lite',
       'vidu_q3',
       'vidu_q3_turbo',
+      'wan_3p0',
+      'wan_3p0_prime',
     });
     expect(modelById('artcraft', 'seedance_2p5_preview').modes, <VideoMode>[
       VideoMode.i2v,
@@ -879,12 +881,41 @@ void main() {
       'veo_3p1_lite': '2/0/0/0/-/mix/audio-ok',
       'vidu_q3': '2/4/0/0/-/mix/audio-ok',
       'vidu_q3_turbo': '2/0/0/0/-/mix/audio-ok',
+      'wan_3p0': '2/10/5/5/-/exclusive/audio-ok',
+      'wan_3p0_prime': '2/10/5/5/-/exclusive/audio-ok',
     };
     expect(<String, String>{
       for (final model in artCraftProvider.models) model.id: constraint(model),
     }, expectedArtCraft);
 
     const expectedAtlas = <String, String>{
+      'pixverse/v6-max/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'minimax/h3-max-turbo/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-3.0-prime/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'xai/grok-imagine-video-v1.5-lite/text-to-video':
+          '0/0/0/0/-/mix/audio-ok',
+      'ltx/ltx-2.5-fast/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'minimax/h3-max/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'minimax/h3-fast/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'minimax/h3-fast/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'minimax/h3/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'xai/grok-imagine-video-v1.5-lite/image-to-video':
+          '1/0/0/0/-/mix/audio-ok',
+      'luma/ray-3.2/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'minimax/h3-max-turbo/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'luma/ray-3.2/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-3.0-prime/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'minimax/h3-max/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'vidu/q4-preview/image-to-video': '1/0/0/0/-/mix/audio-ok',
+      'pixverse/v6-max/image-to-video': '1/0/0/0/-/mix/audio-ok',
+      'minimax/h3/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'ltx/ltx-2.5-pro/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'kwaivgi/kling-v4.0/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'ltx/ltx-2.5-pro/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-3.0/text-to-video': '0/0/0/0/-/mix/audio-ok',
+      'alibaba/wan-3.0/image-to-video': '2/0/0/0/-/mix/audio-ok',
+      'kwaivgi/kling-v4.0/image-to-video': '10/0/0/0/-/mix/audio-ok',
+      'ltx/ltx-2.5-fast/image-to-video': '2/0/0/0/-/mix/audio-ok',
       'bytedance/seedance-2.5/text-to-video': '0/0/0/0/-/mix/audio-ok',
       'bytedance/seedance-2.5/image-to-video': '2/0/0/0/-/mix/audio-ok',
       'bytedance/seedance-2.5/reference-to-video': '0/30/10/10/-/mix/audio-ok',
@@ -924,6 +955,8 @@ void main() {
         for (final model in ltxProvider.models) model.id: constraint(model),
       },
       <String, String>{
+        'ltx-2-5-fast': '2/0/0/1/-/mix/audio-ok',
+        'ltx-2-5-pro': '2/0/0/1/-/mix/audio-ok',
         'ltx-2-3-fast': '2/0/0/0/-/mix/audio-ok',
         'ltx-2-3-pro': '2/0/0/1/-/mix/audio-ok',
       },
@@ -933,6 +966,19 @@ void main() {
         for (final model in runwayProvider.models) model.id: constraint(model),
       },
       <String, String>{
+        'kling_4': '2/10/5/0/-/exclusive/audio-ok',
+        'kling3.0_standard': '2/0/0/0/-/mix/audio-ok',
+        'kling3.0_pro': '2/0/0/0/-/mix/audio-ok',
+        'kling3.0_4k': '2/0/0/0/-/mix/audio-ok',
+        'klingO3_standard': '2/4/0/0/-/exclusive/audio-ok',
+        'klingO3_pro': '2/4/0/0/-/exclusive/audio-ok',
+        'klingO3_4k': '2/4/0/0/-/exclusive/audio-ok',
+        'kling2.5_turbo_pro': '2/0/0/0/-/mix/audio-ok',
+        'wan3': '2/10/5/5/-/exclusive/audio-ok',
+        'wan3_prime': '2/10/5/5/-/exclusive/audio-ok',
+        'h3_max': '2/0/0/0/-/mix/audio-ok',
+        'grok_imagine_1_5_lite': '1/0/0/0/-/mix/audio-ok',
+        'gemini_omni_flash_1.1': '2/5/3/0/-/exclusive/audio-ok',
         'seedance2_5': '2/30/10/10/-/exclusive/audio-ok',
         'grok_imagine_1_5': '1/7/0/1/8/exclusive/visual',
         'seedance2': '2/9/3/3/-/exclusive/audio-ok',
@@ -955,6 +1001,13 @@ void main() {
         for (final model in kreaProvider.models) model.id: constraint(model),
       },
       <String, String>{
+        'black-forest-labs/flux-3-max': '2/0/0/0/-/mix/audio-ok',
+        'black-forest-labs/flux-video-edit': '0/0/0/0/-/mix/audio-ok',
+        'kling/kling-4': '2/10/5/0/-/mix/audio-ok',
+        'minimax/h3-max-turbo': '2/0/0/0/-/mix/audio-ok',
+        'alibaba/wan-3.0-prime': '2/10/5/5/-/mix/audio-ok',
+        'google/gemini-omni-flash': '1/10/1/0/-/mix/audio-ok',
+        'google/gemini-omni-flash-1.1': '1/10/3/0/-/mix/audio-ok',
         'alibaba/wan-2.5': '1/0/0/0/-/mix/audio-ok',
         'alibaba/wan-3.0': '2/10/5/5/-/mix/audio-ok',
         'black-forest-labs/flux-3-video': '2/0/0/0/-/mix/audio-ok',
@@ -986,6 +1039,19 @@ void main() {
           model.id: model.maxPromptCharacters,
       },
       <String, int?>{
+        'kling_4': 26000,
+        'kling3.0_standard': 2500,
+        'kling3.0_pro': 2500,
+        'kling3.0_4k': 2500,
+        'klingO3_standard': 2500,
+        'klingO3_pro': 2500,
+        'klingO3_4k': 2500,
+        'kling2.5_turbo_pro': 2500,
+        'wan3': 20000,
+        'wan3_prime': 20000,
+        'h3_max': 6000,
+        'grok_imagine_1_5_lite': 2500,
+        'gemini_omni_flash_1.1': 4000,
         'seedance2_5': 15000,
         'grok_imagine_1_5': null,
         'seedance2': 3500,
@@ -1073,6 +1139,8 @@ void main() {
         'seedance_2p5_preview': 10000,
         'grok_imagine_video_1p5': 4096,
         'minimax_h3': 7000,
+        'wan_3p0': 20000,
+        'wan_3p0_prime': 20000,
       },
     );
     expect(modelById('runway', 'seedance2_5').maxPromptCharacters, 15000);
@@ -1772,17 +1840,17 @@ void main() {
     expect(decoded.duration, 'source');
     expect(decoded.upscaleFactor, 2.5);
     expect(decoded.upscaleCreativity, 0);
-    expect(precise.maximumUsd, 19.25);
-    expect(precise.providerUnitsMaximum, 1925);
-    expect(creative.maximumUsd, 27.5);
-    expect(inputPrecise.minimumUsd, closeTo(8.652, .000001));
-    expect(inputPrecise.maximumUsd, closeTo(8.652, .000001));
-    expect(inputPrecise.rateUsd, .07);
+    expect(precise.maximumUsd, 9.625);
+    expect(precise.providerUnitsMaximum, 962.5);
+    expect(creative.maximumUsd, 13.75);
+    expect(inputPrecise.minimumUsd, closeTo(4.326, .000001));
+    expect(inputPrecise.maximumUsd, closeTo(4.326, .000001));
+    expect(inputPrecise.rateUsd, .035);
     expect(inputPrecise.rateUnit, 'megapixel-second');
     expect(inputPrecise.calculation, contains('1920×1080 × 2.5×'));
-    expect(inputCreative.minimumUsd, 12.36);
-    expect(inputCreative.maximumUsd, 12.36);
-    expect(inputCreative.rateUsd, .10);
+    expect(inputCreative.minimumUsd, 6.18);
+    expect(inputCreative.maximumUsd, 6.18);
+    expect(inputCreative.rateUsd, .05);
     expect(modelById('bfl', 'flux-tools-video-upscale-v1').modes, <VideoMode>[
       VideoMode.upscale,
     ]);
@@ -1840,6 +1908,18 @@ void main() {
             isTrue,
             reason: '${provider.id}/${model.id}/${mode.name}',
           );
+          if (!estimate.isAvailable) {
+            expect(provider.id, 'krea');
+            expect(
+              publishedProviderPrices(provider.id).any(
+                (row) => row.model == model.id && row.pricingUnit == 'variable',
+              ),
+              isTrue,
+            );
+            expect(estimate.quotedMinimumUsd, isNull);
+            expect(estimate.quotedMaximumUsd, isNull);
+            continue;
+          }
           expect(
             estimate.rateUsd,
             isNotNull,
@@ -1897,10 +1977,10 @@ void main() {
     expect(artcraft.minimumUsd, 1.86);
     expect(artcraft.providerUnitsMinimum, 186);
     expect(artcraft.providerUnitLabel, 'credits');
-    expect(atlas.minimumUsd, .39);
+    expect(atlas.minimumUsd, .45);
     final ltxRows = publishedProviderPrices('ltx');
-    expect(ltxRows.first.model, 'ltx-2-3-fast:720p');
-    expect(ltxRows.first.priceFor(10), .3);
+    expect(ltxRows.first.model, 'ltx-2-5-fast:720p');
+    expect(ltxRows.first.priceFor(10), closeTo(.9, 1e-9));
     expect(ltxRows.first.supportsDuration(15), isFalse);
     expect(ltxRows.first.supportsDuration(20), isTrue);
   });
@@ -1924,8 +2004,8 @@ void main() {
       const <Generation>[],
       prices,
     );
-    expect(silent.minimumUsd, .84);
-    expect(silent.rateUsd, .21);
+    expect(silent.minimumUsd, .8);
+    expect(silent.rateUsd, .2);
 
     final audio = estimateCost(
       'krea',
@@ -1942,8 +2022,8 @@ void main() {
       const <Generation>[],
       prices,
     );
-    expect(audio.minimumUsd, 1.68);
-    expect(audio.rateUsd, .42);
+    expect(audio.minimumUsd, 1.6);
+    expect(audio.rateUsd, .4);
 
     final edit = estimateCost(
       'krea',
@@ -2033,7 +2113,11 @@ void main() {
       safetyTolerance: 2,
       draft: false,
       references: <MediaReferenceLabel>[
-        MediaReferenceLabel(label: 'Dialogue', kind: MediaReferenceKind.audio),
+        MediaReferenceLabel(
+          label: 'Dialogue',
+          kind: MediaReferenceKind.audio,
+          durationSeconds: 10,
+        ),
       ],
     );
 

@@ -74,6 +74,12 @@ class LtxApi {
         ? 'image-to-video'
         : 'text-to-video';
     final duration = input['duration'];
+    if (!audioDriven && duration == 'auto' && frames.length > 1) {
+      throw const ProviderException(
+        'LTX requires a fixed duration when a last frame is supplied.',
+        status: 400,
+      );
+    }
     final prompt = translateReferencePrompt(
       input['prompt']?.toString() ?? '',
       dialect: ReferencePromptDialect.plainOrdinal,
@@ -163,15 +169,19 @@ class LtxApi {
   }
 
   String _resolution(String value, String ratio) {
-    final landscape = switch (value) {
-      'fhd' => '1920x1080',
-      'qhd' => '2560x1440',
-      '4k' => '3840x2160',
-      _ => '1280x720',
+    final shortSide = switch (value) {
+      'fhd' => 1080,
+      'qhd' => 1440,
+      '4k' => 2160,
+      _ => 720,
     };
-    if (ratio != '9:16') return landscape;
-    final parts = landscape.split('x');
-    return '${parts.last}x${parts.first}';
+    return switch (ratio) {
+      '1:1' => '${shortSide}x$shortSide',
+      '3:2' => '${shortSide * 3 ~/ 2}x$shortSide',
+      '2:3' => '${shortSide}x${shortSide * 3 ~/ 2}',
+      '9:16' => '${shortSide}x${shortSide * 16 ~/ 9}',
+      _ => '${shortSide * 16 ~/ 9}x$shortSide',
+    };
   }
 
   String _frameSource(Object? value) {

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "flux-tools-video-edit-v1",
+  "canonical_model_id": "flux-video-edit-fast",
+  "label": "FLUX Video Edit [fast]",
+  "description": "Edit a source clip while preserving its length, framing, and audio.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "source",
+      "label": "Source aspect",
+      "detail": "Up to 720p"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.03,
+  "reference_usd_per_second": 0.03,
+  "supports_start_frame": false,
+  "supports_end_frame": false,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "supports_audio": false,
+  "max_prompt_characters": 4096,
+  "max_source_video_seconds": 15,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "source_input_label": "Video to edit",
+  "source_input_hint": "Up to 15 seconds; output follows the source at up to 720p."
+}

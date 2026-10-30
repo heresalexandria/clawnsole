@@ -5750,7 +5750,11 @@ class AppController extends ChangeNotifier {
   int? referenceSecondsLimit(MediaReferenceKind kind) =>
       referenceLimit(kind) <= 0
       ? null
-      : selectedModel.maxReferenceSeconds(kind, form.resolution);
+      : selectedModel.maxReferenceSeconds(
+          kind,
+          form.resolution,
+          outputSeconds: form.autoDuration ? null : form.durationSeconds,
+        );
 
   /// Seconds of reference media of [kind] already attached. A reference
   /// whose duration has not been measured yet counts as zero; how many are
@@ -6315,6 +6319,7 @@ class AppController extends ChangeNotifier {
     if (saved != null) {
       unawaited(rememberSavedReferenceDuration(saved, seconds));
     }
+    _invalidateProviderEstimate();
     notifyListeners();
   }
 
@@ -6865,7 +6870,11 @@ class AppController extends ChangeNotifier {
           knownDurations.any((seconds) => seconds + _secondSlack < minimum)) {
         return _referenceMinimumSecondsProblem(model, minimum);
       }
-      final maximum = model.maxReferenceSeconds(kind, form.resolution);
+      final maximum = model.maxReferenceSeconds(
+        kind,
+        form.resolution,
+        outputSeconds: form.autoDuration ? null : form.durationSeconds,
+      );
       final total = knownDurations.fold<double>(
         0,
         (sum, seconds) => sum + seconds,
@@ -6913,6 +6922,7 @@ class AppController extends ChangeNotifier {
       'generate_audio': form.generateAudio,
       'safety_tolerance': form.safetyTolerance,
       'draft': form.draft,
+      ..._referenceDurationInput(),
       if (selectedModel.supportsFrameRate) 'frame_rate': form.frameRate,
       if (selectedModel.supportsSeed && form.seed != null) 'seed': form.seed,
     };
@@ -7496,7 +7506,12 @@ class AppController extends ChangeNotifier {
       'exactTiming': form.exactTiming,
       'referenceTask': form.referenceTask.name,
       'references': form.references
-          .map((reference) => reference.kind.name)
+          .map(
+            (reference) => <String, Object?>{
+              'kind': reference.kind.name,
+              'duration': reference.durationSeconds,
+            },
+          )
           .toList(),
       'keyframes': form.keyframes
           .map(
@@ -7527,6 +7542,7 @@ class AppController extends ChangeNotifier {
   }
 
   Map<String, Object?> _providerEstimateInput() => <String, Object?>{
+    ..._referenceDurationInput(),
     'prompt': generationPrompt,
     'aspect_ratio': form.aspectRatio,
     'duration': form.duration,
@@ -7557,6 +7573,17 @@ class AppController extends ChangeNotifier {
       'source_width': form.videoMetadata!.width,
       'source_height': form.videoMetadata!.height,
       'source_duration': form.videoMetadata!.durationSeconds,
+    },
+  };
+
+  Map<String, Object?> _referenceDurationInput() => <String, Object?>{
+    if (form.referenceCount(MediaReferenceKind.video) > 0) ...<String, Object?>{
+      'reference_video_duration_seconds': referenceSecondsUsed(
+        MediaReferenceKind.video,
+      ),
+      'reference_video_duration_pending': referenceSecondsPending(
+        MediaReferenceKind.video,
+      ),
     },
   };
 
@@ -8612,7 +8639,11 @@ class AppController extends ChangeNotifier {
     if (total != null && form.references.length > total) {
       return '${model.label} accepts up to $total creative references total.';
     }
-    final seconds = model.maxReferenceSeconds(kind, form.resolution);
+    final seconds = model.maxReferenceSeconds(
+      kind,
+      form.resolution,
+      outputSeconds: form.autoDuration ? null : form.durationSeconds,
+    );
     if (seconds != null) {
       final used = form.references
           .where((item) => item.kind == kind)

@@ -21,6 +21,6 @@
   "max_duration": 20,
   "duration_step": 1,
   "max_keyframes": 0,
-  "usd_per_second": 0.1,
+  "usd_per_second": 0.05,
   "supports_audio": false
 }

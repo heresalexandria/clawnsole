@@ -28,8 +28,8 @@
   "max_duration": 10,
   "duration_step": 2,
   "max_keyframes": 2,
-  "usd_per_second": 0.126,
-  "reference_usd_per_second": 0.126,
+  "usd_per_second": 0.12,
+  "reference_usd_per_second": 0.12,
   "supports_start_frame": true,
   "supports_end_frame": true
 }

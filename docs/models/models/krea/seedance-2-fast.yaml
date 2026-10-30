@@ -32,12 +32,13 @@
   "max_duration": 15,
   "duration_step": 1,
   "max_keyframes": 2,
-  "usd_per_second": 0.1129,
-  "reference_usd_per_second": 0.1129,
+  "usd_per_second": 0.10752,
+  "reference_usd_per_second": 0.10752,
   "supports_start_frame": true,
   "supports_end_frame": true,
   "max_image_references": 9,
   "max_video_references": 3,
   "max_audio_references": 3,
-  "supports_seed": true
+  "supports_seed": true,
+  "supports_audio": false
 }

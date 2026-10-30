@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "vidu/q4-preview/image-to-video",
+  "canonical_model_id": "vidu-q4-preview",
+  "label": "Vidu Q4 Preview · Image",
+  "description": "Vidu Q4 Preview generation from pinned frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    },
+    {
+      "id": "sd",
+      "label": "540p",
+      "detail": "960 × 540"
+    },
+    {
+      "id": "qhd",
+      "label": "2K",
+      "detail": "2K output"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 16,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.032,
+  "supports_audio": true,
+  "reference_usd_per_second": 0.032,
+  "supports_start_frame": true,
+  "supports_end_frame": false,
+  "supports_seed": true,
+  "prompt_optional_modes": [
+    "i2v"
+  ],
+  "max_prompt_characters": 20000,
+  "max_input_image_bytes": 50000000,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

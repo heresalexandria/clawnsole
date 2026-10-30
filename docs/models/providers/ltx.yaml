@@ -12,6 +12,8 @@
     "availability_seconds": 86400
   },
   "models": [
+    "models/ltx/ltx-2-5-fast.yaml",
+    "models/ltx/ltx-2-5-pro.yaml",
     "models/ltx/ltx-2-3-fast.yaml",
     "models/ltx/ltx-2-3-pro.yaml"
   ]

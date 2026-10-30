@@ -58,6 +58,63 @@ void main() {
     }
   });
 
+  test(
+    'the next minor catalog matches the bundled cross-platform contracts',
+    () async {
+      final root = Directory('../docs/models').absolute;
+      final bundle = await ProviderCatalogClient(
+        client: MockClient((request) async {
+          final relative = request.url.path == '/models/'
+              ? 'index.html'
+              : request.url.path.replaceFirst('/models/', '');
+          return http.Response.bytes(
+            await File('${root.path}/$relative').readAsBytes(),
+            200,
+          );
+        }),
+        siteUrl: Uri.parse('https://clawnsole.app/'),
+      ).fetch(appVersion: '0.61.0');
+      expect(
+        bundle.providers.map((p) => p.id).toSet(),
+        bundledVideoProviders.map((p) => p.id).toSet(),
+      );
+      for (final bundled in bundledVideoProviders) {
+        final remote = bundle.providers.singleWhere((p) => p.id == bundled.id);
+        expect(
+          remote.models.map((m) => m.id).toSet(),
+          bundled.models.map((m) => m.id).toSet(),
+          reason: bundled.id,
+        );
+        for (final model in bundled.models) {
+          final fetched = remote.models.singleWhere((m) => m.id == model.id);
+          final reason = '${bundled.id}/${model.id}';
+          expect(fetched.canonicalId, model.canonicalId, reason: reason);
+          expect(fetched.usdPerSecond, model.usdPerSecond, reason: reason);
+          expect(
+            fetched.referenceUsdPerSecond,
+            model.referenceUsdPerSecond,
+            reason: reason,
+          );
+          expect(
+            fetched.resolutions.map((r) => r.id),
+            model.resolutions.map((r) => r.id),
+            reason: reason,
+          );
+          expect(fetched.aspectRatios, model.aspectRatios, reason: reason);
+          expect(fetched.modes, model.modes, reason: reason);
+          expect(fetched.minDuration, model.minDuration, reason: reason);
+          expect(fetched.maxDuration, model.maxDuration, reason: reason);
+          expect(fetched.supportsAudio, model.supportsAudio, reason: reason);
+          expect(
+            fetched.maxCombinedVideoSeconds,
+            model.maxCombinedVideoSeconds,
+            reason: reason,
+          );
+        }
+      }
+    },
+  );
+
   test('provider and model version constraints are independently applied', () {
     final cache = _cache(<Map<String, Object?>>[
       _provider(<Map<String, Object?>>[

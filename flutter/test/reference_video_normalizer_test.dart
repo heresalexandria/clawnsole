@@ -838,6 +838,7 @@ void main() {
         MediaReferenceLabel(
           label: 'Clip',
           kind: MediaReferenceKind.video,
+          durationSeconds: 2.5,
           source: retained,
           thumbnailAsset: retained,
         ),
@@ -856,6 +857,7 @@ void main() {
     expect(prepared.config.references![0].source, same(retained));
     expect(prepared.config.references![1].source, isNull);
     expect(prepared.config.references![1].thumbnailAsset, isNull);
+    expect(prepared.config.references![1].durationSeconds, 2.5);
   });
 
   test(

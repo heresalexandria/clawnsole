@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "id": "kling_4",
+  "canonical_model_id": "kling-4.0",
+  "label": "Kling 4.0",
+  "description": "Generation with image/video guidance and source-video editing.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "21:9"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 \u00d7 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 \u00d7 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.157,
+  "reference_usd_per_second": 0.157,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_image_references": 10,
+  "max_video_references": 5,
+  "max_reference_video_seconds": 30,
+  "max_prompt_characters": 26000,
+  "frames_exclusive_with_references": true,
+  "max_keyframes_by_mode": {
+    "v2v": 0
+  },
+  "max_references_by_mode": {
+    "v2v": {
+      "video": 0
+    }
+  },
+  "max_source_video_seconds": 30,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "supports_guidance_with_source": true,
+  "aspect_ratios_by_mode": {
+    "i2v": [
+      "auto"
+    ],
+    "v2v": [
+      "auto"
+    ]
+  },
+  "source_input_label": "Video to edit"
+}

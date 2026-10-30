@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "kling3.0_4k",
+  "canonical_model_id": "kling-3.0-4k",
+  "label": "Kling 3.0 4K",
+  "description": "Text and frame-guided generation.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 \u00d7 2160"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.43,
+  "reference_usd_per_second": 0.43,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_prompt_characters": 2500
+}
