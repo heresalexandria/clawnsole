@@ -1889,7 +1889,7 @@ void main() {
             ),
             const <Generation>[],
             publishedProviderPrices(provider.id),
-            upscale
+            upscale || mode == VideoMode.v2v
                 ? const VideoSourceMetadata(
                     width: 1280,
                     height: 720,
