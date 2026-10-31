@@ -4460,6 +4460,58 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('fal exposes FLUX 3 Max with explicit list-price estimates', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final controller = AppController(
+      gateway: _MemoryGateway(
+        const LocalSnapshot(
+          generations: [],
+          preferences: AppPreferences(
+            provider: 'fal',
+            model: 'blackforestlabs/flux-3-max/text-to-video',
+          ),
+          hasApiKey: true,
+          connectedProviders: {'fal'},
+          storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+        ),
+      ),
+    );
+    await controller.initialize();
+    controller.updateForm((form) {
+      form.autoDuration = false;
+      form.durationSeconds = 5;
+      form.resolution = 'hd';
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.selectedProvider.id, 'fal');
+    expect(controller.selectedModel.label, contains('FLUX 3 Max'));
+    expect(controller.currentEstimate.minimumUsd, .85);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('estimated-charge-panel')),
+        matching: find.text(r'$0.85'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byTooltip(
+        'Estimated from published list rates. Provider promotions may reduce the final charge.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets('console-only balances stay off the cost panel', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1400, 1200));
     addTearDown(() async {

@@ -235,6 +235,9 @@ ResolvedProviderCost resolveProviderCost(
   final minimum = generation.quotedCostUsdMin;
   final maximum = generation.quotedCostUsdMax;
   if (allowDeterministicQuote &&
+      // fal's published list estimates exclude account promotions and are
+      // not receipts. Only an explicit provider cost can settle these jobs.
+      providerByIdForRouting(generation.provider)?.adapter != 'fal' &&
       minimum != null &&
       maximum != null &&
       (minimum - maximum).abs() < .0000001) {
@@ -351,6 +354,7 @@ ProviderModelPrice? _pricedModel(
       '$modelId:$resolutionLabel:video-reference',
     '$modelId:$resolutionLabel:${config.generateAudio ? 'audio' : 'silent'}',
     '$modelId:$resolutionLabel',
+    '$modelId:${config.resolution}',
     modelId,
   ];
   for (final candidate in routeSpecific) {
@@ -481,7 +485,7 @@ CostEstimate estimateCost(
   List<ProviderModelPrice> prices = const <ProviderModelPrice>[],
   VideoSourceMetadata? sourceMetadata,
 ]) {
-  if (providerId == 'krea') {
+  if (providerId == 'krea' || providerId == 'fal') {
     // A partially loaded live catalog must not turn an omitted variable-price
     // route into the model's numeric zero placeholder.
     prices = <ProviderModelPrice>[

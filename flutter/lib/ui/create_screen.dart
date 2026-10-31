@@ -4894,6 +4894,8 @@ class _CostPreview extends StatelessWidget {
         : '${controller.form.draft ? 'Drafts use the provider’s HD draft tier. ' : ''}'
               '${estimate.basis == 'artcraft-live-quote'
                   ? 'Live quote calculated from the current prompt and settings.'
+                  : estimate.basis.startsWith('Published list rates')
+                  ? 'Estimated from published list rates. Provider promotions may reduce the final charge.'
                   : estimate.basis == 'input-derived-published-rate'
                   ? 'Calculated from the source dimensions, duration, scale, and selected mode.'
                   : 'Calculated from the current pricing settings at the provider’s published or live rate.'}';

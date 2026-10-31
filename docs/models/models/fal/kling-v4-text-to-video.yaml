@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "kling/v4/text-to-video",
+  "canonical_model_id": "kling-4.0",
+  "label": "Kling 4.0 · Text",
+  "description": "Kling 4.0 video with native audio always enabled.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "21:9"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.157,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.62.0"
+  },
+  "max_prompt_characters": 26000
+}

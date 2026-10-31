@@ -1,0 +1,1304 @@
+{
+  "retrieved_at": "2026-10-30",
+  "routes": {
+    "blackforestlabs/flux-3-max/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=blackforestlabs/flux-3-max/text-to-video",
+      "input": {
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "generate_audio": {
+            "default": true,
+            "type": "boolean"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "21:9",
+              "2:1",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "auto",
+            "type": "string"
+          },
+          "duration": {
+            "enum": [
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ],
+            "default": 5,
+            "type": "integer"
+          },
+          "resolution": {
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "default": "720p",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasoning_level": {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "default": "high",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "blackforestlabs/flux-3-max/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=blackforestlabs/flux-3-max/image-to-video",
+      "input": {
+        "required": [
+          "prompt",
+          "image_url"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration": {
+            "enum": [
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ],
+            "default": 5,
+            "type": "integer"
+          },
+          "reasoning_level": {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "default": "high",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "21:9",
+              "2:1",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "auto",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "default": "720p",
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string"
+          },
+          "generate_audio": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "blackforestlabs/flux-3/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=blackforestlabs/flux-3/text-to-video",
+      "input": {
+        "properties": {
+          "safety_tolerance": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 2,
+            "maximum": 4
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "21:9",
+              "2:1",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
+          },
+          "duration": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string",
+            "default": "720p",
+            "enum": [
+              "720p",
+              "1080p",
+              "1440p",
+              "2160p"
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    "blackforestlabs/flux-3/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=blackforestlabs/flux-3/image-to-video",
+      "input": {
+        "properties": {
+          "safety_tolerance": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 2,
+            "maximum": 4
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "21:9",
+              "2:1",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ]
+          },
+          "duration": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "default": "720p",
+            "enum": [
+              "720p",
+              "1080p",
+              "1440p",
+              "2160p"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string"
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt",
+          "image_url"
+        ]
+      }
+    },
+    "minimax/h3-max/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/text-to-video",
+      "input": {
+        "properties": {
+          "target_audio_url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_expansion_mode": {
+            "type": "string",
+            "default": "balanced"
+          },
+          "duration": {
+            "default": 5,
+            "minimum": 0.92,
+            "maximum": 15,
+            "type": "number"
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "16:9",
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "maxLength": 50000,
+            "type": "string"
+          },
+          "sync_mode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P",
+              "1080P"
+            ],
+            "default": "768P",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "prompt_expansion_mode"
+        ],
+        "type": "object"
+      }
+    },
+    "minimax/h3-max/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max/image-to-video",
+      "input": {
+        "properties": {
+          "target_audio_url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "minLength": 1,
+            "maxLength": 50000,
+            "type": "string"
+          },
+          "duration": {
+            "default": 5,
+            "minimum": 0.92,
+            "maximum": 15,
+            "type": "number"
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "prompt_expansion_mode": {
+            "type": "string",
+            "default": "balanced"
+          },
+          "sync_mode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P",
+              "1080P"
+            ],
+            "default": "768P",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "prompt_expansion_mode"
+        ],
+        "type": "object"
+      }
+    },
+    "minimax/h3-max-turbo/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max-turbo/text-to-video",
+      "input": {
+        "properties": {
+          "target_audio_url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_expansion_mode": {
+            "type": "string",
+            "default": "balanced"
+          },
+          "duration": {
+            "default": 5,
+            "minimum": 0.92,
+            "maximum": 15,
+            "type": "number"
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "16:9",
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "maxLength": 50000,
+            "type": "string"
+          },
+          "sync_mode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P",
+              "1080P"
+            ],
+            "default": "768P",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "prompt_expansion_mode"
+        ],
+        "type": "object"
+      }
+    },
+    "minimax/h3-max-turbo/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=minimax/h3-max-turbo/image-to-video",
+      "input": {
+        "properties": {
+          "target_audio_url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "minLength": 1,
+            "maxLength": 50000,
+            "type": "string"
+          },
+          "duration": {
+            "default": 5,
+            "minimum": 0.92,
+            "maximum": 15,
+            "type": "number"
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "prompt_expansion_mode": {
+            "type": "string",
+            "default": "balanced"
+          },
+          "sync_mode": {
+            "default": false,
+            "type": "boolean"
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P",
+              "1080P"
+            ],
+            "default": "768P",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "prompt_expansion_mode"
+        ],
+        "type": "object"
+      }
+    },
+    "kling/v4/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=kling/v4/text-to-video",
+      "input": {
+        "properties": {
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 26000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "multi_prompt": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/KlingV4Shot"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration": {
+            "minimum": 3,
+            "type": "integer",
+            "default": 5,
+            "maximum": 30
+          },
+          "resolution": {
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "type": "string",
+            "default": "1080p"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "21:9"
+            ],
+            "type": "string",
+            "default": "16:9"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "kling/v4/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=kling/v4/image-to-video",
+      "input": {
+        "properties": {
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 26000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "multi_prompt": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/KlingV4Shot"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution": {
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "type": "string",
+            "default": "1080p"
+          },
+          "start_image_url": {
+            "type": "string"
+          },
+          "middle_image_urls": {
+            "anyOf": [
+              {
+                "maxItems": 8,
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration": {
+            "minimum": 3,
+            "type": "integer",
+            "default": 5,
+            "maximum": 30
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_image_url"
+        ]
+      }
+    },
+    "alibaba/wan-3.0/text-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/wan-3.0/text-to-video",
+      "input": {
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "duration": {
+            "default": 5,
+            "anyOf": [
+              {
+                "minimum": 2,
+                "maximum": 30,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audio": {
+            "default": true,
+            "type": "boolean"
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "maximum": 2147483647,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_thinking": {
+            "default": false,
+            "type": "boolean"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "adaptive",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "adaptive",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "480p",
+              "720p",
+              "1080p"
+            ],
+            "default": "1080p",
+            "type": "string"
+          },
+          "enable_prompt_expansion": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "alibaba/wan-3.0/image-to-video": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=alibaba/wan-3.0/image-to-video",
+      "input": {
+        "required": [
+          "start_image_url"
+        ],
+        "properties": {
+          "start_image_url": {
+            "type": "string"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "audio": {
+            "default": true,
+            "type": "boolean"
+          },
+          "enable_safety_checker": {
+            "default": true,
+            "type": "boolean"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "maximum": 2147483647,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration": {
+            "default": 5,
+            "anyOf": [
+              {
+                "minimum": 2,
+                "maximum": 30,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_thinking": {
+            "default": false,
+            "type": "boolean"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "adaptive",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "default": "adaptive",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "480p",
+              "720p",
+              "1080p"
+            ],
+            "default": "1080p",
+            "type": "string"
+          },
+          "enable_prompt_expansion": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "lightricks/ltx-2.5/text-to-video/fast": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=lightricks/ltx-2.5/text-to-video/fast",
+      "input": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "default": "auto",
+            "enum": [
+              6,
+              8,
+              10,
+              12,
+              14,
+              16,
+              18,
+              20,
+              "auto"
+            ]
+          },
+          "camera_motion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dolly_in",
+                  "dolly_out",
+                  "dolly_left",
+                  "dolly_right",
+                  "jib_up",
+                  "jib_down",
+                  "static",
+                  "focus_shift"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "16:9",
+            "enum": [
+              "16:9",
+              "9:16"
+            ]
+          },
+          "fps": {
+            "type": "integer",
+            "default": 25,
+            "enum": [
+              24,
+              25,
+              48,
+              50
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1
+          },
+          "resolution": {
+            "type": "string",
+            "default": "1080p",
+            "enum": [
+              "720p",
+              "1080p",
+              "1440p",
+              "2160p"
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    "lightricks/ltx-2.5/image-to-video/fast": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=lightricks/ltx-2.5/image-to-video/fast",
+      "input": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "default": "auto",
+            "enum": [
+              6,
+              8,
+              10,
+              12,
+              14,
+              16,
+              18,
+              20,
+              "auto"
+            ]
+          },
+          "camera_motion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dolly_in",
+                  "dolly_out",
+                  "dolly_left",
+                  "dolly_right",
+                  "jib_up",
+                  "jib_down",
+                  "static",
+                  "focus_shift"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "fps": {
+            "type": "integer",
+            "default": 25,
+            "enum": [
+              24,
+              25,
+              48,
+              50
+            ]
+          },
+          "image_url": {
+            "type": "string"
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1
+          },
+          "resolution": {
+            "type": "string",
+            "default": "1080p",
+            "enum": [
+              "720p",
+              "1080p",
+              "1440p",
+              "2160p"
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ]
+      }
+    },
+    "lightricks/ltx-2.5/text-to-video/pro": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=lightricks/ltx-2.5/text-to-video/pro",
+      "input": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "default": "auto",
+            "enum": [
+              6,
+              8,
+              10,
+              "auto"
+            ]
+          },
+          "camera_motion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dolly_in",
+                  "dolly_out",
+                  "dolly_left",
+                  "dolly_right",
+                  "jib_up",
+                  "jib_down",
+                  "static",
+                  "focus_shift"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "16:9",
+            "enum": [
+              "16:9",
+              "9:16"
+            ]
+          },
+          "fps": {
+            "type": "integer",
+            "default": 25,
+            "enum": [
+              24,
+              25,
+              50
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1
+          },
+          "resolution": {
+            "type": "string",
+            "default": "1080p",
+            "enum": [
+              "720p",
+              "1080p"
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    },
+    "lightricks/ltx-2.5/image-to-video/pro": {
+      "source": "https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=lightricks/ltx-2.5/image-to-video/pro",
+      "input": {
+        "type": "object",
+        "properties": {
+          "duration": {
+            "default": "auto",
+            "enum": [
+              6,
+              8,
+              10,
+              "auto"
+            ]
+          },
+          "camera_motion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dolly_in",
+                  "dolly_out",
+                  "dolly_left",
+                  "dolly_right",
+                  "jib_up",
+                  "jib_down",
+                  "static",
+                  "focus_shift"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aspect_ratio": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "16:9",
+              "9:16"
+            ]
+          },
+          "fps": {
+            "type": "integer",
+            "default": 25,
+            "enum": [
+              24,
+              25,
+              50
+            ]
+          },
+          "image_url": {
+            "type": "string"
+          },
+          "end_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1
+          },
+          "resolution": {
+            "type": "string",
+            "default": "1080p",
+            "enum": [
+              "720p",
+              "1080p"
+            ]
+          },
+          "generate_audio": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ]
+      }
+    }
+  }
+}

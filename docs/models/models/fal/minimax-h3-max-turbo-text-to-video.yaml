@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "minimax/h3-max-turbo/text-to-video",
+  "canonical_model_id": "minimax-h3-max-turbo",
+  "label": "MiniMax H3 Max Turbo · Text",
+  "description": "Faster fal-post-trained MiniMax H3. Native audio is always enabled; output can exceed the requested duration by about 0.7 seconds.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "21:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "768p",
+      "detail": "Native 768 px short edge"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "480 px short edge"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.04,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.62.0"
+  },
+  "supports_seed": true,
+  "max_prompt_characters": 50000
+}

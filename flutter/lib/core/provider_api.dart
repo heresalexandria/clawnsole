@@ -2,6 +2,7 @@ import 'provider_submission.dart';
 import 'artcraft_api.dart';
 import 'atlas_cloud_api.dart';
 import 'bfl_api.dart';
+import 'fal_api.dart';
 import 'krea_api.dart';
 import 'ltx_api.dart';
 import 'models.dart';
@@ -16,12 +17,14 @@ class ProviderApiRouter {
     AtlasCloudApi? atlas,
     RunwayApi? runway,
     KreaApi? krea,
+    FalApi? fal,
   }) : bfl = bfl ?? BflApi(),
        ltx = ltx ?? LtxApi(),
        artcraft = artcraft ?? ArtCraftApi(),
        atlas = atlas ?? AtlasCloudApi(),
        runway = runway ?? RunwayApi(),
-       krea = krea ?? KreaApi();
+       krea = krea ?? KreaApi(),
+       fal = fal ?? FalApi();
 
   final BflApi bfl;
   final LtxApi ltx;
@@ -29,6 +32,7 @@ class ProviderApiRouter {
   final AtlasCloudApi atlas;
   final RunwayApi runway;
   final KreaApi krea;
+  final FalApi fal;
 
   String _adapter(String provider) {
     final definition = providerByIdForRouting(provider);
@@ -45,6 +49,7 @@ class ProviderApiRouter {
         'atlas' => atlas.verify(key),
         'runway' => runway.verify(key),
         'krea' => krea.verify(key),
+        'fal' => fal.verify(key),
         'bfl' => ProviderAccountStatus(
           provider: 'bfl',
           balance: await bfl.getCredits(key),
@@ -74,6 +79,7 @@ class ProviderApiRouter {
     'atlas' => atlas.submit(key, model, input, beforeSend: beforeSend),
     'runway' => runway.submit(key, model, input, beforeSend: beforeSend),
     'krea' => krea.submit(key, model, input, beforeSend: beforeSend),
+    'fal' => fal.submit(key, model, input, beforeSend: beforeSend),
     'bfl' => bfl.submit(key, input, model: model, beforeSend: beforeSend),
     final adapter => throw ProviderException(
       'Provider adapter "$adapter" is not supported by this build.',
@@ -90,6 +96,7 @@ class ProviderApiRouter {
     'atlas' => atlas.poll(key, pollingUrl),
     'runway' => runway.poll(key, pollingUrl),
     'krea' => krea.poll(key, pollingUrl),
+    'fal' => fal.poll(key, pollingUrl),
     'bfl' => bfl.poll(key, pollingUrl),
     final adapter => throw ProviderException(
       'Provider adapter "$adapter" is not supported by this build.',
@@ -102,6 +109,7 @@ class ProviderApiRouter {
         'artcraft' => artcraft.listVideoModels(),
         'runway' => runway.listVideoModels(),
         'krea' => krea.listVideoModels(),
+        'fal' => fal.listVideoModels(key),
         'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
         ),

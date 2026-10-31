@@ -17,6 +17,8 @@ const EXTERNAL_HOSTS = new Set([
   "support.apple.com",
   "www.atlascloud.ai",
   "www.krea.ai",
+  "fal.ai",
+  "docs.fal.ai",
   "heresalexandria.com",
   "heresalexandria.github.io",
   "platform.openai.com",

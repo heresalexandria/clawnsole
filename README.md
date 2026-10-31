@@ -234,7 +234,8 @@ Provider contracts and fallback rates follow the official
 [Atlas Cloud video documentation](https://www.atlascloud.ai/docs/models/video),
 plus Runway’s [model guide](https://docs.dev.runwayml.com/guides/models/) and
 [pricing](https://docs.dev.runwayml.com/guides/pricing/), and
-[Krea’s API documentation](https://www.krea.ai/docs/).
+[Krea’s API documentation](https://www.krea.ai/docs/), and
+[fal's queued inference documentation](https://fal.ai/docs/documentation/model-apis/inference/queue).
 Atlas Cloud models are refreshed from its public catalog and Create-ready costs use
 schema-aware, no-charge request preflight when available. Runway’s guide is
 refreshed for new video model IDs; unfamiliar routes remain comparison-only
@@ -243,6 +244,11 @@ routes are read from its live OpenAPI spec, with other and legacy routes kept
 comparison-only, and its published per-request USD prices are used directly
 since Krea bills fixed USD amounts rather than credits. Equivalent routes
 retain provider-specific IDs while sharing a canonical comparison ID.
+
+fal has its own provider entry and API key, including direct FLUX 3 Max access.
+Its audited model routes share the native Flutter and desktop companion
+adapter, with queue receipts retained so accepted jobs resume after restart.
+Configure a key in Providers; local macOS development also accepts `FAL_KEY`.
 
 Catalog authoring, version bounds, and adapter compatibility are documented in
 [the model manifest guide](docs/models/README.md). Builds read the public
