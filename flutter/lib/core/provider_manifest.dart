@@ -471,6 +471,9 @@ VideoModelDefinition _parseModel(
     maxReferenceVideoSeconds:
         _integer(manifest['max_reference_video_seconds']) ??
         (maxVideoReferences > 0 ? bundled?.maxReferenceVideoSeconds : null),
+    maxCombinedVideoSeconds:
+        _positiveInteger(manifest, 'max_combined_video_seconds') ??
+        (maxVideoReferences > 0 ? bundled?.maxCombinedVideoSeconds : null),
     maxReferenceAudioSeconds:
         _integer(manifest['max_reference_audio_seconds']) ??
         (maxAudioReferences > 0 ? bundled?.maxReferenceAudioSeconds : null),

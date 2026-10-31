@@ -262,10 +262,10 @@ void main() {
       draft: true,
     );
 
-    expect(estimateCredits(VideoMode.t2v, hdEightSeconds).minimum, 136);
-    expect(estimateCredits(VideoMode.v2v, hdEightSeconds).minimum, 344);
+    expect(estimateCredits(VideoMode.t2v, hdEightSeconds).minimum, 120);
+    expect(estimateCredits(VideoMode.v2v, hdEightSeconds).minimum, 168);
     expect(estimateCredits(VideoMode.t2v, draftTenSeconds).minimum, 60);
-    expect(creditsToUsd(136), 1.36);
+    expect(creditsToUsd(120), 1.2);
 
     const fhdAuto = GenerationConfig(
       aspectRatio: '16:9',
@@ -276,8 +276,8 @@ void main() {
       draft: false,
     );
     final autoEstimate = estimateCredits(VideoMode.v2v, fhdAuto);
-    expect(autoEstimate.minimum, 270);
-    expect(autoEstimate.maximum, 1080);
+    expect(autoEstimate.minimum, 135);
+    expect(autoEstimate.maximum, 540);
   });
 
   test('calculates BFL estimates from current inputs instead of history', () {
@@ -304,8 +304,8 @@ void main() {
     ];
 
     final estimate = estimateCredits(VideoMode.t2v, config, history);
-    expect(estimate.minimum, 136);
-    expect(estimate.maximum, 136);
+    expect(estimate.minimum, 120);
+    expect(estimate.maximum, 120);
     expect(estimate.basis, 'bfl-rate');
   });
 
@@ -334,8 +334,8 @@ void main() {
       ),
     ]);
 
-    expect(estimate.minimum, 170);
-    expect(estimate.maximum, 170);
+    expect(estimate.minimum, 150);
+    expect(estimate.maximum, 150);
     expect(estimate.basis, 'bfl-rate');
   });
 
@@ -380,6 +380,26 @@ void main() {
       expect(controller.currentEstimate.minimumUsd, 4.66);
       expect(controller.currentEstimate.providerUnitsMinimum, 466);
       expect(gateway.quotedResolutions, containsAll(<String>['hd', 'fhd']));
+      controller.updateForm((form) {
+        form.references = [
+          const MediaReferenceDraft(
+            id: 'billable-video',
+            label: 'Reference video',
+            kind: MediaReferenceKind.video,
+            source: 'https://example.com/reference.mp4',
+          ),
+        ];
+      });
+      await controller.refreshProviderEstimate();
+      expect(gateway.quotedInputs.last['reference_video_duration_pending'], 1);
+      controller.rememberReferenceDuration('billable-video', 12.55);
+      expect(controller.currentEstimate.basis, isNot('artcraft-live-quote'));
+      await controller.refreshProviderEstimate();
+      expect(
+        gateway.quotedInputs.last['reference_video_duration_seconds'],
+        12.55,
+      );
+      expect(gateway.quotedInputs.last['reference_video_duration_pending'], 0);
       controller.dispose();
     },
   );
@@ -4019,7 +4039,7 @@ void main() {
     expect(find.byKey(const ValueKey('auto-duration-range')), findsOneWidget);
     expect(find.textContaining('5–20 seconds'), findsOneWidget);
 
-    await controller.selectProvider('ltx');
+    await controller.selectProviderModel('ltx', 'ltx-2-3-fast');
     controller.updateForm((form) => form.resolution = 'qhd');
     await tester.pumpAndSettle();
     expect(controller.form.autoDuration, isFalse);
@@ -4388,6 +4408,55 @@ void main() {
     final recentHeader = find.text('Recent work');
     expect(recentHeader, findsOneWidget);
     expect(tester.getTopLeft(recentHeader).dy, lessThan(900));
+    controller.dispose();
+  });
+
+  testWidgets('variable Krea pricing never appears or submits as free', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final gateway = _MemoryGateway(
+      const LocalSnapshot(
+        generations: [],
+        preferences: AppPreferences(
+          provider: 'krea',
+          model: 'bytedance/seedance-2-5',
+        ),
+        hasApiKey: true,
+        connectedProviders: {'krea'},
+        storage: StorageStats(path: 'memory', bytes: 0, records: 0),
+      ),
+    );
+    final controller = AppController(gateway: gateway);
+    await controller.initialize();
+    controller.updateForm((form) => form.prompt = 'A slow camera move.');
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildClawnsoleTheme(Brightness.light),
+        home: Scaffold(body: CreateScreen(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.currentEstimate.isAvailable, isFalse);
+    final panel = find.byKey(const ValueKey('estimated-charge-panel'));
+    expect(
+      find.descendant(of: panel, matching: find.text('Variable price')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: panel, matching: find.textContaining(r'$0')),
+      findsNothing,
+    );
+    await controller.submit(providerRetentionRiskAcknowledged: true);
+    expect(gateway.submitCalls, 1);
+    final record = controller.visibleGenerations.single;
+    expect(record.quotedCostUsdMin, isNull);
+    expect(record.quotedCostUsdMax, isNull);
+    expect(record.estimatedCreditsMin, isNull);
+    expect(record.estimatedCreditsMax, isNull);
+    expect(record.cost, isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
   });
 
@@ -8102,7 +8171,7 @@ void main() {
     controller.rememberVideoSourceMetadata(
       const VideoSourceMetadata(width: 1920, height: 1080, durationSeconds: 10),
     );
-    expect(controller.currentEstimate.minimumUsd, 7.91);
+    expect(controller.currentEstimate.minimumUsd, 3.955);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -8123,9 +8192,9 @@ void main() {
     expect(find.text('PRECISE'), findsOneWidget);
     expect(find.text('CREATIVE'), findsOneWidget);
     expect(find.text('ESTIMATED CHARGE'), findsOneWidget);
-    expect(find.textContaining(r'$7.91'), findsOneWidget);
-    expect(find.textContaining(r'$0.10 / megapixel-second'), findsOneWidget);
-    expect(find.text('791 credits'), findsOneWidget);
+    expect(find.textContaining(r'$3.96'), findsOneWidget);
+    expect(find.textContaining(r'$0.05 / megapixel-second'), findsOneWidget);
+    expect(find.text('395.5 credits'), findsOneWidget);
     expect(find.textContaining('1920×1080 × 2.0×'), findsOneWidget);
     expect(find.text('UPSCALE VIDEO'), findsOneWidget);
     controller.dispose();

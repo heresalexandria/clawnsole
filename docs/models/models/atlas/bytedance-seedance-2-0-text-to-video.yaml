@@ -43,7 +43,7 @@
   "max_duration": 15,
   "duration_step": 1,
   "max_keyframes": 0,
-  "usd_per_second": 0.112,
+  "usd_per_second": 0.09,
   "aspect_ratios_by_resolution": {
     "4k": [
       "16:9"

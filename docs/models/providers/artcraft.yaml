@@ -39,6 +39,8 @@
     "models/artcraft/veo-3p1-fast.yaml",
     "models/artcraft/veo-3p1-lite.yaml",
     "models/artcraft/vidu-q3.yaml",
-    "models/artcraft/vidu-q3-turbo.yaml"
+    "models/artcraft/vidu-q3-turbo.yaml",
+    "models/artcraft/wan-3p0.yaml",
+    "models/artcraft/wan-3p0-prime.yaml"
   ]
 }

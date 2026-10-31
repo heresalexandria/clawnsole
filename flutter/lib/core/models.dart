@@ -2596,6 +2596,7 @@ class CostEstimate {
     this.rateUsd,
     this.rateUnit,
     this.calculation,
+    this.isAvailable = true,
   });
 
   final double minimumUsd;
@@ -2608,6 +2609,13 @@ class CostEstimate {
   final String? rateUnit;
   final String? calculation;
 
+  /// False when the provider publishes variable pricing without a quote.
+  /// The numeric placeholders must never be displayed or persisted as free.
+  final bool isAvailable;
+
+  double? get quotedMinimumUsd => isAvailable ? minimumUsd : null;
+  double? get quotedMaximumUsd => isAvailable ? maximumUsd : null;
+
   CostEstimate withPricingContext(CostEstimate fallback) => CostEstimate(
     minimumUsd: minimumUsd,
     maximumUsd: maximumUsd,
@@ -2618,6 +2626,7 @@ class CostEstimate {
     rateUsd: rateUsd ?? fallback.rateUsd,
     rateUnit: rateUnit ?? fallback.rateUnit,
     calculation: calculation ?? fallback.calculation,
+    isAvailable: isAvailable,
   );
 }
 

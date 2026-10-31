@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "alibaba/wan-3.0-prime/text-to-video",
+  "canonical_model_id": "wan-3.0-prime",
+  "label": "Wan 3.0 Prime · Text",
+  "description": "Wan 3.0 Prime text-to-video generation.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.061,
+  "supports_audio": true,
+  "supports_seed": true,
+  "supports_auto_duration": true,
+  "max_prompt_characters": 20000,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "google/gemini-omni-flash-1.1",
+  "canonical_model_id": "gemini-omni-flash-1.1",
+  "label": "Gemini Omni Flash 1.1",
+  "description": "Multimodal video with native audio.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "Default",
+      "detail": "Provider default output"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0,
+  "supports_start_frame": true,
+  "supports_end_frame": false,
+  "supports_audio": false,
+  "supports_seed": false,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_image_references": 10,
+  "max_video_references": 3,
+  "reference_usd_per_second": 0
+}

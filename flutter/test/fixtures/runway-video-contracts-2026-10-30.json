@@ -1,0 +1,704 @@
+{
+  "source": "https://docs.dev.runwayml.com/openapi.json",
+  "checked_on": "2026-10-30",
+  "endpoints": {
+    "/v1/text_to_video": {
+      "klingO3_4k": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "3840:2160",
+          "2160:3840",
+          "2880:2880"
+        ]
+      },
+      "kling3.0_4k": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "3840:2160",
+          "2160:3840",
+          "2880:2880"
+        ]
+      },
+      "kling2.5_turbo_pro": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "ratio",
+          "cfgScale",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1920:1080",
+          "1440:1440",
+          "1080:1920",
+          "1280:720",
+          "720:720",
+          "720:1280"
+        ]
+      },
+      "kling3.0_pro": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1920:1080",
+          "1080:1920",
+          "1440:1440"
+        ]
+      },
+      "kling3.0_standard": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1280:720",
+          "720:1280",
+          "960:960"
+        ]
+      },
+      "klingO3_pro": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1920:1080",
+          "1080:1920",
+          "1440:1440"
+        ]
+      },
+      "klingO3_standard": {
+        "required": [
+          "ratio",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1280:720",
+          "720:1280",
+          "960:960"
+        ]
+      },
+      "wan3": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "audio",
+          "duration",
+          "ratio",
+          "references",
+          "referenceVideos",
+          "referenceAudio",
+          "model"
+        ],
+        "ratios": [
+          "832:480",
+          "720:544",
+          "624:624",
+          "544:720",
+          "480:832",
+          "1280:720",
+          "1104:832",
+          "960:960",
+          "832:1104",
+          "720:1280",
+          "1920:1080",
+          "1648:1248",
+          "1440:1440",
+          "1248:1648",
+          "1080:1920",
+          "auto_480p",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      },
+      "gemini_omni_flash_1.1": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "ratio",
+          "duration",
+          "references",
+          "referenceVideos",
+          "model"
+        ],
+        "ratios": [
+          "640:360",
+          "360:640",
+          "1280:720",
+          "720:1280",
+          "1920:1080",
+          "1080:1920",
+          "3840:2160",
+          "2160:3840"
+        ]
+      },
+      "wan3_prime": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "audio",
+          "duration",
+          "ratio",
+          "references",
+          "referenceVideos",
+          "referenceAudio",
+          "model"
+        ],
+        "ratios": [
+          "832:480",
+          "720:544",
+          "624:624",
+          "544:720",
+          "480:832",
+          "1280:720",
+          "1104:832",
+          "960:960",
+          "832:1104",
+          "720:1280",
+          "1920:1080",
+          "1648:1248",
+          "1440:1440",
+          "1248:1648",
+          "1080:1920",
+          "auto_480p",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      },
+      "h3_max": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "resolution",
+          "promptExpansionMode",
+          "seed",
+          "duration",
+          "model"
+        ],
+        "ratios": []
+      },
+      "grok_imagine_1_5_lite": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "duration",
+          "ratio",
+          "model"
+        ],
+        "ratios": [
+          "848:480",
+          "480:848",
+          "480:480",
+          "640:480",
+          "480:640",
+          "720:480",
+          "480:720",
+          "1280:720",
+          "720:1280",
+          "720:720",
+          "960:720",
+          "720:960",
+          "1088:720",
+          "720:1088",
+          "1904:1072",
+          "1072:1904",
+          "1424:1424",
+          "1648:1232",
+          "1232:1648",
+          "1744:1152",
+          "1152:1744"
+        ]
+      },
+      "kling_4": {
+        "required": [
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "ratio",
+          "duration",
+          "references",
+          "referenceVideos",
+          "model"
+        ],
+        "ratios": [
+          "1280:720",
+          "720:1280",
+          "940:940",
+          "1460:624",
+          "1920:1080",
+          "1080:1920",
+          "1440:1440",
+          "2200:940",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      }
+    },
+    "/v1/image_to_video": {
+      "klingO3_4k": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "references",
+          "model"
+        ],
+        "ratios": [
+          "3840:2160",
+          "2160:3840",
+          "2880:2880"
+        ]
+      },
+      "kling3.0_4k": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "3840:2160",
+          "2160:3840",
+          "2880:2880"
+        ]
+      },
+      "kling2.5_turbo_pro": {
+        "required": [
+          "promptText",
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "promptText",
+          "promptImage",
+          "cfgScale",
+          "duration",
+          "model"
+        ],
+        "ratios": []
+      },
+      "kling3.0_pro": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1920:1080",
+          "1080:1920",
+          "1440:1440"
+        ]
+      },
+      "kling3.0_standard": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "cfgScale",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "1280:720",
+          "720:1280",
+          "960:960"
+        ]
+      },
+      "klingO3_pro": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "references",
+          "model"
+        ],
+        "ratios": [
+          "1920:1080",
+          "1080:1920",
+          "1440:1440"
+        ]
+      },
+      "klingO3_standard": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "audio",
+          "providerSettings",
+          "promptText",
+          "promptImage",
+          "ratio",
+          "duration",
+          "references",
+          "model"
+        ],
+        "ratios": [
+          "1280:720",
+          "720:1280",
+          "960:960"
+        ]
+      },
+      "wan3": {
+        "required": [
+          "promptImage",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "promptText",
+          "audio",
+          "duration",
+          "ratio",
+          "referenceVideos",
+          "referenceAudio",
+          "model"
+        ],
+        "ratios": [
+          "832:480",
+          "720:544",
+          "624:624",
+          "544:720",
+          "480:832",
+          "1280:720",
+          "1104:832",
+          "960:960",
+          "832:1104",
+          "720:1280",
+          "1920:1080",
+          "1648:1248",
+          "1440:1440",
+          "1248:1648",
+          "1080:1920",
+          "auto_480p",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      },
+      "gemini_omni_flash_1.1": {
+        "required": [
+          "promptImage",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "promptText",
+          "ratio",
+          "duration",
+          "model"
+        ],
+        "ratios": [
+          "640:360",
+          "360:640",
+          "1280:720",
+          "720:1280",
+          "1920:1080",
+          "1080:1920",
+          "3840:2160",
+          "2160:3840"
+        ]
+      },
+      "wan3_prime": {
+        "required": [
+          "promptImage",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "promptText",
+          "audio",
+          "duration",
+          "ratio",
+          "referenceVideos",
+          "referenceAudio",
+          "model"
+        ],
+        "ratios": [
+          "832:480",
+          "720:544",
+          "624:624",
+          "544:720",
+          "480:832",
+          "1280:720",
+          "1104:832",
+          "960:960",
+          "832:1104",
+          "720:1280",
+          "1920:1080",
+          "1648:1248",
+          "1440:1440",
+          "1248:1648",
+          "1080:1920",
+          "auto_480p",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      },
+      "h3_max": {
+        "required": [
+          "promptImage",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "promptText",
+          "resolution",
+          "promptExpansionMode",
+          "seed",
+          "duration",
+          "model"
+        ],
+        "ratios": []
+      },
+      "grok_imagine_1_5_lite": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "promptText",
+          "duration",
+          "ratio",
+          "model"
+        ],
+        "ratios": [
+          "auto_480p",
+          "auto_720p",
+          "auto_1080p"
+        ]
+      },
+      "kling_4": {
+        "required": [
+          "promptImage",
+          "model"
+        ],
+        "allowed": [
+          "promptImage",
+          "ratio",
+          "promptText",
+          "duration",
+          "references",
+          "referenceVideos",
+          "model"
+        ],
+        "ratios": [
+          "auto_720p",
+          "auto_1080p"
+        ]
+      }
+    },
+    "/v1/video_to_video": {
+      "klingO3_4k": {
+        "required": [
+          "promptText",
+          "promptVideo",
+          "model"
+        ],
+        "allowed": [
+          "providerSettings",
+          "promptText",
+          "promptVideo",
+          "references",
+          "model"
+        ],
+        "ratios": []
+      },
+      "klingO3_pro": {
+        "required": [
+          "promptText",
+          "promptVideo",
+          "model"
+        ],
+        "allowed": [
+          "providerSettings",
+          "promptText",
+          "promptVideo",
+          "references",
+          "model"
+        ],
+        "ratios": []
+      },
+      "klingO3_standard": {
+        "required": [
+          "promptText",
+          "promptVideo",
+          "model"
+        ],
+        "allowed": [
+          "providerSettings",
+          "promptText",
+          "promptVideo",
+          "references",
+          "model"
+        ],
+        "ratios": []
+      },
+      "gemini_omni_flash_1.1": {
+        "required": [
+          "videoUri",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "videoUri",
+          "promptText",
+          "mode",
+          "ratio",
+          "duration",
+          "references",
+          "model"
+        ],
+        "ratios": [
+          "640:360",
+          "360:640",
+          "1280:720",
+          "720:1280",
+          "1920:1080",
+          "1080:1920",
+          "3840:2160",
+          "2160:3840"
+        ]
+      },
+      "kling_4": {
+        "required": [
+          "videoUri",
+          "promptText",
+          "model"
+        ],
+        "allowed": [
+          "videoUri",
+          "promptText",
+          "ratio",
+          "references",
+          "model"
+        ],
+        "ratios": [
+          "auto_720p",
+          "auto_1080p"
+        ]
+      }
+    }
+  }
+}

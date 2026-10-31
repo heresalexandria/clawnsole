@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "id": "gemini_omni_flash_1.1",
+  "canonical_model_id": "gemini-omni-flash-1.1",
+  "label": "Gemini Omni Flash 1.1",
+  "description": "Reference-guided video and source-video editing up to 4K.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "360p",
+      "label": "360p",
+      "detail": "640 \u00d7 360"
+    },
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 \u00d7 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 \u00d7 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 \u00d7 2160"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.1,
+  "reference_usd_per_second": 0.1,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_image_references": 5,
+  "max_video_references": 3,
+  "max_references_by_mode": {
+    "v2v": {
+      "video": 0
+    }
+  },
+  "max_keyframes_by_mode": {
+    "v2v": 0
+  },
+  "max_prompt_characters": 4000,
+  "max_source_video_seconds": 10,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "supports_guidance_with_source": true,
+  "frames_exclusive_with_references": true,
+  "source_input_label": "Video to edit"
+}

@@ -35,8 +35,8 @@
   "max_keyframes_by_mode": {
     "v2v": 0
   },
-  "usd_per_second": 0.16,
-  "reference_usd_per_second": 0.16,
+  "usd_per_second": 0.15,
+  "reference_usd_per_second": 0.15,
   "supports_start_frame": true,
   "supports_end_frame": true,
   "max_image_references": 9,

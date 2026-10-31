@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "xai/grok-imagine-video-v1.5-lite/text-to-video",
+  "canonical_model_id": "grok-imagine-video-1.5-lite",
+  "label": "Grok Imagine 1.5 Lite · Text",
+  "description": "Grok Imagine 1.5 Lite text-to-video generation.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "21:9",
+    "5:2"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.02,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

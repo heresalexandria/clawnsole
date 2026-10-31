@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "klingO3_pro",
+  "canonical_model_id": "kling-o3-pro",
+  "label": "Kling O3 Pro",
+  "description": "Text and frame-guided generation plus source-video editing.",
+  "modes": [
+    "t2v",
+    "i2v",
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 \u00d7 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.17,
+  "reference_usd_per_second": 0.17,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "availability": {
+    "min_version": "0.61.0"
+  },
+  "max_prompt_characters": 2500,
+  "max_image_references": 4,
+  "max_references_by_mode": {
+    "t2v": {
+      "image": 0
+    },
+    "v2v": {
+      "image": 4
+    },
+    "i2v": {
+      "image": 0
+    }
+  },
+  "max_keyframes_by_mode": {
+    "v2v": 0
+  },
+  "max_source_video_seconds": 10,
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "supports_guidance_with_source": true,
+  "frames_exclusive_with_references": true,
+  "source_input_label": "Video to edit"
+}

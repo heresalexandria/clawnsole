@@ -1124,6 +1124,7 @@ class DirectGateway
             promptName: media.promptName,
             referenceId: media.referenceId,
             thumbnailAsset: media.thumbnailAsset,
+            durationSeconds: media.durationSeconds,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
@@ -1254,14 +1255,14 @@ class DirectGateway
       estimatedCreditsMin:
           record.estimatedCreditsMin ??
           estimate.providerUnitsMinimum ??
-          estimate.minimumUsd,
+          estimate.quotedMinimumUsd,
       estimatedCreditsMax:
           record.estimatedCreditsMax ??
           estimate.providerUnitsMaximum ??
-          estimate.maximumUsd,
+          estimate.quotedMaximumUsd,
       estimateBasis: record.estimateBasis ?? estimate.basis,
-      quotedCostUsdMin: record.quotedCostUsdMin ?? estimate.minimumUsd,
-      quotedCostUsdMax: record.quotedCostUsdMax ?? estimate.maximumUsd,
+      quotedCostUsdMin: record.quotedCostUsdMin ?? estimate.quotedMinimumUsd,
+      quotedCostUsdMax: record.quotedCostUsdMax ?? estimate.quotedMaximumUsd,
       updatedAt: DateTime.now().toUtc(),
     );
     await _replaceGeneration(record);

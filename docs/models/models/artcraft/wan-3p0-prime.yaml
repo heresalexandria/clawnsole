@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "wan_3p0_prime",
+  "canonical_model_id": "wan-3.0-prime",
+  "label": "Wan 3.0 Prime",
+  "description": "Premium Wan video with pinned frames or multimodal references.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.188,
+  "reference_usd_per_second": 0.188,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "max_image_references": 10,
+  "max_video_references": 5,
+  "max_audio_references": 5,
+  "frames_exclusive_with_references": true,
+  "max_reference_video_seconds": 15,
+  "max_reference_audio_seconds": 15,
+  "max_prompt_characters": 20000,
+  "supports_audio": true,
+  "max_combined_video_seconds": 30,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

@@ -178,20 +178,35 @@ class AtlasCloudApi {
       final referenceDuration = durationPrices.keys.reduce(
         (left, right) => left < right ? left : right,
       );
+      final resolution = _pricingResolution(definition);
+      final tier = switch (resolution) {
+        'sd' => '480p',
+        'fhd' => '1080p',
+        'qhd' => '1440p',
+        '4k' => '4K',
+        _ => '720p',
+      };
+      final resolutionLabel = definition.resolutions
+          .firstWhere((item) => item.id == resolution)
+          .label;
       final effectiveRate =
           durationPrices[referenceDuration]! / referenceDuration;
       enriched.add(
         ProviderModelPrice(
           provider: price.provider,
-          model: price.model,
+          // A quote for HD with audio must never match a different selected
+          // output tier or a silent request. Submission quotes remain exact.
+          model:
+              '${price.model}:$tier${definition.supportsAudio ? ':audio' : ''}',
           canonicalModelId: price.canonicalId,
-          label: price.label,
+          label: '${price.label} · $resolutionLabel',
           usdPerSecond: effectiveRate,
           referenceUsdPerSecond: price.referenceUsdPerSecond == null
               ? null
               : effectiveRate,
           modes: price.modes,
-          source: 'atlas-preflight · exact route quotes',
+          source:
+              'atlas-preflight · $resolutionLabel${definition.supportsAudio ? ' · audio' : ''}',
           createReady: price.createReady,
           minDuration: price.minDuration,
           maxDuration: price.maxDuration,
@@ -244,7 +259,7 @@ class AtlasCloudApi {
   ) => <String, Object?>{
     'prompt': 'Clawnsole pricing estimate',
     'duration': duration,
-    'resolution': 'hd',
+    'resolution': _pricingResolution(model),
     'aspect_ratio': model.aspectRatios.contains('16:9') ? '16:9' : 'auto',
     'generate_audio': model.supportsAudio,
     if (model.id.contains('/reference-to-video'))
@@ -252,6 +267,11 @@ class AtlasCloudApi {
     else if (model.modes.contains(VideoMode.i2v))
       'keyframes': <String>[_pricingReferenceImage],
   };
+
+  String _pricingResolution(VideoModelDefinition model) =>
+      model.resolutions.any((resolution) => resolution.id == 'hd')
+      ? 'hd'
+      : model.resolutions.first.id;
 
   Future<Map<String, Object?>> submit(
     String key,
@@ -261,7 +281,7 @@ class AtlasCloudApi {
   }) async {
     final payload = generationPayload(
       model,
-      await _uploadBinaryReferences(key, input),
+      await _uploadBinaryReferences(key, input, model: model),
     );
     double? cost;
     try {
@@ -305,8 +325,9 @@ class AtlasCloudApi {
 
   Future<Map<String, Object?>> _uploadBinaryReferences(
     String key,
-    Map<String, Object?> input,
-  ) async {
+    Map<String, Object?> input, {
+    required String model,
+  }) async {
     final prepared = Map<String, Object?>.from(input);
     for (final field in const <String>[
       'reference_videos',
@@ -322,6 +343,23 @@ class AtlasCloudApi {
         );
       }
       prepared[field] = uploaded;
+    }
+    // Wan 3 requires public image URLs even for its first/last-frame route.
+    if (model.startsWith('alibaba/wan-3.0')) {
+      for (final field in const <String>['keyframes', 'reference_images']) {
+        final values = input[field] as List<Object?>?;
+        if (values == null) continue;
+        final uploaded = <String>[];
+        for (final raw in values) {
+          final source = _frameSource(raw);
+          uploaded.add(
+            source.startsWith('data:')
+                ? await _uploadMedia(key, source)
+                : source,
+          );
+        }
+        prepared[field] = uploaded;
+      }
     }
     return prepared;
   }
@@ -349,6 +387,9 @@ class AtlasCloudApi {
       'video/mp4' => 'mp4',
       'audio/wav' || 'audio/x-wav' => 'wav',
       'audio/mpeg' => 'mp3',
+      'image/png' => 'png',
+      'image/jpeg' => 'jpg',
+      'image/webp' => 'webp',
       _ => 'bin',
     };
     final request =
@@ -489,12 +530,114 @@ class AtlasCloudApi {
     }
 
     if (model.startsWith('xai/grok-imagine-video')) {
+      final lite = model.contains('-lite/');
       payload.addAll(<String, Object?>{
         'resolution': _lowerResolution(resolution),
-        'aspect_ratio': aspectRatio == 'auto' ? '16:9' : aspectRatio,
+        'aspect_ratio': !lite && aspectRatio == 'auto' ? '16:9' : aspectRatio,
+        if (lite) 'generate_audio': input['generate_audio'] != false,
       });
       if (model.contains('/image-to-video') && images.isNotEmpty) {
-        payload['image_url'] = images.first;
+        payload[lite ? 'image' : 'image_url'] = images.first;
+      }
+      return payload;
+    }
+
+    if (model.startsWith('alibaba/wan-3.0')) {
+      payload.addAll(<String, Object?>{
+        'resolution': _lowerResolution(resolution),
+        'audio': input['generate_audio'] != false,
+        if (input['seed'] is int) 'seed': input['seed'],
+      });
+      if (model.endsWith('/text-to-video')) {
+        payload['ratio'] = aspectRatio == 'auto' ? 'adaptive' : aspectRatio;
+      } else {
+        if (images.isNotEmpty) payload['image'] = images.first;
+        if (images.length > 1) payload['last_image'] = images.last;
+      }
+      return payload;
+    }
+
+    if (model.startsWith('kwaivgi/kling-v4.0/')) {
+      payload['resolution'] = _lowerResolution(resolution);
+      if (model.endsWith('/text-to-video')) {
+        payload['aspect_ratio'] = aspectRatio;
+      } else {
+        if (images.isNotEmpty) payload['image'] = images.first;
+        if (images.length > 1) payload['last_image'] = images.last;
+        if (images.length > 2) {
+          payload['middle_images'] = images.sublist(1, images.length - 1);
+        }
+      }
+      return payload;
+    }
+
+    if (model.startsWith('minimax/h3')) {
+      payload.addAll(<String, Object?>{
+        'resolution': switch (resolution) {
+          'sd' => '480P',
+          'qhd' => '2K',
+          _ => '768P',
+        },
+        'ratio': aspectRatio == 'auto' ? 'adaptive' : aspectRatio,
+      });
+      if (model.endsWith('/image-to-video')) {
+        if (images.isNotEmpty) payload['image'] = images.first;
+        if (images.length > 1) payload['end_image'] = images.last;
+      }
+      return payload;
+    }
+
+    if (model.startsWith('vidu/q4-preview/')) {
+      payload.addAll(<String, Object?>{
+        'resolution': switch (resolution) {
+          'sd' => '540p',
+          'qhd' => '2k',
+          _ => _lowerResolution(resolution),
+        },
+        'generate_audio': input['generate_audio'] != false,
+        if (input['seed'] is int) 'seed': input['seed'],
+        if (images.isNotEmpty) 'image': images.first,
+      });
+      return payload;
+    }
+
+    if (model.startsWith('pixverse/v6-max/')) {
+      payload.addAll(<String, Object?>{
+        'resolution': resolution == 'sd'
+            ? '540p'
+            : _lowerResolution(resolution),
+        'generate_audio': input['generate_audio'] != false,
+        if (input['seed'] is int) 'seed': input['seed'],
+      });
+      if (model.endsWith('/text-to-video')) {
+        payload['aspect_ratio'] = aspectRatio;
+      } else if (images.isNotEmpty) {
+        payload['image'] = images.first;
+      }
+      return payload;
+    }
+
+    if (model.startsWith('luma/ray-3.2/') || model.startsWith('ltx/ltx-2.5-')) {
+      final ltx = model.startsWith('ltx/');
+      if (ltx && duration == 'auto' && images.length > 1) {
+        throw const ProviderException(
+          'LTX requires a fixed duration when a last frame is supplied.',
+          status: 400,
+        );
+      }
+      payload['resolution'] = !ltx && resolution == 'sd'
+          ? '540p'
+          : _lowerResolution(resolution);
+      if (ltx || model.endsWith('/text-to-video')) {
+        payload['aspect_ratio'] = aspectRatio;
+      }
+      if (ltx) {
+        payload['fps'] = 24;
+        payload['generate_audio'] = input['generate_audio'] != false;
+      }
+      if (model.endsWith('/image-to-video')) {
+        if (images.isNotEmpty) payload['image'] = images.first;
+        if (images.length > 1) payload['last_image'] = images.last;
       }
       return payload;
     }

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "luma/ray-3.2/image-to-video",
+  "canonical_model_id": "ray-3.2",
+  "label": "Luma Ray 3.2 · Frames",
+  "description": "Luma Ray 3.2 generation from pinned frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "sd",
+      "label": "540p",
+      "detail": "960 × 540"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 10,
+  "duration_step": 5,
+  "max_keyframes": 2,
+  "usd_per_second": 0.06,
+  "supports_audio": false,
+  "reference_usd_per_second": 0.06,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "prompt_optional_modes": [
+    "i2v"
+  ],
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

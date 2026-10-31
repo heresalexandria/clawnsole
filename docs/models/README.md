@@ -41,7 +41,9 @@ availability:
 
 `version`, `min_version`, and `max_version` may be combined, although an exact
 version is normally used by itself. Omit `availability` to expose the entry to
-every app version. All manifests in the baseline catalog omit it.
+every app version. Routes requiring a newer adapter are version-gated; when an
+existing route gains new wire semantics, a legacy manifest can retain its
+previous contract for older releases.
 
 ## Mobile test releases
 
@@ -99,6 +101,14 @@ display names or model families do not inherit another route's budget.
 Omitted resolution-budget mappings also retain the compiled mapping; an
 explicit mapping, including an empty one, replaces it completely.
 
+`max_combined_video_seconds` optionally caps the sum of output duration and
+all reference-video durations. It is independent of the input-only budget;
+the composer uses the smaller of that budget and the combined budget minus
+the selected output duration. Image and audio references never consume it.
+ArtCraft's Wan 3.0 routes publish a 30-second combined budget and a separate
+15-second input-video budget. New routes that require this contract must set
+`availability.min_version` to at least `0.61.0`.
+
 Krea's `bytedance/seedance-2-5` has a 30-second aggregate reference-video
 compatibility fallback. [Krea's API guide](https://www.krea.ai/blog/seedance-2-5-api-access-guide-features-code-examples-for-long-form-video)
 publishes the 10-video count and a separate 4–30-second **output** duration;
@@ -120,3 +130,19 @@ older builds safely ignore providers whose adapter they do not understand.
 Keep `schema_version: 1` on the index and every manifest. Invalid schemas,
 unsafe or cross-origin paths, malformed values, duplicate IDs, and catalogs
 with no compatible providers are rejected without replacing the prior catalog.
+
+## Model and price audit, 2026-10-30
+
+The catalog and bundled Flutter fallback were reconciled with all six remote
+providers. Audit sources, verified rates, and remaining provider limitations:
+
+- [BFL and Runway](audit-bfl-runway.md)
+- [Krea](audit-krea.md)
+- [ArtCraft](audit-artcraft.md)
+- [Atlas Cloud and LTX](audit-atlas-ltx.md)
+
+Apple's two on-device routes remain free of provider API charges. The same
+Flutter contracts and estimates serve iOS, Android, native Windows, and the
+Electron macOS renderer/companion. New adapter-dependent routes are gated to
+version 0.61.0; the normal minor release workflow owns the version bump.
+Variable pricing is displayed explicitly and is not saved as a zero-cost quote.

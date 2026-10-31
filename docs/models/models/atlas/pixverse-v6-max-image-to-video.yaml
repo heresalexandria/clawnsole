@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "pixverse/v6-max/image-to-video",
+  "canonical_model_id": "pixverse-v6-max",
+  "label": "PixVerse V6 Max · Image",
+  "description": "PixVerse V6 Max generation from pinned frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "sd",
+      "label": "540p",
+      "detail": "960 × 540"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.024,
+  "supports_audio": true,
+  "reference_usd_per_second": 0.024,
+  "supports_start_frame": true,
+  "supports_end_frame": false,
+  "supports_seed": true,
+  "max_prompt_characters": 5000,
+  "max_input_image_bytes": 10000000,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}

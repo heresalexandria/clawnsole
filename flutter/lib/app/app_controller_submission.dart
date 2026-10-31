@@ -134,12 +134,14 @@ extension AppControllerSubmission on AppController {
       createdAt: now,
       updatedAt: now,
       estimatedCreditsMin:
-          fallbackEstimate.providerUnitsMinimum ?? fallbackEstimate.minimumUsd,
+          fallbackEstimate.providerUnitsMinimum ??
+          fallbackEstimate.quotedMinimumUsd,
       estimatedCreditsMax:
-          fallbackEstimate.providerUnitsMaximum ?? fallbackEstimate.maximumUsd,
+          fallbackEstimate.providerUnitsMaximum ??
+          fallbackEstimate.quotedMaximumUsd,
       estimateBasis: fallbackEstimate.basis,
-      quotedCostUsdMin: fallbackEstimate.minimumUsd,
-      quotedCostUsdMax: fallbackEstimate.maximumUsd,
+      quotedCostUsdMin: fallbackEstimate.quotedMinimumUsd,
+      quotedCostUsdMax: fallbackEstimate.quotedMaximumUsd,
       folderId: selectedGenerationFolderId,
       title: tab.title,
       rewriteOfLocalId: tab.rewriteSummary == null
@@ -183,12 +185,12 @@ extension AppControllerSubmission on AppController {
             final estimate = quote.withPricingContext(fallbackEstimate);
             pending = pending.copyWith(
               estimatedCreditsMin:
-                  estimate.providerUnitsMinimum ?? estimate.minimumUsd,
+                  estimate.providerUnitsMinimum ?? estimate.quotedMinimumUsd,
               estimatedCreditsMax:
-                  estimate.providerUnitsMaximum ?? estimate.maximumUsd,
+                  estimate.providerUnitsMaximum ?? estimate.quotedMaximumUsd,
               estimateBasis: estimate.basis,
-              quotedCostUsdMin: estimate.minimumUsd,
-              quotedCostUsdMax: estimate.maximumUsd,
+              quotedCostUsdMin: estimate.quotedMinimumUsd,
+              quotedCostUsdMax: estimate.quotedMaximumUsd,
             );
           }
         } on Object {

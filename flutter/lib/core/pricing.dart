@@ -1,13 +1,30 @@
 import 'dart:math' as math;
 
 import 'models.dart';
+import 'artcraft_reference_pricing.dart';
 import 'provider_catalog.dart';
+import 'runway_pricing.dart';
+
+export 'runway_pricing.dart' show runwayKling4Credits;
 
 const double bflUsdPerCredit = 0.01;
 
-const _textOrImageRates = <String, double>{'draft': 6, 'hd': 17, 'fhd': 29};
+const _textOrImageRates = <String, double>{
+  'draft': 6,
+  'hd': 15,
+  'fhd': 24,
+  'qhd': 28,
+  '4k': 41,
+};
 
-const _videoRates = <String, double>{'draft': 12, 'hd': 43, 'fhd': 54};
+// The current rate feed omits continuation drafts; retain BFL's last published 12-credit rate.
+const _videoRates = <String, double>{
+  'draft': 12,
+  'hd': 21,
+  'fhd': 27,
+  'qhd': 31,
+  '4k': 45,
+};
 
 const double bflUpscaleMaximumOutputMegapixels = 13.75;
 const double bflUpscaleMaximumDurationSeconds = 20;
@@ -33,7 +50,7 @@ CreditEstimate estimateCredits(
   VideoSourceMetadata? sourceMetadata,
 ]) {
   if (mode == VideoMode.upscale) {
-    final usdPerMegapixelSecond = config.upscaleCreativity == 0 ? .07 : .10;
+    final usdPerMegapixelSecond = config.upscaleCreativity == 0 ? .035 : .05;
     final outputMegapixels = sourceMetadata == null
         ? bflUpscaleMaximumOutputMegapixels
         : _upscaleOutputMegapixels(sourceMetadata, config.upscaleFactor);
@@ -313,6 +330,7 @@ ProviderModelPrice? _pricedModel(
   List<ProviderModelPrice> prices,
 ) {
   final resolutionLabel = switch (config.resolution) {
+    '360p' => '360p',
     'sd' => '480p',
     'hd' => '720p',
     'fhd' => '1080p',
@@ -326,6 +344,11 @@ ProviderModelPrice? _pricedModel(
     if (modelId == 'gemini_omni_flash')
       '$modelId:${mode == VideoMode.v2v ? 'edit' : 'generation'}',
     if (mode == VideoMode.v2v) '$modelId:$resolutionLabel:edit',
+    if (config.references?.any(
+          (reference) => reference.kind == MediaReferenceKind.video,
+        ) ==
+        true)
+      '$modelId:$resolutionLabel:video-reference',
     '$modelId:$resolutionLabel:${config.generateAudio ? 'audio' : 'silent'}',
     '$modelId:$resolutionLabel',
     modelId,
@@ -345,9 +368,12 @@ ProviderModelPrice? _pricedModel(
   List<ProviderModelPrice> prices,
 ) {
   if (providerId == 'bfl') {
+    if (modelId == 'flux-tools-video-edit-v1') {
+      return (usdPerSecond: .03, source: 'published-source-duration-rate');
+    }
     if (mode == VideoMode.upscale) {
       return (
-        usdPerSecond: config.upscaleCreativity == 0 ? .07 : .10,
+        usdPerSecond: config.upscaleCreativity == 0 ? .035 : .05,
         source: 'published-output-megapixel-rate',
       );
     }
@@ -358,11 +384,27 @@ ProviderModelPrice? _pricedModel(
     return (usdPerSecond: creditsToUsd(credits), source: 'published-rate');
   }
   if (providerId == 'ltx' &&
+      modelId == 'ltx-2-3-pro' &&
       config.references?.any((item) => item.kind == MediaReferenceKind.audio) ==
           true) {
-    return (usdPerSecond: .10, source: 'published-rate');
+    return (
+      usdPerSecond: switch (config.resolution) {
+        'fhd' => .10,
+        'qhd' => .18,
+        '4k' => .34,
+        _ => .06,
+      },
+      source: 'published-audio-input-rate',
+    );
   }
-  final pricedModel = _pricedModel(modelId, mode, config, prices);
+  final pricedModel = _pricedModel(
+    modelId,
+    mode,
+    config,
+    prices.isEmpty && providerId == 'runway'
+        ? publishedProviderPrices('runway')
+        : prices,
+  );
   if (pricedModel?.pricingUnit == 'per-frame') {
     return (
       usdPerSecond: pricedModel!.usdPerSecond * 24,
@@ -377,8 +419,30 @@ ProviderModelPrice? _pricedModel(
       source: pricedModel.source,
     );
   }
+  if (providerId == 'atlas' &&
+      const <String>{
+        'minimax/hailuo-2.3/t2v-standard',
+        'minimax/hailuo-2.3/i2v-standard',
+      }.contains(modelId)) {
+    return (
+      usdPerSecond: config.duration == 10 ? .056 : .28 / 6,
+      source: 'published-duration-price',
+    );
+  }
   if (providerId == 'ltx') {
     const rates = <String, Map<String, double>>{
+      'ltx-2-5-fast': <String, double>{
+        'hd': .09,
+        'fhd': .13,
+        'qhd': .19,
+        '4k': .30,
+      },
+      'ltx-2-5-pro': <String, double>{
+        'hd': .12,
+        'fhd': .17,
+        'qhd': .25,
+        '4k': .39,
+      },
       'ltx-2-3-fast': <String, double>{
         'hd': .03,
         'fhd': .06,
@@ -417,19 +481,86 @@ CostEstimate estimateCost(
   List<ProviderModelPrice> prices = const <ProviderModelPrice>[],
   VideoSourceMetadata? sourceMetadata,
 ]) {
+  if (providerId == 'krea') {
+    // A partially loaded live catalog must not turn an omitted variable-price
+    // route into the model's numeric zero placeholder.
+    prices = <ProviderModelPrice>[
+      ...prices,
+      ...publishedProviderPrices(providerId),
+    ];
+  }
+  if (providerId == 'artcraft') {
+    final videos = config.references
+        ?.where((item) => item.kind == MediaReferenceKind.video)
+        .toList();
+    if (videos != null && videos.isNotEmpty) {
+      final estimate = artCraftReferenceEstimate(modelId, <String, Object?>{
+        'duration': config.duration,
+        'resolution': config.resolution,
+        'reference_types': <String>['video'],
+        'reference_video_duration_seconds': videos.fold<double>(
+          0,
+          (sum, video) => sum + (video.durationSeconds ?? 0),
+        ),
+        'reference_video_duration_pending': videos
+            .where((video) => video.durationSeconds == null)
+            .length,
+      });
+      if (estimate != null) return estimate;
+    }
+  }
   final duration = config.duration;
   final model = modelById(providerId, modelId);
   final sourceDuration = model.durationComesFromSource(mode)
       ? sourceMetadata?.durationSeconds
       : null;
+  final drivingAudio = providerId == 'ltx'
+      ? config.references
+            ?.where((reference) => reference.kind == MediaReferenceKind.audio)
+            .firstOrNull
+      : null;
   final minimumSeconds =
+      drivingAudio?.durationSeconds ??
       sourceDuration ??
-      (duration is num ? duration.toDouble() : model.minDuration.toDouble());
+      (drivingAudio != null
+          ? (model.minReferenceAudioSeconds ?? 2).toDouble()
+          : duration is num
+          ? duration.toDouble()
+          : model.minDuration.toDouble());
   final maximumSeconds =
+      drivingAudio?.durationSeconds ??
       sourceDuration ??
-      (duration is num ? duration.toDouble() : model.maxDuration.toDouble());
+      (drivingAudio != null
+          ? (model.maxReferenceSeconds(
+                      MediaReferenceKind.audio,
+                      config.resolution,
+                    ) ??
+                    model.maxDuration)
+                .toDouble()
+          : duration is num
+          ? duration.toDouble()
+          : model.maxDurationFor(config.resolution).toDouble());
   final rate = _providerRate(providerId, modelId, mode, config, prices);
   final pricedModel = _pricedModel(modelId, mode, config, prices);
+  final kreaNeedsReferenceDuration =
+      providerId == 'krea' &&
+      (modelId == 'minimax/hailuo-3' || modelId == 'alibaba/wan-3.0-prime') &&
+      config.references?.any(
+            (reference) =>
+                reference.kind == MediaReferenceKind.video &&
+                reference.durationSeconds == null,
+          ) ==
+          true;
+  if (pricedModel?.pricingUnit == 'variable' || kreaNeedsReferenceDuration) {
+    return CostEstimate(
+      minimumUsd: 0,
+      maximumUsd: 0,
+      basis: kreaNeedsReferenceDuration
+          ? 'Reading reference video duration to calculate the charge.'
+          : pricedModel!.source,
+      isAvailable: false,
+    );
+  }
   final durationLabel = minimumSeconds == maximumSeconds
       ? '${_secondsLabel(minimumSeconds)} s'
       : '${_secondsLabel(minimumSeconds)}–${_secondsLabel(maximumSeconds)} s Auto';
@@ -452,7 +583,26 @@ CostEstimate estimateCost(
     if (config.generateAudio) 'audio',
   ].join(' · ');
 
-  double quotedTotal(double seconds) {
+  double quotedTotal(double seconds, {bool upperBound = false}) {
+    if (providerId == 'krea' &&
+        (modelId == 'minimax/hailuo-3' || modelId == 'alibaba/wan-3.0-prime')) {
+      final references = config.references ?? const <MediaReferenceLabel>[];
+      final videoSeconds = references
+          .where((reference) => reference.kind == MediaReferenceKind.video)
+          .fold<double>(
+            0,
+            (sum, reference) => sum + (reference.durationSeconds ?? 0),
+          );
+      final imageCount = references
+          .where((reference) => reference.kind == MediaReferenceKind.image)
+          .length;
+      return rate.usdPerSecond *
+              (seconds +
+                  (upperBound ? videoSeconds.ceil() : videoSeconds.floor())) +
+          (modelId == 'minimax/hailuo-3' && imageCount > 5
+              ? (imageCount - 5) * .04
+              : 0);
+    }
     final wholeSeconds = seconds.round();
     if ((seconds - wholeSeconds).abs() < .0001) {
       final exact = pricedModel?.durationPrices[wholeSeconds];
@@ -462,7 +612,13 @@ CostEstimate estimateCost(
   }
 
   if (providerId == 'bfl') {
-    final credits = estimateCredits(mode, config, history, sourceMetadata);
+    final credits = modelId == 'flux-tools-video-edit-v1'
+        ? CreditEstimate(
+            minimum: _roundCredits(minimumSeconds * 3),
+            maximum: _roundCredits(maximumSeconds * 3),
+            basis: 'published-source-duration-rate',
+          )
+        : estimateCredits(mode, config, history, sourceMetadata);
     final upscale = mode == VideoMode.upscale;
     final outputMegapixels = sourceMetadata == null || !upscale
         ? null
@@ -485,6 +641,59 @@ CostEstimate estimateCost(
                     outputMegapixels!,
                   )
           : calculation,
+    );
+  }
+  if (providerId == 'runway' && modelId == 'kling_4') {
+    if (mode == VideoMode.v2v && sourceMetadata == null) {
+      // Editing uses the source length for both sides of the charge. The
+      // duration control cannot stand in for an unmeasured source video.
+      return const CostEstimate(
+        minimumUsd: 0,
+        maximumUsd: 0,
+        basis: 'Reading source video duration to calculate the charge.',
+        isAvailable: false,
+      );
+    }
+    final references = config.references ?? const <MediaReferenceLabel>[];
+    final videoReferences = references.where(
+      (item) => item.kind == MediaReferenceKind.video,
+    );
+    final hasPendingInputDuration = videoReferences.any(
+      (item) => item.durationSeconds == null,
+    );
+    final hasInputVideo = mode == VideoMode.v2v || videoReferences.isNotEmpty;
+    final inputSeconds =
+        videoReferences.fold<double>(
+          0,
+          (sum, item) => sum + (item.durationSeconds ?? 0),
+        ) +
+        (mode == VideoMode.v2v ? sourceMetadata?.durationSeconds ?? 0 : 0);
+    final minimumCredits = runwayKling4Credits(
+      resolution: config.resolution,
+      outputSeconds: minimumSeconds,
+      inputSeconds: inputSeconds,
+      hasInputVideo: hasInputVideo,
+    );
+    final maximumCredits = runwayKling4Credits(
+      resolution: config.resolution,
+      outputSeconds: maximumSeconds,
+      // The provider caps aggregate billable input at 30 seconds. Until all
+      // clips are measured, the known total is only a lower bound.
+      inputSeconds: hasPendingInputDuration ? 30 : inputSeconds,
+      hasInputVideo: hasInputVideo,
+    );
+    return CostEstimate(
+      minimumUsd: creditsToUsd(minimumCredits),
+      maximumUsd: creditsToUsd(maximumCredits),
+      providerUnitsMinimum: minimumCredits,
+      providerUnitsMaximum: maximumCredits,
+      providerUnitLabel: 'credits',
+      basis:
+          'published · rounded credits; 20% off through 2026-11-30 UTC'
+          '${hasPendingInputDuration ? '; reference duration pending' : ''}',
+      rateUsd: rate.usdPerSecond,
+      rateUnit: 'second',
+      calculation: calculation,
     );
   }
   if (providerId == 'artcraft' || providerId == 'runway') {
@@ -524,7 +733,7 @@ CostEstimate estimateCost(
   }
   return CostEstimate(
     minimumUsd: _roundUsd(quotedTotal(minimumSeconds)),
-    maximumUsd: _roundUsd(quotedTotal(maximumSeconds)),
+    maximumUsd: _roundUsd(quotedTotal(maximumSeconds, upperBound: true)),
     basis: rate.source,
     rateUsd: rate.usdPerSecond,
     rateUnit: 'second',
@@ -558,7 +767,7 @@ double _runwayKnownInputSurchargeUsd(
       (referenceVideoSeconds + sourceSeconds) * inputCreditsPerSecond,
     );
   }
-  if (modelId == 'grok_imagine_1_5') {
+  if (modelId == 'grok_imagine_1_5' || modelId == 'grok_imagine_1_5_lite') {
     return creditsToUsd((references.length + keyframes.length).toDouble());
   }
   if (modelId == 'hailuo3') {
@@ -567,9 +776,31 @@ double _runwayKnownInputSurchargeUsd(
             .where((item) => item.kind == MediaReferenceKind.image)
             .length +
         keyframes.length;
-    return creditsToUsd(imageCount * 2.0);
+    final videoSeconds =
+        references
+            .where((item) => item.kind == MediaReferenceKind.video)
+            .fold<double>(0, (sum, item) => sum + (item.durationSeconds ?? 0)) +
+        (mode == VideoMode.v2v ? sourceMetadata?.durationSeconds ?? 0 : 0);
+    return creditsToUsd(
+      imageCount * 2.0 +
+          videoSeconds.clamp(0, 15) * (config.resolution == 'qhd' ? 15 : 10),
+    );
   }
-  if (modelId == 'gemini_omni_flash' && mode == VideoMode.i2v) {
+  if (modelId == 'gemini_omni_flash_1.1') {
+    final imageCount =
+        references
+            .where((item) => item.kind == MediaReferenceKind.image)
+            .length +
+        keyframes.length;
+    final videoSeconds =
+        references
+            .where((item) => item.kind == MediaReferenceKind.video)
+            .fold<double>(0, (sum, item) => sum + (item.durationSeconds ?? 0)) +
+        (mode == VideoMode.v2v ? sourceMetadata?.durationSeconds ?? 0 : 0);
+    return creditsToUsd(imageCount + videoSeconds);
+  }
+  if (modelId == 'gemini_omni_flash' &&
+      (mode == VideoMode.i2v || mode == VideoMode.v2v)) {
     return creditsToUsd((references.length + keyframes.length).toDouble());
   }
   return 0;

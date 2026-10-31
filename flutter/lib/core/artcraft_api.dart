@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'api_transcript.dart';
+import 'artcraft_reference_pricing.dart';
 import 'provider_submission.dart';
 import 'bfl_api.dart';
 import 'models.dart';
@@ -47,6 +48,8 @@ class ArtCraftApi {
     'veo_3p1',
     'veo_3p1_fast',
     'vidu_q3',
+    'wan_3p0',
+    'wan_3p0_prime',
   };
 
   Map<String, String> _headers(String key, {bool json = false}) =>
@@ -83,6 +86,8 @@ class ArtCraftApi {
     String model,
     Map<String, Object?> input,
   ) async {
+    final referenceEstimate = artCraftReferenceEstimate(model, input);
+    if (referenceEstimate != null) return referenceEstimate;
     final quote = await _quote(_pricingPayload(model, input));
     if (quote == null) return null;
     return CostEstimate(
@@ -161,8 +166,32 @@ class ArtCraftApi {
     BeforeGenerationSend? beforeSend,
     String? operationId,
   }) async {
+    final combinedLimit = modelById('artcraft', model).maxCombinedVideoSeconds;
+    final referenceSeconds = input['reference_video_duration_seconds'];
+    final outputSeconds = input['duration'];
+    if (combinedLimit != null &&
+        referenceSeconds is num &&
+        outputSeconds is num &&
+        referenceSeconds + outputSeconds > combinedLimit + .001) {
+      throw ProviderException(
+        '${modelById('artcraft', model).label} reference video and output '
+        'must fit within $combinedLimit seconds combined.',
+        status: 400,
+      );
+    }
     final payload = await _generationPayload(key, model, input);
-    final quote = await _quote(payload);
+    final videoTokens = payload['reference_video_media_tokens'];
+    final referenceEstimate = artCraftReferenceEstimate(model, input);
+    final quote =
+        referenceEstimate == null ||
+            (videoTokens is List &&
+                videoTokens.isNotEmpty &&
+                _canQuoteReferenceDuration(model, input))
+        ? await _quote(<String, Object?>{
+            ...payload,
+            ..._estimateDurationFields(input),
+          })
+        : null;
     payload['idempotency_token'] = operationId == null
         ? _uuid()
         : submissionIdempotencyToken(operationId);
@@ -389,6 +418,28 @@ class ArtCraftApi {
         'resolution': resolution,
       if (definition.supportsAudio)
         'generate_audio': input['generate_audio'] != false,
+      ..._estimateDurationFields(input),
+    };
+  }
+
+  bool _canQuoteReferenceDuration(String model, Map<String, Object?> input) {
+    if (model != 'seedance_2p5' && model != 'seedance_2p5_u') return true;
+    final pending = input['reference_video_duration_pending'];
+    if (pending is num && pending > 0) return false;
+    final videos = input['reference_videos'];
+    final seconds = input['reference_video_duration_seconds'];
+    return videos is! List ||
+        videos.isEmpty ||
+        seconds is num && seconds.isFinite && seconds > 0;
+  }
+
+  Map<String, Object?> _estimateDurationFields(Map<String, Object?> input) {
+    final seconds = input['reference_video_duration_seconds'];
+    if (seconds is! num || !seconds.isFinite || seconds < 0) return const {};
+    return <String, Object?>{
+      'estimate_only': <String, Object?>{
+        'total_input_video_duration_millis': (seconds * 1000).ceil(),
+      },
     };
   }
 

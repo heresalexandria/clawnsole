@@ -2542,6 +2542,7 @@ class CompanionApp {
             promptName: media.promptName,
             referenceId: media.referenceId,
             thumbnailAsset: media.thumbnailAsset,
+            durationSeconds: media.durationSeconds,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,
@@ -2829,14 +2830,16 @@ class CompanionApp {
       estimatedCreditsMin:
           generation.estimatedCreditsMin ??
           estimate.providerUnitsMinimum ??
-          estimate.minimumUsd,
+          estimate.quotedMinimumUsd,
       estimatedCreditsMax:
           generation.estimatedCreditsMax ??
           estimate.providerUnitsMaximum ??
-          estimate.maximumUsd,
+          estimate.quotedMaximumUsd,
       estimateBasis: generation.estimateBasis ?? estimate.basis,
-      quotedCostUsdMin: generation.quotedCostUsdMin ?? estimate.minimumUsd,
-      quotedCostUsdMax: generation.quotedCostUsdMax ?? estimate.maximumUsd,
+      quotedCostUsdMin:
+          generation.quotedCostUsdMin ?? estimate.quotedMinimumUsd,
+      quotedCostUsdMax:
+          generation.quotedCostUsdMax ?? estimate.quotedMaximumUsd,
       updatedAt: DateTime.now().toUtc(),
     );
     generation = await _upsert(generation);

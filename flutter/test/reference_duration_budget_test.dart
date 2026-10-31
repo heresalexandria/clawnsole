@@ -14,6 +14,37 @@ import 'package:flutter_test/flutter_test.dart';
 /// more seconds than the model accepts.
 void main() {
   group('the controller resolves and spends a seconds budget', () {
+    test('Wan shares its 30-second budget between input and output', () {
+      final controller = _director(provider: 'artcraft', model: 'wan_3p0');
+      addTearDown(controller.dispose);
+      controller.form
+        ..prompt = 'Continue the camera movement.'
+        ..durationSeconds = 20;
+      _attachVideos(controller, <double?>[4.5, 5.5]);
+      expect(controller.referenceSecondsLimit(MediaReferenceKind.video), 10);
+      expect(controller.referenceSecondsLimit(MediaReferenceKind.audio), 15);
+      expect(controller.validate(), isNull);
+      expect(
+        controller
+            .checkReferenceBudget(MediaReferenceKind.video, durationSeconds: 1)
+            .allowed,
+        isFalse,
+      );
+      controller.form.durationSeconds = 21;
+      expect(controller.validate(), contains('up to 9 s of reference video'));
+      controller.form.durationSeconds = 10;
+      expect(controller.referenceSecondsLimit(MediaReferenceKind.video), 15);
+    });
+
+    test('submission carries measured reference duration without media', () {
+      final controller = _director(provider: 'artcraft', model: 'seedance_2p5');
+      addTearDown(controller.dispose);
+      _attachVideos(controller, <double?>[4.5, 5.5, null]);
+      final input = controller.buildInputForTesting();
+      expect(input['reference_video_duration_seconds'], 10);
+      expect(input['reference_video_duration_pending'], 1);
+    });
+
     test('a model publishes its seconds budget per kind', () {
       final controller = _director();
       expect(controller.referenceSecondsLimit(MediaReferenceKind.video), 30);

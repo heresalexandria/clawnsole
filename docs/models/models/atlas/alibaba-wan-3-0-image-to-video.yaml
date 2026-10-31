@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "alibaba/wan-3.0/image-to-video",
+  "canonical_model_id": "wan-3.0",
+  "label": "Wan 3.0 · Frames",
+  "description": "Wan 3.0 generation from pinned frames.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.04,
+  "supports_audio": true,
+  "reference_usd_per_second": 0.04,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_seed": true,
+  "supports_auto_duration": true,
+  "max_prompt_characters": 20000,
+  "max_input_image_bytes": 20000000,
+  "availability": {
+    "min_version": "0.61.0"
+  }
+}
