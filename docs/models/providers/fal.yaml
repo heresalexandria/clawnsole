@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "fal",
+  "adapter": "fal",
+  "name": "fal",
+  "description": "FLUX 3 Max and current video models through fal’s queued API.",
+  "console_url": "https://fal.ai/dashboard/keys",
+  "docs_url": "https://fal.ai/docs/model-apis",
+  "pricing_url": "https://fal.ai/pricing",
+  "pricing_source": "Published list rates; fal promotions may reduce charges",
+  "availability": {
+    "min_version": "0.62.0"
+  },
+  "models": [
+    "models/fal/blackforestlabs-flux-3-max-text-to-video.yaml",
+    "models/fal/blackforestlabs-flux-3-max-image-to-video.yaml",
+    "models/fal/blackforestlabs-flux-3-text-to-video.yaml",
+    "models/fal/blackforestlabs-flux-3-image-to-video.yaml",
+    "models/fal/minimax-h3-max-text-to-video.yaml",
+    "models/fal/minimax-h3-max-image-to-video.yaml",
+    "models/fal/minimax-h3-max-turbo-text-to-video.yaml",
+    "models/fal/minimax-h3-max-turbo-image-to-video.yaml",
+    "models/fal/kling-v4-text-to-video.yaml",
+    "models/fal/kling-v4-image-to-video.yaml",
+    "models/fal/alibaba-wan-3-0-text-to-video.yaml",
+    "models/fal/alibaba-wan-3-0-image-to-video.yaml",
+    "models/fal/lightricks-ltx-2-5-text-to-video-fast.yaml",
+    "models/fal/lightricks-ltx-2-5-image-to-video-fast.yaml",
+    "models/fal/lightricks-ltx-2-5-text-to-video-pro.yaml",
+    "models/fal/lightricks-ltx-2-5-image-to-video-pro.yaml"
+  ]
+}

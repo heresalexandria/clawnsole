@@ -31,7 +31,7 @@ the adjacent `assets/` directory.
 
 For local development, `start_macos` loads the ignored repository `.env` so
 `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, `ATLAS_CLOUD_KEY`,
-`RUNWAY_KEY` (or Runway’s standard `RUNWAYML_API_SECRET`), and `KREA_API_KEY`
+`RUNWAY_KEY` (or Runway’s standard `RUNWAYML_API_SECRET`), `KREA_API_KEY`, and `FAL_KEY`
 can act as test credentials without exposing them to the Flutter renderer. Saved keys
 still take precedence.
 

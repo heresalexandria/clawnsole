@@ -73,7 +73,7 @@ void main() {
           );
         }),
         siteUrl: Uri.parse('https://clawnsole.app/'),
-      ).fetch(appVersion: '0.61.0');
+      ).fetch(appVersion: '0.62.0');
       expect(
         bundle.providers.map((p) => p.id).toSet(),
         bundledVideoProviders.map((p) => p.id).toSet(),

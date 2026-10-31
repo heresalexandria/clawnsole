@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'fal_catalog.dart' as fal_catalog;
 import 'runway_pricing.dart';
 
 const clawnsoleMobileTestBuild = bool.fromEnvironment(
@@ -3984,6 +3985,7 @@ const Set<String> remoteProviderIds = <String>{
   'atlas',
   'runway',
   'krea',
+  'fal',
 };
 
 const bundledVideoProviders = <VideoProviderDefinition>[
@@ -3991,6 +3993,7 @@ const bundledVideoProviders = <VideoProviderDefinition>[
   _artCraftProvider,
   _atlasProvider,
   _bflProvider,
+  fal_catalog.falProvider,
   _kreaProvider,
   _ltxProvider,
   _runwayProvider,
@@ -4093,6 +4096,8 @@ VideoProviderDefinition get runwayProvider =>
     providerByIdOrNull('runway') ?? _runwayProvider;
 VideoProviderDefinition get kreaProvider =>
     providerByIdOrNull('krea') ?? _kreaProvider;
+VideoProviderDefinition get falProvider =>
+    providerByIdOrNull('fal') ?? fal_catalog.falProvider;
 
 String providerNameForHistory(String id) =>
     providerByIdForRouting(id)?.name ?? id;
@@ -4143,6 +4148,12 @@ double? trustedGenerationProgress(Generation generation) {
 }
 
 List<ProviderModelPrice> publishedProviderPrices(String providerId) {
+  if (providerId == 'fal') {
+    return _availablePublishedPrices(
+      providerId,
+      fal_catalog.falPublishedPrices(),
+    );
+  }
   if (providerId == 'atlas') {
     return atlasProvider.models.map((model) {
       if (!const <String>{

@@ -151,6 +151,7 @@ Future<void> _serveCompanion(List<String> arguments) async {
           Platform.environment['RUNWAYML_API_SECRET']?.trim() ??
           '',
       'krea': Platform.environment['KREA_API_KEY']?.trim() ?? '',
+      'fal': Platform.environment['FAL_KEY']?.trim() ?? '',
       'openai': Platform.environment['OPENAI_API_KEY']?.trim() ?? '',
       'anthropic': Platform.environment['ANTHROPIC_API_KEY']?.trim() ?? '',
     },

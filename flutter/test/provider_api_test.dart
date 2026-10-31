@@ -2158,10 +2158,20 @@ void main() {
 
   test('provider selector order and canonical routes are stable', () {
     final names = videoProviders.map((provider) => provider.name).toList();
-    expect(names, List<String>.from(names)..sort());
+    // Brand capitalization (such as fal) does not change selector order.
+    expect(
+      names,
+      List<String>.from(names)..sort(
+        (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+      ),
+    );
 
     expect(modelById('bfl', 'flux-3-video').canonicalId, 'flux-3');
     expect(modelById('artcraft', 'flux_3').canonicalId, 'flux-3');
+    expect(
+      modelById('fal', 'blackforestlabs/flux-3-max/text-to-video').canonicalId,
+      modelById('krea', 'black-forest-labs/flux-3-max').canonicalId,
+    );
     expect(
       modelById('atlas', 'black-forest-labs/flux-3/text-to-video').canonicalId,
       'flux-3',

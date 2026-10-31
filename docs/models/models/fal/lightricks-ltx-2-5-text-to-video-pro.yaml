@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "lightricks/ltx-2.5/text-to-video/pro",
+  "canonical_model_id": "ltx-2.5-pro",
+  "label": "LTX 2.5 Pro · Text",
+  "description": "LTX 2.5 Pro with native audio at 25 fps, up to 1080p.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 10,
+  "duration_step": 2,
+  "max_keyframes": 0,
+  "usd_per_second": 0.12,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.62.0"
+  },
+  "supports_auto_duration": true,
+  "max_prompt_characters": 5000
+}

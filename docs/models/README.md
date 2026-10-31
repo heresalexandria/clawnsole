@@ -122,8 +122,8 @@ derive them from output durations or reference counts.
 
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
-in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `krea`, `ltx`, or
-`runway`. `apple-local` is implemented only by the native iOS app. A genuinely
+in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `fal`, `krea`,
+`ltx`, or `runway`. `apple-local` is implemented only by the native iOS app. A genuinely
 new API protocol still requires an app release that implements its adapter;
 older builds safely ignore providers whose adapter they do not understand.
 
@@ -146,3 +146,11 @@ Flutter contracts and estimates serve iOS, Android, native Windows, and the
 Electron macOS renderer/companion. New adapter-dependent routes are gated to
 version 0.61.0; the normal minor release workflow owns the version bump.
 Variable pricing is displayed explicitly and is not saved as a zero-cost quote.
+
+## fal provider
+
+The fal adapter and its model manifests require version 0.62.0. Older apps
+ignore the provider until their request adapter is available. The same
+provider key, queue lifecycle, and media delivery contract apply to native
+Flutter and the desktop companion. See the [fal audit](audit-fal.md) for
+supported routes, official sources, pricing, and provider limitations.

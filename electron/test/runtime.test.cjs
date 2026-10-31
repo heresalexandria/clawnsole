@@ -79,6 +79,9 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
   );
   assert.equal(isAllowedExternalUrl("https://gist.github.com/example"), false);
   assert.equal(isAllowedExternalUrl("https://www.atlascloud.ai/console"), true);
+  assert.equal(isAllowedExternalUrl("https://fal.ai/dashboard/keys"), true);
+  assert.equal(isAllowedExternalUrl("https://docs.fal.ai/"), true);
+  assert.equal(isAllowedExternalUrl("https://fal.ai.example.com/"), false);
   assert.equal(isAllowedExternalUrl("https://heresalexandria.com/"), true);
   assert.equal(
     isAllowedExternalUrl(
@@ -104,18 +107,12 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
 });
 
 test("every provider catalog link is allowlisted for desktop", () => {
-  const catalog = fs.readFileSync(
-    path.join(
-      __dirname,
-      "..",
-      "..",
-      "flutter",
-      "lib",
-      "core",
-      "provider_catalog.dart",
-    ),
-    "utf8",
-  );
+  const catalog = ["provider_catalog.dart", "fal_catalog.dart"]
+    .map((file) => fs.readFileSync(
+      path.join(__dirname, "..", "..", "flutter", "lib", "core", file),
+      "utf8",
+    ))
+    .join("\n");
   const urls = [...catalog.matchAll(
     /\b(?:consoleUrl|docsUrl|pricingUrl):\s*'([^']+)'/g,
   )].map((match) => match[1]);

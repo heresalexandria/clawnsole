@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "lightricks/ltx-2.5/image-to-video/fast",
+  "canonical_model_id": "ltx-2.5-fast",
+  "label": "LTX 2.5 Fast · Frames",
+  "description": "LTX 2.5 Fast with native audio at 25 fps; output above 1080p is limited to 10 seconds.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "Full HD",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "qhd",
+      "label": "1440p",
+      "detail": "2560 × 1440"
+    },
+    {
+      "id": "4k",
+      "label": "4K",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 20,
+  "duration_step": 2,
+  "max_keyframes": 2,
+  "usd_per_second": 0.09,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.62.0"
+  },
+  "reference_usd_per_second": 0.09,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "supports_auto_duration": true,
+  "max_prompt_characters": 5000,
+  "max_duration_by_resolution": {
+    "qhd": 10,
+    "4k": 10
+  }
+}
