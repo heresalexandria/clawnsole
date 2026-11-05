@@ -1088,7 +1088,7 @@ void main() {
 
     final migrated = StoredData.fromJson(json);
 
-    expect(migrated.toJson()['schemaVersion'], 26);
+    expect(migrated.toJson()['schemaVersion'], 27);
     expect(
       migrated.generations.single.config.references!.single.referenceId,
       'legacy-reference',

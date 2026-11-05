@@ -47,5 +47,7 @@
   "min_source_video_seconds": 3,
   "max_source_video_seconds": 10,
   "requires_public_media_urls": true,
-  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "selection_group_id": "kling-2.6-motion-control",
+  "selection_group_label": "Kling 2.6 Motion Control"
 }

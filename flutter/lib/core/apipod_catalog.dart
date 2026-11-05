@@ -2,9 +2,11 @@ import 'provider_catalog.dart';
 import 'apipod_models.dart';
 
 export 'apipod_pricing.dart';
+export 'apipod_model_groups.dart';
 
 const apipodProvider = VideoProviderDefinition(
   id: 'apipod',
+  supportsLivePricing: true,
   name: 'APIPod',
   description:
       'Seedance, Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, Muse and motion control.',

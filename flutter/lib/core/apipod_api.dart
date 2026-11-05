@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'api_transcript.dart';
 import 'apipod_model_contracts.dart';
+import 'apipod_pricing.dart';
 import 'bfl_api.dart';
 import 'generation_status.dart';
 import 'models.dart';
@@ -39,6 +40,53 @@ class ApipodApi {
     String model,
     Map<String, Object?> input,
   ) => apipodGenerationPayload(model, input);
+
+  /// APIPod's documented public, read-only estimate endpoint. Only billing
+  /// dimensions leave the app: no API key, prompt, task ID, or media location.
+  Future<CostEstimate?> estimate(
+    String model,
+    Map<String, Object?> input,
+  ) async {
+    final quote = apipodQuoteRequest(model, input);
+    if (quote == null) return null;
+    final request =
+        http.Request('POST', _baseUrl.resolve('/v1/pricing/estimate'))
+          ..followRedirects = false
+          ..headers.addAll(const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          })
+          ..body = jsonEncode(quote.toJson());
+    try {
+      Future<http.Response> send() async =>
+          http.Response.fromStream(await _client.send(request));
+      final response = await send().timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) return null;
+      final body = jsonDecode(response.body);
+      if (body is! Map || !const [0, 200].contains(body['code'])) return null;
+      final data = body['data'];
+      if (data is! Map || data['currency'] != 'USD') return null;
+      final price = data['price'];
+      if (price is! num || !price.isFinite || price < 0) return null;
+      final usd = price.toDouble();
+      return CostEstimate(
+        minimumUsd: usd,
+        maximumUsd: usd,
+        basis: 'apipod-live-quote',
+        rateUsd: quote.billableSeconds == null
+            ? usd
+            : usd / quote.billableSeconds!,
+        rateUnit: quote.billableSeconds == null ? 'generation' : 'second',
+        calculation: quote.calculation,
+      );
+    } on FormatException {
+      return null;
+    } on http.ClientException {
+      return null;
+    } on TimeoutException {
+      return null;
+    }
+  }
 
   Future<Map<String, Object?>> submit(
     String key,

@@ -530,6 +530,8 @@ class MediaReferenceLabel {
     this.source,
     this.thumbnailAsset,
     this.durationSeconds,
+    this.publicSourceUrl,
+    this.publicSourceExpiresAt,
   });
 
   final String label;
@@ -545,6 +547,8 @@ class MediaReferenceLabel {
   final AssetReference? source;
   final AssetReference? thumbnailAsset;
   final double? durationSeconds;
+  final String? publicSourceUrl;
+  final DateTime? publicSourceExpiresAt;
 
   MediaReferenceLabel copyWith({
     String? promptName,
@@ -552,6 +556,8 @@ class MediaReferenceLabel {
     AssetReference? source,
     AssetReference? thumbnailAsset,
     double? durationSeconds,
+    String? publicSourceUrl,
+    DateTime? publicSourceExpiresAt,
   }) => MediaReferenceLabel(
     label: label,
     kind: kind,
@@ -560,6 +566,12 @@ class MediaReferenceLabel {
     source: source ?? this.source,
     thumbnailAsset: thumbnailAsset ?? this.thumbnailAsset,
     durationSeconds: durationSeconds ?? this.durationSeconds,
+    publicSourceUrl: publicSourceUrl ?? this.publicSourceUrl,
+    publicSourceExpiresAt:
+        publicSourceExpiresAt ??
+        (publicSourceUrl != null && publicSourceUrl != this.publicSourceUrl
+            ? null
+            : this.publicSourceExpiresAt),
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -570,6 +582,9 @@ class MediaReferenceLabel {
     if (source != null) 'source': source!.toJson(),
     if (thumbnailAsset != null) 'thumbnailAsset': thumbnailAsset!.toJson(),
     if (durationSeconds != null) 'durationSeconds': durationSeconds,
+    if (publicSourceUrl != null) 'publicSourceUrl': publicSourceUrl,
+    if (publicSourceExpiresAt != null)
+      'publicSourceExpiresAt': publicSourceExpiresAt!.toUtc().toIso8601String(),
   };
 
   factory MediaReferenceLabel.fromJson(Map<String, Object?> json) =>
@@ -601,6 +616,10 @@ class MediaReferenceLabel {
               )
             : null,
         durationSeconds: (json['durationSeconds'] as num?)?.toDouble(),
+        publicSourceUrl: json['publicSourceUrl'] as String?,
+        publicSourceExpiresAt: DateTime.tryParse(
+          json['publicSourceExpiresAt'] as String? ?? '',
+        ),
       );
 }
 
@@ -739,6 +758,8 @@ class SavedReference {
     this.characterName,
     this.contentDigest,
     this.durationSeconds,
+    this.publicSourceUrl,
+    this.publicSourceExpiresAt,
   });
 
   final String id;
@@ -764,6 +785,11 @@ class SavedReference {
   /// sorting, model-capacity gauges, and future launches stay deterministic.
   final double? durationSeconds;
 
+  /// An already hosted original, retained separately from local/Drive bytes.
+  /// This never grants public access to the retained asset.
+  final String? publicSourceUrl;
+  final DateTime? publicSourceExpiresAt;
+
   SavedReference copyWith({
     String? name,
     String? characterName,
@@ -779,6 +805,8 @@ class SavedReference {
     String? contentDigest,
     double? durationSeconds,
     bool clearDurationSeconds = false,
+    String? publicSourceUrl,
+    DateTime? publicSourceExpiresAt,
   }) => SavedReference(
     id: id,
     name: name ?? this.name,
@@ -797,6 +825,12 @@ class SavedReference {
     durationSeconds: clearDurationSeconds
         ? null
         : durationSeconds ?? this.durationSeconds,
+    publicSourceUrl: publicSourceUrl ?? this.publicSourceUrl,
+    publicSourceExpiresAt:
+        publicSourceExpiresAt ??
+        (publicSourceUrl != null && publicSourceUrl != this.publicSourceUrl
+            ? null
+            : this.publicSourceExpiresAt),
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -815,6 +849,9 @@ class SavedReference {
     if (storage != LibraryStorage.local) 'storage': storage.name,
     if (contentDigest != null) 'contentDigest': contentDigest,
     if (durationSeconds != null) 'durationSeconds': durationSeconds,
+    if (publicSourceUrl != null) 'publicSourceUrl': publicSourceUrl,
+    if (publicSourceExpiresAt != null)
+      'publicSourceExpiresAt': publicSourceExpiresAt!.toUtc().toIso8601String(),
   };
 
   factory SavedReference.fromJson(Map<String, Object?> json) {
@@ -865,6 +902,12 @@ class SavedReference {
         final double seconds when seconds.isFinite && seconds > 0 => seconds,
         _ => null,
       },
+      // Schema 27 preserves hosted provenance alongside durable media. Older
+      // records keep all media and can still recover a matching generation URL.
+      publicSourceUrl: json['publicSourceUrl'] as String?,
+      publicSourceExpiresAt: DateTime.tryParse(
+        json['publicSourceExpiresAt'] as String? ?? '',
+      ),
     );
   }
 }
@@ -1838,7 +1881,7 @@ Map<String, String> _sortedStringMap(Map<String, String> value) =>
     );
 
 class StoredData {
-  static const currentSchemaVersion = 26;
+  static const currentSchemaVersion = 27;
 
   const StoredData({
     this.apiKey = '',

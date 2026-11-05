@@ -878,6 +878,8 @@ class HybridDataStore
           hidden: reference.hidden,
           storage: LibraryStorage.drive,
           contentDigest: reference.contentDigest,
+          publicSourceUrl: reference.publicSourceUrl,
+          publicSourceExpiresAt: reference.publicSourceExpiresAt,
           durationSeconds: reference.durationSeconds,
         ),
       );
@@ -1185,6 +1187,8 @@ class HybridDataStore
           kind: item.kind,
           promptName: item.promptName,
           durationSeconds: item.durationSeconds,
+          publicSourceUrl: item.publicSourceUrl,
+          publicSourceExpiresAt: item.publicSourceExpiresAt,
           referenceId: item.referenceId == null
               ? null
               : referenceIdMap[item.referenceId] ?? item.referenceId,

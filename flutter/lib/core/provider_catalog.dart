@@ -98,6 +98,8 @@ class VideoModelDefinition {
   const VideoModelDefinition({
     required this.id,
     this.canonicalModelId,
+    this.selectionGroupId,
+    this.selectionGroupLabel,
     required this.label,
     required this.description,
     this.generationNotice,
@@ -173,6 +175,13 @@ class VideoModelDefinition {
 
   final String id;
   final String? canonicalModelId;
+
+  /// Multiple wire routes can belong to one user-facing model choice.
+  final String? selectionGroupId;
+  final String? selectionGroupLabel;
+  String get selectionId => selectionGroupId ?? id;
+  String get selectionLabel => selectionGroupLabel ?? label;
+
   final String label;
   final String description;
 
@@ -303,6 +312,8 @@ class VideoModelDefinition {
   ) => VideoModelDefinition(
     id: id,
     canonicalModelId: canonicalModelId,
+    selectionGroupId: selectionGroupId,
+    selectionGroupLabel: selectionGroupLabel,
     label: label,
     description: description,
     generationNotice: generationNotice,
@@ -524,6 +535,7 @@ class VideoProviderDefinition {
     required this.pricingUrl,
     required this.models,
     this.pricingSource = 'Published rate card',
+    this.supportsLivePricing = false,
     this.requiresApiKey = true,
     this.isLocal = false,
     this.resultDelivery = const ProviderResultDelivery(),
@@ -538,6 +550,7 @@ class VideoProviderDefinition {
   final String docsUrl;
   final String pricingUrl;
   final String pricingSource;
+  final bool supportsLivePricing;
   final List<VideoModelDefinition> models;
   final bool requiresApiKey;
   final bool isLocal;
@@ -2390,6 +2403,7 @@ const _kreaProvider = VideoProviderDefinition(
 
 const _artCraftProvider = VideoProviderDefinition(
   id: 'artcraft',
+  supportsLivePricing: true,
   name: 'ArtCraft',
   description:
       'A broad, live video model catalog behind ArtCraft’s API-key Omni API.',
@@ -4102,6 +4116,7 @@ List<VideoProviderDefinition> mobileTestProviderCatalog(
       docsUrl: provider.docsUrl,
       pricingUrl: provider.pricingUrl,
       pricingSource: provider.pricingSource,
+      supportsLivePricing: provider.supportsLivePricing,
       requiresApiKey: provider.requiresApiKey,
       isLocal: provider.isLocal,
       resultDelivery: provider.resultDelivery,

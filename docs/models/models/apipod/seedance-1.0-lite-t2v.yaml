@@ -40,5 +40,7 @@
   "supports_audio": false,
   "availability": {
     "min_version": "0.64.0"
-  }
+  },
+  "selection_group_id": "seedance-1.0-lite",
+  "selection_group_label": "Seedance 1.0 Lite"
 }

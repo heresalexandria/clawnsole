@@ -28,6 +28,7 @@ import '../core/pricing.dart';
 import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
+import '../core/provider_model_selection.dart';
 import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/screenplay.dart';
@@ -220,6 +221,7 @@ class MediaReferenceDraft {
     this.thumbnailBytes,
     this.savedReferenceId,
     this.durationSeconds,
+    this.publicSourceExpiresAt,
   });
 
   final String id;
@@ -233,6 +235,7 @@ class MediaReferenceDraft {
   final Uint8List? thumbnailBytes;
   final String? savedReferenceId;
   final double? durationSeconds;
+  final DateTime? publicSourceExpiresAt;
 
   String get requestSource => asset?.dataUrl ?? source.trim();
 
@@ -249,6 +252,7 @@ class MediaReferenceDraft {
     bool clearSavedReferenceId = false,
     double? durationSeconds,
     bool clearDurationSeconds = false,
+    DateTime? publicSourceExpiresAt,
   }) => MediaReferenceDraft(
     id: id,
     label: label ?? this.label,
@@ -269,6 +273,11 @@ class MediaReferenceDraft {
     durationSeconds: clearDurationSeconds
         ? null
         : durationSeconds ?? this.durationSeconds,
+    publicSourceExpiresAt:
+        publicSourceExpiresAt ??
+        (source != null && source != this.source
+            ? null
+            : this.publicSourceExpiresAt),
   );
 }
 
@@ -285,6 +294,8 @@ class ReferenceCandidate {
     this.generated = false,
     this.storage = LibraryStorage.local,
     this.durationSeconds,
+    this.publicSourceUrl,
+    this.publicSourceExpiresAt,
   });
 
   final String id;
@@ -298,6 +309,8 @@ class ReferenceCandidate {
   final bool generated;
   final LibraryStorage storage;
   final double? durationSeconds;
+  final String? publicSourceUrl;
+  final DateTime? publicSourceExpiresAt;
 }
 
 /// The answer to "may one more reference join this form?". Every add path
@@ -1521,8 +1534,14 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
-  bool isFavoriteModel(String providerId, String modelId) =>
-      favoriteModelKeys.contains(modelFavoriteKey(providerId, modelId));
+  bool isFavoriteModel(String providerId, String modelId) {
+    final provider = providerById(providerId);
+    final model = modelById(providerId, modelId);
+    return modelsForSelection(provider, model).any(
+      (item) =>
+          favoriteModelKeys.contains(modelFavoriteKey(providerId, item.id)),
+    );
+  }
 
   bool isFavoriteProvider(String providerId) =>
       favoriteProviderIds.contains(providerId);
@@ -1549,9 +1568,17 @@ class AppController extends ChangeNotifier {
       ];
 
   Future<void> toggleFavoriteModel(String providerId, String modelId) async {
-    final key = modelFavoriteKey(providerId, modelId);
+    final model = modelById(providerId, modelId);
+    final siblings = modelsForSelection(providerById(providerId), model);
     final next = List<String>.from(favoriteModelKeys);
-    if (!next.remove(key)) next.add(key);
+    if (isFavoriteModel(providerId, modelId)) {
+      final keys = siblings
+          .map((item) => modelFavoriteKey(providerId, item.id))
+          .toSet();
+      next.removeWhere(keys.contains);
+    } else {
+      next.add(modelFavoriteKey(providerId, siblings.first.id));
+    }
     favoriteModelKeys = List<String>.unmodifiable(next);
     notifyListeners();
     try {
@@ -1600,8 +1627,27 @@ class AppController extends ChangeNotifier {
       modelById(selectedProviderId, selectedModelId);
 
   int get promptCharacterLimit => selectedModel.promptEditorCharacterLimit;
-  VideoModelDefinition get referenceModel => selectedModel;
-  int get keyframeLimit => selectedModel.maxKeyframesFor(
+  Iterable<VideoModelDefinition> get selectedModelRoutes =>
+      modelsForSelection(selectedProvider, selectedModel);
+  bool get supportsMediaReferences =>
+      selectedModelRoutes.any((model) => model.supportsMediaReferences);
+  bool get supportsCharacterReferences =>
+      selectedModelRoutes.any((model) => model.supportsCharacterReferences);
+
+  bool get requiresPublicMediaUrls =>
+      selectedModelRoutes.any((model) => model.requiresPublicMediaUrls);
+
+  /// Expose attachment affordances before a guided route has been selected.
+  /// The actual route is resolved after each attachment changes the form.
+  VideoModelDefinition get referenceModel {
+    if (selectedModel.selectionGroupId == null) return selectedModel;
+    return selectedModelRoutes.fold(
+      selectedModel,
+      (best, model) => model.maxKeyframes > best.maxKeyframes ? model : best,
+    );
+  }
+
+  int get keyframeLimit => referenceModel.maxKeyframesFor(
     form.mode == VideoMode.t2v ? VideoMode.i2v : form.mode,
     durationSeconds: form.autoDuration ? null : form.durationSeconds,
   );
@@ -2434,6 +2480,11 @@ class AppController extends ChangeNotifier {
                       effectiveStorage,
                     ),
                     durationSeconds: item.durationSeconds,
+                    publicSourceUrl: _usablePublicSource(
+                      item.source,
+                      expiresAt: item.publicSourceExpiresAt,
+                    ),
+                    publicSourceExpiresAt: item.publicSourceExpiresAt,
                   ),
                 )
                 .toList()
@@ -4381,6 +4432,11 @@ class AppController extends ChangeNotifier {
       tags: cleanLibraryTags(tags),
       storage: destination,
       durationSeconds: draft.durationSeconds,
+      publicSourceUrl: _usablePublicSource(
+        draft.source,
+        expiresAt: draft.publicSourceExpiresAt,
+      ),
+      publicSourceExpiresAt: draft.publicSourceExpiresAt,
     );
     try {
       _apply(
@@ -4408,9 +4464,11 @@ class AppController extends ChangeNotifier {
           id: item.id,
           label: item.label,
           kind: item.kind,
-          source: savedReference.asset.isLocal
-              ? ''
-              : savedReference.asset.value,
+          source:
+              referenceCandidatePublicUrl(
+                savedReferenceCandidate(savedReference),
+              ) ??
+              (savedReference.asset.isLocal ? '' : savedReference.asset.value),
           promptName: item.promptName,
           asset: asset == null
               ? null
@@ -4428,6 +4486,7 @@ class AppController extends ChangeNotifier {
           savedReferenceId: savedReference.id,
           durationSeconds:
               savedReference.durationSeconds ?? item.durationSeconds,
+          publicSourceExpiresAt: savedReference.publicSourceExpiresAt,
         );
       }).toList();
       notifyListeners();
@@ -4789,6 +4848,81 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  String? _usablePublicSource(String? source, {DateTime? expiresAt}) {
+    if (expiresAt != null && !expiresAt.isAfter(DateTime.now().toUtc())) {
+      return null;
+    }
+    return source != null && _isPublicMediaUrl(source) ? source.trim() : null;
+  }
+
+  Generation? _generationForReferenceAsset(AssetReference asset) => generations
+      .where(
+        (item) =>
+            item.resultAsset?.kind == asset.kind &&
+            item.resultAsset?.value == asset.value,
+      )
+      .firstOrNull;
+
+  String? _generationReferenceUrl(Generation? item) =>
+      item == null || item.deliveryExpired
+      ? null
+      : _usablePublicSource(item.resultUrl, expiresAt: item.deliveryExpiresAt);
+
+  DateTime? _generationReferenceExpiry(Generation? item) =>
+      item?.deliveryExpired == true
+      ? DateTime.utc(1970)
+      : item?.deliveryExpiresAt;
+
+  ReferenceCandidate savedReferenceCandidate(SavedReference item) {
+    final generation = _generationForReferenceAsset(item.asset);
+    final original = _usablePublicSource(
+      item.publicSourceUrl,
+      expiresAt: item.publicSourceExpiresAt,
+    );
+    return ReferenceCandidate(
+      id: item.id,
+      name: item.name,
+      kind: item.kind,
+      asset: item.asset,
+      thumbnailAsset: item.thumbnailAsset,
+      createdAt: item.createdAt,
+      folderId: item.folderId,
+      tags: item.tags,
+      storage: item.storage,
+      durationSeconds: item.durationSeconds,
+      publicSourceUrl: original ?? _generationReferenceUrl(generation),
+      publicSourceExpiresAt: original != null
+          ? item.publicSourceExpiresAt
+          : _generationReferenceExpiry(generation) ??
+                item.publicSourceExpiresAt,
+    );
+  }
+
+  String? referenceCandidatePublicUrl(ReferenceCandidate candidate) =>
+      _usablePublicSource(
+        candidate.publicSourceUrl,
+        expiresAt: candidate.publicSourceExpiresAt,
+      ) ??
+      (candidate.asset.kind == 'remote'
+          ? _usablePublicSource(
+              candidate.asset.value,
+              expiresAt: candidate.publicSourceExpiresAt,
+            )
+          : null);
+
+  String? referenceCandidateProblem(ReferenceCandidate candidate) {
+    if (!referenceRequiresPublicMediaUrls(candidate.kind) ||
+        referenceCandidatePublicUrl(candidate) != null) {
+      return null;
+    }
+    return '“${candidate.name}” has no available public HTTPS URL. '
+        '${selectedModel.selectionLabel} cannot read local or private Drive media. '
+        'Choose a hosted reference or paste its URL.';
+  }
+
+  bool referenceRequiresPublicMediaUrls(MediaReferenceKind kind) =>
+      _modelForReferenceKind(kind).requiresPublicMediaUrls;
+
   List<ReferenceCandidate> generatedReferenceCandidates(
     MediaReferenceKind kind,
   ) {
@@ -4828,6 +4962,8 @@ class AppController extends ChangeNotifier {
             durationSeconds: item.config.duration is num
                 ? (item.config.duration as num).toDouble()
                 : null,
+            publicSourceUrl: _generationReferenceUrl(item),
+            publicSourceExpiresAt: _generationReferenceExpiry(item),
           );
         })
         .toList();
@@ -4851,12 +4987,13 @@ class AppController extends ChangeNotifier {
     final hydrating = <(String, ReferenceCandidate)>[];
     _inComposerTab(tab, () {
       for (final candidate in candidates.where((item) => item.kind == kind)) {
-        if (selectedModel.requiresPublicMediaUrls &&
-            (candidate.asset.isLocal ||
-                !_isPublicMediaUrl(candidate.asset.value))) {
-          refusals.add(publicMediaUrlHint);
+        final sourceProblem = referenceCandidateProblem(candidate);
+        if (sourceProblem != null) {
+          refusals.add(sourceProblem);
           continue;
         }
+        final publicSource = referenceCandidatePublicUrl(candidate);
+        final needsHostedSource = referenceRequiresPublicMediaUrls(kind);
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
@@ -4892,7 +5029,9 @@ class AppController extends ChangeNotifier {
             id: draftId,
             label: candidate.name,
             kind: kind,
-            source: candidate.asset.isLocal ? '' : candidate.asset.value,
+            source:
+                publicSource ??
+                (candidate.asset.isLocal ? '' : candidate.asset.value),
             promptName: promptName,
             retained: candidate.asset,
             thumbnailAsset: _previewForStorage(
@@ -4901,10 +5040,11 @@ class AppController extends ChangeNotifier {
             ),
             savedReferenceId: candidate.generated ? null : candidate.id,
             durationSeconds: candidate.durationSeconds,
+            publicSourceExpiresAt: candidate.publicSourceExpiresAt,
           ),
         ];
         added = true;
-        if (candidate.asset.isLocal) {
+        if (candidate.asset.isLocal && !needsHostedSource) {
           hydrating.add((draftId, candidate));
           _hydratingReferenceDraftIds.add(draftId);
         }
@@ -4999,6 +5139,7 @@ class AppController extends ChangeNotifier {
       thumbnailBytes: thumbnailBytes ?? current.thumbnailBytes,
       savedReferenceId: current.savedReferenceId,
       durationSeconds: current.durationSeconds,
+      publicSourceExpiresAt: current.publicSourceExpiresAt,
     );
     form.references = references;
     notifyListeners();
@@ -5309,6 +5450,11 @@ class AppController extends ChangeNotifier {
         );
 
   void _selectCompatibleModel() {
+    if (selectedModel.selectionGroupId != null) {
+      final compatible = _resolvedModelSelection();
+      if (compatible != null) selectedModelId = compatible.id;
+      return;
+    }
     bool accepts(VideoModelDefinition model) {
       if (form.mode == VideoMode.t2v &&
           form.keyframes.isEmpty &&
@@ -5338,6 +5484,21 @@ class AppController extends ChangeNotifier {
     if (compatible != null) selectedModelId = compatible.id;
   }
 
+  VideoModelDefinition? _resolvedModelSelection({
+    bool includeResolution = false,
+  }) => resolveProviderModelSelection(
+    selectedProvider,
+    selectedModel,
+    mode: form.mode,
+    keyframeCount: form.keyframes.length,
+    referenceCounts: {
+      for (final kind in MediaReferenceKind.values)
+        kind: form.referenceCount(kind),
+    },
+    hasSourceVideo: form.videoAsset != null || form.videoUrl.trim().isNotEmpty,
+    resolution: includeResolution ? form.resolution : null,
+  );
+
   Future<void> selectProvider(String providerId) async {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
@@ -5364,10 +5525,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> selectModel(String modelId) async {
-    final previousModelId = selectedModelId;
+    final previousSelectionId = selectedModel.selectionId;
     _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedModelId = modelById(selectedProviderId, modelId).id;
-    if (selectedModelId != previousModelId) {
+    if (selectedModel.selectionId != previousSelectionId) {
       _restoreGenerationPreferences(_draftTab);
     }
     _normalizeFormForModel();
@@ -5385,14 +5546,14 @@ class AppController extends ChangeNotifier {
     final provider = providerById(providerId);
     if (!providers.any((item) => item.id == provider.id)) return;
     final providerChanged = selectedProviderId != provider.id;
-    final previousModelId = selectedModelId;
+    final previousSelectionId = selectedModel.selectionId;
     _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
     selectedModelId = modelById(provider.id, modelId).id;
     // An unknown model id falls back to the provider default, which must then
     // defer to whichever model accepts the current form.
     if (selectedModelId != modelId) _selectCompatibleModel();
-    if (providerChanged || selectedModelId != previousModelId) {
+    if (providerChanged || selectedModel.selectionId != previousSelectionId) {
       _restoreGenerationPreferences(_draftTab);
     }
     _normalizeFormForModel();
@@ -5424,8 +5585,9 @@ class AppController extends ChangeNotifier {
   }
 
   void _normalizeFormForModel() {
+    _reconcileReferencesForModel(selectedModel);
+    if (selectedModel.selectionGroupId != null) _selectCompatibleModel();
     final model = selectedModel;
-    _reconcileReferencesForModel(model);
     form.upscale = model.isUpscaler;
     if (!model.supportsAutoDuration) form.autoDuration = false;
     if (!model.supportsAudio) {
@@ -5464,7 +5626,10 @@ class AppController extends ChangeNotifier {
   /// validation, pricing, and provider payloads while preserving the Create
   /// draft in case the user switches back to a reference-capable model.
   void _reconcileReferencesForModel(VideoModelDefinition model) {
-    if (!model.supportsMediaReferences) {
+    if (!modelsForSelection(
+      selectedProvider,
+      model,
+    ).any((route) => route.supportsMediaReferences)) {
       if (form.references.isEmpty) return;
       final disabledById = <String, MediaReferenceDraft>{
         for (final reference in _disabledReferences) reference.id: reference,
@@ -5633,13 +5798,32 @@ class AppController extends ChangeNotifier {
   /// Pinned frames are unavailable because this model takes frames or media
   /// references, never both, and references are already attached.
   bool get framesBlockedByReferences =>
-      referenceModel.framesExclusiveWithReferences &&
-      form.references.isNotEmpty;
+      form.references.isNotEmpty &&
+      (selectedModel.selectionGroupId == null
+          ? selectedModel.framesExclusiveWithReferences
+          : !selectedModelRoutes.any(
+              (model) =>
+                  !model.framesExclusiveWithReferences &&
+                  model.maxKeyframes > 0 &&
+                  MediaReferenceKind.values.every(
+                    (kind) =>
+                        form.referenceCount(kind) <=
+                        model.maxReferences(kind, VideoMode.i2v),
+                  ),
+            ));
 
-  /// Media references are unavailable because this model takes frames or
-  /// references, never both, and frames are already pinned.
+  /// Whether a route within this choice can combine existing frames with
+  /// creative references. Separate transport routes remain separate inputs.
   bool get referencesBlockedByFrames =>
-      referenceModel.framesExclusiveWithReferences && form.keyframes.isNotEmpty;
+      form.keyframes.isNotEmpty &&
+      (selectedModel.selectionGroupId == null
+          ? selectedModel.framesExclusiveWithReferences
+          : !selectedModelRoutes.any(
+              (model) =>
+                  !model.framesExclusiveWithReferences &&
+                  model.supportsMediaReferences &&
+                  form.keyframes.length <= model.maxKeyframesFor(VideoMode.i2v),
+            ));
 
   bool canAddFrame(KeyframeRole role) =>
       !framesBlockedByReferences &&
@@ -5714,6 +5898,9 @@ class AppController extends ChangeNotifier {
     }
 
     if (accepts(selectedModel)) return selectedModel;
+    if (selectedModel.selectionGroupId != null) {
+      return selectedModelRoutes.where(accepts).firstOrNull;
+    }
     final sameModelFamily = selectedProvider.models
         .where((model) => model.canonicalId == selectedModel.canonicalId)
         .where(accepts)
@@ -5774,11 +5961,30 @@ class AppController extends ChangeNotifier {
     return true;
   }
 
+  VideoModelDefinition _modelForReferenceKind(MediaReferenceKind kind) {
+    if (selectedModel.selectionGroupId == null) return selectedModel;
+    final candidates = selectedModelRoutes.where(
+      (model) => MediaReferenceKind.values.every(
+        (other) =>
+            other == kind ||
+            form.referenceCount(other) <= model.maxReferences(other, form.mode),
+      ),
+    );
+    return candidates.fold(
+      selectedModel,
+      (best, model) =>
+          model.maxReferences(kind, form.mode) >
+              best.maxReferences(kind, form.mode)
+          ? model
+          : best,
+    );
+  }
+
   int referenceLimit(MediaReferenceKind kind) =>
       kind == MediaReferenceKind.video &&
           form.referenceTask != MediaReferenceTask.reference
-      ? selectedModel.maxVideoReferences.clamp(0, 1)
-      : selectedModel.maxReferences(kind, form.mode);
+      ? _modelForReferenceKind(kind).maxVideoReferences.clamp(0, 1)
+      : _modelForReferenceKind(kind).maxReferences(kind, form.mode);
 
   /// Total seconds of reference media of [kind] the selected model accepts,
   /// resolved for the form's current resolution. Null when the model
@@ -5786,7 +5992,7 @@ class AppController extends ChangeNotifier {
   int? referenceSecondsLimit(MediaReferenceKind kind) =>
       referenceLimit(kind) <= 0
       ? null
-      : selectedModel.maxReferenceSeconds(
+      : _modelForReferenceKind(kind).maxReferenceSeconds(
           kind,
           form.resolution,
           outputSeconds: form.autoDuration ? null : form.durationSeconds,
@@ -5835,7 +6041,7 @@ class AppController extends ChangeNotifier {
     int pendingCount = 0,
     double pendingSeconds = 0,
   }) {
-    final model = selectedModel;
+    final model = _modelForReferenceKind(kind);
     if (referencesBlockedByFrames) {
       return ReferenceBudgetVerdict.refused(
         '${model.label} takes pinned frames or creative references, not both.',
@@ -5985,7 +6191,7 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
-    if (selectedModel.requiresPublicMediaUrls) {
+    if (requiresPublicMediaUrls) {
       showNotice(publicMediaUrlHint);
       return;
     }
@@ -6063,7 +6269,7 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
-    if (selectedModel.requiresPublicMediaUrls) {
+    if (requiresPublicMediaUrls) {
       showNotice(publicMediaUrlHint);
       return;
     }
@@ -6100,7 +6306,7 @@ class AppController extends ChangeNotifier {
   }) async {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
-    if (_inComposerTab(target, () => selectedModel.requiresPublicMediaUrls)) {
+    if (_inComposerTab(target, () => requiresPublicMediaUrls)) {
       showNotice(_inComposerTab(target, () => publicMediaUrlHint));
       return;
     }
@@ -6232,7 +6438,7 @@ class AppController extends ChangeNotifier {
       final blocked = _inComposerTab(
         tab,
         () => referenceLimit(entry.key) <= 0
-            ? '${selectedModel.label} does not accept reference '
+            ? '${selectedModel.selectionLabel} does not accept reference '
                   '${entry.key.pluralLabel}.'
             : null,
       );
@@ -6628,7 +6834,7 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo({
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
-    if (selectedModel.requiresPublicMediaUrls) {
+    if (requiresPublicMediaUrls) {
       showNotice(publicMediaUrlHint);
       return;
     }
@@ -6681,6 +6887,11 @@ class AppController extends ChangeNotifier {
     final model = selectedModel;
     if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
+    }
+    if (model.selectionGroupId != null &&
+        _resolvedModelSelection(includeResolution: true) == null &&
+        (form.keyframes.isNotEmpty || form.references.isNotEmpty)) {
+      return '${model.selectionLabel} does not support this combination of media and output settings. Remove an attachment or change the output settings.';
     }
     final taskDraft =
         form.mode == VideoMode.draftEnhance && model.draftSourceIsTaskId;
@@ -6956,7 +7167,7 @@ class AppController extends ChangeNotifier {
   }
 
   String get publicMediaUrlHint =>
-      '${selectedModel.label} requires public HTTPS media URLs. '
+      '${selectedModel.selectionLabel} requires public HTTPS media URLs. '
       'Paste a hosted URL; local uploads and private library files are not supported.';
 
   bool _isPublicMediaUrl(String source) {
@@ -6969,6 +7180,14 @@ class AppController extends ChangeNotifier {
   }
 
   String? _referenceSourceProblem() {
+    for (final reference in form.references) {
+      if (requiresPublicMediaUrls &&
+          reference.publicSourceExpiresAt != null &&
+          !reference.publicSourceExpiresAt!.isAfter(DateTime.now().toUtc())) {
+        return 'The hosted URL for “${reference.label}” has expired. '
+            'Choose a fresh hosted reference or paste a new URL.';
+      }
+    }
     if (!form.references.any((item) => item.requestSource.isEmpty)) {
       return null;
     }
@@ -7672,7 +7891,9 @@ class AppController extends ChangeNotifier {
     _estimateRevision += 1;
     _liveEstimate = null;
     _liveEstimateRevision = null;
-    if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
+    if (!selectedProvider.supportsLivePricing || gateway is! ProviderGateway) {
+      return;
+    }
     _estimateTimer = Timer(
       const Duration(milliseconds: 250),
       () => unawaited(refreshProviderEstimate()),
@@ -7716,6 +7937,10 @@ class AppController extends ChangeNotifier {
 
   Map<String, Object?> _referenceDurationInput() => <String, Object?>{
     if (form.referenceCount(MediaReferenceKind.video) > 0) ...<String, Object?>{
+      'reference_video_durations_seconds': form.references
+          .where((item) => item.kind == MediaReferenceKind.video)
+          .map((item) => item.durationSeconds)
+          .toList(),
       'reference_video_duration_seconds': referenceSecondsUsed(
         MediaReferenceKind.video,
       ),
@@ -7727,7 +7952,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> refreshProviderEstimate() async {
     _estimateTimer?.cancel();
-    if (selectedProviderId != 'artcraft' || gateway is! ProviderGateway) return;
+    if (!selectedProvider.supportsLivePricing || gateway is! ProviderGateway) {
+      return;
+    }
     final revision = _estimateRevision;
     final input = _providerEstimateInput();
     try {
@@ -8374,6 +8601,10 @@ class AppController extends ChangeNotifier {
         selectedModelId = modelById(item.provider, item.model).id;
       });
     }
+    final requiresHostedSources = _inComposerTab(
+      target,
+      () => requiresPublicMediaUrls,
+    );
     final retainedFrames = <KeyframeDraft>[];
     for (final frame in item.config.keyframes ?? const <KeyframeLabel>[]) {
       final storedReference = frame.source;
@@ -8429,6 +8660,23 @@ class AppController extends ChangeNotifier {
         asset: storedReference,
       );
       final reference = saved?.asset ?? storedReference;
+      final savedCandidate = saved == null
+          ? null
+          : savedReferenceCandidate(saved);
+      final publicSource =
+          _usablePublicSource(
+            media.publicSourceUrl,
+            expiresAt: media.publicSourceExpiresAt,
+          ) ??
+          (savedCandidate == null
+              ? null
+              : referenceCandidatePublicUrl(savedCandidate)) ??
+          (storedReference?.kind == 'remote'
+              ? _usablePublicSource(
+                  storedReference!.value,
+                  expiresAt: media.publicSourceExpiresAt,
+                )
+              : null);
       PickedAsset? asset;
       Uint8List? thumbnailBytes;
       if (media.thumbnailAsset != null) {
@@ -8442,7 +8690,7 @@ class AppController extends ChangeNotifier {
           // The original reference can regenerate its preview.
         }
       }
-      if (reference?.isLocal == true) {
+      if (reference?.isLocal == true && !requiresHostedSources) {
         try {
           asset = await _retainedAsset(
             reference!,
@@ -8458,13 +8706,19 @@ class AppController extends ChangeNotifier {
           id: _uid(),
           label: media.label,
           kind: media.kind,
-          source: reference?.kind == 'remote' ? reference!.value : '',
+          source:
+              publicSource ??
+              (reference?.kind == 'remote' ? reference!.value : ''),
           promptName: media.promptName ?? '${media.kind.label} $promptNumber',
           asset: asset,
           retained: reference,
           thumbnailAsset: media.thumbnailAsset,
           thumbnailBytes: asset?.thumbnailBytes ?? thumbnailBytes,
           savedReferenceId: saved?.id ?? media.referenceId,
+          durationSeconds: media.durationSeconds ?? saved?.durationSeconds,
+          publicSourceExpiresAt:
+              media.publicSourceExpiresAt ??
+              savedCandidate?.publicSourceExpiresAt,
         ),
       );
     }
@@ -8761,6 +9015,8 @@ class AppController extends ChangeNotifier {
       durationSeconds: item.config.duration is num
           ? (item.config.duration as num).toDouble()
           : null,
+      publicSourceUrl: _generationReferenceUrl(item),
+      publicSourceExpiresAt: _generationReferenceExpiry(item),
     );
   }
 

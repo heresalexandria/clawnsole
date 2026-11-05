@@ -33,5 +33,7 @@
     "min_version": "0.64.0"
   },
   "generation_notice": "APIPod currently returns an inaccessible output link for this route (verified 2026-11-05). Generation may be charged without a downloadable video.",
-  "max_prompt_characters": 4000
+  "max_prompt_characters": 4000,
+  "selection_group_id": "gemini-omni",
+  "selection_group_label": "Gemini Omni"
 }

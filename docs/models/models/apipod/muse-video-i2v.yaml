@@ -44,5 +44,7 @@
   "supports_end_frame": true,
   "requires_start_frame_when_using_frames": true,
   "requires_public_media_urls": true,
-  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "selection_group_id": "muse-video",
+  "selection_group_label": "Muse Video"
 }

@@ -54,6 +54,63 @@ void main() {
     },
   );
 
+  test(
+    'logical model selections survive old manifests and explicit updates',
+    () {
+      final inherited = ProviderCatalogBundle.fromCache(
+        _cache([
+          _provider([_model('seedance-2.5-r2v')], id: 'apipod'),
+        ]),
+        appVersion: '0.64.1',
+      ).providers.single.models.single;
+      expect(inherited.id, 'seedance-2.5-r2v');
+      expect(inherited.selectionId, 'seedance-2.5');
+      expect(inherited.selectionLabel, 'Seedance 2.5');
+      final explicit = ProviderCatalogBundle.fromCache(
+        _cache([
+          _provider([
+            {
+              ..._model('custom-route'),
+              'selection_group_id': 'custom-model',
+              'selection_group_label': 'Custom model',
+            },
+          ]),
+        ]),
+        appVersion: '0.64.1',
+      ).providers.single.models.single;
+      expect(explicit.selectionId, 'custom-model');
+      expect(explicit.selectionLabel, 'Custom model');
+      expect(
+        explicit
+            .constrainedForMobileTest(explicit.resolutions.first)
+            .selectionId,
+        'custom-model',
+      );
+    },
+  );
+
+  test('live pricing support uses bundled defaults and explicit overrides', () {
+    for (final providerId in ['apipod', 'artcraft']) {
+      final provider = ProviderCatalogBundle.fromCache(
+        _cache([
+          _provider([_model('example')], id: providerId),
+        ]),
+        appVersion: '0.64.1',
+      ).providers.single;
+      expect(provider.supportsLivePricing, isTrue);
+    }
+    final explicit = ProviderCatalogBundle.fromCache(
+      _cache([
+        {
+          ..._provider([_model('example')], id: 'apipod'),
+          'supports_live_pricing': false,
+        },
+      ]),
+      appVersion: '0.64.1',
+    ).providers.single;
+    expect(explicit.supportsLivePricing, isFalse);
+  });
+
   test('the complete Pages manifest graph is valid for this build', () async {
     final root = Directory('../docs/models').absolute;
     final client = MockClient((request) async {
@@ -98,7 +155,7 @@ void main() {
   });
 
   test(
-    'the next minor catalog matches the bundled cross-platform contracts',
+    'the next patch catalog matches the bundled cross-platform contracts',
     () async {
       final root = Directory('../docs/models').absolute;
       final bundle = await ProviderCatalogClient(
@@ -111,7 +168,7 @@ void main() {
             relative == 'index.html'
                 ? jsonEncode({
                     ...jsonDecode(body) as Map<String, dynamic>,
-                    'catalog_version': '0.64.0',
+                    'catalog_version': '0.64.1',
                   })
                 : body,
             200,
@@ -119,7 +176,7 @@ void main() {
           );
         }),
         siteUrl: Uri.parse('https://clawnsole.app/'),
-      ).fetch(appVersion: '0.64.0');
+      ).fetch(appVersion: '0.64.1');
       expect(
         bundle.providers.map((p) => p.id).toSet(),
         bundledVideoProviders.map((p) => p.id).toSet(),
@@ -507,7 +564,7 @@ void main() {
       StoredData(providerCatalogCache: cache).encode(),
     );
 
-    expect(decoded.toJson()['schemaVersion'], 26);
+    expect(decoded.toJson()['schemaVersion'], 27);
     expect(decoded.providerCatalogCache, cache);
   });
 

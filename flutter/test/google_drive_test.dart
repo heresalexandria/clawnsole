@@ -272,6 +272,8 @@ void main() {
         name: '$id.png',
         characterName: character,
         kind: MediaReferenceKind.image,
+        publicSourceUrl: 'https://example.com/$id.png',
+        publicSourceExpiresAt: DateTime.utc(2100),
         asset: AssetReference(
           kind: 'remote',
           value: 'https://example.com/$id.png',
@@ -282,6 +284,14 @@ void main() {
       );
       await gateway.saveReference(reference('one', 'alexandria'));
       expect(store.data.savedReferences.single.characterName, 'ALEXANDRIA');
+      expect(
+        store.data.savedReferences.single.publicSourceUrl,
+        'https://example.com/one.png',
+      );
+      expect(
+        store.data.savedReferences.single.publicSourceExpiresAt,
+        DateTime.utc(2100),
+      );
       await expectLater(
         gateway.saveReference(reference('two', 'Alexandria')),
         throwsStateError,
@@ -563,7 +573,7 @@ void main() {
 
       expect(driveAsset.kind, 'drive');
       expect(migrated.generations.single.storage, LibraryStorage.local);
-      expect(migrated.toJson()['schemaVersion'], 26);
+      expect(migrated.toJson()['schemaVersion'], 27);
     },
   );
 

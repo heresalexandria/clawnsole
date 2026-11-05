@@ -137,6 +137,7 @@ class ProviderApiRouter {
     Map<String, Object?> input,
   ) => switch (_adapter(provider)) {
     'artcraft' => artcraft.estimate(model, input),
+    'apipod' => apipod.estimate(model, input),
     _ => Future<CostEstimate?>.value(),
   };
 }

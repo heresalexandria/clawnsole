@@ -41,5 +41,7 @@
   "availability": {
     "min_version": "0.64.0"
   },
-  "max_prompt_characters": 2000
+  "max_prompt_characters": 2000,
+  "selection_group_id": "seedance-1.0-pro",
+  "selection_group_label": "Seedance 1.0 Pro"
 }

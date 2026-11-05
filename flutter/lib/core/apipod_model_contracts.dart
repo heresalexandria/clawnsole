@@ -12,6 +12,27 @@ Map<String, Object?> apipodGenerationPayload(
   String model,
   Map<String, Object?> input,
 ) {
+  // Logical selection aliases are conveniences for API callers. Existing
+  // persisted wire IDs keep their exact contract; the composer resolves them
+  // before creating a record so billing and history retain the dispatched ID.
+  if (!apipodRouteSchemas.containsKey(model)) {
+    model = resolveApipodRouteForInput(model, input);
+    final hasGuidance = const [
+      'keyframes',
+      'reference_images',
+      'reference_videos',
+      'reference_audios',
+    ].any((key) => input[key] is List && (input[key]! as List).isNotEmpty);
+    final hasSource = const [
+      'start_video',
+      'input_video',
+    ].any((key) => input[key] != null && input[key] != '');
+    if (hasSource) {
+      input = {...input, 'mode': 'v2v'};
+    } else if (hasGuidance && input['mode'] != 'draft_enhance') {
+      input = {...input, 'mode': 'i2v'};
+    }
+  }
   final schema = apipodRouteSchemas[model];
   final definition = apipodProvider.models
       .where((candidate) => candidate.id == model)

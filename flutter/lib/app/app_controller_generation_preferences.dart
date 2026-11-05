@@ -38,12 +38,25 @@ extension AppControllerGenerationPreferences on AppController {
     tab.generateAudioExplicitlyDisabled = !settings.generateAudio;
   }
 
+  String _generationSelectionKey(String providerId, String modelId) {
+    final model = providerById(
+      providerId,
+    ).models.where((model) => model.id == modelId).firstOrNull;
+    return generationPreferenceKey(providerId, model?.selectionId ?? modelId);
+  }
+
+  GenerationPreferences? _rememberedGenerationSettings(ComposerTab tab) =>
+      _generationPreferences[_generationSelectionKey(
+        tab.providerId,
+        tab.modelId,
+      )] ??
+      _generationPreferences[generationPreferenceKey(
+        tab.providerId,
+        tab.modelId,
+      )];
+
   void _restoreGenerationPreferences(ComposerTab tab) {
-    final settings =
-        _generationPreferences[generationPreferenceKey(
-          tab.providerId,
-          tab.modelId,
-        )];
+    final settings = _rememberedGenerationSettings(tab);
     if (settings != null) {
       _applyGenerationSettings(tab, settings);
     } else if (modelById(
@@ -100,11 +113,7 @@ extension AppControllerGenerationPreferences on AppController {
       ..aestheticReferenceId = source.form.aestheticReferenceId;
     _applyGenerationSettings(
       tab,
-      _generationPreferences[generationPreferenceKey(
-            tab.providerId,
-            tab.modelId,
-          )] ??
-          _generationSettings(source),
+      _rememberedGenerationSettings(tab) ?? _generationSettings(source),
     );
     if (applyCreateDefaults) _applyCreateDefaults(tab);
     // What the tab opened with is nobody's work in it yet, so Reuse, Extend
@@ -160,7 +169,7 @@ extension AppControllerGenerationPreferences on AppController {
     bool persist = true,
   }) {
     if (_disposed || _restoringComposerTabs) return;
-    final key = generationPreferenceKey(tab.providerId, tab.modelId);
+    final key = _generationSelectionKey(tab.providerId, tab.modelId);
     if (onlyIfAbsent && _generationPreferences.containsKey(key)) return;
     final settings = _generationSettings(tab);
     if (_generationPreferences[key] == settings) return;

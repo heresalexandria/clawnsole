@@ -43,5 +43,7 @@
   "requires_start_frame_when_using_frames": true,
   "requires_public_media_urls": true,
   "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
-  "max_input_image_bytes": 31457280
+  "max_input_image_bytes": 31457280,
+  "selection_group_id": "seedance-2.0-mini",
+  "selection_group_label": "Seedance 2.0 Mini"
 }

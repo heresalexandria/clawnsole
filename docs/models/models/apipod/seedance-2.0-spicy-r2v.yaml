@@ -58,5 +58,7 @@
   "max_reference_video_seconds": 15,
   "min_reference_audio_seconds": 2,
   "max_reference_audio_seconds": 15,
-  "requires_visual_reference_for_audio": true
+  "requires_visual_reference_for_audio": true,
+  "selection_group_id": "seedance-2.0-spicy",
+  "selection_group_label": "Seedance 2.0 Spicy"
 }

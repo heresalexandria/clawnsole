@@ -253,6 +253,8 @@ Generation mapGenerationAssets(
               source: replace(media.source),
               thumbnailAsset: replace(media.thumbnailAsset),
               durationSeconds: media.durationSeconds,
+              publicSourceUrl: media.publicSourceUrl,
+              publicSourceExpiresAt: media.publicSourceExpiresAt,
             ),
           )
           .toList(),

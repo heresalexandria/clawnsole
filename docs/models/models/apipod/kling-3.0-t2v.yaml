@@ -41,5 +41,7 @@
   "max_prompt_characters": 2500,
   "prompt_optional_modes": [
     "t2v"
-  ]
+  ],
+  "selection_group_id": "kling-3.0",
+  "selection_group_label": "Kling 3.0"
 }

@@ -40,5 +40,7 @@
     50,
     60
   ],
-  "max_prompt_characters": 4000
+  "max_prompt_characters": 4000,
+  "selection_group_id": "muse-video",
+  "selection_group_label": "Muse Video"
 }

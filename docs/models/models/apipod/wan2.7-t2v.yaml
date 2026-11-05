@@ -5,7 +5,8 @@
   "label": "WAN 2.7 · Text",
   "description": "APIPod WAN 2.7 · Text.",
   "modes": [
-    "t2v"
+    "t2v",
+    "i2v"
   ],
   "aspect_ratios": [
     "16:9",
@@ -33,10 +34,12 @@
   "usd_per_second": 0.0,
   "supports_audio": false,
   "availability": {
-    "min_version": "0.64.0"
+    "min_version": "0.64.1"
   },
   "max_prompt_characters": 5000,
   "max_audio_references": 1,
   "requires_public_media_urls": true,
-  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "selection_group_id": "wan2.7",
+  "selection_group_label": "Wan 2.7"
 }

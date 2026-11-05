@@ -581,6 +581,19 @@ extension AppControllerWorkspace on AppController {
       });
 
   Future<bool> _loadComposerMedia(ComposerTab tab) async {
+    final taskDraft = _inComposerTab(
+      tab,
+      () =>
+          form.mode == VideoMode.draftEnhance &&
+          selectedModel.draftSourceIsTaskId,
+    );
+    // Finalizing a task inherits its media server-side; preview attachments
+    // retained in the composer are not request inputs.
+    if (taskDraft) return true;
+    final needsHostedSources = _inComposerTab(
+      tab,
+      () => requiresPublicMediaUrls,
+    );
     var complete = true;
     Future<PickedAsset?> load(AssetReference retained) async {
       try {
@@ -594,6 +607,9 @@ extension AppControllerWorkspace on AppController {
     }
 
     for (final frame in List.of(tab.form.keyframes)) {
+      if (needsHostedSources && _usablePublicSource(frame.source) != null) {
+        continue;
+      }
       if (frame.asset != null || frame.retained?.isLocal != true) continue;
       final asset = await load(frame.retained!);
       if (_disposed) return false;
@@ -608,6 +624,14 @@ extension AppControllerWorkspace on AppController {
       }
     }
     for (final reference in List.of(tab.form.references)) {
+      if (needsHostedSources &&
+          _usablePublicSource(
+                reference.source,
+                expiresAt: reference.publicSourceExpiresAt,
+              ) !=
+              null) {
+        continue;
+      }
       if (reference.asset != null || reference.retained?.isLocal != true) {
         continue;
       }

@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import '../app/app_controller.dart';
 import '../app/app_theme.dart';
 import '../core/provider_catalog.dart';
+import '../core/provider_model_selection.dart';
 import 'hardware.dart';
 import 'panels.dart';
 
@@ -145,8 +146,17 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
 
   String get _selectedProviderId =>
       widget.selectedProviderId ?? widget.controller.selectedProviderId;
-  String get _selectedModelId =>
-      widget.selectedModelId ?? widget.controller.selectedModel.id;
+  String get _selectedModelId {
+    final id = widget.selectedModelId ?? widget.controller.selectedModel.id;
+    final provider = widget.controller.providers
+        .where((provider) => provider.id == _selectedProviderId)
+        .firstOrNull;
+    return provider?.models
+            .where((model) => model.id == id)
+            .firstOrNull
+            ?.selectionId ??
+        id;
+  }
 
   @override
   void dispose() {
@@ -196,22 +206,36 @@ class _ProviderSearchMenuState extends State<_ProviderSearchMenu> {
     for (final provider in controller.providersByPreference) {
       final providerIdentity = '${provider.name} ${provider.id}';
       final providerMatches = query.isNotEmpty && containsAll(providerIdentity);
+      final selections = providerModelSelections(provider);
       final models = query.isEmpty || providerMatches
-          ? provider.models
-          : provider.models
+          ? selections
+          : selections
                 .where(
-                  (model) => containsAll(
-                    '$providerIdentity ${model.label} ${model.id} ${model.canonicalId}',
-                  ),
+                  (selection) => provider.models
+                      .where(
+                        (route) => route.selectionId == selection.selectionId,
+                      )
+                      .any(
+                        (route) => containsAll(
+                          '$providerIdentity ${selection.selectionLabel} ${route.label} ${route.id} ${route.canonicalId}',
+                        ),
+                      ),
                 )
                 .toList();
       if (models.isNotEmpty) matches.add((provider: provider, models: models));
     }
     // Favorites sit above the provider sections while browsing; a search
     // already narrows the list, so it speaks for itself.
-    final favorites = query.isEmpty
-        ? controller.favoriteModels
-        : const <FavoriteModel>[];
+    final favoriteGroups = <String, FavoriteModel>{};
+    if (query.isEmpty) {
+      for (final favorite in controller.favoriteModels) {
+        favoriteGroups.putIfAbsent(
+          '${favorite.provider.id}|${favorite.model.selectionId}',
+          () => favorite,
+        );
+      }
+    }
+    final favorites = favoriteGroups.values.toList();
     // The headings are burlwood facings, cut in the order they are laid so
     // that no two touching ones come off the same part of the sheet.
     final sliceKeys = <String>[
@@ -470,10 +494,10 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                   children: widget.models.map((model) {
                     final selected =
                         widget.provider.id == widget.selectedProviderId &&
-                        model.id == widget.selectedModelId;
+                        model.selectionId == widget.selectedModelId;
                     return InkWell(
                       key: ValueKey(
-                        'provider-model-option-${widget.provider.id}-${model.id}',
+                        'provider-model-option-${widget.provider.id}-${model.selectionId}',
                       ),
                       onTap: () => Navigator.of(
                         context,
@@ -489,7 +513,7 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                           children: <Widget>[
                             Expanded(
                               child: Text(
-                                model.label,
+                                model.selectionLabel,
                                 style: TextStyle(
                                   color: context.colors.onSurface,
                                   fontSize: 13,
@@ -508,10 +532,10 @@ class _ProviderMenuSectionState extends State<_ProviderMenuSection> {
                             const SizedBox(width: 4),
                             _FavoriteStar(
                               key: ValueKey(
-                                'provider-model-star-${widget.provider.id}-${model.id}',
+                                'provider-model-star-${widget.provider.id}-${model.selectionId}',
                               ),
                               starred: widget.isModelFavorite(model),
-                              subject: model.label,
+                              subject: model.selectionLabel,
                               onPressed: () =>
                                   widget.onModelFavoriteToggle(model),
                             ),
@@ -588,10 +612,10 @@ class _FavoriteModelsSection extends StatelessWidget {
         ...favorites.map((favorite) {
           final selected =
               favorite.provider.id == selectedProviderId &&
-              favorite.model.id == selectedModelId;
+              favorite.model.selectionId == selectedModelId;
           return InkWell(
             key: ValueKey(
-              'provider-model-favorite-${favorite.provider.id}-${favorite.model.id}',
+              'provider-model-favorite-${favorite.provider.id}-${favorite.model.selectionId}',
             ),
             onTap: () => Navigator.of(
               context,
@@ -608,7 +632,7 @@ class _FavoriteModelsSection extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          favorite.model.label,
+                          favorite.model.selectionLabel,
                           style: TextStyle(
                             color: context.colors.onSurface,
                             fontSize: 13,
@@ -636,7 +660,7 @@ class _FavoriteModelsSection extends StatelessWidget {
                   const SizedBox(width: 4),
                   _FavoriteStar(
                     starred: true,
-                    subject: favorite.model.label,
+                    subject: favorite.model.selectionLabel,
                     onPressed: () => onUnstar(favorite),
                   ),
                 ],

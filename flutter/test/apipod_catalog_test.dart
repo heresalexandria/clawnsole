@@ -78,6 +78,11 @@ void main() {
                     !model.supportsStartFrame &&
                     model.maxImageReferences > 0)
                   'reference_images': ['https://example.com/reference.png'],
+                if (mode == VideoMode.i2v &&
+                    !model.supportsStartFrame &&
+                    model.maxImageReferences == 0 &&
+                    model.maxAudioReferences > 0)
+                  'reference_audios': ['https://example.com/reference.mp3'],
               };
               final reason =
                   '${model.id}/${mode.wireValue}/${resolution.id}/$ratio/$duration';
@@ -164,10 +169,11 @@ void main() {
       int duration,
       String resolution, {
       bool audio = true,
+      VideoMode mode = VideoMode.t2v,
     }) => estimateCost(
       'apipod',
       id,
-      VideoMode.t2v,
+      mode,
       GenerationConfig(
         aspectRatio: '16:9',
         duration: duration,
@@ -187,7 +193,7 @@ void main() {
     expect(quote('wan3.0-t2v', 2, 'sd').minimumUsd, .09);
     expect(quote('kling-3.0-t2v', 5, 'hd', audio: false).minimumUsd, .40);
     expect(quote('kling-3.0-t2v', 5, 'hd').minimumUsd, .60);
-    final tierRange = quote('kling-4.0-r2v', 3, 'hd');
+    final tierRange = quote('kling-4.0-r2v', 3, 'hd', mode: VideoMode.i2v);
     expect(tierRange.minimumUsd, .255);
     expect(tierRange.maximumUsd, .4284);
     for (final price in publishedProviderPrices('apipod')) {
@@ -210,7 +216,7 @@ void main() {
           path == 'index.html'
               ? jsonEncode({
                   ...jsonDecode(body) as Map<String, dynamic>,
-                  'catalog_version': '0.64.0',
+                  'catalog_version': '0.64.1',
                 })
               : body,
           200,
@@ -232,6 +238,25 @@ void main() {
     expect(
       provider.models.map((model) => model.id).toSet(),
       apipodProvider.models.map((model) => model.id).toSet(),
+    );
+    expect(
+      provider.models.singleWhere((model) => model.id == 'wan2.7-t2v').modes,
+      [VideoMode.t2v],
+    );
+    final patched = await catalog.fetch(appVersion: '0.64.1');
+    final patchedProvider = patched.providers.singleWhere(
+      (provider) => provider.id == 'apipod',
+    );
+    expect(patchedProvider.models, hasLength(103));
+    expect(
+      patchedProvider.models.map((model) => model.id).toSet(),
+      hasLength(103),
+    );
+    expect(
+      patchedProvider.models
+          .singleWhere((model) => model.id == 'wan2.7-t2v')
+          .modes,
+      [VideoMode.t2v, VideoMode.i2v],
     );
     catalog.close();
   });

@@ -5,6 +5,8 @@ import 'provider_catalog.dart';
 const apipodModels = <VideoModelDefinition>[
   VideoModelDefinition(
     id: "seedance-2.5-t2v",
+    selectionGroupId: "seedance-2.5",
+    selectionGroupLabel: "Seedance 2.5",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 · Text",
     description: "APIPod Seedance 2.5 · Text.",
@@ -26,6 +28,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-i2v",
+    selectionGroupId: "seedance-2.5",
+    selectionGroupLabel: "Seedance 2.5",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 · Frames",
     description: "APIPod Seedance 2.5 · Frames. Public media URLs required.",
@@ -52,6 +56,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-r2v",
+    selectionGroupId: "seedance-2.5",
+    selectionGroupLabel: "Seedance 2.5",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 · References",
     description:
@@ -84,6 +90,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-extend",
+    selectionGroupId: "gemini-omni-extend",
+    selectionGroupLabel: "Gemini Omni Extend",
     canonicalModelId: "gemini-omni",
     label: "Gemini Omni Extend",
     description: "Edit or extend a publicly hosted source video.",
@@ -113,6 +121,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-extend",
+    selectionGroupId: "gemini-omni-flash-1.1-extend",
+    selectionGroupLabel: "Gemini Omni Flash 1.1 Extend",
     canonicalModelId: "gemini-omni-flash-1.1",
     label: "Gemini Omni Flash 1.1 Video Extend",
     description: "Edit or extend a publicly hosted source video.",
@@ -144,6 +154,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-i2v",
+    selectionGroupId: "gemini-omni-flash-1.1",
+    selectionGroupLabel: "Gemini Omni Flash 1.1",
     canonicalModelId: "gemini-omni-flash-1.1",
     label: "Gemini Omni Flash 1.1 · Frames",
     description:
@@ -172,6 +184,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-lite-i2v",
+    selectionGroupId: "gemini-omni-flash-1.1-lite",
+    selectionGroupLabel: "Gemini Omni Flash 1.1 Lite",
     canonicalModelId: "gemini-omni-flash-1.1-lite",
     label: "Gemini Omni Flash 1.1 Lite · Frames",
     description:
@@ -197,6 +211,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-lite-r2v",
+    selectionGroupId: "gemini-omni-flash-1.1-lite",
+    selectionGroupLabel: "Gemini Omni Flash 1.1 Lite",
     canonicalModelId: "gemini-omni-flash-1.1-lite",
     label: "Gemini Omni Flash 1.1 Lite · References",
     description:
@@ -222,6 +238,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-lite-t2v",
+    selectionGroupId: "gemini-omni-flash-1.1-lite",
+    selectionGroupLabel: "Gemini Omni Flash 1.1 Lite",
     canonicalModelId: "gemini-omni-flash-1.1-lite",
     label: "Gemini Omni Flash 1.1 Lite · Text",
     description: "APIPod Gemini Omni Flash 1.1 Lite · Text.",
@@ -241,6 +259,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-r2v",
+    selectionGroupId: "gemini-omni-flash-1.1",
+    selectionGroupLabel: "Gemini Omni Flash 1.1",
     canonicalModelId: "gemini-omni-flash-1.1",
     label: "Gemini Omni Flash 1.1 · References",
     description:
@@ -269,6 +289,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-flash-1.1-t2v",
+    selectionGroupId: "gemini-omni-flash-1.1",
+    selectionGroupLabel: "Gemini Omni Flash 1.1",
     canonicalModelId: "gemini-omni-flash-1.1",
     label: "Gemini Omni Flash 1.1 · Text",
     description: "APIPod Gemini Omni Flash 1.1 · Text.",
@@ -290,6 +312,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-i2v",
+    selectionGroupId: "gemini-omni",
+    selectionGroupLabel: "Gemini Omni",
     canonicalModelId: "gemini-omni",
     label: "Gemini Omni · Frames",
     description: "APIPod Gemini Omni · Frames. Public media URLs required.",
@@ -315,6 +339,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-r2v",
+    selectionGroupId: "gemini-omni",
+    selectionGroupLabel: "Gemini Omni",
     canonicalModelId: "gemini-omni",
     label: "Gemini Omni · References",
     description: "APIPod Gemini Omni · References. Public media URLs required.",
@@ -340,6 +366,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "gemini-omni-t2v",
+    selectionGroupId: "gemini-omni",
+    selectionGroupLabel: "Gemini Omni",
     canonicalModelId: "gemini-omni",
     label: "Gemini Omni · Text",
     description:
@@ -362,6 +390,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "grok-imagine-1.5-fast",
+    selectionGroupId: "grok-imagine-1.5-fast",
+    selectionGroupLabel: "Grok Imagine 1.5 Fast",
     canonicalModelId: "grok-imagine-1.5",
     label: "Grok Imagine Video 1.5 Fast",
     description:
@@ -387,6 +417,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "grok-imagine-1.5-preview",
+    selectionGroupId: "grok-imagine-1.5-preview",
+    selectionGroupLabel: "Grok Imagine 1.5 Preview",
     canonicalModelId: "grok-imagine-1.5",
     label: "Grok Imagine Video 1.5 Preview",
     description:
@@ -411,6 +443,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "grok-imagine-1.5-vip",
+    selectionGroupId: "grok-imagine-1.5-vip",
+    selectionGroupLabel: "Grok Imagine 1.5 VIP",
     canonicalModelId: "grok-imagine-1.5",
     label: "Grok Imagine Video 1.5 VIP",
     description:
@@ -437,6 +471,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "grok-imagine-i2v",
+    selectionGroupId: "grok-imagine",
+    selectionGroupLabel: "Grok Imagine",
     canonicalModelId: "grok-imagine",
     label: "Grok Imagine · Frames",
     description: "APIPod Grok Imagine · Frames. Public media URLs required.",
@@ -462,6 +498,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "grok-imagine-t2v",
+    selectionGroupId: "grok-imagine",
+    selectionGroupLabel: "Grok Imagine",
     canonicalModelId: "grok-imagine",
     label: "Grok Imagine · Text",
     description: "APIPod Grok Imagine · Text.",
@@ -482,6 +520,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-2.6-motion-control",
+    selectionGroupId: "kling-2.6-motion-control",
+    selectionGroupLabel: "Kling 2.6 Motion Control",
     canonicalModelId: "kling-motion-control",
     label: "Kling 2.6 Motion Control",
     description: "Transfer motion from a hosted video to a character image.",
@@ -515,6 +555,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-3.0-i2v",
+    selectionGroupId: "kling-3.0",
+    selectionGroupLabel: "Kling 3.0",
     canonicalModelId: "kling-3.0",
     label: "Kling 3.0 · Frames",
     description: "APIPod Kling 3.0 · Frames. Public media URLs required.",
@@ -542,6 +584,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-3.0-t2v",
+    selectionGroupId: "kling-3.0",
+    selectionGroupLabel: "Kling 3.0",
     canonicalModelId: "kling-3.0",
     label: "Kling 3.0 · Text",
     description: "APIPod Kling 3.0 · Text.",
@@ -563,6 +607,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-4.0-i2v",
+    selectionGroupId: "kling-4.0",
+    selectionGroupLabel: "Kling 4.0",
     canonicalModelId: "kling-4.0",
     label: "Kling 4.0 · Frames",
     description: "APIPod Kling 4.0 · Frames. Public media URLs required.",
@@ -590,6 +636,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-4.0-r2v",
+    selectionGroupId: "kling-4.0",
+    selectionGroupLabel: "Kling 4.0",
     canonicalModelId: "kling-4.0",
     label: "Kling 4.0 · References",
     description: "APIPod Kling 4.0 · References. Public media URLs required.",
@@ -614,6 +662,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "kling-4.0-t2v",
+    selectionGroupId: "kling-4.0",
+    selectionGroupLabel: "Kling 4.0",
     canonicalModelId: "kling-4.0",
     label: "Kling 4.0 · Text",
     description: "APIPod Kling 4.0 · Text.",
@@ -633,6 +683,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-i2v",
+    selectionGroupId: "minimax-h3",
+    selectionGroupLabel: "MiniMax H3",
     canonicalModelId: "minimax-h3",
     label: "MiniMax H3 · Frames",
     description: "APIPod MiniMax H3 · Frames. Public media URLs required.",
@@ -657,6 +709,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-lite-i2v",
+    selectionGroupId: "minimax-h3-lite",
+    selectionGroupLabel: "MiniMax H3 Lite",
     canonicalModelId: "minimax-h3-lite",
     label: "MiniMax H3 Lite · Frames",
     description: "APIPod MiniMax H3 Lite · Frames. Public media URLs required.",
@@ -681,6 +735,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-lite-r2v",
+    selectionGroupId: "minimax-h3-lite",
+    selectionGroupLabel: "MiniMax H3 Lite",
     canonicalModelId: "minimax-h3-lite",
     label: "MiniMax H3 Lite · References",
     description:
@@ -707,6 +763,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-lite-t2v",
+    selectionGroupId: "minimax-h3-lite",
+    selectionGroupLabel: "MiniMax H3 Lite",
     canonicalModelId: "minimax-h3-lite",
     label: "MiniMax H3 Lite · Text",
     description: "APIPod MiniMax H3 Lite · Text.",
@@ -725,6 +783,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-max-i2v",
+    selectionGroupId: "minimax-h3-max",
+    selectionGroupLabel: "MiniMax H3 Max",
     canonicalModelId: "minimax-h3-max",
     label: "MiniMax H3 Max · Frames",
     description: "APIPod MiniMax H3 Max · Frames. Public media URLs required.",
@@ -749,6 +809,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-max-t2v",
+    selectionGroupId: "minimax-h3-max",
+    selectionGroupLabel: "MiniMax H3 Max",
     canonicalModelId: "minimax-h3-max",
     label: "MiniMax H3 Max · Text",
     description: "APIPod MiniMax H3 Max · Text.",
@@ -768,6 +830,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-r2v",
+    selectionGroupId: "minimax-h3",
+    selectionGroupLabel: "MiniMax H3",
     canonicalModelId: "minimax-h3",
     label: "MiniMax H3 · References",
     description: "APIPod MiniMax H3 · References. Public media URLs required.",
@@ -793,6 +857,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "minimax-h3-t2v",
+    selectionGroupId: "minimax-h3",
+    selectionGroupLabel: "MiniMax H3",
     canonicalModelId: "minimax-h3",
     label: "MiniMax H3 · Text",
     description: "APIPod MiniMax H3 · Text.",
@@ -812,6 +878,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "motion-control-m1",
+    selectionGroupId: "motion-control-m1",
+    selectionGroupLabel: "Motion Control M1",
     canonicalModelId: "motion-control",
     label: "Motion Control",
     description: "Transfer motion from a hosted video to a character image.",
@@ -842,6 +910,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "muse-video-i2v",
+    selectionGroupId: "muse-video",
+    selectionGroupLabel: "Muse Video",
     canonicalModelId: "muse-video",
     label: "Muse Video · Frames",
     description: "APIPod Muse Video · Frames. Public media URLs required.",
@@ -866,6 +936,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "muse-video-r2v",
+    selectionGroupId: "muse-video",
+    selectionGroupLabel: "Muse Video",
     canonicalModelId: "muse-video",
     label: "Muse Video · References",
     description: "APIPod Muse Video · References. Public media URLs required.",
@@ -890,6 +962,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "muse-video-t2v",
+    selectionGroupId: "muse-video",
+    selectionGroupLabel: "Muse Video",
     canonicalModelId: "muse-video",
     label: "Muse Video · Text",
     description:
@@ -912,6 +986,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-lite-i2v",
+    selectionGroupId: "seedance-1.0-lite",
+    selectionGroupLabel: "Seedance 1.0 Lite",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Lite · Frames",
     description:
@@ -938,6 +1014,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-lite-i2v-ref",
+    selectionGroupId: "seedance-1.0-lite",
+    selectionGroupLabel: "Seedance 1.0 Lite",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Lite · References",
     description:
@@ -963,6 +1041,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-lite-t2v",
+    selectionGroupId: "seedance-1.0-lite",
+    selectionGroupLabel: "Seedance 1.0 Lite",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Lite · Text",
     description: "APIPod Seedance 1.0 Lite · Text.",
@@ -982,6 +1062,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-pro-fast-i2v",
+    selectionGroupId: "seedance-1.0-pro-fast",
+    selectionGroupLabel: "Seedance 1.0 Pro Fast",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Pro Fast · Frames",
     description:
@@ -1008,6 +1090,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-pro-fast-t2v",
+    selectionGroupId: "seedance-1.0-pro-fast",
+    selectionGroupLabel: "Seedance 1.0 Pro Fast",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Pro Fast · Text",
     description: "APIPod Seedance 1.0 Pro Fast · Text.",
@@ -1028,6 +1112,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-pro-i2v",
+    selectionGroupId: "seedance-1.0-pro",
+    selectionGroupLabel: "Seedance 1.0 Pro",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Pro · Frames",
     description:
@@ -1054,6 +1140,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-1.0-pro-t2v",
+    selectionGroupId: "seedance-1.0-pro",
+    selectionGroupLabel: "Seedance 1.0 Pro",
     canonicalModelId: "seedance-1.0",
     label: "Seedance 1.0 Pro · Text",
     description: "APIPod Seedance 1.0 Pro · Text.",
@@ -1074,6 +1162,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-i2v",
+    selectionGroupId: "seedance-2.0-fast",
+    selectionGroupLabel: "Seedance 2.0 Fast",
     canonicalModelId: "seedance-2.0-fast",
     label: "Seedance 2.0 Fast · Frames",
     description:
@@ -1100,6 +1190,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-lite-i2v",
+    selectionGroupId: "seedance-2.0-fast-lite",
+    selectionGroupLabel: "Seedance 2.0 Fast Lite",
     canonicalModelId: "seedance-2.0-fast-lite",
     label: "Seedance 2.0 Fast · Frames(Lite)",
     description:
@@ -1125,6 +1217,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-lite-r2v",
+    selectionGroupId: "seedance-2.0-fast-lite",
+    selectionGroupLabel: "Seedance 2.0 Fast Lite",
     canonicalModelId: "seedance-2.0-fast-lite",
     label: "Seedance 2.0 Fast · References(Lite)",
     description:
@@ -1155,6 +1249,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-lite-t2v",
+    selectionGroupId: "seedance-2.0-fast-lite",
+    selectionGroupLabel: "Seedance 2.0 Fast Lite",
     canonicalModelId: "seedance-2.0-fast-lite",
     label: "Seedance 2.0 Fast · Text(Lite)",
     description: "APIPod Seedance 2.0 Fast · Text(Lite).",
@@ -1174,6 +1270,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-r2v",
+    selectionGroupId: "seedance-2.0-fast",
+    selectionGroupLabel: "Seedance 2.0 Fast",
     canonicalModelId: "seedance-2.0-fast",
     label: "Seedance 2.0 Fast · References",
     description:
@@ -1205,6 +1303,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-fast-t2v",
+    selectionGroupId: "seedance-2.0-fast",
+    selectionGroupLabel: "Seedance 2.0 Fast",
     canonicalModelId: "seedance-2.0-fast",
     label: "Seedance 2.0 Fast · Text",
     description: "APIPod Seedance 2.0 Fast · Text.",
@@ -1225,6 +1325,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-i2v",
+    selectionGroupId: "seedance-2.0",
+    selectionGroupLabel: "Seedance 2.0",
     canonicalModelId: "seedance-2.0",
     label: "Seedance 2.0 · Frames",
     description: "APIPod Seedance 2.0 · Frames. Public media URLs required.",
@@ -1252,6 +1354,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-lite-i2v",
+    selectionGroupId: "seedance-2.0-lite",
+    selectionGroupLabel: "Seedance 2.0 Lite",
     canonicalModelId: "seedance-2.0-lite",
     label: "Seedance 2.0 · Frames(Lite)",
     description:
@@ -1278,6 +1382,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-lite-r2v",
+    selectionGroupId: "seedance-2.0-lite",
+    selectionGroupLabel: "Seedance 2.0 Lite",
     canonicalModelId: "seedance-2.0-lite",
     label: "Seedance 2.0 · References(Lite)",
     description:
@@ -1308,6 +1414,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-lite-t2v",
+    selectionGroupId: "seedance-2.0-lite",
+    selectionGroupLabel: "Seedance 2.0 Lite",
     canonicalModelId: "seedance-2.0-lite",
     label: "Seedance 2.0 · Text(Lite)",
     description: "APIPod Seedance 2.0 · Text(Lite).",
@@ -1328,6 +1436,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-i2v",
+    selectionGroupId: "seedance-2.0-mini",
+    selectionGroupLabel: "Seedance 2.0 Mini",
     canonicalModelId: "seedance-2.0-mini",
     label: "Seedance 2.0 Mini · Frames",
     description:
@@ -1354,6 +1464,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-lite-i2v",
+    selectionGroupId: "seedance-2.0-mini-lite",
+    selectionGroupLabel: "Seedance 2.0 Mini Lite",
     canonicalModelId: "seedance-2.0-mini-lite",
     label: "Seedance 2.0 Mini · Frames(Lite)",
     description:
@@ -1379,6 +1491,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-lite-r2v",
+    selectionGroupId: "seedance-2.0-mini-lite",
+    selectionGroupLabel: "Seedance 2.0 Mini Lite",
     canonicalModelId: "seedance-2.0-mini-lite",
     label: "Seedance 2.0 Mini · References(Lite)",
     description:
@@ -1409,6 +1523,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-lite-t2v",
+    selectionGroupId: "seedance-2.0-mini-lite",
+    selectionGroupLabel: "Seedance 2.0 Mini Lite",
     canonicalModelId: "seedance-2.0-mini-lite",
     label: "Seedance 2.0 Mini · Text(Lite)",
     description: "APIPod Seedance 2.0 Mini · Text(Lite).",
@@ -1428,6 +1544,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-r2v",
+    selectionGroupId: "seedance-2.0-mini",
+    selectionGroupLabel: "Seedance 2.0 Mini",
     canonicalModelId: "seedance-2.0-mini",
     label: "Seedance 2.0 Mini · References",
     description:
@@ -1459,6 +1577,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-mini-t2v",
+    selectionGroupId: "seedance-2.0-mini",
+    selectionGroupLabel: "Seedance 2.0 Mini",
     canonicalModelId: "seedance-2.0-mini",
     label: "Seedance 2.0 Mini · Text",
     description: "APIPod Seedance 2.0 Mini · Text.",
@@ -1479,6 +1599,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-r2v",
+    selectionGroupId: "seedance-2.0",
+    selectionGroupLabel: "Seedance 2.0",
     canonicalModelId: "seedance-2.0",
     label: "Seedance 2.0 Reference",
     description: "APIPod Seedance 2.0 Reference. Public media URLs required.",
@@ -1511,6 +1633,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-spicy-i2v",
+    selectionGroupId: "seedance-2.0-spicy",
+    selectionGroupLabel: "Seedance 2.0 Spicy",
     canonicalModelId: "seedance-2.0-spicy",
     label: "Seedance 2.0 Spicy · Frames (18+)",
     description:
@@ -1539,6 +1663,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-spicy-r2v",
+    selectionGroupId: "seedance-2.0-spicy",
+    selectionGroupLabel: "Seedance 2.0 Spicy",
     canonicalModelId: "seedance-2.0-spicy",
     label: "Seedance 2.0 Spicy · References (18+)",
     description:
@@ -1572,6 +1698,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-spicy-t2v",
+    selectionGroupId: "seedance-2.0-spicy",
+    selectionGroupLabel: "Seedance 2.0 Spicy",
     canonicalModelId: "seedance-2.0-spicy",
     label: "Seedance 2.0 Spicy · Text (18+)",
     description: "APIPod Seedance 2.0 Spicy · Text (18+).",
@@ -1594,6 +1722,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-t2v",
+    selectionGroupId: "seedance-2.0",
+    selectionGroupLabel: "Seedance 2.0",
     canonicalModelId: "seedance-2.0",
     label: "Seedance 2.0 · Text",
     description: "APIPod Seedance 2.0 · Text.",
@@ -1616,6 +1746,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-x-r2v",
+    selectionGroupId: "seedance-2.0-x",
+    selectionGroupLabel: "Seedance 2.0 X",
     canonicalModelId: "seedance-2.0-x",
     label: "Seedance 2.0 X · References",
     description:
@@ -1646,6 +1778,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.0-x-t2v",
+    selectionGroupId: "seedance-2.0-x",
+    selectionGroupLabel: "Seedance 2.0 X",
     canonicalModelId: "seedance-2.0-x",
     label: "Seedance 2.0 X · Text",
     description: "APIPod Seedance 2.0 X · Text.",
@@ -1665,6 +1799,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-draft",
+    selectionGroupId: "seedance-2.5-draft",
+    selectionGroupLabel: "Seedance 2.5 Draft",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 Draft",
     description:
@@ -1710,6 +1846,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-edit",
+    selectionGroupId: "seedance-2.5-edit",
+    selectionGroupLabel: "Seedance 2.5 Edit",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 Video Edit",
     description: "Edit or extend a publicly hosted source video.",
@@ -1747,6 +1885,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-extend",
+    selectionGroupId: "seedance-2.5-extend",
+    selectionGroupLabel: "Seedance 2.5 Extend",
     canonicalModelId: "seedance-2.5",
     label: "Seedance 2.5 Video Extend",
     description: "Edit or extend a publicly hosted source video.",
@@ -1783,6 +1923,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-lite-i2v",
+    selectionGroupId: "seedance-2.5-lite",
+    selectionGroupLabel: "Seedance 2.5 Lite",
     canonicalModelId: "seedance-2.5-lite",
     label: "Seedance 2.5 · Frames(Lite)",
     description:
@@ -1808,6 +1950,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-lite-r2v",
+    selectionGroupId: "seedance-2.5-lite",
+    selectionGroupLabel: "Seedance 2.5 Lite",
     canonicalModelId: "seedance-2.5-lite",
     label: "Seedance 2.5 · References(Lite)",
     description:
@@ -1838,6 +1982,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-lite-t2v",
+    selectionGroupId: "seedance-2.5-lite",
+    selectionGroupLabel: "Seedance 2.5 Lite",
     canonicalModelId: "seedance-2.5-lite",
     label: "Seedance 2.5 · Text(Lite)",
     description: "APIPod Seedance 2.5 · Text(Lite).",
@@ -1857,6 +2003,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-spicy-edit",
+    selectionGroupId: "seedance-2.5-spicy-edit",
+    selectionGroupLabel: "Seedance 2.5 Spicy Edit",
     canonicalModelId: "seedance-2.5-spicy",
     label: "Seedance 2.5 Spicy Video Edit (18+)",
     description: "Edit or extend a publicly hosted source video.",
@@ -1894,6 +2042,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-spicy-extend",
+    selectionGroupId: "seedance-2.5-spicy-extend",
+    selectionGroupLabel: "Seedance 2.5 Spicy Extend",
     canonicalModelId: "seedance-2.5-spicy",
     label: "Seedance 2.5 Spicy Video Extend (18+)",
     description: "Edit or extend a publicly hosted source video.",
@@ -1930,6 +2080,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-spicy-i2v",
+    selectionGroupId: "seedance-2.5-spicy",
+    selectionGroupLabel: "Seedance 2.5 Spicy",
     canonicalModelId: "seedance-2.5-spicy",
     label: "Seedance 2.5 Spicy · Frames (18+)",
     description:
@@ -1957,6 +2109,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-spicy-r2v",
+    selectionGroupId: "seedance-2.5-spicy",
+    selectionGroupLabel: "Seedance 2.5 Spicy",
     canonicalModelId: "seedance-2.5-spicy",
     label: "Seedance 2.5 Spicy · References (18+)",
     description:
@@ -1989,6 +2143,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "seedance-2.5-spicy-t2v",
+    selectionGroupId: "seedance-2.5-spicy",
+    selectionGroupLabel: "Seedance 2.5 Spicy",
     canonicalModelId: "seedance-2.5-spicy",
     label: "Seedance 2.5 Spicy · Text (18+)",
     description: "APIPod Seedance 2.5 Spicy · Text (18+).",
@@ -2010,6 +2166,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-fast",
+    selectionGroupId: "veo3-1-fast",
+    selectionGroupLabel: "Veo 3.1 Fast",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Fast",
     description: "APIPod Veo 3.1 Fast. Public media URLs required.",
@@ -2034,6 +2192,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-fast-4k",
+    selectionGroupId: "veo3-1-fast-4k",
+    selectionGroupLabel: "Veo 3.1 Fast 4K",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Fast 4K",
     description: "APIPod Veo 3.1 Fast 4K. Public media URLs required.",
@@ -2057,6 +2217,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-fast-ref",
+    selectionGroupId: "veo3-1-fast",
+    selectionGroupLabel: "Veo 3.1 Fast",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Fast Reference",
     description: "APIPod Veo 3.1 Fast Reference. Public media URLs required.",
@@ -2081,6 +2243,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-lite",
+    selectionGroupId: "veo3-1-lite",
+    selectionGroupLabel: "Veo 3.1 Lite",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Lite",
     description: "APIPod Veo 3.1 Lite. Public media URLs required.",
@@ -2105,6 +2269,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-lite-4k",
+    selectionGroupId: "veo3-1-lite-4k",
+    selectionGroupLabel: "Veo 3.1 Lite 4K",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Lite 4K",
     description: "APIPod Veo 3.1 Lite 4K. Public media URLs required.",
@@ -2128,6 +2294,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-quality",
+    selectionGroupId: "veo3-1-quality",
+    selectionGroupLabel: "Veo 3.1 Quality",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Quality",
     description: "APIPod Veo 3.1 Quality. Public media URLs required.",
@@ -2152,6 +2320,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "veo3-1-quality-4k",
+    selectionGroupId: "veo3-1-quality-4k",
+    selectionGroupLabel: "Veo 3.1 Quality 4K",
     canonicalModelId: "veo3-1",
     label: "Veo 3.1 Quality 4K",
     description: "APIPod Veo 3.1 Quality 4K. Public media URLs required.",
@@ -2175,6 +2345,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan2.7-i2v",
+    selectionGroupId: "wan2.7",
+    selectionGroupLabel: "Wan 2.7",
     canonicalModelId: "wan2.7-video",
     label: "WAN 2.7 · Frames",
     description: "APIPod WAN 2.7 · Frames. Public media URLs required.",
@@ -2200,10 +2372,12 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan2.7-t2v",
+    selectionGroupId: "wan2.7",
+    selectionGroupLabel: "Wan 2.7",
     canonicalModelId: "wan2.7-video",
     label: "WAN 2.7 · Text",
     description: "APIPod WAN 2.7 · Text.",
-    modes: <VideoMode>[VideoMode.t2v],
+    modes: <VideoMode>[VideoMode.t2v, VideoMode.i2v],
     aspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4"],
     resolutions: <VideoResolutionDefinition>[
       VideoResolutionDefinition("fhd", "1080P", "1920 × 1080"),
@@ -2222,6 +2396,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan2.7-videoedit",
+    selectionGroupId: "wan2.7-videoedit",
+    selectionGroupLabel: "Wan 2.7 Edit",
     canonicalModelId: "wan2.7-video",
     label: "WAN 2.7 Video Edit",
     description: "Edit or extend a publicly hosted source video.",
@@ -2253,6 +2429,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-i2v",
+    selectionGroupId: "wan3.0",
+    selectionGroupLabel: "Wan 3.0",
     canonicalModelId: "wan3.0-video",
     label: "WAN 3.0 · Frames",
     description: "APIPod WAN 3.0 · Frames. Public media URLs required.",
@@ -2281,6 +2459,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-i2v",
+    selectionGroupId: "wan3.0-prime",
+    selectionGroupLabel: "Wan 3.0 Prime",
     canonicalModelId: "wan3.0-video-prime",
     label: "WAN 3.0 Prime · Frames",
     description: "APIPod WAN 3.0 Prime · Frames. Public media URLs required.",
@@ -2309,6 +2489,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-r2v",
+    selectionGroupId: "wan3.0-prime",
+    selectionGroupLabel: "Wan 3.0 Prime",
     canonicalModelId: "wan3.0-video-prime",
     label: "WAN 3.0 Prime · References",
     description:
@@ -2340,6 +2522,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-spicy-i2v",
+    selectionGroupId: "wan3.0-prime-spicy",
+    selectionGroupLabel: "Wan 3.0 Prime Spicy",
     canonicalModelId: "wan3.0-video-prime-spicy",
     label: "Wan 3.0 Prime Spicy · Frames (18+)",
     description:
@@ -2368,6 +2552,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-spicy-r2v",
+    selectionGroupId: "wan3.0-prime-spicy",
+    selectionGroupLabel: "Wan 3.0 Prime Spicy",
     canonicalModelId: "wan3.0-video-prime-spicy",
     label: "Wan 3.0 Prime Spicy · References (18+)",
     description:
@@ -2399,6 +2585,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-spicy-t2v",
+    selectionGroupId: "wan3.0-prime-spicy",
+    selectionGroupLabel: "Wan 3.0 Prime Spicy",
     canonicalModelId: "wan3.0-video-prime-spicy",
     label: "Wan 3.0 Prime Spicy · Text (18+)",
     description: "APIPod Wan 3.0 Prime Spicy · Text (18+).",
@@ -2420,6 +2608,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-prime-t2v",
+    selectionGroupId: "wan3.0-prime",
+    selectionGroupLabel: "Wan 3.0 Prime",
     canonicalModelId: "wan3.0-video-prime",
     label: "WAN 3.0 Prime · Text",
     description: "APIPod WAN 3.0 Prime · Text.",
@@ -2441,6 +2631,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-pro-spicy-i2v",
+    selectionGroupId: "wan3.0-pro-spicy",
+    selectionGroupLabel: "Wan 3.0 Pro Spicy",
     canonicalModelId: "wan3.0-video-pro-spicy",
     label: "Wan 3.0 Pro Spicy · Frames (18+)",
     description:
@@ -2470,6 +2662,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-pro-spicy-r2v",
+    selectionGroupId: "wan3.0-pro-spicy",
+    selectionGroupLabel: "Wan 3.0 Pro Spicy",
     canonicalModelId: "wan3.0-video-pro-spicy",
     label: "Wan 3.0 Pro Spicy · References (18+)",
     description:
@@ -2501,6 +2695,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-pro-spicy-t2v",
+    selectionGroupId: "wan3.0-pro-spicy",
+    selectionGroupLabel: "Wan 3.0 Pro Spicy",
     canonicalModelId: "wan3.0-video-pro-spicy",
     label: "Wan 3.0 Pro Spicy · Text (18+)",
     description: "APIPod Wan 3.0 Pro Spicy · Text (18+).",
@@ -2522,6 +2718,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-r2v",
+    selectionGroupId: "wan3.0",
+    selectionGroupLabel: "Wan 3.0",
     canonicalModelId: "wan3.0-video",
     label: "WAN 3.0 · References",
     description: "APIPod WAN 3.0 · References. Public media URLs required.",
@@ -2552,6 +2750,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-spicy-i2v",
+    selectionGroupId: "wan3.0-spicy",
+    selectionGroupLabel: "Wan 3.0 Spicy",
     canonicalModelId: "wan3.0-video-spicy",
     label: "Wan 3.0 Spicy · Frames (18+)",
     description:
@@ -2581,6 +2781,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-spicy-r2v",
+    selectionGroupId: "wan3.0-spicy",
+    selectionGroupLabel: "Wan 3.0 Spicy",
     canonicalModelId: "wan3.0-video-spicy",
     label: "Wan 3.0 Spicy · References (18+)",
     description:
@@ -2612,6 +2814,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-spicy-t2v",
+    selectionGroupId: "wan3.0-spicy",
+    selectionGroupLabel: "Wan 3.0 Spicy",
     canonicalModelId: "wan3.0-video-spicy",
     label: "Wan 3.0 Spicy · Text (18+)",
     description: "APIPod Wan 3.0 Spicy · Text (18+).",
@@ -2633,6 +2837,8 @@ const apipodModels = <VideoModelDefinition>[
   ),
   VideoModelDefinition(
     id: "wan3.0-t2v",
+    selectionGroupId: "wan3.0",
+    selectionGroupLabel: "Wan 3.0",
     canonicalModelId: "wan3.0-video",
     label: "WAN 3.0 · Text",
     description: "APIPod WAN 3.0 · Text.",
