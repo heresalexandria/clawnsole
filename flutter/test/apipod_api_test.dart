@@ -108,7 +108,7 @@ void main() {
   test(
     'all documented text controls and duration boundaries map without extras',
     () {
-      for (final resolution in ['sd', 'hd']) {
+      for (final resolution in ['sd', 'hd', 'fhd']) {
         for (final duration in [4, 30]) {
           for (final ratio in [
             'auto',
@@ -135,7 +135,10 @@ void main() {
               'aspect_ratio',
               'generate_audio',
             });
-            expect(payload['resolution'], resolution == 'sd' ? '480p' : '720p');
+            expect(
+              payload['resolution'],
+              {'sd': '480p', 'hd': '720p', 'fhd': '1080p'}[resolution],
+            );
             expect(payload['duration'], duration);
             expect(
               payload['aspect_ratio'],
@@ -149,7 +152,7 @@ void main() {
   );
 
   test(
-    'image route preserves first and last frames and omits aspect ratio',
+    'image route preserves first and last frames with adaptive aspect ratio',
     () {
       final payload = apipodGenerationPayload('seedance-2.5-i2v', {
         ..._input(),
@@ -161,7 +164,7 @@ void main() {
         _image,
         'https://cdn.example.com/end.png',
       ]);
-      expect(payload.containsKey('aspect_ratio'), false);
+      expect(payload['aspect_ratio'], 'adaptive');
       expect(payload.containsKey('keyframes'), false);
     },
   );
@@ -203,7 +206,7 @@ void main() {
         {..._input(), 'duration': 4.5},
         {..._input(), 'duration': 'auto'},
         {..._input(), 'duration': double.infinity},
-        {..._input(), 'resolution': 'fhd'},
+        {..._input(), 'resolution': '4k'},
         {..._input(), 'aspect_ratio': '2:1'},
         {..._input(), 'prompt': ''},
         {..._input(), 'prompt': 'x' * 30001},

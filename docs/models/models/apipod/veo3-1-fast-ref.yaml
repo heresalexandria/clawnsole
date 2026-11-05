@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "veo3-1-fast-ref",
+  "canonical_model_id": "veo3-1",
+  "label": "Veo 3.1 Fast Reference",
+  "description": "APIPod Veo 3.1 Fast Reference. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 8,
+  "max_duration": 8,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 4000,
+  "max_image_references": 3,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

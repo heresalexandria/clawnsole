@@ -1909,10 +1909,13 @@ void main() {
             reason: '${provider.id}/${model.id}/${mode.name}',
           );
           if (!estimate.isAvailable) {
-            expect(provider.id, 'krea');
+            expect(provider.id, isIn(['krea', 'apipod']));
             expect(
               publishedProviderPrices(provider.id).any(
-                (row) => row.model == model.id && row.pricingUnit == 'variable',
+                (row) =>
+                    (row.model == model.id ||
+                        row.model.startsWith('${model.id}:')) &&
+                    row.pricingUnit == 'variable',
               ),
               isTrue,
             );

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "minimax-h3-i2v",
+  "canonical_model_id": "minimax-h3",
+  "label": "MiniMax H3 · Frames",
+  "description": "APIPod MiniMax H3 · Frames. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "qhd",
+      "label": "2K",
+      "detail": "2K"
+    },
+    {
+      "id": "768p",
+      "label": "768P",
+      "detail": "1366 × 768"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 7000,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

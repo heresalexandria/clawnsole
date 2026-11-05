@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "kling-4.0-i2v",
+  "canonical_model_id": "kling-4.0",
+  "label": "Kling 4.0 · Frames",
+  "description": "APIPod Kling 4.0 · Frames. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 10,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 8000,
+  "supports_ordered_middle_frames": true,
+  "max_keyframes_per_second": 1,
+  "max_middle_frames": 8,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

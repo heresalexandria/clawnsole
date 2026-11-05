@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "muse-video-i2v",
+  "canonical_model_id": "muse-video",
+  "label": "Muse Video · Frames",
+  "description": "APIPod Muse Video · Frames. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "4:3",
+    "3:4"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 60,
+  "duration_step": 5,
+  "max_keyframes": 2,
+  "usd_per_second": 0.0,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "duration_options": [
+    5,
+    10,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "max_prompt_characters": 4005,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "seedance-2.0-x-t2v",
+  "canonical_model_id": "seedance-2.0-x",
+  "label": "Seedance 2.0 X · Text",
+  "description": "APIPod Seedance 2.0 X · Text.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "1:1",
+    "21:9"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 5,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 30000,
+  "max_input_image_bytes": 31457280
+}

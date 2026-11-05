@@ -3,7 +3,7 @@
   "id": "seedance-2.5-i2v",
   "canonical_model_id": "seedance-2.5",
   "label": "Seedance 2.5 · Frames",
-  "description": "Animate hosted first and last frames. Public URLs required.",
+  "description": "APIPod Seedance 2.5 · Frames. Public media URLs required.",
   "modes": [
     "i2v"
   ],
@@ -13,30 +13,34 @@
   "resolutions": [
     {
       "id": "hd",
-      "label": "HD",
+      "label": "720p",
       "detail": "1280 × 720"
     },
     {
       "id": "sd",
       "label": "480p",
       "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
     }
   ],
   "min_duration": 4,
   "max_duration": 30,
   "duration_step": 1,
   "max_keyframes": 2,
-  "usd_per_second": 0.2205,
+  "usd_per_second": 0.0,
   "supports_audio": true,
-  "max_prompt_characters": 30000,
   "availability": {
-    "min_version": "0.63.0"
+    "min_version": "0.64.0"
   },
-  "reference_usd_per_second": 0.2205,
-  "requires_public_media_urls": true,
-  "max_input_image_bytes": 31457280,
+  "max_prompt_characters": 30000,
   "supports_start_frame": true,
   "supports_end_frame": true,
   "requires_start_frame_when_using_frames": true,
-  "reference_prompt_hint": "Use publicly reachable image URLs; local uploads are unavailable."
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "max_input_image_bytes": 31457280
 }

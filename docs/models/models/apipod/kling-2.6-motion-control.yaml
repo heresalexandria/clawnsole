@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "kling-2.6-motion-control",
+  "canonical_model_id": "kling-motion-control",
+  "label": "Kling 2.6 Motion Control",
+  "description": "Transfer motion from a hosted video to a character image.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "Standard",
+      "detail": "Motion transfer quality"
+    },
+    {
+      "id": "fhd",
+      "label": "Pro",
+      "detail": "Motion transfer quality"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 2500,
+  "max_image_references": 0,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "supports_guidance_with_source": true,
+  "source_input_label": "Source video",
+  "source_input_hint": "Paste a publicly reachable HTTPS video URL.",
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "requires_start_frame_with_source": true,
+  "supports_start_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "min_source_video_seconds": 3,
+  "max_source_video_seconds": 10,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

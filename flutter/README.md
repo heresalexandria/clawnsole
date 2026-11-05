@@ -10,7 +10,7 @@ only macOS desktop lifecycle, packaging, and self-update.
 
 - BFL FLUX 3 and FLUX Video Upscale, LTX 2.3, ArtCraft’s live video catalog,
   selected Create-ready Atlas Cloud models, Runway’s first-party video catalog,
-  Krea’s live multi-vendor video catalog, and APIPod Seedance 2.5
+  Krea’s live multi-vendor video catalog, and APIPod’s video catalog
 - Keyless Apple Intelligence image creation on supported iOS devices, with a
   still-image model and a one-image-per-second silent MP4 sequence model
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
@@ -316,8 +316,10 @@ starting-rate fallbacks. Krea models are read from its live OpenAPI spec, and
 Create-ready costs use its published fixed per-request USD prices rather than
 a calculate endpoint.
 
-APIPod supports Seedance 2.5 text, first/last-frame, and multimodal reference
-routes at 480p/720p, with 4–30-second output and optional generated audio.
-Media inputs require public HTTPS URLs; local uploads are unavailable.
-The adapter uses the settings-vault key or companion `APIPOD_API_KEY` fallback.
-See [the APIPod audit](../docs/models/audit-apipod.md) for schema and pricing details.
+APIPod supports all 103 active video routes audited on 2026-11-05, including
+Seedance variants and the Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, and Muse
+families. Controls follow each route’s live schema, including source-video
+editing/extensions and two-stage Seedance draft rendering. Media inputs require
+public HTTPS URLs; local uploads are unavailable. The adapter uses the
+settings-vault key or companion `APIPOD_API_KEY` fallback.
+See [the APIPod audit](../docs/models/audit-apipod.md) for coverage and pricing.

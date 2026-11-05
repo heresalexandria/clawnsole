@@ -489,7 +489,14 @@ CostEstimate estimateCost(
   List<ProviderModelPrice> prices = const <ProviderModelPrice>[],
   VideoSourceMetadata? sourceMetadata,
 ]) {
-  if (providerId == 'apipod') return apipodEstimate(config);
+  if (providerId == 'apipod') {
+    return apipodEstimate(
+      modelId,
+      mode,
+      config,
+      sourceMetadata: sourceMetadata,
+    );
+  }
   if (providerId == 'krea' || providerId == 'fal') {
     // A partially loaded live catalog must not turn an omitted variable-price
     // route into the model's numeric zero placeholder.

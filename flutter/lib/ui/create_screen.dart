@@ -371,6 +371,9 @@ class _ComposerState extends State<_Composer> {
     final videoActive =
         !draftActive &&
         (upscaling ||
+            controller.selectedModel.modes.every(
+              (mode) => mode == VideoMode.v2v,
+            ) ||
             form.videoAsset != null ||
             form.videoUrl.trim().isNotEmpty ||
             _showVideoPanel);
@@ -381,7 +384,9 @@ class _ComposerState extends State<_Composer> {
     final videoAction = controller.selectedModel.modes.contains(VideoMode.v2v)
         ? _QuietAction(
             icon: Icons.movie_filter_rounded,
-            label: 'Or continue a video',
+            label:
+                controller.selectedModel.sourceInputLabel ??
+                'Or continue a video',
             onTap: () => setState(() => _showVideoPanel = true),
           )
         : null;
@@ -389,7 +394,9 @@ class _ComposerState extends State<_Composer> {
     // would only open an empty picker.
     final draftAction =
         controller.selectedModel.modes.contains(VideoMode.draftEnhance) &&
-            (controller.hasDraftEnhanceCandidates || draftActive)
+            (controller.hasDraftEnhanceCandidates ||
+                controller.selectedModel.draftSourceIsTaskId ||
+                draftActive)
         ? _QuietAction(
             icon: Icons.auto_fix_high_rounded,
             label: 'Or enhance a saved draft',
@@ -469,12 +476,17 @@ class _ComposerState extends State<_Composer> {
           if (draftActive)
             _SourceEditor(
               controller: controller,
-              title: 'Enhance a draft render',
-              description:
-                  'Re-render a saved FLUX 3 draft cache at full quality. Prompt, framing, and duration come from the original.',
+              title: controller.selectedModel.draftSourceIsTaskId
+                  ? 'Render a completed draft'
+                  : 'Enhance a draft render',
+              description: controller.selectedModel.draftSourceIsTaskId
+                  ? controller.selectedModel.sourceInputHint ??
+                        'Enter the completed preview task ID from the same provider account. The final render reuses its prompt, media, duration, framing, and audio.'
+                  : 'Re-render a saved draft cache at full quality. Prompt, framing, and duration come from the original.',
               icon: Icons.auto_fix_high_rounded,
               asset: form.draftAsset,
               url: form.draftUrl,
+              taskIdInput: controller.selectedModel.draftSourceIsTaskId,
               onPick: controller.pickDraft,
               onUrl: (value) =>
                   controller.updateForm((form) => form.draftUrl = value),
@@ -2399,7 +2411,9 @@ class _FramesSection extends StatelessWidget {
         model.framesExclusiveWithReferences &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
-    final frameLimit = model.supportsTimedKeyframes
+    final frameLimit = model.supportsOrderedMiddleFrames
+        ? '$maximumFrames frames max · middle frames follow attachment order'
+        : model.supportsTimedKeyframes
         ? '$maximumFrames frames max · custom timing available'
         : model.supportsEndFrame
         ? '$maximumFrames frames max · first + last · pinned by the provider'
@@ -2417,8 +2431,8 @@ class _FramesSection extends StatelessWidget {
     final timingPill = form.keyframes.isNotEmpty && model.supportsTimedKeyframes
         ? TogglePill(
             label: 'Custom timing',
-            selected: form.usesTimedKeyframes,
-            onChanged: form.requiresTimedKeyframes
+            selected: controller.usesTimedKeyframes,
+            onChanged: controller.requiresTimedKeyframes
                 ? null
                 : controller.setExactTiming,
           )
@@ -2429,7 +2443,9 @@ class _FramesSection extends StatelessWidget {
               .where(
                 (role) => switch (role) {
                   KeyframeRole.start => model.supportsStartFrame,
-                  KeyframeRole.middle => model.supportsTimedKeyframes,
+                  KeyframeRole.middle =>
+                    model.supportsTimedKeyframes ||
+                        model.supportsOrderedMiddleFrames,
                   KeyframeRole.end => model.supportsEndFrame,
                 },
               )
@@ -3549,7 +3565,7 @@ class _FrameTile extends StatelessWidget {
               style: const TextStyle(fontSize: 10.5),
             ),
           ],
-          if (controller.form.usesTimedKeyframes) ...<Widget>[
+          if (controller.usesTimedKeyframes) ...<Widget>[
             const SizedBox(height: 6),
             TextFormField(
               key: ValueKey('frame-time-${frame.id}'),
@@ -3613,7 +3629,10 @@ class _AddFrameButton extends StatelessWidget {
     };
     final hint = switch (role) {
       KeyframeRole.start => 'Pins the opening at 0 s',
-      KeyframeRole.middle => 'Timed waypoint · repeatable',
+      KeyframeRole.middle =>
+        controller.selectedModel.supportsOrderedMiddleFrames
+            ? 'Chronological waypoint · repeatable'
+            : 'Timed waypoint · repeatable',
       KeyframeRole.end =>
         controller.selectedModel.requiresStartFrameWhenUsingFrames
             ? 'Pins the ending · requires a first frame'
@@ -3722,6 +3741,7 @@ class _SourceEditor extends StatelessWidget {
     required this.onDismiss,
     required this.formRevision,
     this.mediaKind,
+    this.taskIdInput = false,
   });
 
   final AppController controller;
@@ -3735,6 +3755,7 @@ class _SourceEditor extends StatelessWidget {
   final VoidCallback onDismiss;
   final int formRevision;
   final MediaReferenceKind? mediaKind;
+  final bool taskIdInput;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -3896,29 +3917,37 @@ class _SourceEditor extends StatelessWidget {
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  OutlinedButton.icon(
-                    onPressed: controller.selectedModel.requiresPublicMediaUrls
-                        ? null
-                        : () => unawaited(onPick()),
-                    icon: const Icon(Icons.upload_file_rounded, size: 16),
-                    label: const Text('Choose file'),
-                  ),
-                  Text(
-                    'or',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: context.colors.onSurfaceVariant,
+                  if (!taskIdInput)
+                    OutlinedButton.icon(
+                      onPressed:
+                          controller.selectedModel.requiresPublicMediaUrls
+                          ? null
+                          : () => unawaited(onPick()),
+                      icon: const Icon(Icons.upload_file_rounded, size: 16),
+                      label: const Text('Choose file'),
                     ),
-                  ),
+                  if (!taskIdInput)
+                    Text(
+                      'or',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
                   SizedBox(
                     width: 300,
                     child: TextFormField(
                       key: ValueKey('$title-url-$formRevision'),
                       initialValue: url,
                       onChanged: onUrl,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.link_rounded, size: 17),
-                        hintText: 'Paste a hosted URL',
+                      decoration: InputDecoration(
+                        prefixIcon: Icon(
+                          taskIdInput ? Icons.tag_rounded : Icons.link_rounded,
+                          size: 17,
+                        ),
+                        hintText: taskIdInput
+                            ? 'Completed draft task ID'
+                            : 'Paste a hosted URL',
                         isDense: true,
                       ),
                       style: const TextStyle(fontSize: 12.5),
@@ -4309,6 +4338,12 @@ class _EnhanceSettings extends StatelessWidget {
         const SizedBox(height: 6),
         _ResolutionDropdown(controller: controller),
       ];
+      if (controller.selectedModel.draftSourceIsTaskId) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: finish,
+        );
+      }
       final safety = <Widget>[_SafetyControl(controller: controller)];
       if (!columns) {
         return Column(
@@ -4489,7 +4524,7 @@ class _DurationControl extends StatelessWidget {
     final model = controller.selectedModel;
     final range = controller.selectedDurationRange;
     final autoLocked =
-        form.requiresFixedDuration ||
+        controller.requiresFixedDuration ||
         form.referenceTask == MediaReferenceTask.edit;
     final rangeText = range.minimumSeconds == range.maximumSeconds
         ? '${range.minimumSeconds} seconds'
@@ -4500,7 +4535,9 @@ class _DurationControl extends StatelessWidget {
       unit: form.autoDuration ? null : 's',
       semanticLabel: 'Duration',
       unitLabel: form.autoDuration ? null : 'seconds',
-      enabled: !(form.autoDuration && autoLocked),
+      enabled:
+          range.minimumSeconds != range.maximumSeconds &&
+          !(form.autoDuration && autoLocked),
       // Starting to type is the keyboard's version of touching the slider:
       // it drops Auto and takes manual control.
       onEditingStarted: form.autoDuration && !autoLocked
@@ -4582,6 +4619,40 @@ class _DurationControl extends StatelessWidget {
                   ],
                 ),
               )
+            else if (range.minimumSeconds == range.maximumSeconds)
+              Padding(
+                key: const ValueKey('fixed-duration'),
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Fixed at $rangeText.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                ),
+              )
+            else if (range.allowedSeconds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: DropdownButtonFormField<int>(
+                  key: ValueKey(
+                    'duration-options-${model.id}-${form.durationSeconds}',
+                  ),
+                  initialValue: form.durationSeconds,
+                  decoration: const InputDecoration(isDense: true),
+                  items: range.allowedSeconds
+                      .map(
+                        (seconds) => DropdownMenuItem(
+                          value: seconds,
+                          child: Text('$seconds seconds'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) controller.setDurationSeconds(value);
+                  },
+                ),
+              )
             else ...<Widget>[
               HardwareSlider(
                 key: const ValueKey('duration-slider'),
@@ -4616,7 +4687,7 @@ class _DurationControl extends StatelessWidget {
                 ],
               ),
             ],
-            if (form.requiresFixedDuration)
+            if (controller.requiresFixedDuration)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
@@ -5442,7 +5513,7 @@ class _ComposerFooter extends StatelessWidget {
     final plaque = RepaintBoundary(
       child: _ProviderPlaque(controller: controller),
     );
-    return LayoutBuilder(
+    final controls = LayoutBuilder(
       builder: (context, constraints) {
         // The plaque and the button together need real room; narrower
         // composers stack them, the plaque keeping its place just above
@@ -5472,6 +5543,39 @@ class _ComposerFooter extends StatelessWidget {
           ],
         );
       },
+    );
+    final notice = controller.selectedModel.generationNotice;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (notice != null)
+          Semantics(
+            container: true,
+            liveRegion: true,
+            child: Padding(
+              key: const ValueKey('generation-notice'),
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: context.colors.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      notice,
+                      style: const TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        controls,
+      ],
     );
   }
 

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "grok-imagine-t2v",
+  "canonical_model_id": "grok-imagine",
+  "label": "Grok Imagine · Text",
+  "description": "APIPod Grok Imagine · Text.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "2:3",
+    "3:2",
+    "1:1",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "duration_options": [
+    6,
+    10,
+    15
+  ],
+  "max_prompt_characters": 4000
+}

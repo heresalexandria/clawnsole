@@ -1603,7 +1603,14 @@ class AppController extends ChangeNotifier {
   VideoModelDefinition get referenceModel => selectedModel;
   int get keyframeLimit => selectedModel.maxKeyframesFor(
     form.mode == VideoMode.t2v ? VideoMode.i2v : form.mode,
+    durationSeconds: form.autoDuration ? null : form.durationSeconds,
   );
+  bool get requiresTimedKeyframes =>
+      !selectedModel.supportsOrderedMiddleFrames && form.requiresTimedKeyframes;
+  bool get usesTimedKeyframes =>
+      !selectedModel.supportsOrderedMiddleFrames && form.usesTimedKeyframes;
+  bool get requiresFixedDuration =>
+      !selectedModel.supportsOrderedMiddleFrames && form.requiresFixedDuration;
   bool get hasApiKey => hasApiKeyFor(selectedProviderId);
   bool hasApiKeyFor(String provider) =>
       snapshot?.hasApiKeyFor(provider) ?? false;
@@ -2383,14 +2390,14 @@ class AppController extends ChangeNotifier {
       safetyTolerance: form.safetyTolerance,
       draft: upscaling ? false : form.draft,
       frameRate: form.frameRate,
-      exactTiming: form.usesTimedKeyframes || timedSourceGuidance,
+      exactTiming: usesTimedKeyframes || timedSourceGuidance,
       keyframes: retainsGuidance && orderedFrames.isNotEmpty
           ? orderedFrames
                 .map(
                   (frame) => KeyframeLabel(
                     label: frame.label,
                     role: frame.role,
-                    seconds: form.usesTimedKeyframes || timedSourceGuidance
+                    seconds: usesTimedKeyframes || timedSourceGuidance
                         ? timedSourceGuidance &&
                                   frame.role == KeyframeRole.end &&
                                   form.videoMetadata != null
@@ -2454,11 +2461,14 @@ class AppController extends ChangeNotifier {
           form.videoUrl,
           form.videoAsset?.name ?? 'Starting video',
         ),
-        VideoMode.draftEnhance => _reference(
-          form.draftAsset,
-          form.draftUrl,
-          form.draftAsset?.name ?? 'FLUX 3 draft cache',
-        ),
+        VideoMode.draftEnhance =>
+          selectedModel.draftSourceIsTaskId
+              ? null
+              : _reference(
+                  form.draftAsset,
+                  form.draftUrl,
+                  form.draftAsset?.name ?? 'Draft cache',
+                ),
         VideoMode.upscale => _reference(
           form.videoAsset,
           form.videoUrl,
@@ -2572,8 +2582,7 @@ class AppController extends ChangeNotifier {
   bool get needsProviderSetup => !hasAnyApiKey && !localGenerationAvailable;
 
   /// Whether any delivered film could be picked as a draft to enhance.
-  bool get hasDraftEnhanceCandidates =>
-      generations.any((item) => item.draftCacheUrl != null);
+  bool get hasDraftEnhanceCandidates => generations.any(canEnhance);
 
   Future<void> setThemeMode(AppThemeMode value) async {
     if (value == themeMode) return;
@@ -5179,7 +5188,7 @@ class AppController extends ChangeNotifier {
       form.aspectRatio = ratios.contains('16:9') ? '16:9' : ratios.first;
     }
     if (!selectedModel.supportsAutoDuration) form.autoDuration = false;
-    if (form.requiresFixedDuration) form.autoDuration = false;
+    if (requiresFixedDuration) form.autoDuration = false;
     form.durationSeconds = _validDuration(form.durationSeconds);
     if (settingsEdited) _rememberGenerationPreferences(_draftTab);
     _invalidateProviderEstimate();
@@ -5278,10 +5287,13 @@ class AppController extends ChangeNotifier {
     );
     return selectedModel.resolutions
         .where(
-          (item) => selectedModel.supportsResolutionForReferences(
-            item.id,
-            referenceKinds,
-          ),
+          (item) =>
+              (selectedModel.resolutionsByMode[form.mode]?.contains(item.id) ??
+                  true) &&
+              selectedModel.supportsResolutionForReferences(
+                item.id,
+                referenceKinds,
+              ),
         )
         .toList();
   }
@@ -5306,7 +5318,11 @@ class AppController extends ChangeNotifier {
       }
       if (!model.modes.contains(form.mode)) return false;
       if (!model.referenceTasks.contains(form.referenceTask)) return false;
-      if (form.keyframes.length > model.maxKeyframesFor(form.mode)) {
+      if (form.keyframes.length >
+          model.maxKeyframesFor(
+            form.mode,
+            durationSeconds: form.autoDuration ? null : form.durationSeconds,
+          )) {
         return false;
       }
       for (final kind in MediaReferenceKind.values) {
@@ -5630,7 +5646,14 @@ class AppController extends ChangeNotifier {
       form.keyframes.length < keyframeLimit &&
       switch (role) {
         KeyframeRole.start => referenceModel.supportsStartFrame,
-        KeyframeRole.middle => referenceModel.supportsTimedKeyframes,
+        KeyframeRole.middle =>
+          (referenceModel.supportsTimedKeyframes ||
+                  referenceModel.supportsOrderedMiddleFrames) &&
+              (referenceModel.maxMiddleFrames == null ||
+                  form.keyframes
+                          .where((frame) => frame.role == KeyframeRole.middle)
+                          .length <
+                      referenceModel.maxMiddleFrames!),
         KeyframeRole.end => referenceModel.supportsEndFrame,
       } &&
       (role == KeyframeRole.middle ||
@@ -5657,13 +5680,20 @@ class AppController extends ChangeNotifier {
       if (!model.modes.contains(VideoMode.i2v) ||
           !model.supportsStartFrame ||
           !model.referenceTasks.contains(form.referenceTask) ||
-          form.keyframes.length + 1 > model.maxKeyframesFor(VideoMode.i2v)) {
+          form.keyframes.length + 1 >
+              model.maxKeyframesFor(
+                VideoMode.i2v,
+                durationSeconds: form.autoDuration
+                    ? null
+                    : form.durationSeconds,
+              )) {
         return false;
       }
       if (form.keyframes.any(
         (frame) => switch (frame.role) {
           KeyframeRole.start => true,
-          KeyframeRole.middle => !model.supportsTimedKeyframes,
+          KeyframeRole.middle =>
+            !model.supportsTimedKeyframes && !model.supportsOrderedMiddleFrames,
           KeyframeRole.end => !model.supportsEndFrame,
         },
       )) {
@@ -5736,7 +5766,7 @@ class AppController extends ChangeNotifier {
       ];
     selectedModelId = targetModel.id;
     _normalizeFormForModel();
-    if (form.requiresFixedDuration) form.autoDuration = false;
+    if (requiresFixedDuration) form.autoDuration = false;
     _invalidateProviderEstimate();
     notifyListeners();
     if (selectedModelId != previousModelId) await _persistSelection();
@@ -5941,7 +5971,7 @@ class AppController extends ChangeNotifier {
     ];
     _selectCompatibleModel();
     _normalizeFormForModel();
-    if (form.requiresFixedDuration) form.autoDuration = false;
+    if (requiresFixedDuration) form.autoDuration = false;
     if (selectedModel.supportsFrameRate) {
       form.frameRate = form.frameRate.clamp(1, 6);
     }
@@ -6529,7 +6559,7 @@ class AppController extends ChangeNotifier {
 
   void setAutoDuration(bool value) {
     final model = selectedModel;
-    if (value && (!model.supportsAutoDuration || form.requiresFixedDuration)) {
+    if (value && (!model.supportsAutoDuration || requiresFixedDuration)) {
       return;
     }
     if (!value && form.referenceTask == MediaReferenceTask.edit) return;
@@ -6556,7 +6586,7 @@ class AppController extends ChangeNotifier {
 
   List<KeyframeDraft> _orderedFrames() {
     final frames = List<KeyframeDraft>.from(form.keyframes);
-    if (form.usesTimedKeyframes) {
+    if (usesTimedKeyframes) {
       frames.sort((a, b) => a.seconds.compareTo(b.seconds));
       return frames;
     }
@@ -6598,6 +6628,10 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo({
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
+    if (selectedModel.requiresPublicMediaUrls) {
+      showNotice(publicMediaUrlHint);
+      return;
+    }
     final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.video, source: source);
@@ -6624,6 +6658,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pickDraft() async {
+    if (selectedModel.draftSourceIsTaskId) {
+      showNotice('Enter the task ID of a completed draft.');
+      return;
+    }
     final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.any);
@@ -6644,7 +6682,9 @@ class AppController extends ChangeNotifier {
     if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
     }
-    if (model.requiresPublicMediaUrls) {
+    final taskDraft =
+        form.mode == VideoMode.draftEnhance && model.draftSourceIsTaskId;
+    if (model.requiresPublicMediaUrls && !taskDraft) {
       final sources = <String>[
         ...form.keyframes.map((frame) => frame.requestSource),
         ...form.references.map((reference) => reference.requestSource),
@@ -6667,6 +6707,18 @@ class AppController extends ChangeNotifier {
     }
     if (!model.modes.contains(form.mode)) {
       return '${model.label} does not support ${form.mode.label.toLowerCase()}. Choose a compatible model or remove the attached source.';
+    }
+    if (taskDraft) {
+      if (form.draftAsset != null ||
+          !RegExp(
+            r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$',
+          ).hasMatch(form.draftUrl.trim())) {
+        return 'Enter the task ID of a completed draft, not a file or URL.';
+      }
+      if (!availableResolutions.any((item) => item.id == form.resolution)) {
+        return 'Choose a supported final-render resolution.';
+      }
+      return null;
     }
     final prompt = generationPrompt;
     if (form.mode != VideoMode.draftEnhance &&
@@ -6699,7 +6751,10 @@ class AppController extends ChangeNotifier {
         return '${model.label} takes pinned frames or creative references, '
             'not both. Remove one side before generating.';
       }
-      final maximumKeyframes = model.maxKeyframesFor(VideoMode.i2v);
+      final maximumKeyframes = model.maxKeyframesFor(
+        VideoMode.i2v,
+        durationSeconds: form.autoDuration ? null : form.durationSeconds,
+      );
       if (form.keyframes.length > maximumKeyframes) {
         return maximumKeyframes == 0
             ? '${model.label} uses media references instead of keyframes.'
@@ -6711,11 +6766,19 @@ class AppController extends ChangeNotifier {
       if (form.keyframes.any(
         (frame) => switch (frame.role) {
           KeyframeRole.start => !model.supportsStartFrame,
-          KeyframeRole.middle => !model.supportsTimedKeyframes,
+          KeyframeRole.middle =>
+            !model.supportsTimedKeyframes && !model.supportsOrderedMiddleFrames,
           KeyframeRole.end => !model.supportsEndFrame,
         },
       )) {
         return '${model.label} does not support this keyframe layout.';
+      }
+      if (model.maxMiddleFrames != null &&
+          form.keyframes
+                  .where((frame) => frame.role == KeyframeRole.middle)
+                  .length >
+              model.maxMiddleFrames!) {
+        return '${model.label} accepts up to ${model.maxMiddleFrames} middle frames.';
       }
       for (final kind in MediaReferenceKind.values) {
         final count = form.referenceCount(kind);
@@ -6759,10 +6822,10 @@ class AppController extends ChangeNotifier {
           )) {
         return 'On-device reference images must be uploaded from this device.';
       }
-      if (form.requiresFixedDuration && form.autoDuration) {
+      if (requiresFixedDuration && form.autoDuration) {
         return 'Choose a fixed duration for this keyframe layout.';
       }
-      if (form.usesTimedKeyframes) {
+      if (usesTimedKeyframes) {
         final maximumDuration = model.maxDurationFor(
           form.resolution,
           withImageGuidance: hasImageGuidance,
@@ -6782,7 +6845,13 @@ class AppController extends ChangeNotifier {
       return 'Add the source video for ${model.label}.';
     }
     if (form.mode == VideoMode.v2v && model.supportsGuidanceWithSource) {
-      final maximumKeyframes = model.maxKeyframesFor(VideoMode.v2v);
+      if (model.requiresStartFrameWithSource && !form.hasStartFrame) {
+        return '${model.label} needs a first frame as well as the source video.';
+      }
+      final maximumKeyframes = model.maxKeyframesFor(
+        VideoMode.v2v,
+        durationSeconds: form.autoDuration ? null : form.durationSeconds,
+      );
       if (form.keyframes.length > maximumKeyframes) {
         return maximumKeyframes == 0
             ? '${model.label} does not accept guidance keyframes.'
@@ -6877,6 +6946,12 @@ class AppController extends ChangeNotifier {
     if (form.autoDuration && !model.supportsAutoDuration) {
       return '${model.label} needs a fixed duration.';
     }
+    if (!form.autoDuration &&
+        !model.durationComesFromSource(form.mode) &&
+        model.durationOptions.isNotEmpty &&
+        !selectedDurationRange.allowedSeconds.contains(form.durationSeconds)) {
+      return 'Choose one of ${model.durationOptions.join(', ')} seconds for ${model.label}.';
+    }
     return null;
   }
 
@@ -6960,9 +7035,13 @@ class AppController extends ChangeNotifier {
     if (form.mode == VideoMode.draftEnhance) {
       return <String, Object?>{
         'mode': 'draft_enhance',
-        'draft_cache': form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
+        if (selectedModel.draftSourceIsTaskId)
+          'draft_task_id': form.draftUrl.trim()
+        else
+          'draft_cache': form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
         'resolution': form.resolution,
-        'safety_tolerance': form.safetyTolerance,
+        if (!selectedModel.draftSourceIsTaskId)
+          'safety_tolerance': form.safetyTolerance,
       };
     }
     final common = <String, Object?>{
@@ -6982,7 +7061,7 @@ class AppController extends ChangeNotifier {
     final providerNeedsTimedSourceGuidance =
         form.mode == VideoMode.v2v &&
         selectedModel.sourceGuidanceRequiresTimestamps;
-    final frames = form.usesTimedKeyframes || providerNeedsTimedSourceGuidance
+    final frames = usesTimedKeyframes || providerNeedsTimedSourceGuidance
         ? orderedFrames
               .map<Object?>(
                 (frame) => <Object?>[
@@ -7019,6 +7098,10 @@ class AppController extends ChangeNotifier {
         if (selectedModel.referenceTasks.length > 1)
           'reference_task': form.referenceTask.name,
         if (frames.isNotEmpty) 'keyframes': frames,
+        if (frames.isNotEmpty && selectedModel.supportsOrderedMiddleFrames)
+          '_clawnsole_keyframe_roles': orderedFrames
+              .map((frame) => frame.role.name)
+              .toList(),
         if (references[MediaReferenceKind.image]!.isNotEmpty)
           'reference_images': references[MediaReferenceKind.image]!,
         if (references[MediaReferenceKind.video]!.isNotEmpty)
@@ -7032,6 +7115,9 @@ class AppController extends ChangeNotifier {
         ...common,
         'mode': 'v2v',
         'start_video': form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        if (selectedModel.supportsGuidanceWithSource &&
+            form.references.isNotEmpty)
+          referencePromptNamesInputKey: promptNames,
         if (selectedModel.supportsGuidanceWithSource && frames.isNotEmpty)
           'keyframes': frames,
         if (selectedModel.supportsGuidanceWithSource &&
@@ -7569,7 +7655,7 @@ class AppController extends ChangeNotifier {
           .map(
             (frame) => <String, Object?>{
               'role': frame.role.name,
-              if (form.usesTimedKeyframes) 'seconds': frame.seconds,
+              if (usesTimedKeyframes) 'seconds': frame.seconds,
             },
           )
           .toList(),
@@ -7615,7 +7701,7 @@ class AppController extends ChangeNotifier {
         .map(
           (frame) => <String, Object?>{
             'role': frame.role.name,
-            if (form.usesTimedKeyframes) 'seconds': frame.seconds,
+            if (usesTimedKeyframes) 'seconds': frame.seconds,
           },
         )
         .toList(),
@@ -8506,10 +8592,12 @@ class AppController extends ChangeNotifier {
         ..draftAsset = item.mode == VideoMode.draftEnhance
             ? retainedSource
             : null
-        ..draftUrl =
-            item.mode == VideoMode.draftEnhance &&
-                durableSource?.kind == 'remote'
-            ? durableSource!.value
+        ..draftUrl = item.mode == VideoMode.draftEnhance
+            ? selectedModel.draftSourceIsTaskId
+                  ? item.config.sourceLabel ?? ''
+                  : durableSource?.kind == 'remote'
+                  ? durableSource!.value
+                  : ''
             : '';
       _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
         item,
@@ -8833,8 +8921,19 @@ class AppController extends ChangeNotifier {
     );
   }
 
+  bool canEnhance(Generation item) {
+    if (item.draftCacheUrl != null) return true;
+    final model = providerByIdOrNull(
+      item.provider,
+    )?.models.where((model) => model.id == item.model).firstOrNull;
+    return model?.draftSourceIsTaskId == true &&
+        item.isReady &&
+        item.mode != VideoMode.draftEnhance &&
+        item.requestId?.isNotEmpty == true;
+  }
+
   void enhance(Generation item) {
-    if (item.draftCacheUrl == null) return;
+    if (!canEnhance(item)) return;
     // Draft enhance hides the prompt entirely, so an enhance-born tab is
     // "blank" by prompt alone: the attached cache is what makes it occupied.
     final current = activeComposerTab;
@@ -8844,7 +8943,10 @@ class AppController extends ChangeNotifier {
         current.form.draftUrl.trim().isEmpty;
     final tab = free ? current : addComposerTab(applyCreateDefaults: false);
     _inComposerTab(tab, () {
+      selectedProviderId = item.provider;
+      selectedModelId = item.model;
       form
+        ..aspectRatio = item.config.aspectRatio
         ..autoDuration = item.config.duration == 'auto'
         ..durationSeconds = item.config.duration is num
             ? (item.config.duration as num).toInt()
@@ -8853,12 +8955,15 @@ class AppController extends ChangeNotifier {
         ..generateAudio = item.config.generateAudio
         ..draft = false
         ..draftAsset = null
-        ..draftUrl = item.draftCacheUrl!;
+        ..draftUrl = selectedModel.draftSourceIsTaskId
+            ? item.requestId!
+            : item.draftCacheUrl!;
       _generateAudioExplicitlyDisabled = _generationExplicitlyDisabledAudio(
         item,
       );
       tab.sourceGenerationId = item.localId;
       _adoptGenerationFolder(tab, item);
+      _normalizeFormForModel();
       _invalidateProviderEstimate();
       formRevision += 1;
     });

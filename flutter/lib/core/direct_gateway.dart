@@ -1081,6 +1081,9 @@ class DirectGateway
     LibraryStorage storage,
   ) async {
     final mode = input['mode'];
+    if (mode == 'draft_enhance' && input.containsKey('draft_task_id')) {
+      return config;
+    }
     if (mode == 'i2v') {
       final rawFrames = input['keyframes'] as List<Object?>? ?? const [];
       final frames = <KeyframeLabel>[];

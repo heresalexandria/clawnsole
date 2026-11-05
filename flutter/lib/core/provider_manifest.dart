@@ -56,6 +56,21 @@ class ProviderCatalogBundle {
         'The model catalog cache uses an unsupported schema.',
       );
     }
+    final catalogVersion = _catalogVersion(cache['catalog_version']);
+    final catalogComparison = catalogVersion == null
+        ? null
+        : compareSemanticVersions(catalogVersion, appVersion);
+    // A delayed catalog deployment or an old local cache must not remove
+    // capabilities shipped in a newer app. Current catalogs remain complete
+    // replacements, so intentional removals still take effect. Legacy schema-1
+    // catalogs without a version retain their existing compatibility behavior.
+    if (!mobileTestBuild &&
+        catalogComparison != null &&
+        catalogComparison < 0) {
+      throw ProviderCatalogManifestException(
+        'The model catalog targets app $catalogVersion, older than $appVersion.',
+      );
+    }
     final rawProviders = _list(cache['providers']);
     final providers = <VideoProviderDefinition>[];
     final providerIds = <String>{};
@@ -105,10 +120,8 @@ class ProviderCatalogBundle {
         'The model catalog has no providers compatible with this app.',
       );
     }
-    final catalogVersion = _catalogVersion(cache['catalog_version']);
     final catalogCoversApp =
-        catalogVersion != null &&
-        (compareSemanticVersions(catalogVersion, appVersion) ?? -1) >= 0;
+        catalogComparison != null && catalogComparison >= 0;
     final isMobileTest =
         mobileTestBuild &&
         (_testVersions(cache['test_versions']).contains(appVersion) ||
@@ -439,18 +452,44 @@ VideoModelDefinition _parseModel(
       'Every model needs at least one mode and resolution.',
     );
   }
+  final minDuration = _requiredInteger(manifest, 'min_duration');
+  final maxDuration = _requiredInteger(manifest, 'max_duration');
+  final durationOptions = <int>[];
+  for (final raw in _list(manifest['duration_options'])) {
+    final seconds = _integer(raw);
+    if (seconds == null ||
+        seconds <= 0 ||
+        seconds < minDuration ||
+        seconds > maxDuration ||
+        (durationOptions.isNotEmpty && seconds <= durationOptions.last)) {
+      throw const ProviderCatalogManifestException(
+        'duration_options must contain increasing, unique positive integers '
+        'within the duration range.',
+      );
+    }
+    durationOptions.add(seconds);
+  }
   return VideoModelDefinition(
     id: id,
     canonicalModelId: _optionalString(manifest, 'canonical_model_id'),
     label: _requiredString(manifest, 'label'),
     description: _requiredString(manifest, 'description'),
+    generationNotice:
+        _optionalString(manifest, 'generation_notice') ??
+        bundled?.generationNotice,
     modes: modes,
     aspectRatios: _strings(manifest, 'aspect_ratios', required: true),
     resolutions: resolutions,
-    minDuration: _requiredInteger(manifest, 'min_duration'),
-    maxDuration: _requiredInteger(manifest, 'max_duration'),
+    minDuration: minDuration,
+    maxDuration: maxDuration,
     durationStep: _requiredInteger(manifest, 'duration_step'),
+    durationOptions: List<int>.unmodifiable(durationOptions),
     maxKeyframes: _requiredInteger(manifest, 'max_keyframes'),
+    maxMiddleFrames: _positiveInteger(manifest, 'max_middle_frames'),
+    maxKeyframesPerSecond: _positiveInteger(
+      manifest,
+      'max_keyframes_per_second',
+    ),
     maxKeyframesByMode: _modeIntegerMap(manifest['max_keyframes_by_mode']),
     usdPerSecond: _requiredDouble(manifest, 'usd_per_second'),
     referenceUsdPerSecond: _optionalDouble(
@@ -463,6 +502,11 @@ VideoModelDefinition _parseModel(
       manifest,
       'requires_start_frame_when_using_frames',
       fallback: bundled?.requiresStartFrameWhenUsingFrames ?? false,
+    ),
+    requiresStartFrameWithSource: _boolean(
+      manifest,
+      'requires_start_frame_with_source',
+      fallback: bundled?.requiresStartFrameWithSource ?? false,
     ),
     requiresPublicMediaUrls: _boolean(
       manifest,
@@ -525,6 +569,7 @@ VideoModelDefinition _parseModel(
       manifest['aspect_ratios_by_resolution'],
     ),
     aspectRatiosByMode: _modeListMap(manifest['aspect_ratios_by_mode']),
+    resolutionsByMode: _modeListMap(manifest['resolutions_by_mode']),
     aspectRatiosWithFrames: manifest.containsKey('aspect_ratios_with_frames')
         ? _strings(manifest, 'aspect_ratios_with_frames')
         : null,
@@ -538,7 +583,12 @@ VideoModelDefinition _parseModel(
     supportsAutoDuration: _boolean(manifest, 'supports_auto_duration'),
     supportsAudio: _boolean(manifest, 'supports_audio', fallback: true),
     supportsDraft: _boolean(manifest, 'supports_draft'),
+    draftSourceIsTaskId: _boolean(manifest, 'draft_source_is_task_id'),
     supportsTimedKeyframes: _boolean(manifest, 'supports_timed_keyframes'),
+    supportsOrderedMiddleFrames: _boolean(
+      manifest,
+      'supports_ordered_middle_frames',
+    ),
     supportsFrameRate: _boolean(manifest, 'supports_frame_rate'),
     supportsSeed: _boolean(manifest, 'supports_seed'),
     maxPromptCharacters: _integer(manifest['max_prompt_characters']),

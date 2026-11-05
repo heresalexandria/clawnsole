@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "gemini-omni-r2v",
+  "canonical_model_id": "gemini-omni",
+  "label": "Gemini Omni · References",
+  "description": "APIPod Gemini Omni · References. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 10,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 4000,
+  "max_image_references": 5,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "max_input_image_bytes": 5242880
+}
