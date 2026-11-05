@@ -60,3 +60,14 @@ as realized USD spend. Account balances and quotes are not task charges.
 - [Idempotency and envelopes](https://docs.apipod.ai/endpoint-conventions.md)
 - [Reference route pricing](https://www.apipod.ai/models/seedance-2.5/seedance-2.5-r2v)
 - [Pricing estimates](https://www.apipod.ai/pricing.md)
+
+## Live smoke test
+
+`flutter/test/apipod_live_test.dart` is skipped unless both `APIPOD_API_KEY` and
+`RUN_APIPOD_LIVE_TESTS=true` are supplied to the test process. It creates three
+paid 4-second 480p jobs, verifies output downloads, and checks reported costs.
+Set `APIPOD_LIVE_REPORT` to a local JSON path to retain task IDs. After an
+interruption, use that same report with `APIPOD_LIVE_RESUME=true` to poll the
+existing jobs; an uncertain submission without a confirmed ID is never resent.
+Downloads use the production media client with bounded retries of the same
+URL. `APIPOD_LIVE_OUTPUT_DIR` optionally saves MP4s for inspection.
