@@ -320,6 +320,10 @@ APIPod supports all 103 active video routes audited on 2026-11-05, including
 Seedance variants and the Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, and Muse
 families. Controls follow each route’s live schema, including source-video
 editing/extensions and two-stage Seedance draft rendering. Media inputs require
-public HTTPS URLs; local uploads are unavailable. The adapter uses the
+public HTTPS URLs. Imported images, videos, audio, keyframes, and source videos
+can be hosted as temporary Google Drive copies; originals remain private. The
+native gateway and desktop companion manage sharing and durable cleanup, while
+the Create screen explains public access and offers Connect Google Drive when
+needed. Existing public URLs bypass hosting and normalization. The adapter uses the
 settings-vault key or companion `APIPOD_API_KEY` fallback.
 See [the APIPod audit](../docs/models/audit-apipod.md) for coverage and pricing.

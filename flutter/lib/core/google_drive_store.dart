@@ -56,6 +56,7 @@ class GoogleDriveStore implements DurableDataStore, StreamingAssetStore {
   );
 
   GoogleDriveConnection get connection => _connection;
+  GoogleDriveApi? get connectedApi => _connection.isConnected ? _api : null;
   StoredData? get lastData => _lastData;
 
   Future<StoredData> connect(

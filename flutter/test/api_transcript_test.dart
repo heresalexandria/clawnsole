@@ -101,6 +101,27 @@ void main() {
       },
     );
 
+    test(
+      'redacts temporary media URLs in requests, echoed responses and plain errors',
+      () async {
+        const temporary =
+            'https://drive.google.com/uc?id=private-copy&export=download';
+        final record = await _record(
+          request: http.Request('POST', Uri.parse('https://api.test/v1/submit'))
+            ..body = jsonEncode({
+              'video_urls': [temporary],
+              'prompt': 'A quiet street.',
+            }),
+          response: http.Response('Could not fetch $temporary', 400),
+          privateMediaUrls: {temporary},
+        );
+        expect(record.requestBody, contains('temporary media URL'));
+        expect(record.responseBody, contains('temporary media URL'));
+        expect(record.toTranscriptText(), isNot(contains('private-copy')));
+        expect(record.toTranscriptText(), contains('A quiet street.'));
+      },
+    );
+
     test('describes multipart parts instead of carrying their bytes', () async {
       final request =
           http.MultipartRequest('POST', Uri.parse('https://api.test/v1/upload'))
@@ -443,6 +464,7 @@ Future<ApiRequestRecord> _record({
   http.Response? response,
   Object? failure,
   ApiRequestPurpose purpose = ApiRequestPurpose.submit,
+  Set<String> privateMediaUrls = const {},
 }) async {
   final sink = _Sink();
   final client = recordingProviderClient(
@@ -462,6 +484,7 @@ Future<ApiRequestRecord> _record({
       operationId: 'film-b',
       provider: 'artcraft',
       purpose: purpose,
+      privateMediaUrls: privateMediaUrls,
     );
   } finally {
     if (sink.records.isNotEmpty) _lastRecord = sink.records.single;

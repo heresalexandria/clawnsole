@@ -8,6 +8,9 @@ class LocalDataStore implements DurableDataStore, StreamingAssetStore {
     'Browser builds use the Clawnsole local companion service.',
   );
 
+  Future<String> mediaHostingJournalPath() =>
+      throw UnsupportedError('Browser builds use the local companion.');
+
   Future<String> dataDirectoryPath() =>
       throw UnsupportedError('Browser builds use the local companion.');
 

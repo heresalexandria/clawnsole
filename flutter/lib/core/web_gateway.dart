@@ -19,6 +19,7 @@ import 'prompt_rewrite.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_shell.dart';
 import 'video_cache_gateway.dart';
+import 'temporary_media_host.dart';
 
 Uri _configuredBaseUrl(Uri? override) {
   if (override != null) return override;
@@ -47,6 +48,7 @@ class WebGateway
         GenerationPreviewGateway,
         MediaPreviewGateway,
         GoogleDriveGateway,
+        TemporaryMediaHostingGateway,
         SettingsVaultGateway,
         DataLocationGateway,
         MediaCacheGateway,
@@ -99,6 +101,24 @@ class WebGateway
     );
   }
 
+  bool _supportsTemporaryMediaHosting = false;
+  @override
+  bool get supportsTemporaryMediaHosting => _supportsTemporaryMediaHosting;
+
+  @override
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/temporary-media/status'))),
+    );
+    _supportsTemporaryMediaHosting = payload['supported'] == true;
+    return TemporaryMediaHostStatus(
+      available: payload['available'] == true,
+      activeLeases: (payload['activeLeases'] as num?)?.toInt() ?? 0,
+      pendingCleanup: (payload['pendingCleanup'] as num?)?.toInt() ?? 0,
+      lastCleanupError: payload['lastCleanupError'] as String?,
+    );
+  }
+
   @override
   SettingsVaultStatus get settingsVaultStatus => _settingsVaultStatus;
 
@@ -132,6 +152,8 @@ class WebGateway
 
   Future<LocalSnapshot> _snapshot(http.Response response) async {
     final payload = _map(await _read(response));
+    _supportsTemporaryMediaHosting =
+        payload['temporaryMediaHostingSupported'] == true;
     final rawDrive = payload['driveConnection'];
     if (rawDrive is Map<Object?, Object?>) {
       _driveConnection = GoogleDriveConnection.fromJson(

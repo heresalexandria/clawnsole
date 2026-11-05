@@ -100,7 +100,9 @@ bool isTextualContentType(String? contentType) {
 Map<String, String> redactHeaders(Map<String, String> headers) {
   final result = <String, String>{};
   for (final entry in headers.entries) {
-    result[entry.key] = _looksSecret(entry.key) ? redactedValue : entry.value;
+    result[entry.key] = _looksSecret(entry.key)
+        ? redactedValue
+        : _redactTemporaryMedia(entry.value);
   }
   return result;
 }
@@ -108,6 +110,12 @@ Map<String, String> redactHeaders(Map<String, String> headers) {
 /// The URL as it may be shown: query values that name a credential are
 /// scrubbed, because several providers still accept `?key=` style auth.
 String redactUrl(Uri url) {
+  final privateUrl = _redactTemporaryMedia(url.toString());
+  if (privateUrl != url.toString()) return privateUrl;
+  if (ApiTranscriptScope.current?.privateMediaUrls.contains(url.toString()) ??
+      false) {
+    return '«temporary media URL»';
+  }
   if (url.query.isEmpty) return url.toString();
   // Rebuilt pair by pair from the raw query so untouched values keep their
   // original encoding and the marker itself is written as-is: a re-encoded
@@ -164,7 +172,9 @@ String? mediaPlaceholderFor(String value) {
 
 Object? _scrubJson(Object? value, {bool secret = false}) {
   if (secret && value is String) return redactedValue;
-  if (value is String) return mediaPlaceholderFor(value) ?? value;
+  if (value is String) {
+    return mediaPlaceholderFor(value) ?? _redactTemporaryMedia(value);
+  }
   if (value is List) {
     return value.map((child) => _scrubJson(child, secret: secret)).toList();
   }
@@ -197,7 +207,16 @@ String scrubBodyText(String body, {String? contentType}) {
       // Not JSON after all; fall through to the plain-text path.
     }
   }
-  return mediaPlaceholderFor(trimmed) ?? body;
+  return mediaPlaceholderFor(trimmed) ?? _redactTemporaryMedia(body);
+}
+
+String _redactTemporaryMedia(String value) {
+  value = ApiTranscriptScope.current?.redactPrivateMedia?.call(value) ?? value;
+  for (final url
+      in ApiTranscriptScope.current?.privateMediaUrls ?? const <String>{}) {
+    value = value.replaceAll(url, '«temporary media URL»');
+  }
+  return value;
 }
 
 /// A body cut to [limit], with how much was dropped.
@@ -447,12 +466,16 @@ class ApiTranscriptScope {
     required this.operationId,
     required this.provider,
     required this.purpose,
+    this.privateMediaUrls = const {},
+    this.redactPrivateMedia,
   });
 
   final ApiTranscriptSink sink;
   final String operationId;
   final String provider;
   final ApiRequestPurpose purpose;
+  final Set<String> privateMediaUrls;
+  final String Function(String)? redactPrivateMedia;
 
   static const Object _zoneKey = #clawnsoleApiTranscript;
 
@@ -472,8 +495,11 @@ class ApiTranscriptScope {
     required String operationId,
     required String provider,
     required ApiRequestPurpose purpose,
+    Set<String>? privateMediaUrls,
+    String Function(String)? redactPrivateMedia,
   }) {
     if (sink == null || operationId.isEmpty) return body();
+    final parent = current?.operationId == operationId ? current : null;
     return runZoned(
       body,
       zoneValues: <Object, Object?>{
@@ -482,6 +508,9 @@ class ApiTranscriptScope {
           operationId: operationId,
           provider: provider,
           purpose: purpose,
+          privateMediaUrls:
+              privateMediaUrls ?? parent?.privateMediaUrls ?? const {},
+          redactPrivateMedia: redactPrivateMedia ?? parent?.redactPrivateMedia,
         ),
       },
     );
@@ -504,6 +533,8 @@ class ApiTranscriptScope {
           operationId: scope.operationId,
           provider: scope.provider,
           purpose: purpose,
+          privateMediaUrls: scope.privateMediaUrls,
+          redactPrivateMedia: scope.redactPrivateMedia,
         ),
       },
     );
@@ -574,7 +605,7 @@ class RecordingHttpClient extends http.BaseClient {
           requestHeaders: redactHeaders(request.headers),
           requestBody: captured.text,
           requestTruncatedBytes: captured.truncatedBytes,
-          error: error.toString(),
+          error: _redactTemporaryMedia(error.toString()),
         ),
       );
       rethrow;

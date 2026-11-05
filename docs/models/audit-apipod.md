@@ -84,9 +84,30 @@ types. Wan 3’s `enum: [-1]` supplements its explicit duration range with Auto.
 
 ## Media and workflows
 
+### Temporary Drive hosting: live release blocker
+
+The proposed Drive-hosting implementation is **not yet verified for APIPod
+generation and must not be released as working Seedance upload support**.
+On 2026-11-05, two fresh copies of the same nonprivate test video passed
+anonymous full-download/SHA256 checks and APIPod's duration-based pricing probe
+($0.5292 each). Seedance 2.5 reference generation nevertheless failed both
+tasks during upstream asset review: its TOS downloader reported HTTP 502.
+One task used Drive's `webContentLink`; the second used its verified final
+`drive.usercontent.google.com` redirect target. No usage/cost was reported.
+This establishes a downstream fetch failure, not its cause or permanence.
+
+Both tests successfully revoked public permission, verified owner-only access,
+trashed the temporary copy, and confirmed that the same anonymous URL no longer
+returned media. Google Drive hosting and cleanup work independently; a host that
+the generation backend can read, or an upstream fix, is still required before
+merging this integration. Automated gateway tests cannot replace that live check.
+
 Media inputs require publicly reachable HTTPS URLs. The documented API has no
-API-key upload endpoint; local files and base64 data are rejected before paid
-submission, and hosted inputs bypass local normalization. Keys remain in native
+API-key upload endpoint. Clawnsole stages imported/local/private media as
+temporary Google Drive copies when Drive is connected, verifies an anonymous
+byte-for-byte download before paid submission, and maps the links into the
+existing provider request. Public HTTPS inputs bypass staging and normalization;
+local inputs retain the normal compatibility fixes. Keys remain in native
 settings storage or the desktop companion, never in the Flutter web renderer.
 
 The official [Seedance web/API guide](https://www.apipod.ai/blog/alors-on-danse-ai-seedance-2-5)
@@ -96,8 +117,9 @@ with a browser session and `/auth/refresh`. On 2026-11-05 an empty multipart
 request using the working API key returned HTTP 401, “Invalid or expired token”;
 no media bytes were uploaded. No supported API-key upload endpoint was found in
 the official API index. A local Files/Photos import therefore cannot be made
-provider-readable merely by preserving its local path; Clawnsole offers a
-public-URL attachment instead of silently uploading to an unrelated host.
+provider-readable merely by preserving its local path. Clawnsole offers either
+a public-URL attachment or explicitly disclosed temporary sharing through the
+existing Drive connection. See [temporary media sharing](../google-drive-web.md#temporary-media-sharing).
 
 Seedance edits and extensions use the source-video editor. The source is sent
 first in `video_urls`; reference prompt numbering accounts for that position.

@@ -54,7 +54,32 @@ void main() {
     expect(config.dataFile, endsWith('data.json'));
     expect(config.webRoot, endsWith('build/web'));
     expect(config.mediaToolsDir, endsWith('build/media-tools'));
+    expect(config.mediaHostJournalFile, isNull);
   });
+
+  test(
+    'companion hosting journal remains independent of library relocation',
+    () {
+      final first = CompanionConfig.from([
+        '--data-file',
+        'first/data.json',
+        '--media-host-journal',
+        'app-data/media-hosting.json',
+      ], const {});
+      final moved = CompanionConfig.from([
+        '--data-file',
+        'moved/data.json',
+        '--media-host-journal',
+        'app-data/media-hosting.json',
+      ], const {});
+      expect(first.mediaHostJournalFile, moved.mediaHostJournalFile);
+      expect(
+        first.mediaHostJournalFile,
+        File('app-data/media-hosting.json').absolute.path,
+      );
+      expect(first.dataFile, isNot(moved.dataFile));
+    },
+  );
 
   test(
     'companion bootstrap accepts packaged stdin and development env',

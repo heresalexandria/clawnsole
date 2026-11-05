@@ -10,6 +10,45 @@ Electron packages it with the loopback Dart companion, and `start_web` remains
 available as a local development harness. This does not change or remove the
 existing `docs/` website, splash page, privacy policy, or terms.
 
+## Temporary media sharing
+
+Providers such as APIPod fetch media from public HTTPS URLs. When an attachment
+has no usable public URL, Clawnsole can use the connected Drive account to host
+a temporary copy of an imported image, video, audio clip, keyframe, or source
+video. Create explains the sharing before Generate and offers **Connect Google
+Drive** if needed. Existing public URLs work without Drive. Provider model and
+file-format limits still apply.
+
+Clawnsole creates a separate, private **Clawnsole temporary media** folder in
+My Drive using the existing `drive.file` permission. Each generation gets its
+own tagged copies. Only those copies receive unlisted, read-only “anyone with
+the link” access; original assets and library folder permissions are unchanged.
+The gateway verifies that the anonymous download contains the exact media bytes
+before sending a paid generation request. Drive download limits or account
+sharing restrictions can prevent hosting; the app reports the failure before
+submission.
+
+Public access stays available until the provider reports success or failure.
+Clawnsole then removes the public permission, verifies private access, and moves
+the temporary copy to Trash. A private recovery journal stores file/permission
+and provider job IDs, never media bytes or public download links. It survives
+library clearing and restart; accepted jobs removed from history are checked
+independently without restoring their history. Ambiguous submissions retain
+access while recovery is possible, with a 24-hour orphan limit enforced on the
+next connected cleanup pass. Public links are redacted from provider transcripts
+and history. Credentials remain in native code or the desktop companion.
+
+Google Drive does **not** support automatic expiry for anyone-with-the-link
+permissions. If Clawnsole is closed, offline, uninstalled, or unable to reconnect
+to the same Drive account/library, public access can remain until cleanup runs.
+The Create screen reports pending cleanup and asks for reconnection. Disconnecting
+Drive first attempts to revoke all temporary copies, including those used by
+active jobs; those jobs may fail if the provider has not fetched the media yet.
+You can also remove sharing or delete the temporary copies in Drive yourself.
+
+This behavior follows Google's [permissions reference](https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions)
+and [download guide](https://developers.google.com/workspace/drive/api/guides/manage-downloads).
+
 ## Drive files
 
 Clawnsole creates an app-marked folder using the narrow

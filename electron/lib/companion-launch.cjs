@@ -5,12 +5,14 @@ function bundledCompanionArguments({
   dataFile,
   rendererDirectory,
   resourcesPath,
+  mediaHostJournalFile,
 }) {
   return [
     '--port',
     String(port),
     '--data-file',
     dataFile,
+    ...(mediaHostJournalFile ? ['--media-host-journal', mediaHostJournalFile] : []),
     '--web-root',
     rendererDirectory,
     '--media-tools-dir',

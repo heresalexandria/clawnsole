@@ -259,5 +259,8 @@ APIPod has its own provider entry and API key for its active video catalog:
 Seedance variants, Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, Muse, and motion
 control. Add the key in Providers on any platform. The desktop companion also
 supports `APIPOD_API_KEY` as a development fallback. Image, video, and audio
-inputs require publicly reachable URLs via Paste URL. See the
+inputs can use public HTTPS URLs or temporary Google Drive copies of local and
+private library assets. Connect Drive in Sync before generating with an imported
+asset. Originals stay private; temporary public access is removed after processing
+and retried on reopening/reconnecting if interrupted. See the
 [APIPod contract and pricing audit](docs/models/audit-apipod.md).

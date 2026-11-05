@@ -385,6 +385,93 @@ void main() {
   );
 
   test(
+    'public URL preservation normalizes only local sources and preserves index metadata',
+    () async {
+      const hosted = 'https://cdn.example.com/media.mp4';
+      const retained = AssetReference(
+        kind: 'local',
+        value: 'original',
+        label: 'Original',
+      );
+      final normalizer = _LocalOnlyNormalizer();
+      final prepared = await prepareGenerationReferences(
+        input: {
+          'keyframes': [
+            [0, hosted],
+            [4, 'data:image/heic;base64,AA=='],
+          ],
+          'reference_images': [hosted, 'data:image/heic;base64,AA=='],
+          'reference_videos': [hosted, 'data:video/mp4;base64,AA=='],
+        },
+        config: const GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 5,
+          resolution: 'hd',
+          generateAudio: true,
+          safetyTolerance: 2,
+          draft: false,
+          keyframes: [
+            KeyframeLabel(
+              label: 'Hosted',
+              role: KeyframeRole.start,
+              source: retained,
+            ),
+            KeyframeLabel(
+              label: 'Local',
+              role: KeyframeRole.end,
+              source: retained,
+            ),
+          ],
+          references: [
+            MediaReferenceLabel(
+              label: 'Hosted',
+              kind: MediaReferenceKind.image,
+              source: retained,
+            ),
+            MediaReferenceLabel(
+              label: 'Local',
+              kind: MediaReferenceKind.image,
+              source: retained,
+            ),
+            MediaReferenceLabel(
+              label: 'Hosted',
+              kind: MediaReferenceKind.video,
+              source: retained,
+            ),
+            MediaReferenceLabel(
+              label: 'Local',
+              kind: MediaReferenceKind.video,
+              source: retained,
+            ),
+          ],
+        ),
+        videoNormalizer: normalizer,
+        imageNormalizer: normalizer,
+        videoProfile: ReferenceVideoCompatibilityProfile.seedance,
+        preservePublicUrls: true,
+      );
+      expect(normalizer.seen, hasLength(3));
+      expect(normalizer.seen, everyElement(startsWith('data:')));
+      expect(prepared.input['keyframes'], [
+        [0, hosted],
+        [4, 'normalized'],
+      ]);
+      expect(prepared.input['reference_images'], [hosted, 'normalized']);
+      expect(prepared.input['reference_videos'], [hosted, 'normalized']);
+      expect(prepared.config.keyframes!.map((item) => item.source), [
+        retained,
+        null,
+      ]);
+      expect(prepared.config.references!.map((item) => item.source), [
+        retained,
+        null,
+        retained,
+        null,
+      ]);
+    },
+  );
+
+  test(
     'canonical references are returned byte-for-byte without ffmpeg',
     () async {
       final cache = await Directory.systemTemp.createTemp(
@@ -1583,3 +1670,39 @@ String _packetCsv({
   final flags = keyframes.contains(index) ? 'K_' : '__';
   return '0,$timestamp,$timestamp,$flags';
 }).join('\n');
+
+class _LocalOnlyNormalizer
+    implements
+        ReferenceVideoNormalizationService,
+        ReferenceImageNormalizationService {
+  final seen = <String>[];
+  void record(List<String> sources) {
+    expect(sources, everyElement(startsWith('data:')));
+    seen.addAll(sources);
+  }
+
+  @override
+  Future<PreparedReferenceImages> normalizeImages(
+    List<String> sources, {
+    ReferenceImageCompatibilityProfile profile =
+        const ReferenceImageCompatibilityProfile(),
+  }) async {
+    record(sources);
+    return PreparedReferenceImages(
+      sources: List.filled(sources.length, 'normalized'),
+      changedIndexes: {for (var i = 0; i < sources.length; i++) i},
+    );
+  }
+
+  @override
+  Future<PreparedReferenceVideos> normalize(
+    List<String> sources, {
+    required ReferenceVideoCompatibilityProfile profile,
+  }) async {
+    record(sources);
+    return PreparedReferenceVideos(
+      sources: List.filled(sources.length, 'normalized'),
+      changedIndexes: {for (var i = 0; i < sources.length; i++) i},
+    );
+  }
+}

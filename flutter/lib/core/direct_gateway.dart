@@ -28,6 +28,7 @@ import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
 import 'screenplay.dart';
 import 'stream_discard.dart';
+import 'temporary_media_host.dart';
 
 enum ApiKeySource { saved, configured }
 
@@ -42,6 +43,7 @@ class DirectGateway
     implements
         AppGateway,
         GenerationDeliveryGateway,
+        TemporaryMediaHostingGateway,
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
@@ -63,11 +65,13 @@ class DirectGateway
     ProviderApiRouter? providerRouter,
     PromptRewriteRouter? rewriteRouter,
     BackgroundResultDelivery? backgroundDelivery,
+    TemporaryMediaHost? temporaryMediaHost,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
     this.persistenceDescription = 'Durable Clawnsole data store',
     this.availableProviders = remoteProviderIds,
   }) : _store = store,
+       _temporaryMediaHost = temporaryMediaHost,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _rewrite = rewriteRouter ?? PromptRewriteRouter(client: client),
        _client = recordingProviderClient(client ?? PublicMediaClient()),
@@ -79,6 +83,98 @@ class DirectGateway
            : null;
 
   final DurableDataStore _store;
+  final TemporaryMediaHost? _temporaryMediaHost;
+  TemporaryMediaHost? get temporaryMediaHost => _temporaryMediaHost;
+  Future<void>? _hostingMaintenance;
+  DateTime? _lastHostingMaintenance;
+
+  @override
+  bool get supportsTemporaryMediaHosting => temporaryMediaHost != null;
+
+  @override
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async {
+    final host = temporaryMediaHost;
+    if (host == null) {
+      return const TemporaryMediaHostStatus(
+        available: false,
+        activeLeases: 0,
+        pendingCleanup: 0,
+      );
+    }
+    await maintainTemporaryMedia();
+    return host.status();
+  }
+
+  Future<void> maintainTemporaryMedia({bool force = false}) async {
+    final host = temporaryMediaHost;
+    if (host == null) return;
+    if (_hostingMaintenance != null) return _hostingMaintenance;
+    final now = DateTime.now();
+    if (!force &&
+        _lastHostingMaintenance != null &&
+        now.difference(_lastHostingMaintenance!) <
+            const Duration(seconds: 30)) {
+      return;
+    }
+    _lastHostingMaintenance = now;
+    _hostingMaintenance = () async {
+      try {
+        final data = await _store.read();
+        await host.reconcile(
+          data.generations,
+          activeOperations: _submissionsInFlight,
+          poll: (lease) async {
+            final key = activeApiKey(lease.provider, data)?.value ?? '';
+            if (key.isEmpty || lease.pollingUrl == null) return null;
+            final payload = await _providers.poll(
+              lease.provider,
+              key,
+              lease.pollingUrl!,
+            );
+            return Generation(
+              localId: lease.operationId,
+              provider: lease.provider,
+              model: lease.model,
+              status: normalizeGenerationStatus(payload['status']),
+              prompt: '',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 5,
+                resolution: 'sd',
+                generateAudio: false,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: lease.createdAt,
+              updatedAt: now.toUtc(),
+              requestId: lease.requestId,
+              pollingUrl: lease.pollingUrl,
+            );
+          },
+        );
+      } on Object {
+        // The durable journal remains for the next connected pass. Its status
+        // is presented separately; cleanup must not break library access.
+      }
+    }();
+    try {
+      await _hostingMaintenance;
+    } finally {
+      _hostingMaintenance = null;
+    }
+  }
+
+  String _redactHostingText(String value) =>
+      temporaryMediaHost?.redactText(value) ?? value;
+
+  Future<void> _releaseTemporaryMedia(String operationId) async {
+    try {
+      await temporaryMediaHost?.release(operationId);
+    } on Object {
+      // Keep the journal for startup/reconnection recovery.
+    }
+  }
 
   /// Where recorded provider traffic goes: a sidecar file per film, beside
   /// the library and never inside it.
@@ -108,6 +204,7 @@ class DirectGateway
   /// so every snapshot served from here, and the interrupted-submission
   /// sweep in [_readFresh], treat these records as what they are: submitting.
   final Set<String> _submissionsInFlight = <String>{};
+  final Map<String, Future<Generation>> _submitting = {};
 
   ActiveApiKey? activeApiKey(String provider, StoredData data) {
     final saved = data.apiKeyFor(provider).trim();
@@ -1052,13 +1149,23 @@ class DirectGateway
     String provider,
     ApiRequestPurpose purpose,
     Future<T> Function() body,
-  ) => ApiTranscriptScope.run(
-    body,
-    sink: _transcripts,
-    operationId: operationId ?? '',
-    provider: provider,
-    purpose: purpose,
-  );
+  ) async {
+    try {
+      await temporaryMediaHost?.status();
+    } on Object {
+      // A broken recovery journal must not prevent polling an accepted task.
+    }
+    return ApiTranscriptScope.run(
+      body,
+      sink: _transcripts,
+      operationId: operationId ?? '',
+      provider: provider,
+      purpose: purpose,
+      privateMediaUrls:
+          temporaryMediaHost?.hostedUrlsFor(operationId ?? '') ?? const {},
+      redactPrivateMedia: temporaryMediaHost?.redactText,
+    );
+  }
 
   Future<double?> _balanceSafely(
     String provider,
@@ -1094,7 +1201,11 @@ class DirectGateway
     if (mode == 'draft_enhance' && input.containsKey('draft_task_id')) {
       return config;
     }
-    if (mode == 'i2v') {
+    if (mode == 'i2v' ||
+        input.containsKey('keyframes') ||
+        input.containsKey('reference_images') ||
+        input.containsKey('reference_videos') ||
+        input.containsKey('reference_audios')) {
       final rawFrames = input['keyframes'] as List<Object?>? ?? const [];
       final frames = <KeyframeLabel>[];
       for (var index = 0; index < (config.keyframes?.length ?? 0); index += 1) {
@@ -1149,7 +1260,7 @@ class DirectGateway
           ),
         );
       }
-      return config.copyWith(keyframes: frames, references: references);
+      config = config.copyWith(keyframes: frames, references: references);
     }
     if (mode == 'v2v' ||
         mode == 'draft_enhance' ||
@@ -1171,7 +1282,14 @@ class DirectGateway
   }
 
   @override
-  Future<Generation> submit(GenerationSubmission submission) async {
+  Future<Generation> submit(GenerationSubmission submission) {
+    final id = submission.record.localId;
+    return _submitting[id] ??= _submitOnce(submission).whenComplete(() {
+      _submitting.remove(id);
+    });
+  }
+
+  Future<Generation> _submitOnce(GenerationSubmission submission) async {
     final data = await _readFresh();
     final operationId = submission.record.localId;
     final existing = data.generations
@@ -1236,7 +1354,7 @@ class DirectGateway
     final model = modelById(provider, record.model);
     final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
     final referenceImageProfile = model.referenceImageCompatibilityProfile;
-    if (!model.requiresPublicMediaUrls &&
+    if ((!model.requiresPublicMediaUrls || temporaryMediaHost != null) &&
         (submission.autoFixReferenceVideos ??
             data.preferences.autoFixReferenceVideos)) {
       final ReferenceImageNormalizationService imageNormalizer =
@@ -1250,6 +1368,7 @@ class DirectGateway
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
         imageProfile: referenceImageProfile,
+        preservePublicUrls: model.requiresPublicMediaUrls,
       );
       input = prepared.input;
       record = record.copyWith(config: prepared.config);
@@ -1284,7 +1403,14 @@ class DirectGateway
     await _replaceGeneration(record);
 
     var mayHaveBeenSent = false;
+    var usesTemporaryHosting = false;
     try {
+      if (model.requiresPublicMediaUrls && temporaryMediaHost != null) {
+        input = await temporaryMediaHost!.prepare(record, input);
+        usesTemporaryHosting = temporaryMediaHost!
+            .hostedUrlsFor(record.localId)
+            .isNotEmpty;
+      }
       final creditsBefore = await _balanceSafely(
         provider,
         key,
@@ -1305,6 +1431,9 @@ class DirectGateway
           input,
           operationId: record.localId,
           beforeSend: () async {
+            if (usesTemporaryHosting) {
+              await temporaryMediaHost!.beforeSend(record.localId);
+            }
             final uncertain = record.copyWith(
               status: submissionUnknownStatus,
               error: submissionUnknownMessage,
@@ -1313,6 +1442,9 @@ class DirectGateway
             );
             // Await the durable write before the adapter starts its POST.
             record = await _replaceGeneration(uncertain);
+            if (usesTemporaryHosting) {
+              temporaryMediaHost!.assertCanSend(record.localId);
+            }
             mayHaveBeenSent = true;
           },
         ),
@@ -1346,7 +1478,9 @@ class DirectGateway
             ? null
             : creditsToUsd(receiptEstimate),
         lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(response),
+        lastProviderResponse: _redactHostingText(
+          compactProviderResponse(response),
+        ),
         lastProviderResponseAt: acceptedAt,
         updatedAt: acceptedAt,
       );
@@ -1354,6 +1488,7 @@ class DirectGateway
       // Persist it before optional balance/cost bookkeeping makes another
       // network request or the app has another opportunity to be suspended.
       record = await _persistReceipt(record);
+      if (usesTemporaryHosting) await temporaryMediaHost!.accepted(record);
       final liveAfter = await _balanceSafely(
         provider,
         key,
@@ -1390,13 +1525,14 @@ class DirectGateway
       }
       final acceptanceUnknown =
           mayHaveBeenSent && !isDefinitiveSubmissionRejection(error);
+      if (!acceptanceUnknown) await _releaseTemporaryMedia(record.localId);
       record = record.copyWith(
         status: acceptanceUnknown ? submissionUnknownStatus : 'Error',
         error: acceptanceUnknown
             ? submissionUnknownMessage
-            : generationExceptionMessage(error),
+            : _redactHostingText(generationExceptionMessage(error)),
         lastProviderStatusCode: providerHttpStatus(error),
-        lastProviderResponse: providerErrorResponse(error),
+        lastProviderResponse: _redactHostingText(providerErrorResponse(error)),
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
@@ -1701,7 +1837,7 @@ class DirectGateway
     } on TimeoutException {
       failure = 'The result download stalled. Clawnsole will retry it.';
     } on Object catch (error) {
-      failure = generationExceptionMessage(error);
+      failure = _redactHostingText(generationExceptionMessage(error));
     }
     if (asset != null) {
       final result = _pollWriteTail.then((_) async {
@@ -1779,6 +1915,10 @@ class DirectGateway
         () => _providers.poll(generation.provider, key, generation.pollingUrl!),
       );
       final reportedStatus = normalizeGenerationStatus(payload['status']);
+      if (reportedStatus == 'Ready' ||
+          isGenerationFailureStatus(reportedStatus)) {
+        await _releaseTemporaryMedia(generation.localId);
+      }
       var status = reportedStatus;
       if (isGenerationFailureStatus(status) && generation.hasDeliveredMedia) {
         // A provider expiring or forgetting a task whose film — or still-held
@@ -1802,6 +1942,9 @@ class DirectGateway
               fallback: status,
             )
           : null;
+      if (failureMessage != null) {
+        failureMessage = _redactHostingText(failureMessage);
+      }
       AssetReference? resultAsset = generation.resultAsset;
       var retentionFailures = generation.resultRetentionFailures;
       String? retentionError;
@@ -1836,7 +1979,9 @@ class DirectGateway
                 : null,
             clearDeliveryExpiresAt: deliveryAvailability == null,
             deliveryExpired: false,
-            lastProviderResponse: compactProviderResponse(payload),
+            lastProviderResponse: _redactHostingText(
+              compactProviderResponse(payload),
+            ),
             lastProviderResponseAt: checkedAt,
             updatedAt: checkedAt,
           ),
@@ -1867,7 +2012,9 @@ class DirectGateway
               'The provider result download stalled. Clawnsole will retry it.';
         } on Object catch (error) {
           retentionFailures += 1;
-          retentionError = generationExceptionMessage(error);
+          retentionError = _redactHostingText(
+            generationExceptionMessage(error),
+          );
         }
       }
       final failed = isGenerationFailureStatus(status);
@@ -1926,7 +2073,9 @@ class DirectGateway
         consecutiveCheckFailures: 0,
         clearLastCheckError: true,
         lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(payload),
+        lastProviderResponse: _redactHostingText(
+          compactProviderResponse(payload),
+        ),
         lastProviderResponseAt: checkedAt,
         updatedAt: checkedAt,
       );
@@ -1941,6 +2090,10 @@ class DirectGateway
           : (asset: null, stalled: false);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
+      if (providerStatus == 'Ready' ||
+          isGenerationFailureStatus(providerStatus)) {
+        await _releaseTemporaryMedia(generation.localId);
+      }
       if (rescue.asset != null) {
         // The status check failed, but the film itself was still available at
         // the previously captured delivery link, so the generation completes.
@@ -1954,7 +2107,9 @@ class DirectGateway
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactHostingText(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -1979,7 +2134,9 @@ class DirectGateway
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactHostingText(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -1993,17 +2150,21 @@ class DirectGateway
           status: providerStatus,
           progress: reportedProgress,
           clearProgress: reportedProgress == null,
-          error: providerNamedFailureMessage(
-            providerById(generation.provider).name,
-            payload,
-            fallback: providerStatus,
+          error: _redactHostingText(
+            providerNamedFailureMessage(
+              providerById(generation.provider).name,
+              payload,
+              fallback: providerStatus,
+            ),
           ),
           lastCheckedAt: checkedAt,
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactHostingText(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -2012,7 +2173,7 @@ class DirectGateway
           lastCheckedAt: checkedAt,
           statusCheckCount: generation.statusCheckCount + 1,
           consecutiveCheckFailures: generation.consecutiveCheckFailures + 1,
-          lastCheckError: generationExceptionMessage(error),
+          lastCheckError: _redactHostingText(generationExceptionMessage(error)),
           lastResultRetentionAttemptAt:
               (retainMedia && generation.needsResultRetention)
               ? checkedAt
@@ -2022,10 +2183,12 @@ class DirectGateway
               ? generation.resultRetentionFailures + 1
               : generation.resultRetentionFailures,
           resultRetentionError: (retainMedia && generation.needsResultRetention)
-              ? generationExceptionMessage(error)
+              ? _redactHostingText(generationExceptionMessage(error))
               : null,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactHostingText(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -2086,7 +2249,13 @@ class DirectGateway
 
   @override
   Future<LocalSnapshot> clearAll() async {
-    await _store.delete();
+    temporaryMediaHost?.suspend();
+    try {
+      await temporaryMediaHost?.releaseAll();
+      await _store.delete();
+    } finally {
+      temporaryMediaHost?.resume();
+    }
     return _snapshot(const StoredData());
   }
 

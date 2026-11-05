@@ -269,17 +269,6 @@ void main() {
     expect(find.text('Synchronized audio'), findsNothing);
     expect(find.text('Frame'), findsNothing);
   });
-
-  test(
-    'public source video routes reject local picking before file access',
-    () async {
-      final controller = _controller('draft');
-      addTearDown(controller.dispose);
-      await controller.pickVideo();
-      expect(controller.notice, contains('public HTTPS media URLs'));
-      expect(controller.form.videoAsset, isNull);
-    },
-  );
 }
 
 const _provider = VideoProviderDefinition(

@@ -233,6 +233,12 @@ class GoogleDriveFile {
     this.size = 0,
     this.modifiedTime,
     this.etag,
+    this.appProperties = const {},
+    this.parents = const [],
+    this.ownedByMe = false,
+    this.trashed = false,
+    this.driveId,
+    this.webContentLink,
   });
 
   final String id;
@@ -241,6 +247,12 @@ class GoogleDriveFile {
   final int size;
   final DateTime? modifiedTime;
   final String? etag;
+  final Map<String, String> appProperties;
+  final List<String> parents;
+  final bool ownedByMe;
+  final bool trashed;
+  final String? driveId;
+  final String? webContentLink;
 
   factory GoogleDriveFile.fromJson(Map<String, Object?> json, {String? etag}) =>
       GoogleDriveFile(
@@ -250,6 +262,43 @@ class GoogleDriveFile {
         size: int.tryParse(json['size']?.toString() ?? '') ?? 0,
         modifiedTime: DateTime.tryParse(json['modifiedTime'] as String? ?? ''),
         etag: etag,
+        appProperties: (json['appProperties'] as Map? ?? const {}).map(
+          (key, value) => MapEntry(key.toString(), value.toString()),
+        ),
+        parents: (json['parents'] as List? ?? const [])
+            .whereType<String>()
+            .toList(),
+        ownedByMe: json['ownedByMe'] == true,
+        trashed: json['trashed'] == true,
+        driveId: json['driveId'] as String?,
+        webContentLink: json['webContentLink'] as String?,
+      );
+}
+
+class GoogleDrivePermission {
+  const GoogleDrivePermission({
+    required this.id,
+    required this.type,
+    required this.role,
+    this.inherited = false,
+    this.allowFileDiscovery = false,
+  });
+
+  final String id;
+  final String type;
+  final String role;
+  final bool inherited;
+  final bool allowFileDiscovery;
+
+  factory GoogleDrivePermission.fromJson(Map<String, Object?> json) =>
+      GoogleDrivePermission(
+        id: json['id'] as String? ?? '',
+        type: json['type'] as String? ?? '',
+        role: json['role'] as String? ?? '',
+        allowFileDiscovery: json['allowFileDiscovery'] == true,
+        inherited: (json['permissionDetails'] as List? ?? const [])
+            .whereType<Map>()
+            .any((detail) => detail['inherited'] == true),
       );
 }
 
@@ -295,6 +344,123 @@ class GoogleDriveApi {
     'Authorization': 'Bearer $_accessToken',
     'Accept': 'application/json',
   };
+
+  /// App-property queries recover uploads whose HTTP response was lost.
+  Future<List<GoogleDriveFile>> findFilesByProperties(
+    Map<String, String> properties, {
+    String? parentId,
+    String? mimeType,
+    bool atMyDriveRoot = false,
+    bool includeTrashed = false,
+  }) => _list(
+    [
+      if (!includeTrashed) 'trashed = false',
+      if (atMyDriveRoot) "'root' in parents",
+      if (parentId != null) "'${_queryValue(parentId)}' in parents",
+      if (mimeType != null) "mimeType = '${_queryValue(mimeType)}'",
+      for (final property in properties.entries)
+        "appProperties has { key='${_queryValue(property.key)}' "
+            "and value='${_queryValue(property.value)}' }",
+    ].join(' and '),
+  ).timeout(const Duration(seconds: 30));
+
+  Future<GoogleDriveFile> getFileDetails(String fileId) async {
+    final response = await _client
+        .get(
+          _apiBase
+              .resolve('files/${Uri.encodeComponent(fileId)}')
+              .replace(
+                queryParameters: const {
+                  'fields':
+                      'id,name,mimeType,size,modifiedTime,appProperties,parents,'
+                      'ownedByMe,trashed,driveId,webContentLink,resourceKey',
+                },
+              ),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 30));
+    return GoogleDriveFile.fromJson(_json(await _expect(response)));
+  }
+
+  Future<List<GoogleDrivePermission>> listPermissions(String fileId) async {
+    final result = <GoogleDrivePermission>[];
+    String? pageToken;
+    do {
+      final response = await _client
+          .get(
+            _apiBase
+                .resolve('files/${Uri.encodeComponent(fileId)}/permissions')
+                .replace(
+                  queryParameters: {
+                    'pageSize': '100',
+                    'fields':
+                        'nextPageToken,permissions(id,type,role,allowFileDiscovery,'
+                        'permissionDetails(inherited))',
+                    if (pageToken != null) 'pageToken': pageToken,
+                  },
+                ),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 30));
+      final payload = _json(await _expect(response));
+      result.addAll(
+        (payload['permissions'] as List? ?? const []).whereType<Map>().map(
+          (item) =>
+              GoogleDrivePermission.fromJson(Map<String, Object?>.from(item)),
+        ),
+      );
+      pageToken = switch (payload['nextPageToken']) {
+        final String value when value.isNotEmpty => value,
+        _ => null,
+      };
+    } while (pageToken != null);
+    return result;
+  }
+
+  Future<GoogleDrivePermission> createUnlistedReader(String fileId) async {
+    final response = await _client
+        .post(
+          _apiBase
+              .resolve('files/${Uri.encodeComponent(fileId)}/permissions')
+              .replace(
+                queryParameters: const {
+                  'fields': 'id,type,role,allowFileDiscovery',
+                },
+              ),
+          headers: {..._headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'type': 'anyone',
+            'role': 'reader',
+            'allowFileDiscovery': false,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    return GoogleDrivePermission.fromJson(_json(await _expect(response)));
+  }
+
+  Future<void> deletePermission(String fileId, String permissionId) async {
+    final response = await _client
+        .delete(
+          _apiBase.resolve(
+            'files/${Uri.encodeComponent(fileId)}/permissions/${Uri.encodeComponent(permissionId)}',
+          ),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 404) await _expect(response, decodeBody: false);
+  }
+
+  /// Move a file to Trash. Hosting callers verify their staging ownership first.
+  Future<void> trashFile(String fileId) async {
+    final response = await _client
+        .patch(
+          _apiBase.resolve('files/${Uri.encodeComponent(fileId)}'),
+          headers: {..._headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({'trashed': true}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 404) await _expect(response, decodeBody: false);
+  }
 
   Future<GoogleDriveFile?> findRootFolder(String name) async {
     final files = await _list(

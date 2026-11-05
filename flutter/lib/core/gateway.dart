@@ -5,6 +5,7 @@ import 'composer_tabs.dart';
 import 'models.dart';
 import 'native_gateway.dart';
 import 'prompt_rewrite.dart';
+import 'temporary_media_host.dart';
 import 'web_gateway.dart';
 
 abstract interface class AppGateway {
@@ -43,6 +44,13 @@ abstract interface class AppGateway {
 abstract interface class GenerationDeliveryGateway {
   Future<Generation> pollStatus(Generation generation);
   Future<Generation> retainResult(Generation generation);
+}
+
+/// Temporary public copies are managed by the native gateway or companion;
+/// credentials and sharing operations never enter the web renderer.
+abstract interface class TemporaryMediaHostingGateway {
+  bool get supportsTemporaryMediaHosting;
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus();
 }
 
 /// Provider-aware operations implemented by the production gateways. Keeping

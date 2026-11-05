@@ -139,6 +139,7 @@ async function startBundledRenderer({ deviceKey, requestToken }) {
     argumentsFor: (port) => bundledCompanionArguments({
       port,
       dataFile: dataLocation.dataFile(app.getPath("userData")),
+      mediaHostJournalFile: path.join(userData, "temporary-media-leases.json"),
       rendererDirectory,
       resourcesPath: process.resourcesPath,
     }),

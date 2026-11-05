@@ -33,6 +33,7 @@ import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/screenplay.dart';
 import '../core/shell_bridge.dart';
+import '../core/temporary_media_host.dart';
 import '../core/video_cache_gateway.dart';
 import 'busy_registry.dart';
 
@@ -1636,6 +1637,47 @@ class AppController extends ChangeNotifier {
 
   bool get requiresPublicMediaUrls =>
       selectedModelRoutes.any((model) => model.requiresPublicMediaUrls);
+
+  bool get canTemporarilyHostMedia =>
+      gateway is TemporaryMediaHostingGateway &&
+      (gateway as TemporaryMediaHostingGateway).supportsTemporaryMediaHosting &&
+      googleDriveConnected;
+
+  TemporaryMediaHostStatus? temporaryMediaHostingStatus;
+  bool _refreshingTemporaryMediaHosting = false;
+
+  Future<void> refreshTemporaryMediaHostingStatus() async {
+    if (_disposed ||
+        _refreshingTemporaryMediaHosting ||
+        gateway is! TemporaryMediaHostingGateway) {
+      return;
+    }
+    _refreshingTemporaryMediaHosting = true;
+    try {
+      final value = await (gateway as TemporaryMediaHostingGateway)
+          .temporaryMediaHostStatus();
+      if (_disposed) return;
+      final previous = temporaryMediaHostingStatus;
+      temporaryMediaHostingStatus = value;
+      if (previous?.available != value.available ||
+          previous?.activeLeases != value.activeLeases ||
+          previous?.pendingCleanup != value.pendingCleanup ||
+          previous?.lastCleanupError != value.lastCleanupError) {
+        notifyListeners();
+      }
+    } on Object {
+      // Keep the last cleanup report visible until the gateway can refresh it.
+    } finally {
+      _refreshingTemporaryMediaHosting = false;
+    }
+  }
+
+  String? get temporaryMediaCleanupNotice {
+    final status = temporaryMediaHostingStatus;
+    if (status == null || status.pendingCleanup == 0) return null;
+    return 'Public access cleanup is pending for ${status.pendingCleanup} temporary media ${status.pendingCleanup == 1 ? 'copy' : 'copies'}. '
+        '${googleDriveConnected ? 'Keep Clawnsole open and online; cleanup will retry.' : 'Reconnect Google Drive to restore privacy.'}';
+  }
 
   /// Expose attachment affordances before a guided route has been selected.
   /// The actual route is resolved after each attachment changes the form.
@@ -4910,14 +4952,46 @@ class AppController extends ChangeNotifier {
             )
           : null);
 
+  final Map<String, Future<bool>> _referenceCacheChecks = {};
+  final Set<String> _cachedReferenceAssets = {};
+
+  /// The picker checks only visible Drive candidates, using the explicit
+  /// cache-only gateway. No login, network read, or media bytes are retained.
+  Future<bool> checkReferenceCandidateCache(ReferenceCandidate candidate) {
+    if (candidate.asset.kind != 'drive' ||
+        googleDriveConnected ||
+        referenceCandidatePublicUrl(candidate) != null ||
+        _mediaCacheGateway == null) {
+      return Future.value(false);
+    }
+    return _referenceCacheChecks.putIfAbsent(candidate.asset.value, () async {
+      try {
+        final bytes = await _mediaCacheGateway!.cachedAssetBytes(
+          candidate.asset,
+        );
+        final available = bytes?.isNotEmpty == true;
+        if (available) _cachedReferenceAssets.add(candidate.asset.value);
+        return available;
+      } on Object {
+        return false;
+      }
+    });
+  }
+
   String? referenceCandidateProblem(ReferenceCandidate candidate) {
     if (!referenceRequiresPublicMediaUrls(candidate.kind) ||
         referenceCandidatePublicUrl(candidate) != null) {
       return null;
     }
-    return '“${candidate.name}” has no available public HTTPS URL. '
-        '${selectedModel.selectionLabel} cannot read local or private Drive media. '
-        'Choose a hosted reference or paste its URL.';
+    if (candidate.asset.kind == 'local') return null;
+    if (candidate.asset.kind == 'drive') {
+      return googleDriveConnected ||
+              _cachedReferenceAssets.contains(candidate.asset.value)
+          ? null
+          : 'Connect Google Drive to load “${candidate.name}”, or choose a local file or public HTTPS URL.';
+    }
+    return '“${candidate.name}” has no available public HTTPS URL or retained file. '
+        'Choose a local file or paste a fresh public HTTPS URL.';
   }
 
   bool referenceRequiresPublicMediaUrls(MediaReferenceKind kind) =>
@@ -4974,6 +5048,19 @@ class AppController extends ChangeNotifier {
     Iterable<ReferenceCandidate> candidates,
   ) async {
     final tab = _draftTab;
+    final selectedCandidates = candidates
+        .where((item) => item.kind == kind)
+        .toList();
+    for (final candidate in selectedCandidates) {
+      if (candidate.asset.kind == 'drive' &&
+          !googleDriveConnected &&
+          _mediaCacheGateway != null &&
+          _inComposerTab(tab, () => referenceRequiresPublicMediaUrls(kind)) &&
+          referenceCandidatePublicUrl(candidate) == null) {
+        await checkReferenceCandidateCache(candidate);
+      }
+    }
+    if (_disposed) return;
     // Saved and generated candidates carry their measured duration, so the
     // seconds budget is decided here — before any media is read or hydrated.
     // Validate and append in order so only actual additions spend capacity.
@@ -4986,14 +5073,13 @@ class AppController extends ChangeNotifier {
     // when the media has to come down from Google Drive first.
     final hydrating = <(String, ReferenceCandidate)>[];
     _inComposerTab(tab, () {
-      for (final candidate in candidates.where((item) => item.kind == kind)) {
+      for (final candidate in selectedCandidates) {
         final sourceProblem = referenceCandidateProblem(candidate);
         if (sourceProblem != null) {
           refusals.add(sourceProblem);
           continue;
         }
         final publicSource = referenceCandidatePublicUrl(candidate);
-        final needsHostedSource = referenceRequiresPublicMediaUrls(kind);
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
@@ -5040,11 +5126,14 @@ class AppController extends ChangeNotifier {
             ),
             savedReferenceId: candidate.generated ? null : candidate.id,
             durationSeconds: candidate.durationSeconds,
-            publicSourceExpiresAt: candidate.publicSourceExpiresAt,
+            publicSourceExpiresAt: publicSource == null
+                ? null
+                : candidate.publicSourceExpiresAt,
           ),
         ];
         added = true;
-        if (candidate.asset.isLocal && !needsHostedSource) {
+        if (candidate.asset.isLocal &&
+            (!referenceRequiresPublicMediaUrls(kind) || publicSource == null)) {
           hydrating.add((draftId, candidate));
           _hydratingReferenceDraftIds.add(draftId);
         }
@@ -5083,7 +5172,15 @@ class AppController extends ChangeNotifier {
                 // The media itself can still make a fresh preview frame.
               }
             }
-            final bytes = await gateway.readAsset(candidate.asset);
+            final bytes =
+                candidate.asset.kind == 'drive' && !googleDriveConnected
+                ? await _mediaCacheGateway?.cachedAssetBytes(candidate.asset)
+                : await gateway.readAsset(candidate.asset);
+            if (bytes == null || bytes.isEmpty) {
+              throw StateError(
+                'Connect Google Drive to load this media; it is not cached on this device.',
+              );
+            }
             _inComposerTab(
               tab,
               () => _hydrateReferenceDraft(
@@ -6191,10 +6288,6 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     // The pick belongs to the tab it was started from, however long the
     // picker sits open and whatever the director does meanwhile.
     final tab = activeComposerTab;
@@ -6269,10 +6362,6 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     final tab = activeComposerTab;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
     _inComposerTab(tab, () => _pendingPickerReferenceAdds += 1);
@@ -6306,10 +6395,6 @@ class AppController extends ChangeNotifier {
   }) async {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
-    if (_inComposerTab(target, () => requiresPublicMediaUrls)) {
-      showNotice(_inComposerTab(target, () => publicMediaUrlHint));
-      return;
-    }
     final attached = _inComposerTab(target, () {
       // A local pick carries no duration yet — the metadata loader reads it
       // once the tile mounts — so only the count budgets can be judged here.
@@ -6834,10 +6919,6 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo({
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.video, source: source);
@@ -6895,19 +6976,8 @@ class AppController extends ChangeNotifier {
     }
     final taskDraft =
         form.mode == VideoMode.draftEnhance && model.draftSourceIsTaskId;
-    if (model.requiresPublicMediaUrls && !taskDraft) {
-      final sources = <String>[
-        ...form.keyframes.map((frame) => frame.requestSource),
-        ...form.references.map((reference) => reference.requestSource),
-        if (form.videoAsset != null || form.videoUrl.trim().isNotEmpty)
-          form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
-        if (form.draftAsset != null || form.draftUrl.trim().isNotEmpty)
-          form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
-      ];
-      if (sources.any((source) => !_isPublicMediaUrl(source))) {
-        return publicMediaUrlHint;
-      }
-    }
+    final hostingProblem = temporaryMediaHostingProblem;
+    if (hostingProblem != null) return hostingProblem;
     if (form.mode == VideoMode.t2v && !model.modes.contains(VideoMode.t2v)) {
       if (model.supportsMediaReferences) {
         return 'Add at least one image, video, or audio reference for ${model.label}.';
@@ -6971,7 +7041,10 @@ class AppController extends ChangeNotifier {
             ? '${model.label} uses media references instead of keyframes.'
             : '${model.label} accepts up to $maximumKeyframes keyframes.';
       }
-      if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
+      if (form.keyframes.any(
+        (frame) =>
+            frame.requestSource.isEmpty && frame.retained?.isLocal != true,
+      )) {
         return 'Every keyframe needs an image or URL.';
       }
       if (form.keyframes.any(
@@ -7068,7 +7141,10 @@ class AppController extends ChangeNotifier {
             ? '${model.label} does not accept guidance keyframes.'
             : '${model.label} accepts up to $maximumKeyframes keyframes.';
       }
-      if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
+      if (form.keyframes.any(
+        (frame) =>
+            frame.requestSource.isEmpty && frame.retained?.isLocal != true,
+      )) {
         return 'Every keyframe needs an image or URL.';
       }
       for (final kind in MediaReferenceKind.values) {
@@ -7166,9 +7242,78 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
-  String get publicMediaUrlHint =>
-      '${selectedModel.selectionLabel} requires public HTTPS media URLs. '
-      'Paste a hosted URL; local uploads and private library files are not supported.';
+  String get publicMediaUrlHint => canTemporarilyHostMedia
+      ? 'Uploads and private library media can use temporary Google Drive links. Public HTTPS URLs also work.'
+      : 'Connect Google Drive to use uploads or private library media with ${selectedModel.selectionLabel}, or paste a public HTTPS URL.';
+
+  static const temporaryMediaSharingDisclosure =
+      'Clawnsole uploads temporary copies to Google Drive that anyone with the link can read while the provider processes this generation. Private originals stay private. Clawnsole removes public access when processing finishes; if the app closes or loses its connection, cleanup resumes when you reopen it and reconnect Drive.';
+
+  bool get _usesPublicMediaInputs =>
+      requiresPublicMediaUrls &&
+      !(form.mode == VideoMode.draftEnhance &&
+          selectedModel.draftSourceIsTaskId);
+
+  /// Local/private media can attach before Drive is connected. Only sending
+  /// them requires the privileged gateway's temporary hosting capability.
+  bool get needsTemporaryMediaHosting =>
+      _usesPublicMediaInputs &&
+      _composerMediaSources.any(
+        (value) =>
+            value.retained?.isLocal == true &&
+                !_isPublicMediaUrl(value.source) ||
+            value.source.startsWith('data:'),
+      );
+
+  bool get needsGoogleDriveForMedia =>
+      needsTemporaryMediaHosting && !canTemporarilyHostMedia;
+
+  Iterable<({String source, AssetReference? retained})>
+  get _composerMediaSources sync* {
+    for (final frame in form.keyframes) {
+      yield (source: frame.requestSource, retained: frame.retained);
+    }
+    for (final reference in form.references) {
+      final expired =
+          reference.publicSourceExpiresAt != null &&
+          !reference.publicSourceExpiresAt!.isAfter(DateTime.now().toUtc());
+      yield (
+        source: expired && reference.asset == null
+            ? ''
+            : reference.requestSource,
+        retained: reference.retained,
+      );
+    }
+    if (form.videoAsset != null || form.videoUrl.trim().isNotEmpty) {
+      yield (
+        source: form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        retained: form.videoAsset?.retained,
+      );
+    }
+    if (form.draftAsset != null || form.draftUrl.trim().isNotEmpty) {
+      yield (
+        source: form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
+        retained: form.draftAsset?.retained,
+      );
+    }
+  }
+
+  String? get temporaryMediaHostingProblem {
+    if (!_usesPublicMediaInputs) return null;
+    if (needsGoogleDriveForMedia) return publicMediaUrlHint;
+    for (final value in _composerMediaSources) {
+      if (_isPublicMediaUrl(value.source)) continue;
+      if (canTemporarilyHostMedia &&
+          (value.source.startsWith('data:') ||
+              value.retained?.isLocal == true)) {
+        continue;
+      }
+      if (value.source.isNotEmpty) {
+        return 'Use an uploaded file or a public HTTPS media URL for ${selectedModel.selectionLabel}.';
+      }
+    }
+    return null;
+  }
 
   bool _isPublicMediaUrl(String source) {
     try {
@@ -7182,13 +7327,17 @@ class AppController extends ChangeNotifier {
   String? _referenceSourceProblem() {
     for (final reference in form.references) {
       if (requiresPublicMediaUrls &&
+          reference.asset == null &&
+          !(canTemporarilyHostMedia && reference.retained?.isLocal == true) &&
           reference.publicSourceExpiresAt != null &&
           !reference.publicSourceExpiresAt!.isAfter(DateTime.now().toUtc())) {
         return 'The hosted URL for “${reference.label}” has expired. '
             'Choose a fresh hosted reference or paste a new URL.';
       }
     }
-    if (!form.references.any((item) => item.requestSource.isEmpty)) {
+    if (!form.references.any(
+      (item) => item.requestSource.isEmpty && item.retained?.isLocal != true,
+    )) {
       return null;
     }
     return form.references.any(
@@ -7464,6 +7613,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pollWorking({bool ignoreSchedule = false}) async {
+    unawaited(refreshTemporaryMediaHostingStatus());
     if (gateway is GenerationDeliveryGateway) {
       return _pollDeliveryStages(ignoreSchedule: ignoreSchedule);
     }
@@ -8113,6 +8263,7 @@ class AppController extends ChangeNotifier {
         restorePreferences: _preferenceRevision == preferenceRevision,
       );
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       await syncComposerWorkspace();
       showNotice('Google Drive connected and synced.');
     } on Object catch (error) {
@@ -8135,6 +8286,7 @@ class AppController extends ChangeNotifier {
         restorePreferences: _preferenceRevision == preferenceRevision,
       );
       showNotice('Drive disconnected on this device. Cloud files were kept.');
+      unawaited(refreshTemporaryMediaHostingStatus());
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
@@ -8176,6 +8328,7 @@ class AppController extends ChangeNotifier {
       }
       if (_disposed) return false;
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       return await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
@@ -8203,6 +8356,7 @@ class AppController extends ChangeNotifier {
     try {
       final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
@@ -8510,7 +8664,9 @@ class AppController extends ChangeNotifier {
     bool cacheOnly = false,
   }) async {
     Future<Uint8List?> read(AssetReference value) {
-      if (!cacheOnly || value.kind != 'drive') {
+      final offlineDrive =
+          gateway is GoogleDriveGateway && !googleDriveConnected;
+      if (value.kind != 'drive' || (!cacheOnly && !offlineDrive)) {
         return gateway.readAsset(value);
       }
       return _mediaCacheGateway?.cachedAssetBytes(value) ??
@@ -8690,7 +8846,8 @@ class AppController extends ChangeNotifier {
           // The original reference can regenerate its preview.
         }
       }
-      if (reference?.isLocal == true && !requiresHostedSources) {
+      if (reference?.isLocal == true &&
+          (!requiresHostedSources || publicSource == null)) {
         try {
           asset = await _retainedAsset(
             reference!,

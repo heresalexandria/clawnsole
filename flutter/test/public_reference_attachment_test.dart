@@ -5,6 +5,7 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/apipod_model_contracts.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/media_cache_gateway.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:flutter/foundation.dart';
@@ -230,44 +231,80 @@ void main() {
   );
 
   test(
-    'private, unsafe and expired references give a reason before any read',
+    'retained local references attach even when hosted provenance expired',
     () async {
       for (final reference in [
         saved(),
         saved(url: 'https://127.0.0.1/private.mp4'),
         saved(url: hosted, expires: DateTime.utc(2000)),
-        saved(
-          asset: const AssetReference(
-            kind: 'drive',
-            value: 'private-file-id',
-            label: 'Motion',
-          ),
-        ),
       ]) {
-        final gateway = _Gateway(snapshot(references: [reference]));
+        final gateway = _Gateway(snapshot(references: [reference]))
+          ..allowReads = true;
         final app = _controller(gateway);
         addTearDown(app.dispose);
         final candidate = app.savedReferenceCandidate(reference);
-        expect(
-          app.referenceCandidateProblem(candidate),
-          contains('no available public HTTPS URL'),
-        );
+        expect(app.referenceCandidateProblem(candidate), isNull);
         await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
-        expect(app.form.references, isEmpty);
-        expect(app.notice, contains('paste its URL'));
-        expect(gateway.reads, 0);
+        expect(
+          app.form.references.single.requestSource,
+          startsWith('data:video/'),
+        );
+        expect(app.form.references.single.publicSourceExpiresAt, isNull);
+        expect(gateway.reads, 1);
+        expect(app.validate(), contains('Connect Google Drive'));
       }
-      final gateway = _Gateway(
-        snapshot(generations: [generation(expires: DateTime.utc(2000))]),
+    },
+  );
+
+  test(
+    'private Drive references explain connection requirement before reading',
+    () async {
+      final reference = saved(
+        asset: const AssetReference(
+          kind: 'drive',
+          value: 'private-file-id',
+          label: 'Motion',
+        ),
       );
+      final gateway = _Gateway(snapshot(references: [reference]));
       final app = _controller(gateway);
       addTearDown(app.dispose);
+      final candidate = app.savedReferenceCandidate(reference);
       expect(
-        app.referenceCandidatePublicUrl(
-          app.generatedReferenceCandidates(MediaReferenceKind.video).single,
-        ),
-        isNull,
+        app.referenceCandidateProblem(candidate),
+        contains('Connect Google Drive'),
       );
+      await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
+      expect(app.form.references, isEmpty);
+      expect(gateway.reads, 0);
+    },
+  );
+
+  test(
+    'cached private Drive references attach offline without a network read',
+    () async {
+      final reference = saved(
+        asset: const AssetReference(
+          kind: 'drive',
+          value: 'cached-file',
+          label: 'Motion',
+          contentType: 'video/mp4',
+        ),
+      );
+      final gateway = _Gateway(snapshot(references: [reference]))
+        ..cachedBytes = Uint8List.fromList([1, 2, 3]);
+      final app = _controller(gateway);
+      addTearDown(app.dispose);
+      final candidate = app.savedReferenceCandidate(reference);
+      expect(await app.checkReferenceCandidateCache(candidate), isTrue);
+      expect(app.referenceCandidateProblem(candidate), isNull);
+      await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
+      expect(
+        app.form.references.single.requestSource,
+        startsWith('data:video/'),
+      );
+      expect(gateway.reads, 0);
+      expect(app.validate(), contains('Connect Google Drive'));
     },
   );
 
@@ -326,7 +363,11 @@ void main() {
           id: 'private',
           name: 'Private clip',
           kind: MediaReferenceKind.video,
-          asset: retained,
+          asset: const AssetReference(
+            kind: 'drive',
+            value: 'private-file',
+            label: 'Private clip',
+          ),
           createdAt: now,
           updatedAt: now,
           durationSeconds: 4,
@@ -366,7 +407,7 @@ void main() {
           find.byKey(const ValueKey('reference-picker-public-url-hint')),
           findsOneWidget,
         );
-        expect(find.text('Public HTTPS URL required'), findsOneWidget);
+        expect(find.text('Connect Google Drive'), findsOneWidget);
         expect(
           tester
               .widget<InkWell>(
@@ -404,10 +445,15 @@ void main() {
   );
 }
 
-class _Gateway implements AppGateway {
+class _Gateway implements AppGateway, MediaCacheGateway {
   _Gateway(this.snapshot, {this.usesCompanion = false});
   LocalSnapshot snapshot;
   int reads = 0;
+  Uint8List? cachedBytes;
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) async =>
+      cachedBytes;
+  bool allowReads = false;
   Completer<double>? creditGate;
   final creditStarted = Completer<void>();
   final submissions = <GenerationSubmission>[];
@@ -437,6 +483,7 @@ class _Gateway implements AppGateway {
   @override
   Future<Uint8List> readAsset(AssetReference reference) async {
     reads++;
+    if (allowReads) return Uint8List.fromList([1, 2, 3]);
     throw StateError('No hydration expected');
   }
 

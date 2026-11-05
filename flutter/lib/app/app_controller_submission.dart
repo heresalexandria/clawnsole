@@ -71,6 +71,8 @@ extension AppControllerSubmission on AppController {
       showNotice(problem);
       if (selectedProvider.requiresApiKey && !hasApiKey) {
         unawaited(navigate(AppSection.providers));
+      } else if (needsGoogleDriveForMedia) {
+        unawaited(openSettings(SettingsTab.sync));
       }
       return;
     }
@@ -106,7 +108,8 @@ extension AppControllerSubmission on AppController {
     final quoteInput = _providerEstimateInput();
     final fallbackEstimate = currentEstimate;
     final normalizeReferences =
-        autoFixReferenceVideos && !model.requiresPublicMediaUrls;
+        autoFixReferenceVideos &&
+        (!model.requiresPublicMediaUrls || needsTemporaryMediaHosting);
     final checksVisualReferences =
         normalizeReferences &&
         (form.keyframes.isNotEmpty ||
@@ -228,6 +231,7 @@ extension AppControllerSubmission on AppController {
         // Released before any recovery read below: once the call is over the
         // durable record — receipt, uncertainty, or failure — is the truth.
         _submissionsInFlight.remove(operationId);
+        unawaited(refreshTemporaryMediaHostingStatus());
       }
       // The provider has answered: the key stops reading SUBMITTING in the
       // same frame the receipt lands, not after the housekeeping below.
