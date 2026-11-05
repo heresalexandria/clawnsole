@@ -34,5 +34,7 @@
   },
   "supports_auto_duration": true,
   "max_prompt_characters": 30000,
-  "max_input_image_bytes": 31457280
+  "max_input_image_bytes": 31457280,
+  "selection_group_id": "seedance-2.0-lite",
+  "selection_group_label": "Seedance 2.0 Lite"
 }

@@ -37,5 +37,7 @@
   "requires_start_frame_when_using_frames": true,
   "max_audio_references": 1,
   "requires_public_media_urls": true,
-  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "selection_group_id": "wan2.7",
+  "selection_group_label": "Wan 2.7"
 }

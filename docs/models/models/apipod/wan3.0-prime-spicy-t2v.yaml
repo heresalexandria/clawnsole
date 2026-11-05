@@ -42,5 +42,7 @@
     "min_version": "0.64.0"
   },
   "supports_auto_duration": true,
-  "max_prompt_characters": 20000
+  "max_prompt_characters": 20000,
+  "selection_group_id": "wan3.0-prime-spicy",
+  "selection_group_label": "Wan 3.0 Prime Spicy"
 }

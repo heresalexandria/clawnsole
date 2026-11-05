@@ -45,5 +45,7 @@
   "max_source_video_seconds": 10,
   "requires_public_media_urls": true,
   "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
-  "max_input_image_bytes": 20971520
+  "max_input_image_bytes": 20971520,
+  "selection_group_id": "wan2.7-videoedit",
+  "selection_group_label": "Wan 2.7 Edit"
 }

@@ -32,5 +32,7 @@
   "availability": {
     "min_version": "0.64.0"
   },
-  "max_prompt_characters": 30000
+  "max_prompt_characters": 30000,
+  "selection_group_id": "gemini-omni-flash-1.1-lite",
+  "selection_group_label": "Gemini Omni Flash 1.1 Lite"
 }

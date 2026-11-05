@@ -7,6 +7,19 @@ and companion-backed Electron macOS. The release workflow owns the version bump.
 The [machine-readable coverage inventory](apipod-coverage.json) records every
 route and its exact schema source.
 
+## Model choices and automatic routes
+
+Clawnsole 0.64.1 presents 49 logical APIPod choices while retaining all 103
+wire IDs. A choice such as Seedance 2.5 automatically selects its text, pinned
+frame, or creative-reference route from the attached media. Draft, Edit, Extend,
+quality/speed variants, and Veo 4K remain distinct choices. Routes never jump to
+another variant merely because its attachment budget is larger. The selected
+wire route controls limits and pricing, and its ID remains in generation history.
+Wan 2.7 text audio guidance requires 0.64.1; a version-bounded legacy manifest
+retains the text-only mode for 0.64.0. Both releases expose exactly 103 routes.
+Existing saved wire IDs and preferences remain valid; refreshed manifests add
+`selection_group_id` and `selection_group_label` without changing route IDs.
+
 ## Coverage
 
 | Family | Active routes |
@@ -76,6 +89,16 @@ API-key upload endpoint; local files and base64 data are rejected before paid
 submission, and hosted inputs bypass local normalization. Keys remain in native
 settings storage or the desktop companion, never in the Flutter web renderer.
 
+The official [Seedance web/API guide](https://www.apipod.ai/blog/alors-on-danse-ai-seedance-2-5)
+distinguishes local uploads in its web playground from publicly reachable media
+URLs in API requests. The current website uses multipart `/console/uploads`
+with a browser session and `/auth/refresh`. On 2026-11-05 an empty multipart
+request using the working API key returned HTTP 401, “Invalid or expired token”;
+no media bytes were uploaded. No supported API-key upload endpoint was found in
+the official API index. A local Files/Photos import therefore cannot be made
+provider-readable merely by preserving its local path; Clawnsole offers a
+public-URL attachment instead of silently uploading to an unrelated host.
+
 Seedance edits and extensions use the source-video editor. The source is sent
 first in `video_urls`; reference prompt numbering accounts for that position.
 Motion control requires both the character image and source video. Muse and
@@ -99,6 +122,22 @@ Only returned `usage.cost` is settled USD spend. Estimated values never become
 realized charges. Polling, operation IDs, ambiguous receipts, restarts, and media
 retention use the existing shared native/companion transport.
 
+APIPod's documented public `/v1/pricing/estimate` now supplies the live quote for
+the resolved route. Only billing dimensions are sent: no prompt, API key, task
+ID, or media URL. Unavailable/malformed quotes fall back to the published
+estimate; incomplete source metadata never yields a falsely exact live quote.
+Input videos round up **individually** before their durations are added to the
+output. For example, a 5-second 480p Standard output plus 4.0417- and 6.0417-second
+references bills 17 seconds at $0.0588/second, totaling $0.9996. A live quote
+using the source URLs and a separate metadata-only quote returned the same total.
+
+The current [Seedance 2.5 Standard page](https://www.apipod.ai/models/seedance-2.5)
+and live API agree on $0.098/second at 480p, $0.2205 at 720p, and $0.54194 at
+1080p for text/frame generation. The catalog's “from $0.059/sec” is the rounded
+video-reference rate, with input plus output seconds billed. Authenticated and
+public quotes agreed. The reviewed official Standard/Lite/pricing pages did not
+advertise a sub-cent Standard rate; static rates were not lowered speculatively.
+
 The original three 0.63 routes remain in version-bounded legacy manifests. New
 contracts require 0.64, and stale versioned catalogs cannot replace a newer
 bundled catalog. A failed Pages deployment therefore cannot hide new providers.
@@ -106,6 +145,7 @@ bundled catalog. A failed Pages deployment therefore cannot hide new providers.
 ## Verification sources
 
 - [Active route inventory and list prices](https://www.apipod.ai/pricing.md)
+- [Site integration index and public pricing endpoint](https://www.apipod.ai/llms.txt)
 - [Live model catalog and per-model API schemas](https://www.apipod.ai/models)
 - [Documentation export index](https://docs.apipod.ai/llms.txt)
 - [Authentication](https://docs.apipod.ai/authentication.md)
@@ -131,6 +171,19 @@ Set `APIPOD_LIVE_SUITE=catalog` for the eight-family text smoke suite. It requir
 all payloads and a $3 estimate ceiling before the first paid submission. Use
 `APIPOD_LIVE_RESUME=true` to resume saved task IDs without submitting again.
 The default suite retains the three original Seedance 2.5 mode tests.
+
+Set `APIPOD_LIVE_SUITE=workflow` and `APIPOD_LIVE_REFERENCE_REPORT` to an existing
+verified Seedance smoke report for one grouped Seedance 2.5 reference job. It
+resolves the alias to the reference route, requires a fresh live quote below
+$1, persists the submission before polling, and checks settled cost against
+that quote plus MP4 delivery. It reuses the existing report's measured public
+output instead of paying for another source clip.
+
+The 2026-11-05 workflow check selected the `seedance-2.5` family with a measured
+4.041667-second public video reference and resolved to `seedance-2.5-r2v`.
+Its live quote and settled charge both equaled **$0.5292** (4 output seconds +
+5 rounded input seconds). The one submitted job delivered a 1,252,662-byte H.264
+MP4 at 854×480, lasting 4.041667 seconds, with no audio stream.
 
 ## Expanded live results (2026-11-05)
 

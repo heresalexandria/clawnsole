@@ -43,5 +43,7 @@
   "max_audio_references": 0,
   "requires_public_media_urls": true,
   "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
-  "max_input_image_bytes": 10485760
+  "max_input_image_bytes": 10485760,
+  "selection_group_id": "minimax-h3-lite",
+  "selection_group_label": "MiniMax H3 Lite"
 }

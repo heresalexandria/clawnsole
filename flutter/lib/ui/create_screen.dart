@@ -266,7 +266,7 @@ class _ProviderPlaque extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 SegmentReadout(
-                  controller.selectedModel.label,
+                  controller.selectedModel.selectionLabel,
                   fontSize: 10.5,
                   primary: false,
                   minCells: 18,
@@ -838,7 +838,7 @@ class _DirectionModelTrigger extends StatelessWidget {
   /// What the screen reader hears: the model and its provider, even though
   /// only the model is drawn.
   static String _fullLabel(AppController controller) =>
-      '${controller.selectedModel.label} · ${controller.selectedProvider.name}';
+      '${controller.selectedModel.selectionLabel} · ${controller.selectedProvider.name}';
 
   /// Width the trigger wants to set [label] without ellipsizing it.
   static double _widthFor(BuildContext context, String label) {
@@ -866,7 +866,10 @@ class _DirectionModelTrigger extends StatelessWidget {
     BuildContext context,
     AppController controller,
     double cap,
-  ) => math.min(_widthFor(context, controller.selectedModel.label), cap);
+  ) => math.min(
+    _widthFor(context, controller.selectedModel.selectionLabel),
+    cap,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -890,7 +893,7 @@ class _DirectionModelTrigger extends StatelessWidget {
           children: <Widget>[
             Flexible(
               child: Text(
-                controller.selectedModel.label,
+                controller.selectedModel.selectionLabel,
                 style: style,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -965,7 +968,7 @@ class _DirectionToolbar extends StatelessWidget {
                   : null,
               icon: Icons.auto_fix_high_rounded,
             ),
-            if (controller.selectedModel.supportsCharacterReferences)
+            if (controller.supportsCharacterReferences)
               _DirectionToolbarAction(
                 buttonKey: const ValueKey('prompt-characters-button'),
                 tooltip: 'Characters',
@@ -1189,7 +1192,7 @@ class _PromptCharacterCounter extends StatelessWidget {
       return PromptCharacterCounter(
         used: controller.generationPrompt.length,
         limit: controller.promptCharacterLimit,
-        modelLabel: model.label,
+        modelLabel: model.selectionLabel,
         isProviderLimit: (model.maxPromptCharacters ?? 0) > 0,
         compact: compact,
       );
@@ -1877,7 +1880,7 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
     final showFrames =
         controller.keyframeLimit > 0 || form.keyframes.isNotEmpty;
     final showReferences =
-        model.supportsMediaReferences || form.references.isNotEmpty;
+        controller.supportsMediaReferences || form.references.isNotEmpty;
     final actions = <Widget>[
       if (widget.videoAction != null) widget.videoAction!,
       if (widget.draftAction != null) widget.draftAction!,
@@ -1894,7 +1897,7 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
               border: Border.all(color: context.colors.outlineVariant),
             ),
             child: Text(
-              '${model.label} is a text-only endpoint. Choose a Frames or References model to attach media.',
+              '${model.selectionLabel} accepts text only. Choose a model with media support to attach references.',
               style: TextStyle(
                 color: context.colors.onSurfaceVariant,
                 fontSize: 11.5,
@@ -1910,7 +1913,8 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
       );
     }
     final conflicted =
-        model.framesExclusiveWithReferences &&
+        (controller.framesBlockedByReferences ||
+            controller.referencesBlockedByFrames) &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
     final framesSetAside = controller.framesBlockedByReferences;
@@ -1951,7 +1955,7 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
         // to show what arrived. Files sort into image/video/audio by MIME
         // type or extension inside the controller.
         : ReferenceDropZone(
-            enabled: !referencesSetAside && !model.requiresPublicMediaUrls,
+            enabled: !referencesSetAside && !controller.requiresPublicMediaUrls,
             label: 'Drop to add references',
             // Loading tiles hold the dropped files' spots while their bytes
             // are read, before the controller can classify and attach them.
@@ -1990,7 +1994,7 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (model.requiresPublicMediaUrls) ...<Widget>[
+        if (controller.requiresPublicMediaUrls) ...<Widget>[
           Text(
             controller.publicMediaUrlHint,
             key: const ValueKey('public-media-url-hint'),
@@ -2007,7 +2011,8 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
         if (references != null) references,
         // Normalization converts both keyframes and creative references, so
         // the switch sits below the pair instead of inside either section.
-        if (hasVisualReference && !model.requiresPublicMediaUrls) ...<Widget>[
+        if (hasVisualReference &&
+            !controller.requiresPublicMediaUrls) ...<Widget>[
           const SizedBox(height: 8),
           _ReferenceNormalizationToggle(controller: controller),
         ],
@@ -2408,7 +2413,8 @@ class _FramesSection extends StatelessWidget {
     final maximumFrames = controller.keyframeLimit;
     final setAside = controller.framesBlockedByReferences;
     final conflicted =
-        model.framesExclusiveWithReferences &&
+        (controller.framesBlockedByReferences ||
+            controller.referencesBlockedByFrames) &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
     final frameLimit = model.supportsOrderedMiddleFrames
@@ -2422,11 +2428,11 @@ class _FramesSection extends StatelessWidget {
         ? 'a first frame or creative references'
         : 'first/last frames or creative references';
     final caption = conflicted
-        ? '${model.label} cannot combine $exclusiveInputs. Remove one side.'
+        ? '${model.selectionLabel} cannot combine $exclusiveInputs. Remove one side.'
         : setAside
         ? '$frameLimit. References attached — remove them to add frames.'
         : model.framesExclusiveWithReferences
-        ? '$frameLimit. ${model.label}: use $exclusiveInputs, not both.'
+        ? '$frameLimit. ${model.selectionLabel}: use $exclusiveInputs, not both.'
         : frameLimit;
     final timingPill = form.keyframes.isNotEmpty && model.supportsTimedKeyframes
         ? TogglePill(
@@ -2545,7 +2551,8 @@ class _ReferencesSection extends StatelessWidget {
         : '$limits · ${model.maxTotalReferences} files total';
     final setAside = controller.referencesBlockedByFrames;
     final conflicted =
-        model.framesExclusiveWithReferences &&
+        (controller.framesBlockedByReferences ||
+            controller.referencesBlockedByFrames) &&
         form.keyframes.isNotEmpty &&
         form.references.isNotEmpty;
     final taskChips =
@@ -2579,7 +2586,7 @@ class _ReferencesSection extends StatelessWidget {
           if (controller.referenceSecondsOverBudget(kind))
             (
               kind,
-              '${model.label} accepts up to '
+              '${model.selectionLabel} accepts up to '
                   '${controller.referenceSecondsLimit(kind)} s of reference '
                   '${kind == MediaReferenceKind.audio ? 'audio' : 'video'} — '
                   'remove or trim a clip before generating.',
@@ -3151,7 +3158,7 @@ class _ReferenceTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600),
         ),
-        if (controller.selectedModel.supportsCharacterReferences &&
+        if (controller.supportsCharacterReferences &&
             reference.kind != MediaReferenceKind.audio)
           TextButton.icon(
             key: ValueKey('name-character-${reference.id}'),
@@ -3381,7 +3388,7 @@ class _AddReferenceButton extends StatelessWidget {
         ),
         PopupMenuItem(
           value: 'upload',
-          enabled: !controller.selectedModel.requiresPublicMediaUrls,
+          enabled: !controller.requiresPublicMediaUrls,
           child: Row(
             children: <Widget>[
               const Icon(Icons.upload_file_rounded, size: 17),
@@ -3661,7 +3668,7 @@ class _AddFrameButton extends StatelessWidget {
         itemBuilder: (context) => <PopupMenuEntry<String>>[
           PopupMenuItem(
             value: 'upload',
-            enabled: !controller.selectedModel.requiresPublicMediaUrls,
+            enabled: !controller.requiresPublicMediaUrls,
             child: const Row(
               children: <Widget>[
                 Icon(Icons.add_photo_alternate_rounded, size: 17),
@@ -3919,8 +3926,7 @@ class _SourceEditor extends StatelessWidget {
                 children: <Widget>[
                   if (!taskIdInput)
                     OutlinedButton.icon(
-                      onPressed:
-                          controller.selectedModel.requiresPublicMediaUrls
+                      onPressed: controller.requiresPublicMediaUrls
                           ? null
                           : () => unawaited(onPick()),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
@@ -4608,7 +4614,7 @@ class _DurationControl extends StatelessWidget {
                     const SizedBox(width: 9),
                     Expanded(
                       child: Text(
-                        '${model.label} can choose $rangeText at the current resolution.',
+                        '${model.selectionLabel} can choose $rangeText at the current resolution.',
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -5028,7 +5034,7 @@ class _CostPreview extends StatelessWidget {
       ],
     );
     final rate = Text(
-      rateLabel ?? controller.selectedModel.label,
+      rateLabel ?? controller.selectedModel.selectionLabel,
       key: const ValueKey('estimate-rate'),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,

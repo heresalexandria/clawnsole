@@ -34,5 +34,7 @@
   "availability": {
     "min_version": "0.64.0"
   },
-  "max_prompt_characters": 8000
+  "max_prompt_characters": 8000,
+  "selection_group_id": "kling-4.0",
+  "selection_group_label": "Kling 4.0"
 }

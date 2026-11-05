@@ -102,6 +102,7 @@
     "models/apipod/veo3-1-quality.yaml",
     "models/apipod/veo3-1-quality-4k.yaml",
     "models/apipod/wan2.7-i2v.yaml",
+    "models/apipod/wan2.7-t2v-legacy0.64.yaml",
     "models/apipod/wan2.7-t2v.yaml",
     "models/apipod/wan2.7-videoedit.yaml",
     "models/apipod/wan3.0-i2v.yaml",
@@ -119,5 +120,6 @@
     "models/apipod/wan3.0-spicy-r2v.yaml",
     "models/apipod/wan3.0-spicy-t2v.yaml",
     "models/apipod/wan3.0-t2v.yaml"
-  ]
+  ],
+  "supports_live_pricing": true
 }

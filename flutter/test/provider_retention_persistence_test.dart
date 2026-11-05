@@ -45,7 +45,7 @@ void main() {
           isTrue,
         );
         final encoded = migrated.toJson();
-        expect(encoded['schemaVersion'], 26);
+        expect(encoded['schemaVersion'], 27);
         expect(
           encoded.containsKey('providerRetentionAcknowledgements'),
           isFalse,

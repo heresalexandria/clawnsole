@@ -44,5 +44,7 @@
   ],
   "requires_public_media_urls": true,
   "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
-  "max_input_image_bytes": 5242880
+  "max_input_image_bytes": 5242880,
+  "selection_group_id": "gemini-omni-extend",
+  "selection_group_label": "Gemini Omni Extend"
 }

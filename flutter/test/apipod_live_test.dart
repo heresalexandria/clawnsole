@@ -37,18 +37,21 @@ void main() {
   final outputDirectory = Platform.environment['APIPOD_LIVE_OUTPUT_DIR'];
   final suite = Platform.environment['APIPOD_LIVE_SUITE'] ?? 'seedance-2.5';
   final expanded = suite == 'catalog';
+  final workflow = suite == 'workflow';
 
   test(
-    expanded
+    workflow
+        ? 'live APIPod grouped reference route quote and delivery'
+        : expanded
         ? 'live APIPod expanded video catalog delivery'
         : 'live APIPod Seedance 2.5 text, frames, and video reference delivery',
     () async {
-      expect(suite, isIn(const ['seedance-2.5', 'catalog']));
-      if (expanded) {
+      expect(suite, isIn(const ['seedance-2.5', 'catalog', 'workflow']));
+      if (expanded || workflow) {
         expect(
           reportPath?.isNotEmpty,
           isTrue,
-          reason: 'APIPOD_LIVE_REPORT is required to resume paid catalog jobs.',
+          reason: 'APIPOD_LIVE_REPORT is required to resume paid jobs.',
         );
       }
       if (!resume && reportPath != null && reportPath.isNotEmpty) {
@@ -98,7 +101,7 @@ void main() {
       // ignore: avoid_print
       print('APIPod live account verified.');
 
-      if (!expanded) {
+      if (!expanded && !workflow) {
         final image = await mediaClient
             .get(Uri.parse(_imageUrl))
             .timeout(const Duration(seconds: 45));
@@ -149,7 +152,9 @@ void main() {
 
       Future<String> generate(String model, Map<String, Object?> extra) async {
         final previous = jobs.where((job) => job['model'] == model).firstOrNull;
-        if (expanded && previous?['status'] == 'verified') return '';
+        if ((expanded || workflow) && previous?['status'] == 'verified') {
+          return '';
+        }
         final job =
             previous ??
             <String, Object?>{'model': model, 'status': 'submitting'};
@@ -171,6 +176,16 @@ void main() {
         } else {
           final input = inputFor(model, extra);
           job['input'] = api.generationPayload(model, input);
+          if (workflow) {
+            expect((job['input']! as Map)['model'], 'seedance-2.5-r2v');
+            final quote = await api.estimate(model, input);
+            expect(quote, isNotNull);
+            expect(quote!.basis, 'apipod-live-quote');
+            expect(quote.minimumUsd, greaterThan(0));
+            expect(quote.maximumUsd, lessThan(1));
+            job['quoted_usd'] = quote.maximumUsd;
+            job['quote_calculation'] = quote.calculation;
+          }
           jobs.add(job);
           await saveReport();
           // A single submit per logical job. Ambiguous responses must never
@@ -237,6 +252,10 @@ void main() {
           job['cost_usd'] = cost;
         }
         await saveReport();
+        if (workflow) {
+          expect(cost, isNotNull);
+          expect(cost, closeTo(job['quoted_usd']! as num, .0001));
+        }
         late http.Response response;
         for (var attempt = 1; attempt <= 3; attempt++) {
           final deliveryClient = PublicMediaClient();
@@ -285,7 +304,39 @@ void main() {
         return outputUrl;
       }
 
-      if (expanded) {
+      if (workflow) {
+        final sourceReportPath =
+            Platform.environment['APIPOD_LIVE_REFERENCE_REPORT'];
+        expect(sourceReportPath, isNotNull);
+        final sourceReport =
+            jsonDecode(await File(sourceReportPath!).readAsString()) as Map;
+        final sourceJob = (sourceReport['jobs'] as List)
+            .whereType<Map>()
+            .firstWhere(
+              (job) =>
+                  job['model'] == 'seedance-2.5-t2v' &&
+                  job['status'] == 'verified',
+            );
+        final duration = double.parse(
+          ((sourceJob['video_probe'] as Map)['format'] as Map)['duration']
+              .toString(),
+        );
+        expect(duration, greaterThan(0));
+        final source = await api.poll(
+          key,
+          'https://api.apipod.ai/v1/videos/status/${sourceJob['task_id']}',
+        );
+        expect(normalizeGenerationStatus(source['status']), 'Ready');
+        await generate('seedance-2.5', {
+          'reference_videos': [(source['outputs']! as List).first],
+          'reference_video_durations_seconds': [duration],
+          'reference_video_duration_pending': 0,
+          'prompt':
+              'Use @Video 1 only as a visual style reference. A peaceful '
+              'mountain lake with a distant pine forest in morning light, '
+              'static camera, natural water ripples, no people or text.',
+        });
+      } else if (expanded) {
         final cases = _catalogCases.entries.iterator;
         final failures = <String>[];
         report.remove('failures');

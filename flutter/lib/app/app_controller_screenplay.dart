@@ -173,7 +173,7 @@ extension ScreenplayAuthoring on AppController {
     required List<String> referenceNames,
     bool renameInScript = false,
   }) async {
-    if (!selectedModel.supportsCharacterReferences) {
+    if (!supportsCharacterReferences) {
       return 'Choose a model that supports image or video references to cast characters.';
     }
     final tab = activeComposerTab;
@@ -431,16 +431,7 @@ extension ScreenplayAuthoring on AppController {
   }
 
   ReferenceCandidate _screenplayCandidate(SavedReference saved) =>
-      ReferenceCandidate(
-        id: saved.id,
-        name: saved.name,
-        kind: saved.kind,
-        asset: saved.asset,
-        thumbnailAsset: saved.thumbnailAsset,
-        createdAt: saved.createdAt,
-        storage: saved.storage,
-        durationSeconds: saved.durationSeconds,
-      );
+      savedReferenceCandidate(saved);
 
   /// Cast once. Remembering the character means deleting or editing a cast
   /// entry never causes it to spring back on the next keystroke.
@@ -462,7 +453,7 @@ extension ScreenplayAuthoring on AppController {
   }
 
   void _syncScreenplayReferences() {
-    if (!form.screenplayMode || !selectedModel.supportsCharacterReferences) {
+    if (!form.screenplayMode || !supportsCharacterReferences) {
       return;
     }
     final names = _defaultCharacterReferences;

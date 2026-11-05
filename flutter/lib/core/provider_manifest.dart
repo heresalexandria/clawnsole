@@ -397,6 +397,9 @@ VideoProviderDefinition _parseProvider(
       ? const <String, Object?>{}
       : _map(manifest['result_delivery'], 'result delivery');
   final seconds = _optionalInteger(delivery, 'availability_seconds');
+  final bundled = bundledVideoProviders
+      .where((provider) => provider.id == manifest['id'])
+      .firstOrNull;
   return VideoProviderDefinition(
     id: _requiredString(manifest, 'id'),
     adapter: _requiredString(manifest, 'adapter'),
@@ -407,6 +410,11 @@ VideoProviderDefinition _parseProvider(
     pricingUrl: _requiredHttpsUrl(manifest, 'pricing_url'),
     pricingSource:
         _optionalString(manifest, 'pricing_source') ?? 'Published rate card',
+    supportsLivePricing: _boolean(
+      manifest,
+      'supports_live_pricing',
+      fallback: bundled?.supportsLivePricing ?? false,
+    ),
     requiresApiKey: _boolean(manifest, 'requires_api_key', fallback: true),
     isLocal: _boolean(manifest, 'is_local'),
     resultDelivery: ProviderResultDelivery(
@@ -472,6 +480,12 @@ VideoModelDefinition _parseModel(
   return VideoModelDefinition(
     id: id,
     canonicalModelId: _optionalString(manifest, 'canonical_model_id'),
+    selectionGroupId:
+        _optionalString(manifest, 'selection_group_id') ??
+        bundled?.selectionGroupId,
+    selectionGroupLabel:
+        _optionalString(manifest, 'selection_group_label') ??
+        bundled?.selectionGroupLabel,
     label: _requiredString(manifest, 'label'),
     description: _requiredString(manifest, 'description'),
     generationNotice:

@@ -4,6 +4,7 @@ import 'package:clawnsole/core/apipod_catalog.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/provider_model_selection.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +17,7 @@ void main() {
     TargetPlatform.windows,
     TargetPlatform.macOS,
   ]) {
-    testWidgets('$platform exposes every APIPod route in the model picker', (
+    testWidgets('$platform groups APIPod choices and renders every route', (
       tester,
     ) async {
       debugDefaultTargetPlatformOverride = platform;
@@ -31,7 +32,11 @@ void main() {
           ..snapshot = _snapshot
           ..loading = false
           ..selectedProviderId = 'apipod'
-          ..selectedModelId = 'seedance-2.5-t2v';
+          ..selectedModelId = 'seedance-2.5-t2v'
+          ..favoriteModelKeys = [
+            modelFavoriteKey('apipod', 'seedance-2.5-i2v'),
+            modelFavoriteKey('apipod', 'seedance-2.5-r2v'),
+          ];
         addTearDown(() async {
           await tester.pumpWidget(const SizedBox.shrink());
           controller.dispose();
@@ -54,13 +59,70 @@ void main() {
         await tester.tap(find.byTooltip('Choose provider and model'));
         await tester.pumpAndSettle();
         expect(apipodProvider.models, hasLength(103));
-        for (final model in apipodProvider.models) {
+        final selections = providerModelSelections(apipodProvider);
+        expect(selections, hasLength(49));
+        for (final model in selections) {
           expect(
-            find.byKey(ValueKey('provider-model-option-apipod-${model.id}')),
+            find.byKey(
+              ValueKey('provider-model-option-apipod-${model.selectionId}'),
+            ),
             findsOneWidget,
-            reason: '${platform.name}/${model.id}',
+            reason: '${platform.name}/${model.selectionId}',
           );
         }
+        final favorite = find.byKey(
+          const ValueKey('provider-model-favorite-apipod-seedance-2.5'),
+        );
+        expect(favorite, findsOneWidget);
+        expect(
+          find.descendant(of: favorite, matching: find.text('Seedance 2.5')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: favorite,
+            matching: find.byIcon(Icons.check_rounded),
+          ),
+          findsOneWidget,
+        );
+        final star = find.byKey(
+          const ValueKey('provider-model-star-apipod-seedance-2.5'),
+        );
+        await tester.ensureVisible(star);
+        await tester.pumpAndSettle();
+        await tester.tap(star);
+        await tester.pumpAndSettle();
+        expect(controller.favoriteModelKeys, isEmpty);
+        expect(favorite, findsNothing);
+        await tester.ensureVisible(star);
+        await tester.pumpAndSettle();
+        await tester.tap(star);
+        await tester.pumpAndSettle();
+        expect(controller.favoriteModelKeys, hasLength(1));
+        expect(
+          controller.isFavoriteModel('apipod', 'seedance-2.5-r2v'),
+          isTrue,
+        );
+        expect(favorite, findsOneWidget);
+        for (final suffix in ['t2v', 'i2v', 'r2v']) {
+          expect(
+            find.byKey(
+              ValueKey('provider-model-option-apipod-seedance-2.5-$suffix'),
+            ),
+            findsNothing,
+          );
+        }
+        await tester.enterText(
+          find.byKey(const ValueKey('provider-model-search')),
+          'seedance-2.5-r2v',
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(
+            const ValueKey('provider-model-option-apipod-seedance-2.5'),
+          ),
+          findsOneWidget,
+        );
         await tester.enterText(
           find.byKey(const ValueKey('provider-model-search')),
           'seedance-2.5-draft',
@@ -106,7 +168,7 @@ void main() {
         for (final model in apipodProvider.models) {
           await controller.selectModel(model.id);
           await tester.pumpAndSettle();
-          expect(controller.selectedModelId, model.id);
+          expect(controller.selectedModel.selectionId, model.selectionId);
           expect(
             tester.takeException(),
             isNull,

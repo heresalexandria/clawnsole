@@ -826,6 +826,8 @@ void main() {
                 'id': 'saved-character',
                 'name': 'Hero portrait',
                 'characterName': 'ALEXANDRIA',
+                'publicSourceUrl': 'https://example.com/hero.png',
+                'publicSourceExpiresAt': '2100-01-01T00:00:00.000Z',
                 'kind': 'image',
                 'asset': <String, Object?>{
                   'kind': 'remote',
@@ -850,6 +852,14 @@ void main() {
         );
         expect(snapshot.savedReferences.single.name, 'Hero portrait');
         expect(snapshot.savedReferences.single.characterName, 'ALEXANDRIA');
+        expect(
+          snapshot.savedReferences.single.publicSourceUrl,
+          'https://example.com/hero.png',
+        );
+        expect(
+          snapshot.savedReferences.single.publicSourceExpiresAt,
+          DateTime.utc(2100),
+        );
         expect(
           (await store.read()).savedReferences.single.characterName,
           'ALEXANDRIA',

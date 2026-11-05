@@ -53,5 +53,7 @@
   "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
   "max_input_image_bytes": 20971520,
   "max_reference_video_seconds": 15,
-  "max_reference_audio_seconds": 15
+  "max_reference_audio_seconds": 15,
+  "selection_group_id": "wan3.0-spicy",
+  "selection_group_label": "Wan 3.0 Spicy"
 }

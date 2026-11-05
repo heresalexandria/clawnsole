@@ -2445,20 +2445,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
         ? widget.controller.generatedReferenceCandidates(widget.kind)
         : widget.controller.savedReferences
               .where((item) => !item.hidden && item.kind == widget.kind)
-              .map(
-                (item) => ReferenceCandidate(
-                  id: item.id,
-                  name: item.name,
-                  kind: item.kind,
-                  asset: item.asset,
-                  thumbnailAsset: item.thumbnailAsset,
-                  createdAt: item.createdAt,
-                  folderId: item.folderId,
-                  tags: item.tags,
-                  storage: item.storage,
-                  durationSeconds: item.durationSeconds,
-                ),
-              )
+              .map(widget.controller.savedReferenceCandidate)
               .toList();
     final normalized = query.trim().toLowerCase();
     final branch =
@@ -2494,6 +2481,9 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
 
   void _toggle(ReferenceCandidate item) {
     final active = selected.containsKey(item.id);
+    if (!active && widget.controller.referenceCandidateProblem(item) != null) {
+      return;
+    }
     if (!active && selected.length >= widget.maximum) return;
     setState(() {
       active ? selected.remove(item.id) : selected[item.id] = item;
@@ -2575,6 +2565,17 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                 selected.clear();
               }),
             ),
+            if (widget.controller.referenceRequiresPublicMediaUrls(
+              widget.kind,
+            )) ...[
+              const SizedBox(height: 12),
+              Text(
+                '${widget.controller.selectedModel.selectionLabel} needs an available public HTTPS URL. '
+                'Hosted originals can be reused. Local-only files and private Drive files cannot be added; paste a hosted URL instead.',
+                key: const ValueKey('reference-picker-public-url-hint'),
+                style: TextStyle(color: context.colors.onSurfaceVariant),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: <Widget>[
@@ -2658,13 +2659,18 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                           itemBuilder: (context, index) {
                             final item = values[index];
                             final active = selected.containsKey(item.id);
+                            final problem = widget.controller
+                                .referenceCandidateProblem(item);
                             final enabled =
-                                active || selected.length < widget.maximum;
+                                active ||
+                                (problem == null &&
+                                    selected.length < widget.maximum);
                             return _ReferenceCandidateCard(
                               controller: widget.controller,
                               item: item,
                               active: active,
                               enabled: enabled,
+                              unavailableReason: problem,
                               onTap: () => _toggle(item),
                               onThumbnail: item.kind == MediaReferenceKind.video
                                   ? (bytes) => _cacheThumbnail(item, bytes)
@@ -2707,6 +2713,7 @@ class _ReferenceCandidateCard extends StatelessWidget {
     required this.active,
     required this.enabled,
     required this.onTap,
+    this.unavailableReason,
     this.onThumbnail,
     this.onDuration,
   });
@@ -2716,6 +2723,7 @@ class _ReferenceCandidateCard extends StatelessWidget {
   final bool active;
   final bool enabled;
   final VoidCallback onTap;
+  final String? unavailableReason;
   final ValueChanged<Uint8List>? onThumbnail;
   final ValueChanged<double>? onDuration;
 
@@ -2746,6 +2754,7 @@ class _ReferenceCandidateCard extends StatelessWidget {
       selected: active,
       enabled: enabled,
       label: '${active ? 'Deselect' : 'Select'} ${item.name}',
+      hint: unavailableReason,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 160),
         opacity: enabled ? 1 : .48,
@@ -2887,7 +2896,9 @@ class _ReferenceCandidateCard extends StatelessWidget {
                         ),
                         const Spacer(),
                         Text(
-                          details,
+                          unavailableReason == null
+                              ? details
+                              : 'Public HTTPS URL required',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

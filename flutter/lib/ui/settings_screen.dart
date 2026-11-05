@@ -195,7 +195,7 @@ class _CreateDefaultsCard extends StatelessWidget {
         .where((item) => item.id == _defaults.modelId)
         .firstOrNull;
     if (provider == null || model == null) return 'No longer available';
-    return '${provider.name} · ${model.label}';
+    return '${provider.name} · ${model.selectionLabel}';
   }
 
   /// The resolution the ratio and duration choices are read against.

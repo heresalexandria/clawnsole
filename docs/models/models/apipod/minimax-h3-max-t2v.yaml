@@ -36,5 +36,7 @@
   "availability": {
     "min_version": "0.64.0"
   },
-  "max_prompt_characters": 7000
+  "max_prompt_characters": 7000,
+  "selection_group_id": "minimax-h3-max",
+  "selection_group_label": "MiniMax H3 Max"
 }

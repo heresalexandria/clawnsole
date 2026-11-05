@@ -2485,7 +2485,7 @@ void main() {
       decoded.generations.single.config.keyframes!.map((frame) => frame.role),
       <KeyframeRole>[KeyframeRole.start, KeyframeRole.middle, KeyframeRole.end],
     );
-    expect(decoded.toJson()['schemaVersion'], 26);
+    expect(decoded.toJson()['schemaVersion'], 27);
   });
 
   test(
@@ -2681,7 +2681,7 @@ void main() {
         hasLength(2),
       );
       final decoded = StoredData.decode(store.data.encode());
-      expect(decoded.toJson()['schemaVersion'], 26);
+      expect(decoded.toJson()['schemaVersion'], 27);
       expect(
         decoded.savedReferences.single.asset.value,
         'https://cdn.test/hero.png',

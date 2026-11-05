@@ -31,5 +31,7 @@
   "availability": {
     "min_version": "0.64.0"
   },
-  "max_prompt_characters": 2000
+  "max_prompt_characters": 2000,
+  "selection_group_id": "minimax-h3-lite",
+  "selection_group_label": "MiniMax H3 Lite"
 }

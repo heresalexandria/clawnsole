@@ -175,7 +175,7 @@ extension AppControllerSubmission on AppController {
       if (_disposed) return;
       _flushComposerTabsSave(onlyIfPending: true);
       unawaited(_requestNotificationsOnce());
-      if (provider.id == 'artcraft' && gateway is ProviderGateway) {
+      if (provider.supportsLivePricing && gateway is ProviderGateway) {
         try {
           final quote = await (gateway as ProviderGateway).quoteProviderCost(
             provider.id,

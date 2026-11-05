@@ -652,6 +652,10 @@ class DirectGateway
     if (asset.value.isEmpty) {
       throw StateError('Choose reference media before saving.');
     }
+    final publicSourceUrl =
+        reference.publicSourceUrl ??
+        (Uri.tryParse(source ?? '')?.scheme == 'https' ? source : null) ??
+        existing?.publicSourceUrl;
     final clean = SavedReference(
       id: reference.id,
       name: name,
@@ -667,6 +671,12 @@ class DirectGateway
       hidden: reference.hidden,
       storage: reference.storage,
       contentDigest: reference.contentDigest ?? existing?.contentDigest,
+      publicSourceUrl: publicSourceUrl,
+      publicSourceExpiresAt:
+          reference.publicSourceExpiresAt ??
+          (publicSourceUrl == existing?.publicSourceUrl
+              ? existing?.publicSourceExpiresAt
+              : null),
       durationSeconds: reference.durationSeconds ?? existing?.durationSeconds,
     );
     final references = List<SavedReference>.from(current.savedReferences);
@@ -1128,6 +1138,8 @@ class DirectGateway
             referenceId: media.referenceId,
             thumbnailAsset: media.thumbnailAsset,
             durationSeconds: media.durationSeconds,
+            publicSourceUrl: media.publicSourceUrl,
+            publicSourceExpiresAt: media.publicSourceExpiresAt,
             source: await _store.persistSource(
               index < sources.length ? sources[index]?.toString() ?? '' : '',
               label: media.label,

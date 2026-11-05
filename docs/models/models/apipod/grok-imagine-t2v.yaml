@@ -40,5 +40,7 @@
     10,
     15
   ],
-  "max_prompt_characters": 4000
+  "max_prompt_characters": 4000,
+  "selection_group_id": "grok-imagine",
+  "selection_group_label": "Grok Imagine"
 }
