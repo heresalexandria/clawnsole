@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "wan2.7-t2v",
+  "canonical_model_id": "wan2.7-video",
+  "label": "WAN 2.7 · Text",
+  "description": "APIPod WAN 2.7 · Text.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1",
+    "4:3",
+    "3:4"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "1080P",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "hd",
+      "label": "720P",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 5000,
+  "max_audio_references": 1,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

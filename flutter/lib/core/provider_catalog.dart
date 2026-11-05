@@ -68,6 +68,7 @@ class VideoDurationRange {
     required this.minimumSeconds,
     required this.maximumSeconds,
     required this.stepSeconds,
+    this.allowedSeconds = const <int>[],
   }) : assert(minimumSeconds > 0),
        assert(maximumSeconds >= minimumSeconds),
        assert(stepSeconds > 0),
@@ -76,11 +77,18 @@ class VideoDurationRange {
   final int minimumSeconds;
   final int maximumSeconds;
   final int stepSeconds;
+  final List<int> allowedSeconds;
 
   int get divisions => (maximumSeconds - minimumSeconds) ~/ stepSeconds;
 
   int normalize(int value) {
     final clamped = value.clamp(minimumSeconds, maximumSeconds);
+    if (allowedSeconds.isNotEmpty) {
+      return allowedSeconds.lastWhere(
+        (seconds) => seconds <= clamped,
+        orElse: () => allowedSeconds.first,
+      );
+    }
     final offset = clamped - minimumSeconds;
     return minimumSeconds + (offset ~/ stepSeconds) * stepSeconds;
   }
@@ -92,19 +100,24 @@ class VideoModelDefinition {
     this.canonicalModelId,
     required this.label,
     required this.description,
+    this.generationNotice,
     required this.modes,
     required this.aspectRatios,
     required this.resolutions,
     required this.minDuration,
     required this.maxDuration,
     required this.durationStep,
+    this.durationOptions = const <int>[],
     required this.maxKeyframes,
+    this.maxMiddleFrames,
+    this.maxKeyframesPerSecond,
     this.maxKeyframesByMode = const <VideoMode, int>{},
     required this.usdPerSecond,
     this.referenceUsdPerSecond,
     this.supportsStartFrame = false,
     this.supportsEndFrame = false,
     this.requiresStartFrameWhenUsingFrames = false,
+    this.requiresStartFrameWithSource = false,
     this.requiresPublicMediaUrls = false,
     this.maxInputImagePixels,
     this.maxInputImageBytes,
@@ -137,7 +150,9 @@ class VideoModelDefinition {
     this.supportsAutoDuration = false,
     this.supportsAudio = true,
     this.supportsDraft = false,
+    this.draftSourceIsTaskId = false,
     this.supportsTimedKeyframes = false,
+    this.supportsOrderedMiddleFrames = false,
     this.supportsFrameRate = false,
     this.supportsSeed = false,
     this.maxPromptCharacters,
@@ -151,6 +166,7 @@ class VideoModelDefinition {
     this.supportsGuidanceWithSource = false,
     this.sourceGuidanceRequiresTimestamps = false,
     this.upscaleUsesResolutionTargets = false,
+    this.resolutionsByMode = const <VideoMode, List<String>>{},
     this.outputKind = GenerationOutputKind.video,
     this.progressReporting,
   });
@@ -159,13 +175,23 @@ class VideoModelDefinition {
   final String? canonicalModelId;
   final String label;
   final String description;
+
+  /// Provider behavior users need to know before submitting a paid request.
+  final String? generationNotice;
   final List<VideoMode> modes;
   final List<String> aspectRatios;
   final List<VideoResolutionDefinition> resolutions;
   final int minDuration;
   final int maxDuration;
   final int durationStep;
+
+  /// Explicit durations for routes whose choices do not form a regular range.
+  final List<int> durationOptions;
   final int maxKeyframes;
+  final int? maxMiddleFrames;
+
+  /// Total frame capacity is one opening frame plus this many per second.
+  final int? maxKeyframesPerSecond;
   final Map<VideoMode, int> maxKeyframesByMode;
   final double usdPerSecond;
   final double? referenceUsdPerSecond;
@@ -174,6 +200,9 @@ class VideoModelDefinition {
 
   /// Positional frame APIs cannot represent an end frame without a first frame.
   final bool requiresStartFrameWhenUsingFrames;
+
+  /// Motion transfer needs both a source video and its target first frame.
+  final bool requiresStartFrameWithSource;
 
   /// Media must already be hosted publicly; this route has no upload API.
   /// Local normalization cannot produce a replacement URL for these models.
@@ -219,7 +248,13 @@ class VideoModelDefinition {
   final bool supportsAutoDuration;
   final bool supportsAudio;
   final bool supportsDraft;
+
+  /// Final rendering consumes a completed provider task ID, not a media file.
+  final bool draftSourceIsTaskId;
   final bool supportsTimedKeyframes;
+
+  /// Middle frames follow attachment order without explicit timestamps.
+  final bool supportsOrderedMiddleFrames;
   final bool supportsFrameRate;
 
   /// The wire API accepts a reproducible random seed for this model.
@@ -253,6 +288,7 @@ class VideoModelDefinition {
   final bool supportsGuidanceWithSource;
   final bool sourceGuidanceRequiresTimestamps;
   final bool upscaleUsesResolutionTargets;
+  final Map<VideoMode, List<String>> resolutionsByMode;
   final GenerationOutputKind outputKind;
 
   /// Overrides the provider-wide progress contract for this model route.
@@ -269,6 +305,7 @@ class VideoModelDefinition {
     canonicalModelId: canonicalModelId,
     label: label,
     description: description,
+    generationNotice: generationNotice,
     modes: modes,
     aspectRatios: aspectRatios,
     resolutions: <VideoResolutionDefinition>[resolution],
@@ -276,12 +313,15 @@ class VideoModelDefinition {
     maxDuration: mobileTestDurationSeconds,
     durationStep: 1,
     maxKeyframes: maxKeyframes,
+    maxMiddleFrames: maxMiddleFrames,
+    maxKeyframesPerSecond: maxKeyframesPerSecond,
     maxKeyframesByMode: maxKeyframesByMode,
     usdPerSecond: usdPerSecond,
     referenceUsdPerSecond: referenceUsdPerSecond,
     supportsStartFrame: supportsStartFrame,
     supportsEndFrame: supportsEndFrame,
     requiresStartFrameWhenUsingFrames: requiresStartFrameWhenUsingFrames,
+    requiresStartFrameWithSource: requiresStartFrameWithSource,
     requiresPublicMediaUrls: requiresPublicMediaUrls,
     maxInputImagePixels: maxInputImagePixels,
     maxInputImageBytes: maxInputImageBytes,
@@ -312,7 +352,9 @@ class VideoModelDefinition {
     supportsAutoDuration: false,
     supportsAudio: supportsAudio,
     supportsDraft: supportsDraft,
+    draftSourceIsTaskId: draftSourceIsTaskId,
     supportsTimedKeyframes: supportsTimedKeyframes,
+    supportsOrderedMiddleFrames: supportsOrderedMiddleFrames,
     supportsFrameRate: supportsFrameRate,
     supportsSeed: supportsSeed,
     maxPromptCharacters: maxPromptCharacters,
@@ -326,6 +368,7 @@ class VideoModelDefinition {
     supportsGuidanceWithSource: supportsGuidanceWithSource,
     sourceGuidanceRequiresTimestamps: sourceGuidanceRequiresTimestamps,
     upscaleUsesResolutionTargets: upscaleUsesResolutionTargets,
+    resolutionsByMode: resolutionsByMode,
     outputKind: outputKind,
     progressReporting: progressReporting,
   );
@@ -340,8 +383,12 @@ class VideoModelDefinition {
         MediaReferenceKind.audio => maxAudioReferences,
       };
 
-  int maxKeyframesFor(VideoMode mode) =>
-      maxKeyframesByMode[mode] ?? maxKeyframes;
+  int maxKeyframesFor(VideoMode mode, {int? durationSeconds}) {
+    final maximum = maxKeyframesByMode[mode] ?? maxKeyframes;
+    final rate = maxKeyframesPerSecond;
+    if (rate == null || durationSeconds == null) return maximum;
+    return (durationSeconds * rate + 1).clamp(0, maximum);
+  }
 
   bool get supportsMediaReferences =>
       maxImageReferences > 0 ||
@@ -395,6 +442,13 @@ class VideoModelDefinition {
       withImageGuidance: withImageGuidance,
     ),
     stepSeconds: durationStep,
+    allowedSeconds: durationOptions
+        .where(
+          (seconds) =>
+              seconds <=
+              maxDurationFor(resolution, withImageGuidance: withImageGuidance),
+        )
+        .toList(),
   );
 
   int? maxReferenceSeconds(

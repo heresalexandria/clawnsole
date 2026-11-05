@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "motion-control-m1",
+  "canonical_model_id": "motion-control",
+  "label": "Motion Control",
+  "description": "Transfer motion from a hosted video to a character image.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 1,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "prompt_optional_modes": [
+    "v2v"
+  ],
+  "max_image_references": 0,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "supports_guidance_with_source": true,
+  "source_input_label": "Source video",
+  "source_input_hint": "Paste a publicly reachable HTTPS video URL.",
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "requires_start_frame_with_source": true,
+  "supports_start_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "id": "seedance-2.0-r2v",
+  "canonical_model_id": "seedance-2.0",
+  "label": "Seedance 2.0 Reference",
+  "description": "APIPod Seedance 2.0 Reference. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto",
+    "1:1",
+    "3:4",
+    "4:3",
+    "9:16",
+    "16:9",
+    "21:9"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4k",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 30000,
+  "max_image_references": 9,
+  "max_video_references": 3,
+  "max_audio_references": 3,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "max_input_image_bytes": 31457280,
+  "min_reference_video_seconds": 2,
+  "max_reference_video_seconds": 15,
+  "min_reference_audio_seconds": 2,
+  "max_reference_audio_seconds": 15,
+  "requires_visual_reference_for_audio": true
+}

@@ -211,6 +211,67 @@ void main() {
       );
     }
 
+    for (final finalization in [false, true]) {
+      final model = finalization ? 'seedance-2.5-draft' : 'seedance-2.5-edit';
+      test(
+        '$surface $model preserves task IDs and source media through restart',
+        () async {
+          final fixture = await _ApipodFixture.create(
+            companion: companion,
+            isIos: isIos,
+          );
+          addTearDown(fixture.dispose);
+          await fixture.provider.setProviderApiKey('apipod', _key);
+          fixture.expectedModel = model;
+          final pending = await fixture.gateway.submit(
+            _sourceSubmission(finalization: finalization),
+          );
+          expect(pending.status, 'Pending');
+          expect(pending.requestId, _requestId);
+          expect(fixture.normalizer.calls, 0);
+          expect(fixture.submitCount, 1);
+          if (finalization) {
+            expect(fixture.submittedPayload, {
+              'model': model,
+              'draft_task_id': 'completed-preview-task',
+              'resolution': '1080p',
+            });
+            expect(pending.config.source, isNull);
+            expect(pending.config.sourceLabel, 'completed-preview-task');
+            expect(pending.draftCacheUrl, isNull);
+          } else {
+            expect(fixture.submittedPayload!['video_urls'], [
+              'https://cdn.example.com/source.mp4',
+              'https://cdn.example.com/reference.mp4',
+            ]);
+            expect(
+              fixture.submittedPayload!['prompt'],
+              'Restyle the fox using @video2.',
+            );
+            expect(fixture.submittedPayload!.containsKey('duration'), isFalse);
+            expect(
+              pending.config.source!.value,
+              'https://cdn.example.com/source.mp4',
+            );
+            expect(
+              pending.config.references!.single.source!.value,
+              'https://cdn.example.com/reference.mp4',
+            );
+          }
+          await fixture.restart();
+          final restored = (await fixture.gateway.load()).generations.single;
+          expect(restored.mode, pending.mode);
+          expect(restored.config.toJson(), pending.config.toJson());
+          expect(restored.draftCacheUrl, isNull);
+          expect(fixture.submitCount, 1);
+          fixture.queueStatus = 'completed';
+          final completed = await fixture.delivery.pollStatus(restored);
+          expect(completed.status, 'Ready');
+          expect(completed.realizedCostUsd, 1.09);
+        },
+      );
+    }
+
     test(
       '$surface APIPod uncertain submission is persisted and never resent',
       () async {
@@ -319,6 +380,63 @@ GenerationSubmission _referenceSubmission(String model) {
   );
 }
 
+GenerationSubmission _sourceSubmission({required bool finalization}) {
+  final config = GenerationConfig(
+    duration: 5,
+    resolution: finalization ? 'fhd' : 'hd',
+    generateAudio: true,
+    safetyTolerance: 2,
+    draft: false,
+    aspectRatio: 'auto',
+    sourceLabel: finalization ? 'completed-preview-task' : 'source video',
+    references: finalization
+        ? null
+        : const [
+            MediaReferenceLabel(
+              label: 'reference',
+              kind: MediaReferenceKind.video,
+              durationSeconds: 4,
+              source: AssetReference(
+                kind: 'remote',
+                value: 'https://cdn.example.com/reference.mp4',
+                label: 'reference',
+              ),
+            ),
+          ],
+  );
+  return GenerationSubmission(
+    record: Generation(
+      localId: 'apipod-source-integration',
+      provider: 'apipod',
+      model: finalization ? 'seedance-2.5-draft' : 'seedance-2.5-edit',
+      billingUnit: 'usd',
+      status: 'submitting',
+      prompt: finalization ? '' : 'Restyle the fox using @Video 1.',
+      mode: finalization ? VideoMode.draftEnhance : VideoMode.v2v,
+      config: config,
+      createdAt: DateTime.utc(2026, 11, 5),
+      updatedAt: DateTime.utc(2026, 11, 5),
+    ),
+    input: finalization
+        ? {
+            'mode': 'draft_enhance',
+            'draft_task_id': 'completed-preview-task',
+            'resolution': 'fhd',
+          }
+        : {
+            'mode': 'v2v',
+            'prompt': 'Restyle the fox using @Video 1.',
+            'resolution': 'hd',
+            'aspect_ratio': 'auto',
+            'duration': 5,
+            'generate_audio': true,
+            'start_video': 'https://cdn.example.com/source.mp4',
+            'reference_videos': ['https://cdn.example.com/reference.mp4'],
+          },
+    autoFixReferenceVideos: true,
+  );
+}
+
 class _UnexpectedNormalizer
     implements
         ReferenceVideoNormalizationService,
@@ -408,7 +526,11 @@ class _ApipodFixture {
       final payload = jsonDecode(request.body) as Map<String, dynamic>;
       expect(payload['model'], expectedModel);
       submittedPayload = payload;
-      expect(payload['prompt'], contains('fox'));
+      if (payload.containsKey('draft_task_id')) {
+        expect(payload.containsKey('prompt'), isFalse);
+      } else {
+        expect(payload['prompt'], contains('fox'));
+      }
       expect(request.headers['idempotency-key'], isNotEmpty);
       final marker = (await local.read()).generations.single;
       expect(marker.status, submissionUnknownStatus);

@@ -509,7 +509,7 @@ class GenerationActionsMenu extends StatelessWidget {
     if (onVisibility != null) _DenseGenerationAction.visibility,
     if (includeSave && (item.resultAsset != null || item.resultUrl != null))
       _DenseGenerationAction.save,
-    if (item.draftCacheUrl != null) _DenseGenerationAction.enhance,
+    if (controller.canEnhance(item)) _DenseGenerationAction.enhance,
     if (includeReuse && controller.canReuse(item)) _DenseGenerationAction.reuse,
     if (includeExtend && controller.canExtend(item))
       _DenseGenerationAction.extend,

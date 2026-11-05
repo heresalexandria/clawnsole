@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "grok-imagine-i2v",
+  "canonical_model_id": "grok-imagine",
+  "label": "Grok Imagine · Frames",
+  "description": "APIPod Grok Imagine · Frames. Public media URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "2:3",
+    "3:2",
+    "1:1",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 6,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "duration_options": [
+    6,
+    10,
+    15
+  ],
+  "max_prompt_characters": 4000,
+  "max_image_references": 7,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

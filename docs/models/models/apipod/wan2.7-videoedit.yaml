@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "wan2.7-videoedit",
+  "canonical_model_id": "wan2.7-video",
+  "label": "WAN 2.7 Video Edit",
+  "description": "Edit or extend a publicly hosted source video.",
+  "modes": [
+    "v2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "fhd",
+      "label": "1080P",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "hd",
+      "label": "720P",
+      "detail": "1280 × 720"
+    }
+  ],
+  "min_duration": 2,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 5000,
+  "max_image_references": 3,
+  "max_video_references": 0,
+  "max_audio_references": 0,
+  "supports_guidance_with_source": true,
+  "source_input_label": "Source video",
+  "source_input_hint": "Paste a publicly reachable HTTPS video URL.",
+  "duration_from_source_modes": [
+    "v2v"
+  ],
+  "min_source_video_seconds": 2,
+  "max_source_video_seconds": 10,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs.",
+  "max_input_image_bytes": 20971520
+}

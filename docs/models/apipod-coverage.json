@@ -1,0 +1,448 @@
+{
+  "checked_at": "2026-11-05",
+  "source": "https://www.apipod.ai/pricing.md",
+  "active_video_routes": [
+    {
+      "id": "gemini-omni-extend",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni/gemini-omni-extend"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-extend",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1/gemini-omni-flash-1.1-extend"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-i2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1/gemini-omni-flash-1.1-i2v"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1-lite/gemini-omni-flash-1.1-lite-i2v"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1-lite/gemini-omni-flash-1.1-lite-r2v"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1-lite/gemini-omni-flash-1.1-lite-t2v"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-r2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1/gemini-omni-flash-1.1-r2v"
+    },
+    {
+      "id": "gemini-omni-flash-1.1-t2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni-flash-1.1/gemini-omni-flash-1.1-t2v"
+    },
+    {
+      "id": "gemini-omni-i2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni/gemini-omni-i2v"
+    },
+    {
+      "id": "gemini-omni-r2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni/gemini-omni-r2v"
+    },
+    {
+      "id": "gemini-omni-t2v",
+      "schema_source": "https://www.apipod.ai/models/gemini-omni/gemini-omni-t2v"
+    },
+    {
+      "id": "grok-imagine-1.5-fast",
+      "schema_source": "https://www.apipod.ai/models/grok-imagine-1.5/grok-imagine-1.5-fast"
+    },
+    {
+      "id": "grok-imagine-1.5-preview",
+      "schema_source": "https://www.apipod.ai/models/grok-imagine-1.5/grok-imagine-1.5-preview"
+    },
+    {
+      "id": "grok-imagine-1.5-vip",
+      "schema_source": "https://www.apipod.ai/models/grok-imagine-1.5/grok-imagine-1.5-vip"
+    },
+    {
+      "id": "grok-imagine-i2v",
+      "schema_source": "https://www.apipod.ai/models/grok-imagine/grok-imagine-i2v"
+    },
+    {
+      "id": "grok-imagine-t2v",
+      "schema_source": "https://www.apipod.ai/models/grok-imagine/grok-imagine-t2v"
+    },
+    {
+      "id": "kling-2.6-motion-control",
+      "schema_source": "https://www.apipod.ai/models/kling-motion-control/kling-2.6-motion-control"
+    },
+    {
+      "id": "kling-3.0-i2v",
+      "schema_source": "https://www.apipod.ai/models/kling-3.0/kling-3.0-i2v"
+    },
+    {
+      "id": "kling-3.0-t2v",
+      "schema_source": "https://www.apipod.ai/models/kling-3.0/kling-3.0-t2v"
+    },
+    {
+      "id": "kling-4.0-i2v",
+      "schema_source": "https://www.apipod.ai/models/kling-4.0/kling-4.0-i2v"
+    },
+    {
+      "id": "kling-4.0-r2v",
+      "schema_source": "https://www.apipod.ai/models/kling-4.0/kling-4.0-r2v"
+    },
+    {
+      "id": "kling-4.0-t2v",
+      "schema_source": "https://www.apipod.ai/models/kling-4.0/kling-4.0-t2v"
+    },
+    {
+      "id": "minimax-h3-i2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3/minimax-h3-i2v"
+    },
+    {
+      "id": "minimax-h3-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3-lite/minimax-h3-lite-i2v"
+    },
+    {
+      "id": "minimax-h3-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3-lite/minimax-h3-lite-r2v"
+    },
+    {
+      "id": "minimax-h3-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3-lite/minimax-h3-lite-t2v"
+    },
+    {
+      "id": "minimax-h3-max-i2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3-max/minimax-h3-max-i2v"
+    },
+    {
+      "id": "minimax-h3-max-t2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3-max/minimax-h3-max-t2v"
+    },
+    {
+      "id": "minimax-h3-r2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3/minimax-h3-r2v"
+    },
+    {
+      "id": "minimax-h3-t2v",
+      "schema_source": "https://www.apipod.ai/models/minimax-h3/minimax-h3-t2v"
+    },
+    {
+      "id": "motion-control-m1",
+      "schema_source": "https://www.apipod.ai/models/motion-control/motion-control-m1"
+    },
+    {
+      "id": "muse-video-i2v",
+      "schema_source": "https://www.apipod.ai/models/muse-video/muse-video-i2v"
+    },
+    {
+      "id": "muse-video-r2v",
+      "schema_source": "https://www.apipod.ai/models/muse-video/muse-video-r2v"
+    },
+    {
+      "id": "muse-video-t2v",
+      "schema_source": "https://www.apipod.ai/models/muse-video/muse-video-t2v"
+    },
+    {
+      "id": "seedance-1.0-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-lite-i2v"
+    },
+    {
+      "id": "seedance-1.0-lite-i2v-ref",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-lite-i2v-ref"
+    },
+    {
+      "id": "seedance-1.0-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-lite-t2v"
+    },
+    {
+      "id": "seedance-1.0-pro-fast-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-pro-fast-i2v"
+    },
+    {
+      "id": "seedance-1.0-pro-fast-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-pro-fast-t2v"
+    },
+    {
+      "id": "seedance-1.0-pro-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-pro-i2v"
+    },
+    {
+      "id": "seedance-1.0-pro-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-1.0/seedance-1.0-pro-t2v"
+    },
+    {
+      "id": "seedance-2.0-fast-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast/seedance-2.0-fast-i2v"
+    },
+    {
+      "id": "seedance-2.0-fast-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast-lite/seedance-2.0-fast-lite-i2v"
+    },
+    {
+      "id": "seedance-2.0-fast-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast-lite/seedance-2.0-fast-lite-r2v"
+    },
+    {
+      "id": "seedance-2.0-fast-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast-lite/seedance-2.0-fast-lite-t2v"
+    },
+    {
+      "id": "seedance-2.0-fast-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast/seedance-2.0-fast-r2v"
+    },
+    {
+      "id": "seedance-2.0-fast-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-fast/seedance-2.0-fast-t2v"
+    },
+    {
+      "id": "seedance-2.0-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0/seedance-2.0-i2v"
+    },
+    {
+      "id": "seedance-2.0-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-lite/seedance-2.0-lite-i2v"
+    },
+    {
+      "id": "seedance-2.0-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-lite/seedance-2.0-lite-r2v"
+    },
+    {
+      "id": "seedance-2.0-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-lite/seedance-2.0-lite-t2v"
+    },
+    {
+      "id": "seedance-2.0-mini-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini/seedance-2.0-mini-i2v"
+    },
+    {
+      "id": "seedance-2.0-mini-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini-lite/seedance-2.0-mini-lite-i2v"
+    },
+    {
+      "id": "seedance-2.0-mini-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini-lite/seedance-2.0-mini-lite-r2v"
+    },
+    {
+      "id": "seedance-2.0-mini-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini-lite/seedance-2.0-mini-lite-t2v"
+    },
+    {
+      "id": "seedance-2.0-mini-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini/seedance-2.0-mini-r2v"
+    },
+    {
+      "id": "seedance-2.0-mini-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-mini/seedance-2.0-mini-t2v"
+    },
+    {
+      "id": "seedance-2.0-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0/seedance-2.0-r2v"
+    },
+    {
+      "id": "seedance-2.0-spicy-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-spicy/seedance-2.0-spicy-i2v"
+    },
+    {
+      "id": "seedance-2.0-spicy-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-spicy/seedance-2.0-spicy-r2v"
+    },
+    {
+      "id": "seedance-2.0-spicy-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-spicy/seedance-2.0-spicy-t2v"
+    },
+    {
+      "id": "seedance-2.0-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0/seedance-2.0-t2v"
+    },
+    {
+      "id": "seedance-2.0-x-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-x/seedance-2.0-x-r2v"
+    },
+    {
+      "id": "seedance-2.0-x-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.0-x/seedance-2.0-x-t2v"
+    },
+    {
+      "id": "seedance-2.5-draft",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-draft"
+    },
+    {
+      "id": "seedance-2.5-edit",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-edit"
+    },
+    {
+      "id": "seedance-2.5-extend",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-extend"
+    },
+    {
+      "id": "seedance-2.5-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-i2v"
+    },
+    {
+      "id": "seedance-2.5-lite-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-lite/seedance-2.5-lite-i2v"
+    },
+    {
+      "id": "seedance-2.5-lite-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-lite/seedance-2.5-lite-r2v"
+    },
+    {
+      "id": "seedance-2.5-lite-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-lite/seedance-2.5-lite-t2v"
+    },
+    {
+      "id": "seedance-2.5-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-r2v"
+    },
+    {
+      "id": "seedance-2.5-spicy-edit",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-spicy/seedance-2.5-spicy-edit"
+    },
+    {
+      "id": "seedance-2.5-spicy-extend",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-spicy/seedance-2.5-spicy-extend"
+    },
+    {
+      "id": "seedance-2.5-spicy-i2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-spicy/seedance-2.5-spicy-i2v"
+    },
+    {
+      "id": "seedance-2.5-spicy-r2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-spicy/seedance-2.5-spicy-r2v"
+    },
+    {
+      "id": "seedance-2.5-spicy-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5-spicy/seedance-2.5-spicy-t2v"
+    },
+    {
+      "id": "seedance-2.5-t2v",
+      "schema_source": "https://www.apipod.ai/models/seedance-2.5/seedance-2.5-t2v"
+    },
+    {
+      "id": "veo3-1-fast",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-fast"
+    },
+    {
+      "id": "veo3-1-fast-4k",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-fast-4k"
+    },
+    {
+      "id": "veo3-1-fast-ref",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-fast-ref"
+    },
+    {
+      "id": "veo3-1-lite",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-lite"
+    },
+    {
+      "id": "veo3-1-lite-4k",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-lite-4k"
+    },
+    {
+      "id": "veo3-1-quality",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-quality"
+    },
+    {
+      "id": "veo3-1-quality-4k",
+      "schema_source": "https://www.apipod.ai/models/veo3-1/veo3-1-quality-4k"
+    },
+    {
+      "id": "wan2.7-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan2.7-video/wan2.7-i2v"
+    },
+    {
+      "id": "wan2.7-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan2.7-video/wan2.7-t2v"
+    },
+    {
+      "id": "wan2.7-videoedit",
+      "schema_source": "https://www.apipod.ai/models/wan2.7-video/wan2.7-videoedit"
+    },
+    {
+      "id": "wan3.0-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video/wan3.0-i2v"
+    },
+    {
+      "id": "wan3.0-prime-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime/wan3.0-prime-i2v"
+    },
+    {
+      "id": "wan3.0-prime-r2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime/wan3.0-prime-r2v"
+    },
+    {
+      "id": "wan3.0-prime-spicy-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime-spicy/wan3.0-prime-spicy-i2v"
+    },
+    {
+      "id": "wan3.0-prime-spicy-r2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime-spicy/wan3.0-prime-spicy-r2v"
+    },
+    {
+      "id": "wan3.0-prime-spicy-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime-spicy/wan3.0-prime-spicy-t2v"
+    },
+    {
+      "id": "wan3.0-prime-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-prime/wan3.0-prime-t2v"
+    },
+    {
+      "id": "wan3.0-pro-spicy-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-pro-spicy/wan3.0-pro-spicy-i2v"
+    },
+    {
+      "id": "wan3.0-pro-spicy-r2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-pro-spicy/wan3.0-pro-spicy-r2v"
+    },
+    {
+      "id": "wan3.0-pro-spicy-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-pro-spicy/wan3.0-pro-spicy-t2v"
+    },
+    {
+      "id": "wan3.0-r2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video/wan3.0-r2v"
+    },
+    {
+      "id": "wan3.0-spicy-i2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-spicy/wan3.0-spicy-i2v"
+    },
+    {
+      "id": "wan3.0-spicy-r2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-spicy/wan3.0-spicy-r2v"
+    },
+    {
+      "id": "wan3.0-spicy-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video-spicy/wan3.0-spicy-t2v"
+    },
+    {
+      "id": "wan3.0-t2v",
+      "schema_source": "https://www.apipod.ai/models/wan3.0-video/wan3.0-t2v"
+    }
+  ],
+  "offline_routes": [
+    {
+      "id": "seedance-2.5-x-t2v",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "seedance-2.5-x-r2v",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "sora-2-vip",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "seedance-1.5-pro-i2v",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "seedance-1.5-pro-t2v",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "sora-2-pro",
+      "reason": "APIPod marks this route offline"
+    },
+    {
+      "id": "sora-2",
+      "reason": "APIPod marks this route offline"
+    }
+  ]
+}

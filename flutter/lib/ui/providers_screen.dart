@@ -665,7 +665,9 @@ class _PricingTable extends StatelessWidget {
   /// route has no price for that duration (frame- and megapixel-based routes
   /// quote a different unit, so they compare as unpriced).
   static double? _clipPrice(ProviderModelPrice model, int seconds) =>
-      model.pricingUnit != 'per-second' || !model.hasPriceFor(seconds)
+      (model.pricingUnit != 'per-second' &&
+              !model.durationPrices.containsKey(seconds)) ||
+          !model.hasPriceFor(seconds)
       ? null
       : model.priceFor(seconds);
 

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "kling-3.0-t2v",
+  "canonical_model_id": "kling-3.0",
+  "label": "Kling 3.0 · Text",
+  "description": "APIPod Kling 3.0 · Text.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16",
+    "1:1"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    },
+    {
+      "id": "4k",
+      "label": "4k",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 3,
+  "max_duration": 15,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": true,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 2500,
+  "prompt_optional_modes": [
+    "t2v"
+  ]
+}

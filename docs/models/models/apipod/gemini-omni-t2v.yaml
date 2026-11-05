@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "gemini-omni-t2v",
+  "canonical_model_id": "gemini-omni",
+  "label": "Gemini Omni · Text",
+  "description": "APIPod currently returns an inaccessible output link for this route (verified 2026-11-05). Generation may be charged without a downloadable video.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "720p",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "fhd",
+      "label": "1080p",
+      "detail": "1920 × 1080"
+    }
+  ],
+  "min_duration": 10,
+  "max_duration": 10,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "generation_notice": "APIPod currently returns an inaccessible output link for this route (verified 2026-11-05). Generation may be charged without a downloadable video.",
+  "max_prompt_characters": 4000
+}

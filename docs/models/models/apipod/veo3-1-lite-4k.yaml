@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "veo3-1-lite-4k",
+  "canonical_model_id": "veo3-1",
+  "label": "Veo 3.1 Lite 4K",
+  "description": "APIPod Veo 3.1 Lite 4K. Public media URLs required.",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "4k",
+      "label": "4k",
+      "detail": "3840 × 2160"
+    }
+  ],
+  "min_duration": 8,
+  "max_duration": 8,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.0,
+  "supports_audio": false,
+  "availability": {
+    "min_version": "0.64.0"
+  },
+  "max_prompt_characters": 4000,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "requires_public_media_urls": true,
+  "reference_prompt_hint": "Use publicly reachable HTTPS media URLs."
+}

@@ -157,10 +157,25 @@ supported routes, official sources, pricing, and provider limitations.
 
 ## APIPod provider
 
-APIPod Seedance 2.5 requires version 0.63.0 and supports text, first/last-frame,
-and multimodal generation through the native and companion gateways. Media
-inputs use public URLs; the public API has no documented file upload endpoint.
-See the [APIPod audit](audit-apipod.md) for routes, rates, sources, and limits.
+APIPod’s 103 active video routes require version 0.64.0. Version 0.63 keeps
+its original three Seedance 2.5 contracts through explicitly bounded legacy
+manifests. Native and companion gateways use the same schema-validated adapter.
+Media inputs use public URLs; the public API has no documented file upload
+endpoint. See the [APIPod audit](audit-apipod.md) for coverage and pricing.
+
+Explicitly versioned catalogs older than the running normal app are rejected,
+so a failed site deployment cannot remove newly bundled providers. Same/newer
+catalogs remain authoritative and can deliberately remove retired routes.
+Legacy unversioned catalogs and mobile-test gating retain their prior behavior.
+
+`duration_options` lists discrete durations when a uniform step cannot express
+the allowed choices. `resolutions_by_mode` restricts output resolution by mode.
+`draft_source_is_task_id` uses a completed provider task ID for draft finalization
+instead of a cache URL. `supports_ordered_middle_frames` keeps chronological
+frames separate from explicit timestamps; `max_middle_frames` and
+`max_keyframes_per_second` constrain their count. `generation_notice` displays
+known provider behavior before submission. `requires_start_frame_with_source` requires a character
+image alongside a source video for motion-transfer routes.
 
 `requires_public_media_urls` disables file upload and local normalization for
 routes that only accept hosted media. `requires_start_frame_when_using_frames`

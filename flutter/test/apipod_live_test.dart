@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:clawnsole/core/apipod_api.dart';
+import 'package:clawnsole/core/apipod_pricing.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/generation_status.dart';
+import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/public_media_http.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -14,16 +16,50 @@ const _imageUrl =
     'https://fastly.picsum.photos/id/10/768/512.jpg'
     '?hmac=ymRW7CNzICp4_62XcWFzB5IVh7-fEldiC9iZqxRR4MU';
 
+// The expanded suite uses the cheapest documented text inputs across eight
+// families. At the audited prices this totals $1.328, below its $3 ceiling.
+const _catalogCases = <String, Map<String, Object?>>{
+  'seedance-2.0-mini-t2v': {'duration': 4, 'resolution': 'sd'},
+  'veo3-1-lite': {'duration': 8, 'resolution': 'hd'},
+  'grok-imagine-1.5-fast': {'duration': 6, 'resolution': 'sd'},
+  'wan3.0-t2v': {'duration': 2, 'resolution': 'sd'},
+  'minimax-h3-lite-t2v': {'duration': 5, 'resolution': 'qhd'},
+  'muse-video-t2v': {'duration': 5, 'resolution': 'hd'},
+  'kling-3.0-t2v': {'duration': 3, 'resolution': 'hd'},
+  'gemini-omni-t2v': {'duration': 10, 'resolution': 'hd'},
+};
+
 void main() {
   final key = Platform.environment['APIPOD_API_KEY']?.trim() ?? '';
   final enabled = Platform.environment['RUN_APIPOD_LIVE_TESTS'] == 'true';
   final reportPath = Platform.environment['APIPOD_LIVE_REPORT'];
   final resume = Platform.environment['APIPOD_LIVE_RESUME'] == 'true';
   final outputDirectory = Platform.environment['APIPOD_LIVE_OUTPUT_DIR'];
+  final suite = Platform.environment['APIPOD_LIVE_SUITE'] ?? 'seedance-2.5';
+  final expanded = suite == 'catalog';
 
   test(
-    'live APIPod Seedance 2.5 text, frames, and video reference delivery',
+    expanded
+        ? 'live APIPod expanded video catalog delivery'
+        : 'live APIPod Seedance 2.5 text, frames, and video reference delivery',
     () async {
+      expect(suite, isIn(const ['seedance-2.5', 'catalog']));
+      if (expanded) {
+        expect(
+          reportPath?.isNotEmpty,
+          isTrue,
+          reason: 'APIPOD_LIVE_REPORT is required to resume paid catalog jobs.',
+        );
+      }
+      if (!resume && reportPath != null && reportPath.isNotEmpty) {
+        expect(
+          await File(reportPath).exists(),
+          isFalse,
+          reason:
+              'An existing report must be resumed with APIPOD_LIVE_RESUME=true, '
+              'not overwritten with duplicate submissions.',
+        );
+      }
       final client = http.Client();
       final mediaClient = PublicMediaClient();
       addTearDown(client.close);
@@ -34,9 +70,11 @@ void main() {
               jsonDecode(await File(reportPath).readAsString()) as Map,
             )
           : <String, Object?>{
+              'suite': suite,
               'started_at': DateTime.now().toUtc().toIso8601String(),
               'jobs': <Map<String, Object?>>[],
             };
+      expect(report['suite'] ?? 'seedance-2.5', suite);
       final jobs = (report['jobs']! as List)
           .map((job) => Map<String, Object?>.from(job as Map))
           .toList();
@@ -60,15 +98,58 @@ void main() {
       // ignore: avoid_print
       print('APIPod live account verified.');
 
-      final image = await mediaClient
-          .get(Uri.parse(_imageUrl))
-          .timeout(const Duration(seconds: 45));
-      expect(image.statusCode, 200);
-      expect(image.headers['content-type'], startsWith('image/'));
-      expect(image.bodyBytes.length, greaterThan(1024));
+      if (!expanded) {
+        final image = await mediaClient
+            .get(Uri.parse(_imageUrl))
+            .timeout(const Duration(seconds: 45));
+        expect(image.statusCode, 200);
+        expect(image.headers['content-type'], startsWith('image/'));
+        expect(image.bodyBytes.length, greaterThan(1024));
+      }
+
+      Map<String, Object?> inputFor(String model, Map<String, Object?> extra) =>
+          <String, Object?>{
+            'mode': expanded || model.endsWith('-t2v') ? 't2v' : 'i2v',
+            'prompt':
+                'A quiet cinematic forest landscape in soft morning light, '
+                'leaves moving gently in a breeze, one continuous slow camera '
+                'push, natural realistic motion, no people, no text.',
+            'duration': 4,
+            'resolution': 'sd',
+            'aspect_ratio': model.endsWith('-i2v') ? 'auto' : '16:9',
+            'generate_audio': false,
+            ...extra,
+          };
+
+      if (expanded) {
+        var estimatedMaximum = 0.0;
+        for (final entry in _catalogCases.entries) {
+          // Validate every route before the first paid submission.
+          api.generationPayload(entry.key, inputFor(entry.key, entry.value));
+          final estimate = apipodEstimate(
+            entry.key,
+            VideoMode.t2v,
+            GenerationConfig(
+              aspectRatio: '16:9',
+              duration: entry.value['duration']! as int,
+              resolution: entry.value['resolution']! as String,
+              generateAudio: false,
+              safetyTolerance: 2,
+              draft: false,
+            ),
+          );
+          expect(estimate.isAvailable, isTrue);
+          estimatedMaximum += estimate.maximumUsd;
+        }
+        expect(estimatedMaximum, greaterThan(0));
+        expect(estimatedMaximum, lessThanOrEqualTo(3));
+        report['estimated_maximum_usd'] = estimatedMaximum;
+        await saveReport();
+      }
 
       Future<String> generate(String model, Map<String, Object?> extra) async {
         final previous = jobs.where((job) => job['model'] == model).firstOrNull;
+        if (expanded && previous?['status'] == 'verified') return '';
         final job =
             previous ??
             <String, Object?>{'model': model, 'status': 'submitting'};
@@ -88,28 +169,27 @@ void main() {
           id = savedId! as String;
           pollingUrl = 'https://api.apipod.ai/v1/videos/status/$id';
         } else {
+          final input = inputFor(model, extra);
+          job['input'] = api.generationPayload(model, input);
           jobs.add(job);
           await saveReport();
           // A single submit per logical job. Ambiguous responses must never
           // trigger a blind retry or another paid generation in this test.
-          final receipt = await api.submit(
-            key,
-            model,
-            <String, Object?>{
-              'mode': model.endsWith('-t2v') ? 't2v' : 'i2v',
-              'prompt':
-                  'A quiet cinematic forest landscape in soft morning light, '
-                  'leaves moving gently in a breeze, one continuous slow camera '
-                  'push, natural realistic motion, no people, no text.',
-              'duration': 4,
-              'resolution': 'sd',
-              'aspect_ratio': model.endsWith('-i2v') ? 'auto' : '16:9',
-              'generate_audio': false,
-              ...extra,
-            },
-            operationId:
-                'apipod-live-${DateTime.now().microsecondsSinceEpoch}-$model',
-          );
+          late final Map<String, Object?> receipt;
+          try {
+            receipt = await api.submit(
+              key,
+              model,
+              input,
+              operationId:
+                  'apipod-live-${DateTime.now().microsecondsSinceEpoch}-$model',
+            );
+          } on ProviderException catch (error) {
+            job['submission_error'] = error.message;
+            job['submission_http_status'] = error.status;
+            await saveReport();
+            rethrow;
+          }
           id = receipt['id']! as String;
           pollingUrl = receipt['polling_url']! as String;
         }
@@ -135,6 +215,9 @@ void main() {
           }
           final state = normalizeGenerationStatus(status['status']);
           job['status'] = state;
+          if (isGenerationFailureStatus(state)) {
+            job['error'] = status['error'];
+          }
           await saveReport();
           if (state != lastState) {
             // ignore: avoid_print
@@ -202,20 +285,48 @@ void main() {
         return outputUrl;
       }
 
-      final textOutput = await generate('seedance-2.5-t2v', const {});
-      await Future.wait([
-        generate('seedance-2.5-i2v', const {
-          'keyframes': [_imageUrl],
-        }),
-        generate('seedance-2.5-r2v', {
-          'reference_videos': [textOutput],
-          'aspect_ratio': 'auto',
-          'prompt':
-              'Use @Video 1 only as a visual style reference. Create a new '
-              'daytime scene of a quiet mountain lake with still water and a '
-              'distant pine forest. Static camera, realistic morning light.',
-        }),
-      ]);
+      if (expanded) {
+        final cases = _catalogCases.entries.iterator;
+        final failures = <String>[];
+        report.remove('failures');
+        Future<void> check(MapEntry<String, Map<String, Object?>> entry) async {
+          try {
+            await generate(entry.key, entry.value);
+          } catch (error) {
+            failures.add('${entry.key}: $error');
+            report['failures'] = failures;
+            await saveReport();
+            // ignore: avoid_print
+            print('APIPod live ${entry.key} failed: $error');
+          }
+        }
+
+        // Three simultaneous jobs keep the smoke run useful without an
+        // account-wide burst. A rejected or ambiguous submit is never retried.
+        Future<void> worker() async {
+          while (cases.moveNext()) {
+            await check(cases.current);
+          }
+        }
+
+        await Future.wait(List.generate(3, (_) => worker()));
+        expect(failures, isEmpty, reason: failures.join('\n'));
+      } else {
+        final textOutput = await generate('seedance-2.5-t2v', const {});
+        await Future.wait([
+          generate('seedance-2.5-i2v', const {
+            'keyframes': [_imageUrl],
+          }),
+          generate('seedance-2.5-r2v', {
+            'reference_videos': [textOutput],
+            'aspect_ratio': 'auto',
+            'prompt':
+                'Use @Video 1 only as a visual style reference. Create a new '
+                'daytime scene of a quiet mountain lake with still water and a '
+                'distant pine forest. Static camera, realistic morning light.',
+          }),
+        ]);
+      }
       report['completed_at'] = DateTime.now().toUtc().toIso8601String();
       await saveReport();
     },
