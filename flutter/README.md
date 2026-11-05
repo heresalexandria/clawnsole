@@ -10,7 +10,7 @@ only macOS desktop lifecycle, packaging, and self-update.
 
 - BFL FLUX 3 and FLUX Video Upscale, LTX 2.3, ArtCraft’s live video catalog,
   selected Create-ready Atlas Cloud models, Runway’s first-party video catalog,
-  and Krea’s live multi-vendor video catalog
+  Krea’s live multi-vendor video catalog, and APIPod Seedance 2.5
 - Keyless Apple Intelligence image creation on supported iOS devices, with a
   still-image model and a one-image-per-second silent MP4 sequence model
 - Text-to-video and image/reference-to-video across providers, plus FLUX 3
@@ -94,7 +94,8 @@ the original reference is never modified.
 
 ## Install
 
-Use Flutter 3.35.1 or newer and Dart 3.9 or newer.
+Use Flutter 3.47.0 and Dart 3.13 to match CI. Android uses Gradle 8.14,
+Android Gradle Plugin 8.11.1, and Kotlin 2.2.20 to meet that SDK’s minimums.
 
 ```bash
 cd flutter
@@ -308,9 +309,15 @@ flutter build web
 ```
 
 The implementation follows the official BFL, LTX, ArtCraft, Atlas Cloud,
-Runway, and Krea API, polling, model capability, and pricing documentation.
+Runway, Krea, fal, and APIPod API, polling, model capability, and pricing documentation.
 Atlas models are read from its public catalog; supported-duration Create-ready
 costs use exact route payloads with its calculate endpoint and checked-in
 starting-rate fallbacks. Krea models are read from its live OpenAPI spec, and
 Create-ready costs use its published fixed per-request USD prices rather than
 a calculate endpoint.
+
+APIPod supports Seedance 2.5 text, first/last-frame, and multimodal reference
+routes at 480p/720p, with 4–30-second output and optional generated audio.
+Media inputs require public HTTPS URLs; local uploads are unavailable.
+The adapter uses the settings-vault key or companion `APIPOD_API_KEY` fallback.
+See [the APIPod audit](../docs/models/audit-apipod.md) for schema and pricing details.

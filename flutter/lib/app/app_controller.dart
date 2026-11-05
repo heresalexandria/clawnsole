@@ -4842,6 +4842,12 @@ class AppController extends ChangeNotifier {
     final hydrating = <(String, ReferenceCandidate)>[];
     _inComposerTab(tab, () {
       for (final candidate in candidates.where((item) => item.kind == kind)) {
+        if (selectedModel.requiresPublicMediaUrls &&
+            (candidate.asset.isLocal ||
+                !_isPublicMediaUrl(candidate.asset.value))) {
+          refusals.add(publicMediaUrlHint);
+          continue;
+        }
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
@@ -5823,12 +5829,14 @@ class AppController extends ChangeNotifier {
       );
     }
     if (durationSeconds != null && durationSeconds > 0) {
-      final minimum = kind == MediaReferenceKind.audio
-          ? model.minReferenceAudioSeconds
-          : null;
+      final minimum = switch (kind) {
+        MediaReferenceKind.audio => model.minReferenceAudioSeconds,
+        MediaReferenceKind.video => model.minReferenceVideoSeconds,
+        MediaReferenceKind.image => null,
+      };
       if (minimum != null && durationSeconds + _secondSlack < minimum) {
         return ReferenceBudgetVerdict.refused(
-          _referenceMinimumSecondsProblem(model, minimum),
+          _referenceMinimumSecondsProblem(model, kind, minimum),
         );
       }
       final budget = referenceSecondsLimit(kind);
@@ -5868,9 +5876,10 @@ class AppController extends ChangeNotifier {
 
   static String _referenceMinimumSecondsProblem(
     VideoModelDefinition model,
+    MediaReferenceKind kind,
     int minimum,
   ) =>
-      '${model.label} needs each reference audio clip to be at least '
+      '${model.label} needs each reference ${kind.name} clip to be at least '
       '${_secondsLabel(minimum.toDouble())}.';
 
   /// A budget reading: `30 s`, `42.5 s`. Whole seconds wherever the figure
@@ -5946,6 +5955,10 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
+    if (selectedModel.requiresPublicMediaUrls) {
+      showNotice(publicMediaUrlHint);
+      return;
+    }
     // The pick belongs to the tab it was started from, however long the
     // picker sits open and whatever the director does meanwhile.
     final tab = activeComposerTab;
@@ -6020,6 +6033,10 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
+    if (selectedModel.requiresPublicMediaUrls) {
+      showNotice(publicMediaUrlHint);
+      return;
+    }
     final tab = activeComposerTab;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
     _inComposerTab(tab, () => _pendingPickerReferenceAdds += 1);
@@ -6053,6 +6070,10 @@ class AppController extends ChangeNotifier {
   }) async {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
+    if (_inComposerTab(target, () => selectedModel.requiresPublicMediaUrls)) {
+      showNotice(_inComposerTab(target, () => publicMediaUrlHint));
+      return;
+    }
     final attached = _inComposerTab(target, () {
       // A local pick carries no duration yet — the metadata loader reads it
       // once the tile mounts — so only the count budgets can be judged here.
@@ -6623,6 +6644,19 @@ class AppController extends ChangeNotifier {
     if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
     }
+    if (model.requiresPublicMediaUrls) {
+      final sources = <String>[
+        ...form.keyframes.map((frame) => frame.requestSource),
+        ...form.references.map((reference) => reference.requestSource),
+        if (form.videoAsset != null || form.videoUrl.trim().isNotEmpty)
+          form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        if (form.draftAsset != null || form.draftUrl.trim().isNotEmpty)
+          form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
+      ];
+      if (sources.any((source) => !_isPublicMediaUrl(source))) {
+        return publicMediaUrlHint;
+      }
+    }
     if (form.mode == VideoMode.t2v && !model.modes.contains(VideoMode.t2v)) {
       if (model.supportsMediaReferences) {
         return 'Add at least one image, video, or audio reference for ${model.label}.';
@@ -6649,6 +6683,11 @@ class AppController extends ChangeNotifier {
     final promptLimit = model.maxPromptCharacters;
     if (promptLimit != null && prompt.length > promptLimit) {
       return '${model.label} accepts prompts up to $promptLimit characters.';
+    }
+    if (model.requiresStartFrameWhenUsingFrames &&
+        form.keyframes.isNotEmpty &&
+        !form.keyframes.any((frame) => frame.role == KeyframeRole.start)) {
+      return '${model.label} needs a first frame before an ending frame.';
     }
     if (form.mode == VideoMode.i2v) {
       if (form.keyframes.isEmpty && form.references.isEmpty) {
@@ -6841,6 +6880,19 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  String get publicMediaUrlHint =>
+      '${selectedModel.label} requires public HTTPS media URLs. '
+      'Paste a hosted URL; local uploads and private library files are not supported.';
+
+  bool _isPublicMediaUrl(String source) {
+    try {
+      validatedProviderUrl(source.trim());
+      return true;
+    } on ProviderException {
+      return false;
+    }
+  }
+
   String? _referenceSourceProblem() {
     if (!form.references.any((item) => item.requestSource.isEmpty)) {
       return null;
@@ -6865,10 +6917,10 @@ class AppController extends ChangeNotifier {
           .toList();
       final minimum = kind == MediaReferenceKind.audio
           ? model.minReferenceAudioSeconds
-          : null;
+          : model.minReferenceVideoSeconds;
       if (minimum != null &&
           knownDurations.any((seconds) => seconds + _secondSlack < minimum)) {
-        return _referenceMinimumSecondsProblem(model, minimum);
+        return _referenceMinimumSecondsProblem(model, kind, minimum);
       }
       final maximum = model.maxReferenceSeconds(
         kind,

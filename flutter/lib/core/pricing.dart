@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'models.dart';
+import 'apipod_catalog.dart';
 import 'artcraft_reference_pricing.dart';
 import 'provider_catalog.dart';
 import 'runway_pricing.dart';
@@ -235,9 +236,12 @@ ResolvedProviderCost resolveProviderCost(
   final minimum = generation.quotedCostUsdMin;
   final maximum = generation.quotedCostUsdMax;
   if (allowDeterministicQuote &&
-      // fal's published list estimates exclude account promotions and are
-      // not receipts. Only an explicit provider cost can settle these jobs.
-      providerByIdForRouting(generation.provider)?.adapter != 'fal' &&
+      // fal's list rates exclude account promotions; APIPod's per-second
+      // estimates cannot determine final token usage. Neither is a receipt.
+      !const {
+        'fal',
+        'apipod',
+      }.contains(providerByIdForRouting(generation.provider)?.adapter) &&
       minimum != null &&
       maximum != null &&
       (minimum - maximum).abs() < .0000001) {
@@ -485,6 +489,7 @@ CostEstimate estimateCost(
   List<ProviderModelPrice> prices = const <ProviderModelPrice>[],
   VideoSourceMetadata? sourceMetadata,
 ]) {
+  if (providerId == 'apipod') return apipodEstimate(config);
   if (providerId == 'krea' || providerId == 'fal') {
     // A partially loaded live catalog must not turn an omitted variable-price
     // route into the model's numeric zero placeholder.

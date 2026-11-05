@@ -625,8 +625,8 @@ void main() {
         findsNothing,
       );
 
-      // The picker lists providers alphabetically; ArtCraft leads, BFL sits
-      // third, so both stay inside the lazily built menu list.
+      // The picker lists providers alphabetically. Expand ArtCraft to star
+      // a model, then return to the top to inspect the pinned sections.
       const artcraftHeading = ValueKey('provider-model-heading-artcraft');
       const bflHeading = ValueKey('provider-model-heading-bfl');
       await tester.tap(find.byKey(artcraftHeading));
@@ -638,6 +638,16 @@ void main() {
       // Fold ArtCraft again so every heading sits inside the lazily built
       // list for the position checks below.
       await tester.tap(find.byKey(artcraftHeading));
+      await tester.pumpAndSettle();
+
+      // Adding providers can scroll the lazy list while locating the model.
+      await tester.drag(
+        find.descendant(
+          of: find.byKey(const ValueKey('provider-model-picker')),
+          matching: find.byType(ListView),
+        ),
+        const Offset(0, 1000),
+      );
       await tester.pumpAndSettle();
 
       expect(gateway.snapshot.preferences.favoriteModels, <String>[
@@ -667,6 +677,10 @@ void main() {
         find.byKey(const ValueKey('provider-model-option-bfl-flux-3-video')),
         findsOneWidget,
       );
+      // Fold its model list before comparing headings: more providers may
+      // otherwise put ArtCraft outside the lazily built viewport.
+      await tester.tap(find.byKey(bflHeading));
+      await tester.pumpAndSettle();
       expect(
         tester.getTopLeft(find.byKey(bflHeading)).dy,
         lessThan(tester.getTopLeft(find.byKey(artcraftHeading)).dy),

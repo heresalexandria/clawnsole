@@ -73,7 +73,7 @@ void main() {
           );
         }),
         siteUrl: Uri.parse('https://clawnsole.app/'),
-      ).fetch(appVersion: '0.62.0');
+      ).fetch(appVersion: '0.63.0');
       expect(
         bundle.providers.map((p) => p.id).toSet(),
         bundledVideoProviders.map((p) => p.id).toSet(),
@@ -106,6 +106,26 @@ void main() {
           expect(fetched.maxDuration, model.maxDuration, reason: reason);
           expect(fetched.supportsAudio, model.supportsAudio, reason: reason);
           expect(
+            fetched.minReferenceVideoSeconds,
+            model.minReferenceVideoSeconds,
+            reason: reason,
+          );
+          expect(
+            fetched.minReferenceAudioSeconds,
+            model.minReferenceAudioSeconds,
+            reason: reason,
+          );
+          expect(
+            fetched.requiresStartFrameWhenUsingFrames,
+            model.requiresStartFrameWhenUsingFrames,
+            reason: reason,
+          );
+          expect(
+            fetched.requiresPublicMediaUrls,
+            model.requiresPublicMediaUrls,
+            reason: reason,
+          );
+          expect(
             fetched.maxCombinedVideoSeconds,
             model.maxCombinedVideoSeconds,
             reason: reason,
@@ -114,6 +134,25 @@ void main() {
       }
     },
   );
+
+  test('public media URL restrictions survive incomplete cached manifests', () {
+    final bundle = ProviderCatalogBundle.fromCache(
+      _cache(<Map<String, Object?>>[
+        _provider(<Map<String, Object?>>[
+          _model('seedance-2.5-i2v'),
+          <String, Object?>{
+            ..._model('new-hosted-route'),
+            'requires_public_media_urls': true,
+          },
+          _model('upload-route'),
+        ], id: 'apipod'),
+      ]),
+    );
+    final models = bundle.providers.single.models;
+    expect(models[0].requiresPublicMediaUrls, isTrue);
+    expect(models[1].requiresPublicMediaUrls, isTrue);
+    expect(models[2].requiresPublicMediaUrls, isFalse);
+  });
 
   test('provider and model version constraints are independently applied', () {
     final cache = _cache(<Map<String, Object?>>[
