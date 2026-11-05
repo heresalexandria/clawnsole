@@ -24,6 +24,10 @@ are not covered consistently by the three standard route schemas. These
 controls and alternate model families are deliberately not exposed by this
 integration. The published OpenAPI schemas enumerate only 480p/720p and omit
 seed. Image-to-video omits aspect ratio; its geometry follows the input.
+Live validation also found that continuation wording on the reference route
+can trigger APIPod’s extension validation, which requires adaptive geometry.
+The reference smoke test requests a new scene with visual guidance and uses
+the catalog’s default adaptive aspect ratio.
 
 ## Transport and persistence
 

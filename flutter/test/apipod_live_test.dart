@@ -209,9 +209,11 @@ void main() {
         }),
         generate('seedance-2.5-r2v', {
           'reference_videos': [textOutput],
+          'aspect_ratio': 'auto',
           'prompt':
-              'Continue the quiet forest atmosphere and gentle camera motion '
-              'shown in @Video 1. Natural realistic leaves and morning light.',
+              'Use @Video 1 only as a visual style reference. Create a new '
+              'daytime scene of a quiet mountain lake with still water and a '
+              'distant pine forest. Static camera, realistic morning light.',
         }),
       ]);
       report['completed_at'] = DateTime.now().toUtc().toIso8601String();
