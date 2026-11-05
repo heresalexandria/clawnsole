@@ -122,7 +122,7 @@ derive them from output durations or reference counts.
 
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
-in that app build: `apple-local`, `artcraft`, `atlas`, `bfl`, `fal`, `krea`,
+in that app build: `apple-local`, `apipod`, `artcraft`, `atlas`, `bfl`, `fal`, `krea`,
 `ltx`, or `runway`. `apple-local` is implemented only by the native iOS app. A genuinely
 new API protocol still requires an app release that implements its adapter;
 older builds safely ignore providers whose adapter they do not understand.
@@ -154,3 +154,15 @@ ignore the provider until their request adapter is available. The same
 provider key, queue lifecycle, and media delivery contract apply to native
 Flutter and the desktop companion. See the [fal audit](audit-fal.md) for
 supported routes, official sources, pricing, and provider limitations.
+
+## APIPod provider
+
+APIPod Seedance 2.5 requires version 0.63.0 and supports text, first/last-frame,
+and multimodal generation through the native and companion gateways. Media
+inputs use public URLs; the public API has no documented file upload endpoint.
+See the [APIPod audit](audit-apipod.md) for routes, rates, sources, and limits.
+
+`requires_public_media_urls` disables file upload and local normalization for
+routes that only accept hosted media. `requires_start_frame_when_using_frames`
+requires a first frame before a positional last frame; both default to false
+and are preserved by the bundled fallback when omitted remotely.

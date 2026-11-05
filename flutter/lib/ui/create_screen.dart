@@ -1939,7 +1939,7 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
         // to show what arrived. Files sort into image/video/audio by MIME
         // type or extension inside the controller.
         : ReferenceDropZone(
-            enabled: !referencesSetAside,
+            enabled: !referencesSetAside && !model.requiresPublicMediaUrls,
             label: 'Drop to add references',
             // Loading tiles hold the dropped files' spots while their bytes
             // are read, before the controller can classify and attach them.
@@ -1978,12 +1978,24 @@ class _GuidanceInputsSectionState extends State<_GuidanceInputsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        if (model.requiresPublicMediaUrls) ...<Widget>[
+          Text(
+            controller.publicMediaUrlHint,
+            key: const ValueKey('public-media-url-hint'),
+            style: TextStyle(
+              color: context.colors.onSurfaceVariant,
+              fontSize: 11.5,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (frames != null) frames,
         if (frames != null && references != null) const SizedBox(height: 10),
         if (references != null) references,
         // Normalization converts both keyframes and creative references, so
         // the switch sits below the pair instead of inside either section.
-        if (hasVisualReference) ...<Widget>[
+        if (hasVisualReference && !model.requiresPublicMediaUrls) ...<Widget>[
           const SizedBox(height: 8),
           _ReferenceNormalizationToggle(controller: controller),
         ],
@@ -3353,6 +3365,7 @@ class _AddReferenceButton extends StatelessWidget {
         ),
         PopupMenuItem(
           value: 'upload',
+          enabled: !controller.selectedModel.requiresPublicMediaUrls,
           child: Row(
             children: <Widget>[
               const Icon(Icons.upload_file_rounded, size: 17),
@@ -3601,7 +3614,10 @@ class _AddFrameButton extends StatelessWidget {
     final hint = switch (role) {
       KeyframeRole.start => 'Pins the opening at 0 s',
       KeyframeRole.middle => 'Timed waypoint · repeatable',
-      KeyframeRole.end => 'Pins the ending · works alone',
+      KeyframeRole.end =>
+        controller.selectedModel.requiresStartFrameWhenUsingFrames
+            ? 'Pins the ending · requires a first frame'
+            : 'Pins the ending · works alone',
     };
     return Tooltip(
       message: hint,
@@ -3624,9 +3640,10 @@ class _AddFrameButton extends StatelessWidget {
           }
         },
         itemBuilder: (context) => <PopupMenuEntry<String>>[
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'upload',
-            child: Row(
+            enabled: !controller.selectedModel.requiresPublicMediaUrls,
+            child: const Row(
               children: <Widget>[
                 Icon(Icons.add_photo_alternate_rounded, size: 17),
                 SizedBox(width: 9),
@@ -3880,7 +3897,9 @@ class _SourceEditor extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   OutlinedButton.icon(
-                    onPressed: () => unawaited(onPick()),
+                    onPressed: controller.selectedModel.requiresPublicMediaUrls
+                        ? null
+                        : () => unawaited(onPick()),
                     icon: const Icon(Icons.upload_file_rounded, size: 16),
                     label: const Text('Choose file'),
                   ),

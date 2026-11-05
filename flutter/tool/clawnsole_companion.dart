@@ -152,6 +152,7 @@ Future<void> _serveCompanion(List<String> arguments) async {
           '',
       'krea': Platform.environment['KREA_API_KEY']?.trim() ?? '',
       'fal': Platform.environment['FAL_KEY']?.trim() ?? '',
+      'apipod': Platform.environment['APIPOD_API_KEY']?.trim() ?? '',
       'openai': Platform.environment['OPENAI_API_KEY']?.trim() ?? '',
       'anthropic': Platform.environment['ANTHROPIC_API_KEY']?.trim() ?? '',
     },
@@ -2793,7 +2794,7 @@ class CompanionApp {
     final model = modelById(provider, generation.model);
     final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
     final referenceImageProfile = model.referenceImageCompatibilityProfile;
-    if (autoFixReferenceVideos) {
+    if (autoFixReferenceVideos && !model.requiresPublicMediaUrls) {
       final ReferenceImageNormalizationService imageNormalizer =
           _referenceVideoNormalizer is ReferenceImageNormalizationService
           ? _referenceVideoNormalizer as ReferenceImageNormalizationService

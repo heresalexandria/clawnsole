@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "seedance-2.5-i2v",
+  "canonical_model_id": "seedance-2.5",
+  "label": "Seedance 2.5 · Frames",
+  "description": "Animate hosted first and last frames. Public URLs required.",
+  "modes": [
+    "i2v"
+  ],
+  "aspect_ratios": [
+    "auto"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "HD",
+      "detail": "1280 × 720"
+    },
+    {
+      "id": "sd",
+      "label": "480p",
+      "detail": "854 × 480"
+    }
+  ],
+  "min_duration": 4,
+  "max_duration": 30,
+  "duration_step": 1,
+  "max_keyframes": 2,
+  "usd_per_second": 0.2205,
+  "supports_audio": true,
+  "max_prompt_characters": 30000,
+  "availability": {
+    "min_version": "0.63.0"
+  },
+  "reference_usd_per_second": 0.2205,
+  "requires_public_media_urls": true,
+  "max_input_image_bytes": 31457280,
+  "supports_start_frame": true,
+  "supports_end_frame": true,
+  "requires_start_frame_when_using_frames": true,
+  "reference_prompt_hint": "Use publicly reachable image URLs; local uploads are unavailable."
+}

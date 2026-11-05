@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'apipod_catalog.dart' as apipod_catalog;
 import 'fal_catalog.dart' as fal_catalog;
 import 'runway_pricing.dart';
 
@@ -103,6 +104,8 @@ class VideoModelDefinition {
     this.referenceUsdPerSecond,
     this.supportsStartFrame = false,
     this.supportsEndFrame = false,
+    this.requiresStartFrameWhenUsingFrames = false,
+    this.requiresPublicMediaUrls = false,
     this.maxInputImagePixels,
     this.maxInputImageBytes,
     this.maxImageReferences = 0,
@@ -115,6 +118,7 @@ class VideoModelDefinition {
     this.maxReferenceVideoSeconds,
     this.maxCombinedVideoSeconds,
     this.maxReferenceAudioSeconds,
+    this.minReferenceVideoSeconds,
     this.minReferenceAudioSeconds,
     this.maxReferenceVideoSecondsByResolution = const <String, int>{},
     this.maxReferenceAudioSecondsByResolution = const <String, int>{},
@@ -168,6 +172,13 @@ class VideoModelDefinition {
   final bool supportsStartFrame;
   final bool supportsEndFrame;
 
+  /// Positional frame APIs cannot represent an end frame without a first frame.
+  final bool requiresStartFrameWhenUsingFrames;
+
+  /// Media must already be hosted publicly; this route has no upload API.
+  /// Local normalization cannot produce a replacement URL for these models.
+  final bool requiresPublicMediaUrls;
+
   /// Hard provider/model ceiling for each pinned or creative input image.
   /// Null means no dependable pixel ceiling is published for this route.
   final int? maxInputImagePixels;
@@ -192,6 +203,7 @@ class VideoModelDefinition {
   /// Images and audio references do not consume this budget.
   final int? maxCombinedVideoSeconds;
   final int? maxReferenceAudioSeconds;
+  final int? minReferenceVideoSeconds;
   final int? minReferenceAudioSeconds;
   final Map<String, int> maxReferenceVideoSecondsByResolution;
   final Map<String, int> maxReferenceAudioSecondsByResolution;
@@ -269,6 +281,8 @@ class VideoModelDefinition {
     referenceUsdPerSecond: referenceUsdPerSecond,
     supportsStartFrame: supportsStartFrame,
     supportsEndFrame: supportsEndFrame,
+    requiresStartFrameWhenUsingFrames: requiresStartFrameWhenUsingFrames,
+    requiresPublicMediaUrls: requiresPublicMediaUrls,
     maxInputImagePixels: maxInputImagePixels,
     maxInputImageBytes: maxInputImageBytes,
     maxImageReferences: maxImageReferences,
@@ -280,6 +294,7 @@ class VideoModelDefinition {
     maxReferenceVideoSeconds: maxReferenceVideoSeconds,
     maxCombinedVideoSeconds: maxCombinedVideoSeconds,
     maxReferenceAudioSeconds: maxReferenceAudioSeconds,
+    minReferenceVideoSeconds: minReferenceVideoSeconds,
     minReferenceAudioSeconds: minReferenceAudioSeconds,
     maxReferenceVideoSecondsByResolution: maxReferenceVideoSecondsByResolution,
     maxReferenceAudioSecondsByResolution: maxReferenceAudioSecondsByResolution,
@@ -3979,6 +3994,7 @@ const appleLocalProvider = VideoProviderDefinition(
 /// on-device providers are excluded here and stay platform-gated where the
 /// platform is known.
 const Set<String> remoteProviderIds = <String>{
+  'apipod',
   'bfl',
   'ltx',
   'artcraft',
@@ -3989,6 +4005,7 @@ const Set<String> remoteProviderIds = <String>{
 };
 
 const bundledVideoProviders = <VideoProviderDefinition>[
+  apipod_catalog.apipodProvider,
   appleLocalProvider,
   _artCraftProvider,
   _atlasProvider,
@@ -4148,6 +4165,12 @@ double? trustedGenerationProgress(Generation generation) {
 }
 
 List<ProviderModelPrice> publishedProviderPrices(String providerId) {
+  if (providerId == 'apipod') {
+    return _availablePublishedPrices(
+      providerId,
+      apipod_catalog.apipodPublishedPrices(),
+    );
+  }
   if (providerId == 'fal') {
     return _availablePublishedPrices(
       providerId,

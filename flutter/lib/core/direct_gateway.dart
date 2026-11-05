@@ -1221,8 +1221,9 @@ class DirectGateway
     final model = modelById(provider, record.model);
     final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
     final referenceImageProfile = model.referenceImageCompatibilityProfile;
-    if (submission.autoFixReferenceVideos ??
-        data.preferences.autoFixReferenceVideos) {
+    if (!model.requiresPublicMediaUrls &&
+        (submission.autoFixReferenceVideos ??
+            data.preferences.autoFixReferenceVideos)) {
       final ReferenceImageNormalizationService imageNormalizer =
           _referenceVideoNormalizer is ReferenceImageNormalizationService
           ? _referenceVideoNormalizer as ReferenceImageNormalizationService

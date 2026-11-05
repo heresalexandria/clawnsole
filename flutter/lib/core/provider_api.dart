@@ -1,4 +1,5 @@
 import 'provider_submission.dart';
+import 'apipod_api.dart';
 import 'artcraft_api.dart';
 import 'atlas_cloud_api.dart';
 import 'bfl_api.dart';
@@ -11,6 +12,7 @@ import 'runway_api.dart';
 
 class ProviderApiRouter {
   ProviderApiRouter({
+    ApipodApi? apipod,
     BflApi? bfl,
     LtxApi? ltx,
     ArtCraftApi? artcraft,
@@ -18,7 +20,8 @@ class ProviderApiRouter {
     RunwayApi? runway,
     KreaApi? krea,
     FalApi? fal,
-  }) : bfl = bfl ?? BflApi(),
+  }) : apipod = apipod ?? ApipodApi(),
+       bfl = bfl ?? BflApi(),
        ltx = ltx ?? LtxApi(),
        artcraft = artcraft ?? ArtCraftApi(),
        atlas = atlas ?? AtlasCloudApi(),
@@ -26,6 +29,7 @@ class ProviderApiRouter {
        krea = krea ?? KreaApi(),
        fal = fal ?? FalApi();
 
+  final ApipodApi apipod;
   final BflApi bfl;
   final LtxApi ltx;
   final ArtCraftApi artcraft;
@@ -44,6 +48,7 @@ class ProviderApiRouter {
 
   Future<ProviderAccountStatus> verify(String provider, String key) async =>
       switch (_adapter(provider)) {
+        'apipod' => apipod.verify(key),
         'ltx' => ltx.verify(key),
         'artcraft' => artcraft.verify(key),
         'atlas' => atlas.verify(key),
@@ -68,6 +73,13 @@ class ProviderApiRouter {
     BeforeGenerationSend? beforeSend,
     String? operationId,
   }) => switch (_adapter(provider)) {
+    'apipod' => apipod.submit(
+      key,
+      model,
+      input,
+      beforeSend: beforeSend,
+      operationId: operationId,
+    ),
     'ltx' => ltx.submit(key, model, input, beforeSend: beforeSend),
     'artcraft' => artcraft.submit(
       key,
@@ -91,6 +103,7 @@ class ProviderApiRouter {
     String key,
     String pollingUrl,
   ) => switch (_adapter(provider)) {
+    'apipod' => apipod.poll(key, pollingUrl),
     'ltx' => ltx.poll(key, pollingUrl),
     'artcraft' => artcraft.poll(key, pollingUrl),
     'atlas' => atlas.poll(key, pollingUrl),
@@ -110,7 +123,7 @@ class ProviderApiRouter {
         'runway' => runway.listVideoModels(),
         'krea' => krea.listVideoModels(),
         'fal' => fal.listVideoModels(key),
-        'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
+        'apipod' || 'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
         ),
         final adapter => throw ProviderException(

@@ -15,6 +15,7 @@ const clawnsoleSiteUrl = String.fromEnvironment(
 );
 
 const supportedProviderAdapters = <String>{
+  'apipod',
   'apple-local',
   'artcraft',
   'atlas',
@@ -458,6 +459,16 @@ VideoModelDefinition _parseModel(
     ),
     supportsStartFrame: _boolean(manifest, 'supports_start_frame'),
     supportsEndFrame: _boolean(manifest, 'supports_end_frame'),
+    requiresStartFrameWhenUsingFrames: _boolean(
+      manifest,
+      'requires_start_frame_when_using_frames',
+      fallback: bundled?.requiresStartFrameWhenUsingFrames ?? false,
+    ),
+    requiresPublicMediaUrls: _boolean(
+      manifest,
+      'requires_public_media_urls',
+      fallback: bundled?.requiresPublicMediaUrls ?? false,
+    ),
     maxInputImagePixels: _positiveInteger(manifest, 'max_input_image_pixels'),
     maxInputImageBytes: _positiveInteger(manifest, 'max_input_image_bytes'),
     maxImageReferences: _integer(manifest['max_image_references']) ?? 0,
@@ -478,7 +489,12 @@ VideoModelDefinition _parseModel(
     maxReferenceAudioSeconds:
         _integer(manifest['max_reference_audio_seconds']) ??
         (maxAudioReferences > 0 ? bundled?.maxReferenceAudioSeconds : null),
-    minReferenceAudioSeconds: _integer(manifest['min_reference_audio_seconds']),
+    minReferenceVideoSeconds:
+        _positiveInteger(manifest, 'min_reference_video_seconds') ??
+        (maxVideoReferences > 0 ? bundled?.minReferenceVideoSeconds : null),
+    minReferenceAudioSeconds:
+        _positiveInteger(manifest, 'min_reference_audio_seconds') ??
+        (maxAudioReferences > 0 ? bundled?.minReferenceAudioSeconds : null),
     maxReferenceVideoSecondsByResolution:
         manifest.containsKey('max_reference_video_seconds_by_resolution')
         ? _stringIntegerMap(

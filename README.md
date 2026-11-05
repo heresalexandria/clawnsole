@@ -254,3 +254,10 @@ Catalog authoring, version bounds, and adapter compatibility are documented in
 [the model manifest guide](docs/models/README.md). Builds read the public
 `CLAWNSOLE_SITE_URL` setting from the environment or repository `.env`; the
 checked-in `.env.example` and GitHub Actions use `https://clawnsole.app/`.
+
+APIPod has its own provider entry and API key for Seedance 2.5 text, first/last-
+frame, and reference generation at 480p/720p. Add the key in Providers on any
+platform. The desktop companion also supports `APIPOD_API_KEY` as a development
+fallback. Image, video, and audio inputs require publicly reachable URLs via
+Paste URL; local file uploads are not documented by APIPod. See the
+[APIPod contract and pricing audit](docs/models/audit-apipod.md).

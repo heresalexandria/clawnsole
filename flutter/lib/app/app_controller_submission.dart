@@ -105,7 +105,8 @@ extension AppControllerSubmission on AppController {
         : effectiveAestheticText;
     final quoteInput = _providerEstimateInput();
     final fallbackEstimate = currentEstimate;
-    final normalizeReferences = autoFixReferenceVideos;
+    final normalizeReferences =
+        autoFixReferenceVideos && !model.requiresPublicMediaUrls;
     final checksVisualReferences =
         normalizeReferences &&
         (form.keyframes.isNotEmpty ||

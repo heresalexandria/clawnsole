@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "apipod",
+  "adapter": "apipod",
+  "name": "APIPod",
+  "description": "Seedance 2.5 with native audio and hosted media references.",
+  "console_url": "https://www.apipod.ai/console/api-keys",
+  "docs_url": "https://docs.apipod.ai/",
+  "pricing_url": "https://www.apipod.ai/models/seedance-2.5",
+  "pricing_source": "Published APIPod estimates; final token usage determines cost",
+  "progress_reporting": "reported",
+  "availability": {
+    "min_version": "0.63.0"
+  },
+  "models": [
+    "models/apipod/seedance-2.5-t2v.yaml",
+    "models/apipod/seedance-2.5-i2v.yaml",
+    "models/apipod/seedance-2.5-r2v.yaml"
+  ]
+}
