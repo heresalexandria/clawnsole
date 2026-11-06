@@ -1,6 +1,6 @@
 {
   "name": "clawnsole-electron",
-  "version": "0.64.1",
+  "version": "0.65.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -60,7 +60,9 @@
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "gatekeeperAssess": false,
-      "binaries": ["Contents/Resources/native-tools/clawnsole_icloud_host"],
+      "binaries": [
+        "Contents/Resources/native-tools/clawnsole_icloud_host"
+      ],
       "icon": "assets/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [
