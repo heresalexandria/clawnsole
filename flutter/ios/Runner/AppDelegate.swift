@@ -9,6 +9,7 @@ import UIKit
   private let backgroundDeliveryPlugin = BackgroundDeliveryPlugin()
   private let completionNotificationPlugin = CompletionNotificationPlugin()
   private let shareSheetPlugin = ShareSheetPlugin()
+  private let iCloudReferenceHostingPlugin = ICloudReferenceHostingPlugin()
 
   override func application(
     _ application: UIApplication,
@@ -22,6 +23,7 @@ import UIKit
       backgroundDeliveryPlugin.register(with: controller)
       completionNotificationPlugin.register(with: controller)
       shareSheetPlugin.register(with: controller)
+      iCloudReferenceHostingPlugin.register(with: controller)
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

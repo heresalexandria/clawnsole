@@ -54,6 +54,11 @@ jobs:
                 electron=true
                 macos=true
                 ;;
+              native/apple/*)
+                flutter=true
+                electron=true
+                macos=true
+                ;;
               .github/workflows/pr.yml)
                 site=true
                 flutter=true
@@ -189,6 +194,15 @@ jobs:
         run: ./flutter/scripts/build_macos
       - name: Smoke test packaged desktop app
         run: electron/dist/release/mac-arm64/Clawnsole.app/Contents/MacOS/Clawnsole --smoke
+      - name: Verify native iCloud recovery and packaged helper protocol
+        run: |
+          xcrun swiftc -swift-version 5 \
+            native/apple/ICloudReferenceHosting.swift \
+            native/apple/ICloudReferenceHostingTests.swift \
+            -o "$RUNNER_TEMP/clawnsole-icloud-host-tests"
+          "$RUNNER_TEMP/clawnsole-icloud-host-tests"
+          python3 native/apple/test_icloud_host_protocol.py \
+            electron/dist/release/mac-arm64/Clawnsole.app/Contents/Resources/native-tools/clawnsole_icloud_host
       - name: Exercise renderer crash recovery in an isolated profile
         working-directory: electron
         run: ./node_modules/.bin/electron scripts/smoke-recovery.cjs

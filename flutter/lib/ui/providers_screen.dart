@@ -325,6 +325,16 @@ class _ProviderCard extends StatelessWidget {
               color: context.colors.onSurfaceVariant,
             ),
           ),
+          if (provider.models.any(
+            (model) => model.requiresPublicMediaUrls,
+          )) ...[
+            const SizedBox(height: 10),
+            const Text(
+              'Media references need public HTTPS links. On iOS and macOS, Clawnsole can publish copies from your iCloud Drive after you allow sharing. Published links may remain readable until Apple’s expiry, even after source cleanup.',
+              key: ValueKey('provider-public-reference-hint'),
+              style: TextStyle(fontSize: 12, height: 1.4),
+            ),
+          ],
           const SizedBox(height: 14),
           OutlinedButton.icon(
             onPressed: selected

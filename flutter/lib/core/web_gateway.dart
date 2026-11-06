@@ -49,6 +49,7 @@ class WebGateway
         MediaPreviewGateway,
         GoogleDriveGateway,
         TemporaryMediaHostingGateway,
+        TemporaryMediaConsentGateway,
         SettingsVaultGateway,
         DataLocationGateway,
         MediaCacheGateway,
@@ -111,11 +112,23 @@ class WebGateway
       await _read(await _client.get(_url('/temporary-media/status'))),
     );
     _supportsTemporaryMediaHosting = payload['supported'] == true;
-    return TemporaryMediaHostStatus(
-      available: payload['available'] == true,
-      activeLeases: (payload['activeLeases'] as num?)?.toInt() ?? 0,
-      pendingCleanup: (payload['pendingCleanup'] as num?)?.toInt() ?? 0,
-      lastCleanupError: payload['lastCleanupError'] as String?,
+    return TemporaryMediaHostStatus.fromJson(payload);
+  }
+
+  @override
+  Future<void> acceptTemporaryMediaSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  }) async {
+    await _read(
+      await _client.post(
+        _url('/temporary-media/accept-sharing'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'expectedBackendId': expectedBackendId,
+          'expectedAccountScope': expectedAccountScope,
+        }),
+      ),
     );
   }
 

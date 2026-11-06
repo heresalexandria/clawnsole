@@ -5283,9 +5283,18 @@ Future<void> _submitWithProviderRetentionWarning(
   BuildContext context,
   AppController controller,
 ) async {
-  if (controller.needsGoogleDriveForMedia) {
-    await controller.submit();
-    return;
+  if (controller.needsTemporaryMediaHosting) {
+    await controller.refreshTemporaryMediaHostingStatus();
+    if (!context.mounted) return;
+    if (controller.needsMediaHostingSetup) {
+      controller.showNotice(controller.publicMediaUrlHint);
+      return;
+    }
+    if (controller.needsMediaSharingConsent &&
+        !await _showMediaSharingConsent(context, controller)) {
+      return;
+    }
+    if (!context.mounted) return;
   }
   if (controller.requiresProviderRetentionAcknowledgement) {
     final suppressFutureWarnings = await _showProviderRetentionWarning(
@@ -5305,6 +5314,40 @@ Future<void> _submitWithProviderRetentionWarning(
     return;
   }
   await controller.submit();
+}
+
+Future<bool> _showMediaSharingConsent(
+  BuildContext context,
+  AppController controller,
+) async {
+  final shown = controller.temporaryMediaHostingStatus;
+  if (shown == null || !shown.available) return false;
+  final accepted = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      key: const ValueKey('media-sharing-consent-dialog'),
+      title: const Text('Allow iCloud references?'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          child: Text(controller.mediaSharingDisclosure),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('confirm-media-sharing'),
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('Allow iCloud references'),
+        ),
+      ],
+    ),
+  );
+  if (accepted != true || !context.mounted) return false;
+  return controller.acceptTemporaryMediaSharing(shown);
 }
 
 /// Returns whether later warnings should be suppressed, or null when canceled.
@@ -5564,18 +5607,32 @@ class _ComposerFooter extends StatelessWidget {
               children: [
                 Text(
                   controller.canTemporarilyHostMedia
-                      ? AppController.temporaryMediaSharingDisclosure
+                      ? controller.mediaSharingDisclosure
                       : controller.publicMediaUrlHint,
                   style: const TextStyle(fontSize: 12, height: 1.4),
                 ),
-                if (!controller.canTemporarilyHostMedia)
-                  TextButton.icon(
-                    key: const ValueKey('connect-drive-for-media'),
-                    onPressed: () =>
-                        unawaited(controller.openSettings(SettingsTab.sync)),
-                    icon: const Icon(Icons.cloud_outlined, size: 16),
-                    label: const Text('Connect Google Drive'),
-                  ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    if (controller.needsMediaSharingConsent)
+                      TextButton.icon(
+                        key: const ValueKey('allow-icloud-references'),
+                        onPressed: () => unawaited(
+                          _showMediaSharingConsent(context, controller),
+                        ),
+                        icon: const Icon(Icons.cloud_outlined, size: 16),
+                        label: const Text('Allow iCloud references'),
+                      ),
+                    TextButton.icon(
+                      key: const ValueKey('recheck-media-hosting'),
+                      onPressed: () => unawaited(
+                        controller.refreshTemporaryMediaHostingStatus(),
+                      ),
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Recheck hosting'),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -5590,13 +5647,23 @@ class _ComposerFooter extends StatelessWidget {
                   cleanup,
                   style: const TextStyle(fontSize: 12, height: 1.4),
                 ),
-                if (!controller.googleDriveConnected)
-                  TextButton(
-                    onPressed: () =>
-                        unawaited(controller.openSettings(SettingsTab.sync)),
-                    child: const Text('Reconnect Google Drive'),
+                TextButton(
+                  onPressed: () => unawaited(
+                    controller.refreshTemporaryMediaHostingStatus(),
                   ),
+                  child: const Text('Recheck hosting'),
+                ),
               ],
+            ),
+          ),
+        if (controller.temporaryMediaPublicationNotice
+            case final String publication)
+          Padding(
+            key: const ValueKey('temporary-media-publication-notice'),
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              publication,
+              style: const TextStyle(fontSize: 12, height: 1.4),
             ),
           ),
         if (notice != null)

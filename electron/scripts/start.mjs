@@ -60,6 +60,8 @@ async function run() {
       dataFile,
       "--web-root",
       webRoot,
+      "--icloud-host-helper",
+      path.join(electronDirectory, "dist", "native-tools", "clawnsole_icloud_host"),
     ],
     {
       cwd: flutterDirectory,

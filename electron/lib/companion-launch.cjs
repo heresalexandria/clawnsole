@@ -17,6 +17,8 @@ function bundledCompanionArguments({
     rendererDirectory,
     '--media-tools-dir',
     path.join(resourcesPath, 'media-tools'),
+    '--icloud-host-helper',
+    path.join(resourcesPath, 'native-tools', 'clawnsole_icloud_host'),
     '--secure-bootstrap',
   ];
 }

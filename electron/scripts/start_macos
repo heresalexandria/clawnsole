@@ -29,6 +29,7 @@ if [[ -f "$REPOSITORY_ROOT/.env" ]]; then
 fi
 
 cd "$FLUTTER_DIRECTORY"
+"$ELECTRON_DIRECTORY/scripts/prepare-icloud-host"
 flutter build web --debug \
   --pwa-strategy=none \
   --dart-define "CLAWNSOLE_PROXY_URL=" \

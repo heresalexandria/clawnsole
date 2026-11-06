@@ -7,6 +7,7 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/media_cache_gateway.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/temporary_media_host.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -78,6 +79,7 @@ LocalSnapshot snapshot({
 AppController _controller(_Gateway gateway) => AppController(gateway: gateway)
   ..snapshot = gateway.snapshot
   ..loading = false
+  ..temporaryMediaHostingStatus = gateway.hostingStatus
   ..selectedProviderId = 'apipod'
   ..selectedModelId = 'seedance-2.5-r2v';
 
@@ -251,7 +253,12 @@ void main() {
         );
         expect(app.form.references.single.publicSourceExpiresAt, isNull);
         expect(gateway.reads, 1);
-        expect(app.validate(), contains('Connect Google Drive'));
+        expect(app.validate(), contains('Apple Account > iCloud > Drive'));
+        gateway.hostingStatus = _readyHosting;
+        await app.refreshTemporaryMediaHostingStatus();
+        app.updateForm((form) => form.prompt = 'Follow the camera.');
+        expect(app.validate(), isNull);
+        expect(gateway.reads, 1);
       }
     },
   );
@@ -304,7 +311,12 @@ void main() {
         startsWith('data:video/'),
       );
       expect(gateway.reads, 0);
-      expect(app.validate(), contains('Connect Google Drive'));
+      expect(app.validate(), contains('Apple Account > iCloud > Drive'));
+      gateway.hostingStatus = _readyHosting;
+      await app.refreshTemporaryMediaHostingStatus();
+      app.updateForm((form) => form.prompt = 'Follow the camera.');
+      expect(app.validate(), isNull);
+      expect(gateway.reads, 0);
     },
   );
 
@@ -407,6 +419,16 @@ void main() {
           find.byKey(const ValueKey('reference-picker-public-url-hint')),
           findsOneWidget,
         );
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(const ValueKey('reference-picker-public-url-hint')),
+              )
+              .data,
+          contains('Settings > Apple Account > iCloud > Drive'),
+        );
+        // Google Drive is still needed to retrieve this uncached source;
+        // it is independent of iCloud hosting for an attached reference.
         expect(find.text('Connect Google Drive'), findsOneWidget);
         expect(
           tester
@@ -429,7 +451,10 @@ void main() {
               )
               .first,
         );
-        await tester.tapAt(tester.getTopLeft(card) + const Offset(20, 20));
+        expect(tester.widget<InkWell>(card).onTap, isNotNull);
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
+        await tester.tap(card);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add 1'));
         await tester.pumpAndSettle();
@@ -445,9 +470,35 @@ void main() {
   );
 }
 
-class _Gateway implements AppGateway, MediaCacheGateway {
+const _readyHosting = TemporaryMediaHostStatus(
+  available: true,
+  activeLeases: 0,
+  pendingCleanup: 0,
+  backendId: 'iCloudDrive',
+  readiness: TemporaryMediaReadiness.ready,
+  accountScope: 'opaque-apple-account',
+  cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+  sharingAccepted: true,
+);
+
+class _Gateway
+    implements AppGateway, MediaCacheGateway, TemporaryMediaHostingGateway {
   _Gateway(this.snapshot, {this.usesCompanion = false});
   LocalSnapshot snapshot;
+  TemporaryMediaHostStatus hostingStatus = const TemporaryMediaHostStatus(
+    available: false,
+    activeLeases: 0,
+    pendingCleanup: 0,
+    backendId: 'iCloudDrive',
+    readiness: TemporaryMediaReadiness.signedOut,
+    cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+    sharingAccepted: false,
+  );
+  @override
+  bool get supportsTemporaryMediaHosting => true;
+  @override
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async =>
+      hostingStatus;
   int reads = 0;
   Uint8List? cachedBytes;
   @override

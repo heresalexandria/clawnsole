@@ -71,8 +71,6 @@ extension AppControllerSubmission on AppController {
       showNotice(problem);
       if (selectedProvider.requiresApiKey && !hasApiKey) {
         unawaited(navigate(AppSection.providers));
-      } else if (needsGoogleDriveForMedia) {
-        unawaited(openSettings(SettingsTab.sync));
       }
       return;
     }
@@ -81,6 +79,10 @@ extension AppControllerSubmission on AppController {
       showNotice(
         'Review and accept the ${selectedProvider.name} result-retention warning before generating.',
       );
+      return;
+    }
+    if (needsMediaSharingConsent) {
+      showNotice('Review and allow reference sharing before generating.');
       return;
     }
     if (!canUseDefaultStorage) {
@@ -110,6 +112,7 @@ extension AppControllerSubmission on AppController {
     final normalizeReferences =
         autoFixReferenceVideos &&
         (!model.requiresPublicMediaUrls || needsTemporaryMediaHosting);
+    final usesTemporaryHosting = needsTemporaryMediaHosting;
     final checksVisualReferences =
         normalizeReferences &&
         (form.keyframes.isNotEmpty ||
@@ -160,6 +163,19 @@ extension AppControllerSubmission on AppController {
     submitting = true;
     notifyListeners();
     try {
+      if (usesTemporaryHosting) {
+        await refreshTemporaryMediaHostingStatus();
+        if (_disposed) return;
+        if (!canTemporarilyHostMedia ||
+            temporaryMediaHostingStatus?.sharingAccepted != true) {
+          showNotice(
+            canTemporarilyHostMedia
+                ? 'The hosting account needs your sharing permission before generating.'
+                : publicMediaUrlHint,
+          );
+          return;
+        }
+      }
       if (!await _hydrateComposerMedia(tab)) {
         if (!_disposed) {
           showNotice(

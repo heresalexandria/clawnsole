@@ -56,6 +56,515 @@ Map<String, Object?> _input() => {
 
 void main() {
   test(
+    'account changes during native publication preserve old-account recovery',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.addAll(['apple-one', 'apple-two'])
+        ..createGate = Completer<void>();
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      final prepare = host.prepare(_record('one'), _input());
+      final rejected = expectLater(prepare, throwsStateError);
+      await apple.createStarted.future;
+      apple.account = 'apple-two';
+      await host.status();
+      apple.createGate!.complete();
+      await rejected;
+      expect(apple.released, 0);
+      expect(journal.leases.single.scopeId, 'apple-one');
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.cleanupPending,
+      );
+      expect((await host.status()).pendingCleanup, 1);
+      apple.account = 'apple-one';
+      await host.reconcile([]);
+      expect(apple.released, 1);
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+      expect(journal.leases.single.publishedExpiresAt, apple.expiry);
+    },
+  );
+
+  test(
+    'overlapping legacy and terminal cleanup serialize ownership for one operation',
+    () async {
+      final journal = _Journal();
+      final legacy = _Backend(journal);
+      await TemporaryMediaHost(
+        journal: journal,
+        backend: legacy,
+      ).prepare(_record('legacy'), _input());
+      // This ID is from the original version-one lease algorithm.
+      expect(
+        journal.leases.single.id,
+        'tm_8e1ae9569cfe7e777ab565ee77e72c71875321f856f4661ed43a47db6561a437',
+      );
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one');
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        cleanupBackends: {'googleDrive': legacy},
+        clock: () => _now,
+      );
+      await host.prepare(_record('legacy'), _input());
+      legacy.releaseGate = Completer<void>();
+      final disconnect = host.releaseAll(backendId: 'googleDrive');
+      await legacy.releaseStarted.future;
+      final terminal = host.release('legacy');
+      legacy.releaseGate!.complete();
+      await Future.wait([disconnect, terminal]);
+      expect(legacy.released, 1);
+      expect(apple.released, 1);
+      expect(journal.leases.single.backendId, 'iCloudDrive');
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+    },
+  );
+
+  test(
+    'consent shown for an old account cannot approve the newly signed-in account',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal);
+      final host = TemporaryMediaHost(journal: journal, backend: apple);
+      final displayed = await host.status();
+      apple.account = 'apple-two';
+      await expectLater(
+        host.acceptSharing(
+          expectedBackendId: displayed.backendId,
+          expectedAccountScope: displayed.accountScope!,
+        ),
+        throwsStateError,
+      );
+      expect(apple.consentedAccounts, isEmpty);
+      await expectLater(
+        host.acceptSharing(
+          expectedBackendId: 'googleDrive',
+          expectedAccountScope: 'apple-two',
+        ),
+        throwsStateError,
+      );
+      expect(apple.consentedAccounts, isEmpty);
+    },
+  );
+
+  test(
+    'recovered snapshots redact Apple bearer URLs without storing the URLs',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one');
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      await host.prepare(_record('one'), _input());
+      await host.release('one');
+      final restarted = TemporaryMediaHost(
+        journal: journal,
+        backend: _Backend(journal), // active host may change on a later launch
+        clock: () => _now,
+      );
+      await restarted.status();
+      const cdn =
+          'https://cvws.icloud-content.com/B/no-native-file-id?secret=value';
+      const attachment =
+          'https://www.icloud.com/attachment/?u=public-capability';
+      expect(
+        restarted.redactText('source $cdn and $attachment'),
+        'source «temporary media URL» and «temporary media URL»',
+      );
+      const unrelated = 'https://icloud-content.com.example.net/ordinary';
+      expect(restarted.redactText(unrelated), unrelated);
+      final receipt = jsonEncode(
+        journal.leases.map((lease) => lease.toJson()).toList(),
+      );
+      expect(receipt, isNot(contains(cdn)));
+      expect(receipt, isNot(contains(attachment)));
+    },
+  );
+
+  test(
+    'local recovery metadata redacts expired Apple links without checking an unavailable host',
+    () async {
+      final journal = _Journal()
+        ..leases = [
+          TemporaryMediaLease(
+            id: 'retained-publication',
+            operationId: 'old-operation',
+            scopeId: 'old-account',
+            backendId: 'iCloudDrive',
+            cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+            provider: 'apipod',
+            model: 'seedance-2.5-r2v',
+            createdAt: _now.subtract(const Duration(days: 40)),
+            updatedAt: _now.subtract(const Duration(days: 40)),
+            state: TemporaryMediaLeaseState.sourceRemoved,
+            publicationAttemptedAt: _now.subtract(const Duration(days: 40)),
+            publishedExpiresAt: _now.subtract(const Duration(days: 10)),
+            sourceRemovedAt: _now.subtract(const Duration(days: 40)),
+          ),
+        ];
+      final unavailable = _UnavailableMetadataBackend(journal);
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: unavailable,
+        clock: () => _now,
+      );
+      const link = 'https://cvws.icloud-content.com/B/old?bearer=secret';
+      expect(host.redactText(link), link);
+      await host.loadRecoveryMetadata();
+      expect(host.redactText(link), '«temporary media URL»');
+      expect(unavailable.readinessChecks, 0);
+      expect(journal.leases, hasLength(1)); // Loading does not mutate receipts.
+      expect(unavailable.created, 0);
+      expect(unavailable.released, 0);
+    },
+  );
+
+  test(
+    'confirmed pre-publication failure removes the source intent without inventing a snapshot',
+    () async {
+      final journal = _Journal();
+      final apple = _UnpublishedSnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one');
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      await expectLater(
+        host.prepare(_record('one'), _input()),
+        throwsStateError,
+      );
+      expect(apple.released, 1);
+      expect(journal.leases, isEmpty);
+      final status = await host.status();
+      expect(status.publishedSnapshots, 0);
+      expect(status.pendingCleanup, 0);
+    },
+  );
+
+  test(
+    'an absent native receipt cannot erase an already recorded publication',
+    () async {
+      final journal = _Journal();
+      final original = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one');
+      await TemporaryMediaHost(
+        journal: journal,
+        backend: original,
+        clock: () => _now,
+      ).prepare(_record('one'), _input());
+      final missingReceipt = _UnpublishedSnapshotBackend(journal);
+      final restarted = TemporaryMediaHost(
+        journal: journal,
+        backend: missingReceipt,
+        clock: () => _now,
+      );
+      await restarted.release('one');
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+      expect(journal.leases.single.publishedExpiresAt, original.expiry);
+      expect((await restarted.status()).publishedSnapshots, 1);
+    },
+  );
+
+  test(
+    'unavailable active host never falls back to legacy Google Drive',
+    () async {
+      final journal = _Journal();
+      final legacy = _Backend(journal);
+      final apple = _SnapshotBackend(journal)
+        ..account = null
+        ..readiness = TemporaryMediaReadiness.signedOut;
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        cleanupBackends: {'googleDrive': legacy},
+      );
+      final status = await host.status();
+      expect(status.available, isFalse);
+      expect(status.backendId, 'iCloudDrive');
+      expect(status.readiness, TemporaryMediaReadiness.signedOut);
+      expect(status.sharingAccepted, isFalse);
+      await expectLater(
+        host.prepare(_record('one'), _input()),
+        throwsStateError,
+      );
+      expect(legacy.created, 0);
+      expect(apple.created, 0);
+      expect(journal.leases, isEmpty);
+    },
+  );
+
+  test(
+    'device/account consent is enforced before any publication and sending',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal);
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      expect((await host.status()).available, isTrue);
+      expect((await host.status()).sharingAccepted, isFalse);
+      await expectLater(
+        host.prepare(_record('one'), _input()),
+        throwsStateError,
+      );
+      expect(apple.created, 0);
+      await host.acceptSharing(
+        expectedBackendId: 'iCloudDrive',
+        expectedAccountScope: 'apple-one',
+      );
+      expect((await host.status()).sharingAccepted, isTrue);
+      await host.prepare(_record('one'), _input());
+      apple.consentedAccounts.clear();
+      await expectLater(host.beforeSend('one'), throwsStateError);
+      expect(journal.leases.single.state, TemporaryMediaLeaseState.prepared);
+      // Consent withdrawal must not prevent source-copy cleanup.
+      await host.release('one');
+      expect(apple.copies, isEmpty);
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+    },
+  );
+
+  test(
+    'fresh account checks reject a switch before send and defer old-account cleanup',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.addAll(['apple-one', 'apple-two']);
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      await host.prepare(_record('one'), _input());
+      final checks = apple.readinessChecks;
+      apple.account = 'apple-two';
+      await expectLater(host.beforeSend('one'), throwsStateError);
+      expect(apple.readinessChecks, greaterThan(checks));
+      await host.release('one');
+      expect(apple.released, 0);
+      expect((await host.status()).pendingCleanup, 1);
+      apple.account = 'apple-one';
+      await host.reconcile([]);
+      expect(apple.released, 1);
+      expect((await host.status()).pendingCleanup, 0);
+      expect((await host.status()).publishedSnapshots, 1);
+      await host.prepare(_record('two'), _input());
+      await host.beforeSend('two');
+      apple.scopeId = 'changed-by-native-account-notification';
+      expect(() => host.assertCanSend('two'), throwsStateError);
+    },
+  );
+
+  test(
+    'legacy cleanup routes by backend even when both accounts have the same scope',
+    () async {
+      final journal = _Journal();
+      final legacy = _Backend(journal);
+      await TemporaryMediaHost(
+        journal: journal,
+        backend: legacy,
+      ).prepare(_record('legacy'), _input());
+      final apple = _SnapshotBackend(journal)
+        ..account = legacy.scopeId
+        ..consentedAccounts.add(legacy.scopeId!);
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        cleanupBackends: {'googleDrive': legacy},
+        clock: () => _now,
+      );
+      await host.prepare(_record('apple'), _input());
+      await host.releaseAll(backendId: 'googleDrive');
+      expect(legacy.released, 1);
+      expect(apple.released, 0);
+      expect(journal.leases.single.backendId, 'iCloudDrive');
+      expect(journal.leases.single.state, TemporaryMediaLeaseState.prepared);
+      await host.release('apple');
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+    },
+  );
+
+  test(
+    'source removal keeps URL-free snapshot metadata until the reported expiry',
+    () async {
+      var time = _now;
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one');
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => time,
+      );
+      final input = await host.prepare(_record('one'), _input());
+      await host.release('one');
+      expect(apple.copies, isEmpty);
+      expect(apple.snapshots, hasLength(1));
+      final restarted = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => time,
+      );
+      final status = await restarted.status();
+      expect(status.activeLeases, 0);
+      expect(status.pendingCleanup, 0);
+      expect(status.publishedSnapshots, 1);
+      expect(status.latestPublishedExpiry, apple.expiry);
+      expect(
+        status.cleanupSemantics,
+        TemporaryMediaCleanupSemantics.deferredExpiry,
+      );
+      expect(
+        TemporaryMediaHostStatus.fromJson(status.toJson()).toJson(),
+        status.toJson(),
+      );
+      final receipt = jsonEncode(
+        journal.leases.map((lease) => lease.toJson()).toList(),
+      );
+      expect(
+        receipt,
+        isNot(contains((input['reference_videos'] as List).single)),
+      );
+      await restarted.reconcile([]);
+      expect(apple.released, 1);
+      time = apple.expiry!.add(const Duration(seconds: 1));
+      expect((await restarted.status()).publishedSnapshots, 0);
+      expect(journal.leases, isEmpty);
+      // Pruning metadata is not a remote revocation operation.
+      expect(apple.snapshots, hasLength(1));
+    },
+  );
+
+  test(
+    'publication during create with a lost response recovers its expiry before cleanup',
+    () async {
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one')
+        ..loseCreateResponse = true;
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => _now,
+      );
+      await expectLater(
+        host.prepare(_record('one'), _input()),
+        throwsStateError,
+      );
+      expect(apple.snapshots, hasLength(1));
+      expect(apple.copies, isEmpty);
+      expect(journal.leases.single.publishedExpiresAt, apple.expiry);
+      expect(
+        journal.leases.single.state,
+        TemporaryMediaLeaseState.sourceRemoved,
+      );
+      expect((await host.status()).publishedSnapshotsUnknownExpiry, 0);
+    },
+  );
+
+  test(
+    'unknown-expiry publications remain visible; expiry never drops pending cleanup',
+    () async {
+      var time = _now;
+      final journal = _Journal();
+      final apple = _SnapshotBackend(journal)
+        ..consentedAccounts.add('apple-one')
+        ..expiry = null;
+      final host = TemporaryMediaHost(
+        journal: journal,
+        backend: apple,
+        clock: () => time,
+      );
+      await host.prepare(_record('unknown'), _input());
+      await host.release('unknown');
+      time = _now.add(const Duration(days: 90));
+      expect((await host.status()).publishedSnapshotsUnknownExpiry, 1);
+      expect(journal.leases, hasLength(1));
+
+      time = _now;
+      apple.expiry = _now.add(const Duration(days: 30));
+      await host.prepare(_record('pending'), _input());
+      apple.failure = 'release';
+      await host.release('pending');
+      time = _now.add(const Duration(days: 90));
+      final status = await host.status();
+      expect(status.pendingCleanup, 1);
+      expect(status.publishedSnapshots, 1); // only the unknown-expiry snapshot
+      expect(journal.leases, hasLength(2));
+    },
+  );
+
+  test(
+    'version-one journal migration preserves legacy ownership and writes version two',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('media-v1.');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}/leases.json');
+      final legacy =
+          TemporaryMediaLease(
+              id: 'legacy',
+              operationId: 'operation',
+              scopeId: 'drive-library',
+              provider: 'apipod',
+              model: 'seedance',
+              createdAt: _now,
+              updatedAt: _now,
+              fileId: 'owned-copy',
+              permissionId: 'public-reader',
+            ).toJson()
+            ..remove('backendId')
+            ..remove('cleanupSemantics');
+      await file.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'leases': [legacy],
+        }),
+      );
+      final journal = FileTemporaryMediaLeaseJournal(() async => file);
+      final migrated = await journal.read();
+      expect(migrated.single.backendId, 'googleDrive');
+      expect(migrated.single.permissionId, 'public-reader');
+      await journal.write(migrated);
+      final next = jsonDecode(await file.readAsString()) as Map;
+      expect(next['version'], 2);
+      expect((next['leases'] as List).single['backendId'], 'googleDrive');
+      await file.writeAsString(
+        jsonEncode({
+          'version': 2,
+          'leases': [legacy],
+        }),
+      );
+      await expectLater(journal.read(), throwsFormatException);
+    },
+  );
+
+  test(
     'final synchronous send check rejects disconnect during journal or receipt persistence',
     () async {
       final journal = _Journal();
@@ -301,7 +810,10 @@ void main() {
       backend.failure = 'release';
       await host.release('a');
       expect((await host.status()).pendingCleanup, 1);
-      expect((await host.status()).lastCleanupError, contains('still shared'));
+      expect(
+        (await host.status()).lastCleanupError,
+        contains('source-copy cleanup is pending'),
+      );
       final restarted = TemporaryMediaHost(journal: journal, backend: backend);
       backend
         ..scopeId = 'different-account'
@@ -557,5 +1069,122 @@ class _Backend implements TemporaryMediaBackend {
     released++;
     publicFiles.remove(copy.fileId);
     copies.remove(copy.fileId);
+  }
+}
+
+class _SnapshotBackend extends _Backend
+    implements TemporaryMediaBackendCapabilities, TemporaryMediaConsentBackend {
+  _SnapshotBackend(super.journal);
+
+  @override
+  String get backendId => 'iCloudDrive';
+  String? account = 'apple-one';
+  TemporaryMediaReadiness readiness = TemporaryMediaReadiness.ready;
+  int readinessChecks = 0;
+  final consentedAccounts = <String>{};
+  DateTime? expiry = _now.add(const Duration(days: 30));
+  bool loseCreateResponse = false;
+  final snapshots = <String, TemporaryMediaCopy>{};
+
+  @override
+  Future<TemporaryMediaBackendAvailability> refreshAvailability() async {
+    readinessChecks++;
+    scopeId = account;
+    return TemporaryMediaBackendAvailability(
+      backendId: backendId,
+      readiness: readiness,
+      accountScope: account,
+      message: readiness == TemporaryMediaReadiness.signedOut
+          ? 'Sign in to your Apple Account and enable iCloud Drive.'
+          : null,
+      cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+    );
+  }
+
+  @override
+  Future<bool> isSharingAccepted() async => consentedAccounts.contains(account);
+
+  @override
+  Future<void> acceptSharing() async => consentedAccounts.add(account!);
+
+  @override
+  Future<TemporaryMediaCopy> createCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaSource source,
+  ) async {
+    expect(
+      journal.leases
+          .singleWhere((item) => item.id == lease.id)
+          .publicationAttemptedAt,
+      isNotNull,
+    );
+    final copy = await super.createCopy(lease, source);
+    final published = TemporaryMediaCopy(
+      fileId: copy.fileId,
+      publishedAt: _now,
+      expiresAt: expiry,
+    );
+    snapshots[copy.fileId] = published;
+    if (loseCreateResponse) {
+      throw StateError('Native publication response lost');
+    }
+    return published;
+  }
+
+  @override
+  Future<List<TemporaryMediaCopy>> findCopies(
+    TemporaryMediaLease lease,
+  ) async => [
+    for (final copy in await super.findCopies(lease))
+      snapshots[copy.fileId] ?? copy,
+  ];
+
+  @override
+  Future<TemporaryMediaShare> shareCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaCopy copy,
+  ) async => TemporaryMediaShare(
+    url: 'https://media.example.com/${copy.fileId}',
+    publishedAt: _now,
+    expiresAt: expiry,
+    cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+  );
+}
+
+class _UnavailableMetadataBackend extends _Backend
+    implements TemporaryMediaBackendCapabilities {
+  _UnavailableMetadataBackend(super.journal);
+  int readinessChecks = 0;
+  @override
+  String get backendId => 'iCloudDrive';
+  @override
+  Future<TemporaryMediaBackendAvailability> refreshAvailability() async {
+    readinessChecks++;
+    throw StateError('Native hosting must not be consulted for redaction.');
+  }
+}
+
+class _UnpublishedSnapshotBackend extends _SnapshotBackend {
+  _UnpublishedSnapshotBackend(super.journal);
+
+  @override
+  Future<TemporaryMediaCopy> createCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaSource source,
+  ) async => throw StateError('Source was rejected before native publication.');
+
+  @override
+  Future<List<TemporaryMediaCopy>> findCopies(
+    TemporaryMediaLease lease,
+  ) async => lease.state == TemporaryMediaLeaseState.cleanupPending
+      ? [TemporaryMediaCopy(fileId: lease.id, publicationAttempted: false)]
+      : const [];
+
+  @override
+  Future<void> releaseCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaCopy copy,
+  ) async {
+    released++;
   }
 }

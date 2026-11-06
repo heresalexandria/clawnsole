@@ -25,7 +25,9 @@ class FileTemporaryMediaLeaseJournal implements TemporaryMediaLeaseJournal {
       );
     }
     final value = jsonDecode(await file.readAsString());
-    if (value is! Map || value['version'] != 1 || value['leases'] is! List) {
+    if (value is! Map ||
+        !const [1, 2].contains(value['version']) ||
+        value['leases'] is! List) {
       throw const FormatException(
         'The temporary media recovery journal is invalid.',
       );
@@ -36,6 +38,13 @@ class FileTemporaryMediaLeaseJournal implements TemporaryMediaLeaseJournal {
       if (item is! Map<String, dynamic>) {
         throw const FormatException(
           'The temporary media recovery journal is invalid.',
+        );
+      }
+      if (value['version'] == 2 &&
+          (item['backendId'] is! String ||
+              (item['backendId'] as String).isEmpty)) {
+        throw const FormatException(
+          'The temporary media recovery record has no hosting backend.',
         );
       }
       final lease = TemporaryMediaLease.fromJson(item);
@@ -52,7 +61,7 @@ class FileTemporaryMediaLeaseJournal implements TemporaryMediaLeaseJournal {
   @override
   Future<void> write(List<TemporaryMediaLease> leases) async {
     final source = jsonEncode({
-      'version': 1,
+      'version': 2,
       'leases': leases.map((item) => item.toJson()).toList(),
     });
     if (utf8.encode(source).length > _maximumBytes) {

@@ -1641,42 +1641,119 @@ class AppController extends ChangeNotifier {
   bool get canTemporarilyHostMedia =>
       gateway is TemporaryMediaHostingGateway &&
       (gateway as TemporaryMediaHostingGateway).supportsTemporaryMediaHosting &&
-      googleDriveConnected;
+      temporaryMediaHostingStatus?.available == true;
 
   TemporaryMediaHostStatus? temporaryMediaHostingStatus;
-  bool _refreshingTemporaryMediaHosting = false;
+  Future<void>? _temporaryMediaStatusRefresh;
 
-  Future<void> refreshTemporaryMediaHostingStatus() async {
-    if (_disposed ||
-        _refreshingTemporaryMediaHosting ||
-        gateway is! TemporaryMediaHostingGateway) {
-      return;
+  bool get refreshingTemporaryMediaHosting =>
+      _temporaryMediaStatusRefresh != null;
+
+  bool get needsMediaSharingConsent =>
+      needsTemporaryMediaHosting &&
+      canTemporarilyHostMedia &&
+      temporaryMediaHostingStatus?.sharingAccepted != true;
+
+  Future<void> refreshTemporaryMediaHostingStatus() {
+    if (_disposed || gateway is! TemporaryMediaHostingGateway) {
+      return Future.value();
     }
-    _refreshingTemporaryMediaHosting = true;
+    return _temporaryMediaStatusRefresh ??= _refreshTemporaryMediaHosting()
+        .whenComplete(() => _temporaryMediaStatusRefresh = null);
+  }
+
+  Future<void> _refreshTemporaryMediaHosting() async {
     try {
       final value = await (gateway as TemporaryMediaHostingGateway)
           .temporaryMediaHostStatus();
       if (_disposed) return;
       final previous = temporaryMediaHostingStatus;
       temporaryMediaHostingStatus = value;
-      if (previous?.available != value.available ||
-          previous?.activeLeases != value.activeLeases ||
-          previous?.pendingCleanup != value.pendingCleanup ||
-          previous?.lastCleanupError != value.lastCleanupError) {
+      if (jsonEncode(previous?.toJson()) != jsonEncode(value.toJson())) {
         notifyListeners();
       }
     } on Object {
-      // Keep the last cleanup report visible until the gateway can refresh it.
-    } finally {
-      _refreshingTemporaryMediaHosting = false;
+      if (_disposed) return;
+      final previous = temporaryMediaHostingStatus;
+      // Preserve cleanup evidence, but never treat stale availability/consent
+      // as permission to publish after a failed account refresh.
+      temporaryMediaHostingStatus = TemporaryMediaHostStatus(
+        available: false,
+        activeLeases: previous?.activeLeases ?? 0,
+        pendingCleanup: previous?.pendingCleanup ?? 0,
+        backendId: previous?.backendId ?? 'iCloudDrive',
+        readiness: TemporaryMediaReadiness.unavailable,
+        message:
+            'Could not check reference hosting. Recheck before generating, or use a public HTTPS URL.',
+        cleanupSemantics:
+            previous?.cleanupSemantics ??
+            TemporaryMediaCleanupSemantics.deferredExpiry,
+        lastCleanupError: previous?.lastCleanupError,
+        publishedSnapshots: previous?.publishedSnapshots ?? 0,
+        publishedSnapshotsUnknownExpiry:
+            previous?.publishedSnapshotsUnknownExpiry ?? 0,
+        latestPublishedExpiry: previous?.latestPublishedExpiry,
+        sharingAccepted: false,
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<bool> acceptTemporaryMediaSharing(
+    TemporaryMediaHostStatus shown,
+  ) async {
+    await refreshTemporaryMediaHostingStatus();
+    final current = temporaryMediaHostingStatus;
+    if (_disposed) return false;
+    if (shown.accountScope == null ||
+        !canTemporarilyHostMedia ||
+        current?.backendId != shown.backendId ||
+        current?.accountScope != shown.accountScope) {
+      showNotice(
+        'The reference hosting account changed. Review sharing for the current account before continuing.',
+      );
+      return false;
+    }
+    if (gateway is! TemporaryMediaConsentGateway) {
+      showNotice('Reference sharing cannot be enabled on this device.');
+      return false;
+    }
+    try {
+      await (gateway as TemporaryMediaConsentGateway)
+          .acceptTemporaryMediaSharing(
+            expectedBackendId: shown.backendId,
+            expectedAccountScope: shown.accountScope!,
+          );
+      await refreshTemporaryMediaHostingStatus();
+      return !_disposed &&
+          canTemporarilyHostMedia &&
+          temporaryMediaHostingStatus?.sharingAccepted == true &&
+          temporaryMediaHostingStatus?.accountScope == shown.accountScope;
+    } on Object catch (error) {
+      if (!_disposed) showErrorNotice(error);
+      return false;
     }
   }
 
   String? get temporaryMediaCleanupNotice {
     final status = temporaryMediaHostingStatus;
     if (status == null || status.pendingCleanup == 0) return null;
-    return 'Public access cleanup is pending for ${status.pendingCleanup} temporary media ${status.pendingCleanup == 1 ? 'copy' : 'copies'}. '
-        '${googleDriveConnected ? 'Keep Clawnsole open and online; cleanup will retry.' : 'Reconnect Google Drive to restore privacy.'}';
+    return 'Cleanup is pending for ${status.pendingCleanup} temporary media source ${status.pendingCleanup == 1 ? 'copy' : 'copies'}. '
+        'Keep Clawnsole open and online with the original hosting account; cleanup will retry. Removing an iCloud source does not revoke its published link.';
+  }
+
+  String? get temporaryMediaPublicationNotice {
+    final status = temporaryMediaHostingStatus;
+    if (status == null || status.publishedSnapshots == 0) return null;
+    final count = status.publishedSnapshots;
+    final expiry = status.latestPublishedExpiry;
+    final expiryText = expiry == null
+        ? ''
+        : ' Latest reported expiry: ${expiry.toUtc().toIso8601String()}.';
+    final unknownText = status.publishedSnapshotsUnknownExpiry == 0
+        ? ''
+        : ' ${status.publishedSnapshotsUnknownExpiry} may have been published without a recorded expiry.';
+    return '$count iCloud reference ${count == 1 ? 'snapshot may' : 'snapshots may'} remain readable by anyone with the link, including after source cleanup.$expiryText$unknownText';
   }
 
   /// Expose attachment affordances before a guided route has been selected.
@@ -7242,19 +7319,46 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
-  String get publicMediaUrlHint => canTemporarilyHostMedia
-      ? 'Uploads and private library media can use temporary Google Drive links. Public HTTPS URLs also work.'
-      : 'Connect Google Drive to use uploads or private library media with ${selectedModel.selectionLabel}, or paste a public HTTPS URL.';
+  String get publicMediaUrlHint {
+    final status = temporaryMediaHostingStatus;
+    if (canTemporarilyHostMedia) {
+      return status?.cleanupSemantics ==
+              TemporaryMediaCleanupSemantics.deferredExpiry
+          ? 'Uploads and private library media can use your iCloud Drive for published reference links. Public HTTPS URLs also work.'
+          : 'Uploads and private library media can use temporary hosting links. Public HTTPS URLs also work.';
+    }
+    return switch (status?.readiness) {
+      TemporaryMediaReadiness.signedOut ||
+      TemporaryMediaReadiness.driveDisabled =>
+        '$iCloudReferenceSetupInstructions Then recheck, or paste a public HTTPS URL.',
+      TemporaryMediaReadiness.unsupported =>
+        'Uploading private references through iCloud Drive requires Clawnsole on iOS or macOS. On this device, paste a public HTTPS media URL.',
+      _ =>
+        status?.message ??
+            'Recheck reference hosting to use uploads or private library media, or paste a public HTTPS URL.',
+    };
+  }
+
+  String get iCloudReferenceSetupInstructions =>
+      defaultTargetPlatform == TargetPlatform.macOS
+      ? 'Open System Settings > Apple Account > iCloud > Drive, sign in if needed, and enable iCloud Drive.'
+      : 'Open Settings > Apple Account > iCloud > Drive, sign in if needed, and enable iCloud Drive for Clawnsole.';
 
   static const temporaryMediaSharingDisclosure =
-      'Clawnsole uploads temporary copies to Google Drive that anyone with the link can read while the provider processes this generation. Private originals stay private. Clawnsole removes public access when processing finishes; if the app closes or loses its connection, cleanup resumes when you reopen it and reconnect Drive.';
+      'Clawnsole copies references to your iCloud Drive and publishes links for the generation provider. Anyone with a link may read that snapshot until Apple’s reported expiry (about 30 days in our tests). Deleting the source copy or finishing a generation does not immediately revoke the link. Your original media stays unchanged. This permission applies to the current iCloud account on this device.';
+
+  String get mediaSharingDisclosure =>
+      temporaryMediaHostingStatus?.cleanupSemantics ==
+          TemporaryMediaCleanupSemantics.deferredExpiry
+      ? temporaryMediaSharingDisclosure
+      : 'Clawnsole uploads temporary copies that anyone with the link can read while the provider processes this generation. Your originals stay unchanged. Public access cleanup resumes when you reopen Clawnsole with the original hosting account.';
 
   bool get _usesPublicMediaInputs =>
       requiresPublicMediaUrls &&
       !(form.mode == VideoMode.draftEnhance &&
           selectedModel.draftSourceIsTaskId);
 
-  /// Local/private media can attach before Drive is connected. Only sending
+  /// Local/private media can attach before hosting is ready. Only sending
   /// them requires the privileged gateway's temporary hosting capability.
   bool get needsTemporaryMediaHosting =>
       _usesPublicMediaInputs &&
@@ -7265,7 +7369,7 @@ class AppController extends ChangeNotifier {
             value.source.startsWith('data:'),
       );
 
-  bool get needsGoogleDriveForMedia =>
+  bool get needsMediaHostingSetup =>
       needsTemporaryMediaHosting && !canTemporarilyHostMedia;
 
   Iterable<({String source, AssetReference? retained})>
@@ -7300,7 +7404,7 @@ class AppController extends ChangeNotifier {
 
   String? get temporaryMediaHostingProblem {
     if (!_usesPublicMediaInputs) return null;
-    if (needsGoogleDriveForMedia) return publicMediaUrlHint;
+    if (needsMediaHostingSetup) return publicMediaUrlHint;
     for (final value in _composerMediaSources) {
       if (_isPublicMediaUrl(value.source)) continue;
       if (canTemporarilyHostMedia &&

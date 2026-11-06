@@ -22,6 +22,10 @@ import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
+import 'package:clawnsole/core/icloud_drive_media_backend.dart';
+import 'package:clawnsole/core/icloud_reference_transport.dart';
+import 'package:clawnsole/core/icloud_reference_transport_io.dart';
+import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/library_rules.dart';
 import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
@@ -142,22 +146,33 @@ Future<void> _serveCompanion(List<String> arguments) async {
     InternetAddress.loopbackIPv4,
     config.port,
   );
+  final hostingJournal =
+      config.mediaHostJournalFile ?? '${config.dataFile}.temporary-media.json';
+  final ICloudReferenceTransport icloudTransport =
+      Platform.isMacOS && config.icloudHostHelper != null
+      ? ProcessICloudReferenceTransport(
+          executable: config.icloudHostHelper!,
+          journalDirectory:
+              '${File(hostingJournal).parent.path}/icloud-reference-hosting',
+        )
+      : const UnavailableICloudReferenceTransport();
+  final legacyMediaBackend = GoogleDriveMediaBackend(
+    scopeId: () =>
+        hybrid.connection.isConnected ? hybrid.connection.folderId : null,
+    api: () => hybrid.mediaHostingDrive.connectedApi,
+    stageSource: (source) => stageTemporaryMediaSource(source, hybrid),
+  );
   final app = CompanionApp.hybrid(
     store: store,
     api: BflApi(),
     temporaryMediaHost: TemporaryMediaHost(
-      journal: FileTemporaryMediaLeaseJournal(
-        () async => File(
-          config.mediaHostJournalFile ??
-              '${config.dataFile}.temporary-media.json',
-        ),
-      ),
-      backend: GoogleDriveMediaBackend(
-        scopeId: () =>
-            hybrid.connection.isConnected ? hybrid.connection.folderId : null,
-        api: () => hybrid.mediaHostingDrive.connectedApi,
+      journal: FileTemporaryMediaLeaseJournal(() async => File(hostingJournal)),
+      backend: ICloudDriveMediaBackend(
+        transport: icloudTransport,
+        consentStore: secureStore ?? const UnavailableSecureValueStore(),
         stageSource: (source) => stageTemporaryMediaSource(source, hybrid),
       ),
+      cleanupBackends: {'googleDrive': legacyMediaBackend},
     ),
     fallbackApiKeys: <String, String>{
       'bfl': Platform.environment['BFL_API_KEY']?.trim() ?? '',
@@ -200,8 +215,12 @@ Future<void> _serveCompanion(List<String> arguments) async {
   stdout.writeln('Local data: ${config.dataFile}');
   if (config.webRoot != null) stdout.writeln('Web root: ${config.webRoot}');
   stdout.writeln('Press Ctrl+C to stop.');
-  await for (final request in server) {
-    unawaited(app.handle(request));
+  try {
+    await for (final request in server) {
+      unawaited(app.handle(request));
+    }
+  } finally {
+    await icloudTransport.close();
   }
 }
 
@@ -318,6 +337,7 @@ class CompanionConfig {
     this.webRoot,
     this.mediaToolsDir,
     this.mediaHostJournalFile,
+    this.icloudHostHelper,
     this.secureBootstrap = false,
   });
 
@@ -326,6 +346,7 @@ class CompanionConfig {
   final String? webRoot;
   final String? mediaToolsDir;
   final String? mediaHostJournalFile;
+  final String? icloudHostHelper;
   final bool secureBootstrap;
 
   factory CompanionConfig.from(
@@ -337,6 +358,7 @@ class CompanionConfig {
     var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
     var mediaToolsDir = environment['CLAWNSOLE_MEDIA_TOOLS_DIR']?.trim() ?? '';
     var mediaHostJournalFile = '';
+    var icloudHostHelper = '';
     var secureBootstrap = false;
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
@@ -355,6 +377,9 @@ class CompanionConfig {
       } else if (arguments[index] == '--media-host-journal' &&
           index + 1 < arguments.length) {
         mediaHostJournalFile = arguments[++index];
+      } else if (arguments[index] == '--icloud-host-helper' &&
+          index + 1 < arguments.length) {
+        icloudHostHelper = arguments[++index];
       }
     }
     if (dataFile.isEmpty) {
@@ -372,6 +397,9 @@ class CompanionConfig {
       mediaHostJournalFile: mediaHostJournalFile.isEmpty
           ? null
           : File(mediaHostJournalFile).absolute.path,
+      icloudHostHelper: icloudHostHelper.isEmpty
+          ? null
+          : File(icloudHostHelper).absolute.path,
       secureBootstrap: secureBootstrap,
     );
   }
@@ -1179,11 +1207,15 @@ class CompanionApp {
     final status = await _temporaryMediaHost?.status();
     return {
       'supported': _temporaryMediaHost != null,
-      'available': status?.available ?? false,
-      'activeLeases': status?.activeLeases ?? 0,
-      'pendingCleanup': status?.pendingCleanup ?? 0,
-      if (status?.lastCleanupError != null)
-        'lastCleanupError': status!.lastCleanupError,
+      ...(status ??
+              const TemporaryMediaHostStatus(
+                available: false,
+                activeLeases: 0,
+                pendingCleanup: 0,
+                backendId: 'iCloudDrive',
+                readiness: TemporaryMediaReadiness.unsupported,
+              ))
+          .toJson(),
     };
   }
 
@@ -1260,6 +1292,23 @@ class CompanionApp {
         return await _vaultAction(request, path.substring('/vault/'.length));
       }
       if (request.method == 'GET' && path == '/temporary-media/status') {
+        return await _json(
+          request.response,
+          200,
+          await _temporaryMediaStatus(),
+        );
+      }
+      if (request.method == 'POST' &&
+          path == '/temporary-media/accept-sharing') {
+        final body = await _bodyMap(request);
+        final host = _temporaryMediaHost;
+        if (host == null) {
+          throw StateError('iCloud reference sharing is unavailable.');
+        }
+        await host.acceptSharing(
+          expectedBackendId: body['expectedBackendId'] as String? ?? '',
+          expectedAccountScope: body['expectedAccountScope'] as String? ?? '',
+        );
         return await _json(
           request.response,
           200,
@@ -1365,29 +1414,40 @@ class CompanionApp {
         final accessToken = body['accessToken']?.toString() ?? '';
         final folderName = body['folderName']?.toString() ?? '';
         if (_store.connection.isConnected) {
-          _temporaryMediaHost?.suspend();
-          await _temporaryMediaHost?.releaseAll();
+          if (_temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.suspend();
+          }
+          await _temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
         }
         try {
           await _store.connectDrive(accessToken, folderName);
-          _temporaryMediaHost?.resume();
+          if (_temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.resume();
+          }
           await _maintainTemporaryMedia(force: true);
           return await _json(request.response, 200, await _snapshotPayload());
         } on Object {
-          if (_store.connection.isConnected) _temporaryMediaHost?.resume();
+          if (_store.connection.isConnected &&
+              _temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.resume();
+          }
           rethrow;
         }
       }
       if (request.method == 'POST' && path == '/drive/disconnect') {
-        _temporaryMediaHost?.suspend();
-        await _temporaryMediaHost?.releaseAll();
+        if (_temporaryMediaHost?.backendId == 'googleDrive') {
+          _temporaryMediaHost?.suspend();
+        }
+        await _temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
         await _store.disconnectDrive();
         return await _json(request.response, 200, await _snapshotPayload());
       }
       if (request.method == 'POST' && path == '/drive/refresh') {
         final body = await _bodyMap(request);
         await _store.refreshDrive(body['accessToken']?.toString() ?? '');
-        _temporaryMediaHost?.resume();
+        if (_temporaryMediaHost?.backendId == 'googleDrive') {
+          _temporaryMediaHost?.resume();
+        }
         await _maintainTemporaryMedia(force: true);
         return await _json(request.response, 200, await _snapshotPayload());
       }
@@ -1763,7 +1823,7 @@ class CompanionApp {
         await _temporaryMediaHost?.releaseAll();
         await _store.delete();
       } finally {
-        if (_store.connection.isConnected) _temporaryMediaHost?.resume();
+        _temporaryMediaHost?.resume();
       }
       return;
     }
@@ -2630,7 +2690,7 @@ class CompanionApp {
     Future<T> Function() body,
   ) async {
     try {
-      await _temporaryMediaHost?.status();
+      await _temporaryMediaHost?.loadRecoveryMetadata();
     } on Object {
       // Journal failures must not prevent polling an accepted generation.
     }

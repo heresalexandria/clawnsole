@@ -33,7 +33,7 @@ void main() {
     ]);
   });
 
-  test('local media requires Drive and unsafe URLs remain invalid', () {
+  test('local media requires hosting and unsafe URLs remain invalid', () {
     final controller = _controller('seedance-2.5-i2v');
     addTearDown(controller.dispose);
     for (final source in <String>[
@@ -97,7 +97,7 @@ void main() {
   });
 
   test(
-    'local picks and saved references attach before Drive connection',
+    'local picks and saved references attach before hosting is ready',
     () async {
       final controller = _controller('seedance-2.5-r2v');
       addTearDown(controller.dispose);
@@ -105,7 +105,7 @@ void main() {
         _localImage(),
       ]);
       expect(controller.form.references, hasLength(1));
-      expect(controller.validate(), contains('Connect Google Drive'));
+      expect(controller.validate(), contains('enable iCloud Drive'));
       await controller.addReferenceCandidates(MediaReferenceKind.image, [
         ReferenceCandidate(
           id: 'local',
@@ -124,7 +124,7 @@ void main() {
         controller.form.references.every((item) => item.asset != null),
         isTrue,
       );
-      expect(controller.validate(), contains('Connect Google Drive'));
+      expect(controller.validate(), contains('enable iCloud Drive'));
       controller.form.references = [];
       controller.addUrlReference(MediaReferenceKind.image);
       controller.updateReference(
@@ -138,7 +138,7 @@ void main() {
 
   for (final companion in [false, true]) {
     test(
-      '${companion ? 'companion' : 'native'} prepares every local media kind when Drive is connected',
+      '${companion ? 'companion' : 'native'} prepares every local media kind when hosting is ready',
       () async {
         final gateway = _MemoryGateway(connected: true, companion: companion);
         final controller = _controller('seedance-2.5-r2v', gateway: gateway);
@@ -203,10 +203,11 @@ void main() {
           startsWith('data:video/'),
         );
         gateway.connected = false;
-        expect(controller.validate(), contains('Connect Google Drive'));
+        await controller.refreshTemporaryMediaHostingStatus();
+        expect(controller.validate(), contains('enable iCloud Drive'));
         await controller.submit(providerRetentionRiskAcknowledged: true);
-        expect(controller.section, AppSection.settings);
-        expect(controller.settingsTab, SettingsTab.sync);
+        expect(controller.section, isNot(AppSection.settings));
+        expect(gateway.submissions, 0);
       },
     );
   }
@@ -349,65 +350,127 @@ void main() {
     expect(upload.enabled, isTrue);
     expect(paste.enabled, isTrue);
   });
-  for (final platform in [
-    TargetPlatform.iOS,
-    TargetPlatform.android,
-    TargetPlatform.windows,
-    TargetPlatform.macOS,
-  ]) {
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.macOS]) {
     testWidgets(
-      '${platform.name} shows temporary-sharing disclosure before Generate and a Drive CTA when disconnected',
+      '${platform.name} explains system iCloud setup and rechecks availability',
       (tester) async {
         debugDefaultTargetPlatformOverride = platform;
         try {
-          final gateway = _MemoryGateway(connected: true);
+          final gateway = _MemoryGateway();
           final controller = _controller('seedance-2.5-i2v', gateway: gateway);
           addTearDown(controller.dispose);
-          controller.form.keyframes = [
-            KeyframeDraft(
-              id: 'first',
-              label: 'First',
-              role: KeyframeRole.start,
-              source: '',
-              seconds: 0,
-              asset: _localImage(),
-            ),
-          ];
+          _attachLocalFrame(controller);
           await _mount(
             tester,
             controller,
-            size:
-                platform == TargetPlatform.iOS ||
-                    platform == TargetPlatform.android
+            size: platform == TargetPlatform.iOS
                 ? const Size(430, 932)
                 : const Size(1400, 1000),
           );
           expect(
+            find.textContaining(
+              platform == TargetPlatform.iOS
+                  ? 'Open Settings > Apple Account'
+                  : 'Open System Settings > Apple Account',
+            ),
+            findsWidgets,
+          );
+          expect(find.text('Connect Google Drive'), findsNothing);
+          expect(controller.canTemporarilyHostMedia, isFalse);
+          gateway.status = _icloudStatus(available: true);
+          final recheck = find.byKey(const ValueKey('recheck-media-hosting'));
+          await tester.ensureVisible(recheck);
+          await tester.tap(recheck);
+          await tester.pumpAndSettle();
+          expect(controller.canTemporarilyHostMedia, isTrue);
+          expect(controller.googleDriveConnected, isFalse);
+          expect(
             find.text(AppController.temporaryMediaSharingDisclosure),
             findsOneWidget,
           );
-          expect(
-            find.byKey(const ValueKey('connect-drive-for-media')),
-            findsNothing,
-          );
           expect(tester.takeException(), isNull);
-          gateway.connected = false;
-          controller.notifyListeners();
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      },
+    );
+
+    testWidgets(
+      '${platform.name} requires explicit account-bound sharing consent',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          final gateway = _MemoryGateway()
+            ..status = _icloudStatus(available: true, sharingAccepted: false);
+          final controller = _controller('seedance-2.5-i2v', gateway: gateway);
+          addTearDown(controller.dispose);
+          _attachLocalFrame(controller);
+          await controller.submit(providerRetentionRiskAcknowledged: true);
+          expect(gateway.submissions, 0);
+          await _mount(
+            tester,
+            controller,
+            size: platform == TargetPlatform.iOS
+                ? const Size(430, 932)
+                : const Size(1400, 1000),
+          );
+          final allow = find.byKey(const ValueKey('allow-icloud-references'));
+          await tester.ensureVisible(allow);
+          await tester.tap(allow);
           await tester.pumpAndSettle();
+          final dialog = find.byKey(
+            const ValueKey('media-sharing-consent-dialog'),
+          );
+          expect(dialog, findsOneWidget);
           expect(
-            find.byKey(const ValueKey('connect-drive-for-media')),
+            find.descendant(
+              of: dialog,
+              matching: find.textContaining('does not immediately revoke'),
+            ),
             findsOneWidget,
           );
-          await tester.ensureVisible(
-            find.byKey(const ValueKey('connect-drive-for-media')),
+          expect(
+            find.descendant(
+              of: dialog,
+              matching: find.textContaining('about 30 days'),
+            ),
+            findsOneWidget,
           );
           await tester.tap(
-            find.byKey(const ValueKey('connect-drive-for-media')),
+            find.descendant(of: dialog, matching: find.text('Cancel')),
           );
           await tester.pumpAndSettle();
-          expect(controller.settingsTab, SettingsTab.sync);
-          expect(controller.section, AppSection.settings);
-          expect(find.byType(AlertDialog), findsNothing);
+          expect(gateway.acceptedScopes, isEmpty);
+          await tester.tap(allow);
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('confirm-media-sharing')));
+          await tester.pumpAndSettle();
+          expect(gateway.acceptedScopes, ['account-1']);
+          expect(controller.needsMediaSharingConsent, isFalse);
+          expect(allow, findsNothing);
+          expect(gateway.submissions, 0);
+
+          gateway.status = _icloudStatus(
+            available: true,
+            sharingAccepted: false,
+            accountScope: 'account-2',
+          );
+          await controller.refreshTemporaryMediaHostingStatus();
+          await tester.pumpAndSettle();
+          expect(allow, findsOneWidget);
+          await tester.ensureVisible(allow);
+          await tester.tap(allow);
+          await tester.pumpAndSettle();
+          gateway.status = _icloudStatus(
+            available: true,
+            sharingAccepted: false,
+            accountScope: 'account-3',
+          );
+          await tester.tap(find.byKey(const ValueKey('confirm-media-sharing')));
+          await tester.pumpAndSettle();
+          expect(gateway.acceptedScopes, ['account-1']);
+          expect(controller.needsMediaSharingConsent, isTrue);
+          await tester.pump(const Duration(seconds: 5));
           expect(tester.takeException(), isNull);
         } finally {
           debugDefaultTargetPlatformOverride = null;
@@ -415,6 +478,94 @@ void main() {
       },
     );
   }
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
+    testWidgets(
+      '${platform.name} leaves public references and text generation usable',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          final gateway = _MemoryGateway()
+            ..status = _icloudStatus(
+              available: false,
+              readiness: TemporaryMediaReadiness.unsupported,
+            );
+          final controller = _controller('seedance-2.5-i2v', gateway: gateway);
+          addTearDown(controller.dispose);
+          _attachLocalFrame(controller);
+          expect(
+            controller.validate(),
+            contains('On this device, paste a public HTTPS'),
+          );
+          await _mount(tester, controller);
+          expect(
+            find.byKey(const ValueKey('allow-icloud-references')),
+            findsNothing,
+          );
+          expect(find.text('Connect Google Drive'), findsNothing);
+          controller.form.keyframes = [
+            const KeyframeDraft(
+              id: 'public',
+              label: 'First',
+              role: KeyframeRole.start,
+              source: 'https://cdn.example.com/first.png',
+              seconds: 0,
+            ),
+          ];
+          expect(controller.validate(), isNull);
+          controller.form.keyframes = [];
+          controller.selectedModelId = 'seedance-2.5-t2v';
+          expect(controller.validate(), isNull);
+          expect(controller.needsMediaSharingConsent, isFalse);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      },
+    );
+  }
+
+  testWidgets('source cleanup never hides published iCloud snapshot exposure', (
+    tester,
+  ) async {
+    final gateway = _MemoryGateway()
+      ..status = TemporaryMediaHostStatus(
+        available: true,
+        activeLeases: 0,
+        pendingCleanup: 0,
+        backendId: 'iCloudDrive',
+        cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+        publishedSnapshots: 2,
+        publishedSnapshotsUnknownExpiry: 1,
+        latestPublishedExpiry: DateTime.utc(2026, 12, 6),
+      );
+    final controller = _controller('seedance-2.5-t2v', gateway: gateway);
+    addTearDown(controller.dispose);
+    await _mount(tester, controller);
+    expect(
+      find.byKey(const ValueKey('temporary-media-cleanup-notice')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('temporary-media-publication-notice')),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('including after source cleanup'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('2026-12-06'), findsOneWidget);
+    expect(find.textContaining('without a recorded expiry'), findsOneWidget);
+    expect(find.text('Reconnect Google Drive'), findsNothing);
+    gateway.failStatus = true;
+    await controller.refreshTemporaryMediaHostingStatus();
+    await tester.pumpAndSettle();
+    expect(controller.canTemporarilyHostMedia, isFalse);
+    expect(controller.temporaryMediaHostingStatus?.publishedSnapshots, 2);
+    expect(
+      find.byKey(const ValueKey('temporary-media-publication-notice')),
+      findsOneWidget,
+    );
+  });
 
   testWidgets(
     'pending cleanup remains visible independently of selected model',
@@ -434,8 +585,11 @@ void main() {
         find.byKey(const ValueKey('temporary-media-cleanup-notice')),
         findsOneWidget,
       );
-      expect(find.textContaining('2 temporary media copies'), findsOneWidget);
-      expect(find.text('Reconnect Google Drive'), findsOneWidget);
+      expect(
+        find.textContaining('2 temporary media source copies'),
+        findsOneWidget,
+      );
+      expect(find.text('Reconnect Google Drive'), findsNothing);
       gateway.status = const TemporaryMediaHostStatus(
         available: true,
         activeLeases: 0,
@@ -451,6 +605,39 @@ void main() {
   );
 }
 
+TemporaryMediaHostStatus _icloudStatus({
+  required bool available,
+  bool sharingAccepted = true,
+  String accountScope = 'account-1',
+  TemporaryMediaReadiness? readiness,
+}) => TemporaryMediaHostStatus(
+  available: available,
+  activeLeases: 0,
+  pendingCleanup: 0,
+  backendId: 'iCloudDrive',
+  accountScope: accountScope,
+  readiness:
+      readiness ??
+      (available
+          ? TemporaryMediaReadiness.ready
+          : TemporaryMediaReadiness.signedOut),
+  cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+  sharingAccepted: sharingAccepted,
+);
+
+void _attachLocalFrame(AppController controller) {
+  controller.form.keyframes = [
+    KeyframeDraft(
+      id: 'first',
+      label: 'First',
+      role: KeyframeRole.start,
+      source: '',
+      seconds: 0,
+      asset: _localImage(),
+    ),
+  ];
+}
+
 PickedAsset _localImage() => PickedAsset(
   name: 'local.png',
   bytes: base64Decode(
@@ -460,7 +647,9 @@ PickedAsset _localImage() => PickedAsset(
 );
 
 AppController _controller(String model, {_MemoryGateway? gateway}) {
-  final controller = AppController(gateway: gateway ?? _MemoryGateway())
+  final source = gateway ?? _MemoryGateway();
+  final controller = AppController(gateway: source)
+    ..temporaryMediaHostingStatus = source.currentStatus
     ..snapshot = const LocalSnapshot(
       generations: <Generation>[],
       preferences: AppPreferences(provider: 'apipod'),
@@ -502,7 +691,11 @@ Future<void> _mount(
 }
 
 class _MemoryGateway
-    implements AppGateway, GoogleDriveGateway, TemporaryMediaHostingGateway {
+    implements
+        AppGateway,
+        GoogleDriveGateway,
+        TemporaryMediaHostingGateway,
+        TemporaryMediaConsentGateway {
   _MemoryGateway({this.connected = false, this.companion = false});
   bool connected;
   final bool companion;
@@ -517,14 +710,39 @@ class _MemoryGateway
         : GoogleDriveConnectionState.disconnected,
   );
   TemporaryMediaHostStatus? status;
+  bool failStatus = false;
+  int submissions = 0;
+  final acceptedScopes = <String>[];
+  TemporaryMediaHostStatus get currentStatus =>
+      status ?? _icloudStatus(available: connected);
   @override
-  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async =>
-      status ??
-      TemporaryMediaHostStatus(
-        available: connected,
-        activeLeases: 0,
-        pendingCleanup: 0,
-      );
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async {
+    if (failStatus) throw StateError('offline');
+    return currentStatus;
+  }
+
+  @override
+  Future<void> acceptTemporaryMediaSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  }) async {
+    if (currentStatus.backendId != expectedBackendId ||
+        currentStatus.accountScope != expectedAccountScope) {
+      throw StateError('Account changed');
+    }
+    acceptedScopes.add(expectedAccountScope);
+    status = TemporaryMediaHostStatus.fromJson({
+      ...currentStatus.toJson(),
+      'sharingAccepted': true,
+    });
+  }
+
+  @override
+  Future<Generation> submit(GenerationSubmission submission) async {
+    submissions++;
+    return submission.record.copyWith(status: 'queued');
+  }
+
   @override
   Future<Uint8List> readAsset(AssetReference reference) async =>
       Uint8List.fromList([1, 2, 3]);

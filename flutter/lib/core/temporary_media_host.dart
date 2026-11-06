@@ -12,6 +12,39 @@ enum TemporaryMediaLeaseState {
   submitting,
   accepted,
   cleanupPending,
+  sourceRemoved,
+}
+
+enum TemporaryMediaReadiness {
+  ready,
+  signedOut,
+  driveDisabled,
+  unsupported,
+  unavailable,
+}
+
+/// Removing a source and revoking a published link are different operations.
+enum TemporaryMediaCleanupSemantics { permissionRevocation, deferredExpiry }
+
+class TemporaryMediaBackendAvailability {
+  const TemporaryMediaBackendAvailability({
+    required this.backendId,
+    required this.readiness,
+    this.accountScope,
+    this.message,
+    this.cleanupSemantics = TemporaryMediaCleanupSemantics.permissionRevocation,
+  });
+
+  final String backendId;
+  final TemporaryMediaReadiness readiness;
+  final String? accountScope;
+  final String? message;
+  final TemporaryMediaCleanupSemantics cleanupSemantics;
+
+  bool get available =>
+      readiness == TemporaryMediaReadiness.ready &&
+      accountScope != null &&
+      accountScope!.isNotEmpty;
 }
 
 /// This journal contains recovery identifiers, never media bytes or public URLs.
@@ -24,17 +57,25 @@ class TemporaryMediaLease {
     required this.model,
     required this.createdAt,
     required this.updatedAt,
+    this.backendId = 'googleDrive',
+    this.cleanupSemantics = TemporaryMediaCleanupSemantics.permissionRevocation,
     this.state = TemporaryMediaLeaseState.intent,
     this.fileId,
     this.permissionId,
     this.requestId,
     this.pollingUrl,
     this.lastError,
+    this.publicationAttemptedAt,
+    this.publishedAt,
+    this.publishedExpiresAt,
+    this.sourceRemovedAt,
   });
 
   final String id;
   final String operationId;
   final String scopeId;
+  final String backendId;
+  final TemporaryMediaCleanupSemantics cleanupSemantics;
   final String provider;
   final String model;
   final DateTime createdAt;
@@ -45,6 +86,12 @@ class TemporaryMediaLease {
   final String? requestId;
   final String? pollingUrl;
   final String? lastError;
+  final DateTime? publicationAttemptedAt;
+  final DateTime? publishedAt;
+
+  /// The host-reported expiration, not proof of remote erasure or revocation.
+  final DateTime? publishedExpiresAt;
+  final DateTime? sourceRemovedAt;
 
   TemporaryMediaLease copyWith({
     TemporaryMediaLeaseState? state,
@@ -53,12 +100,20 @@ class TemporaryMediaLease {
     String? requestId,
     String? pollingUrl,
     String? lastError,
+    TemporaryMediaCleanupSemantics? cleanupSemantics,
+    DateTime? publicationAttemptedAt,
+    DateTime? publishedAt,
+    DateTime? publishedExpiresAt,
+    DateTime? sourceRemovedAt,
+    bool clearPublishedExpiry = false,
     bool clearError = false,
     required DateTime updatedAt,
   }) => TemporaryMediaLease(
     id: id,
     operationId: operationId,
     scopeId: scopeId,
+    backendId: backendId,
+    cleanupSemantics: cleanupSemantics ?? this.cleanupSemantics,
     provider: provider,
     model: model,
     createdAt: createdAt,
@@ -69,12 +124,21 @@ class TemporaryMediaLease {
     requestId: requestId ?? this.requestId,
     pollingUrl: pollingUrl ?? this.pollingUrl,
     lastError: clearError ? null : lastError ?? this.lastError,
+    publicationAttemptedAt:
+        publicationAttemptedAt ?? this.publicationAttemptedAt,
+    publishedAt: publishedAt ?? this.publishedAt,
+    publishedExpiresAt: clearPublishedExpiry
+        ? null
+        : publishedExpiresAt ?? this.publishedExpiresAt,
+    sourceRemovedAt: sourceRemovedAt ?? this.sourceRemovedAt,
   );
 
   Map<String, Object?> toJson() => {
     'id': id,
     'operationId': operationId,
     'scopeId': scopeId,
+    'backendId': backendId,
+    'cleanupSemantics': cleanupSemantics.name,
     'provider': provider,
     'model': model,
     'createdAt': createdAt.toIso8601String(),
@@ -85,6 +149,13 @@ class TemporaryMediaLease {
     if (requestId != null) 'requestId': requestId,
     if (pollingUrl != null) 'pollingUrl': pollingUrl,
     if (lastError != null) 'lastError': lastError,
+    if (publicationAttemptedAt != null)
+      'publicationAttemptedAt': publicationAttemptedAt!.toIso8601String(),
+    if (publishedAt != null) 'publishedAt': publishedAt!.toIso8601String(),
+    if (publishedExpiresAt != null)
+      'publishedExpiresAt': publishedExpiresAt!.toIso8601String(),
+    if (sourceRemovedAt != null)
+      'sourceRemovedAt': sourceRemovedAt!.toIso8601String(),
   };
 
   factory TemporaryMediaLease.fromJson(Map<String, Object?> json) {
@@ -100,6 +171,15 @@ class TemporaryMediaLease {
       id: requiredString('id'),
       operationId: requiredString('operationId'),
       scopeId: requiredString('scopeId'),
+      // Version-one journals used Google Drive exclusively.
+      backendId: json.containsKey('backendId')
+          ? requiredString('backendId')
+          : 'googleDrive',
+      cleanupSemantics: json.containsKey('cleanupSemantics')
+          ? TemporaryMediaCleanupSemantics.values.byName(
+              requiredString('cleanupSemantics'),
+            )
+          : TemporaryMediaCleanupSemantics.permissionRevocation,
       provider: requiredString('provider'),
       model: requiredString('model'),
       createdAt: DateTime.parse(requiredString('createdAt')).toUtc(),
@@ -110,6 +190,18 @@ class TemporaryMediaLease {
       requestId: json['requestId'] as String?,
       pollingUrl: json['pollingUrl'] as String?,
       lastError: json['lastError'] as String?,
+      publicationAttemptedAt: json['publicationAttemptedAt'] == null
+          ? null
+          : DateTime.parse(requiredString('publicationAttemptedAt')).toUtc(),
+      publishedAt: json['publishedAt'] == null
+          ? null
+          : DateTime.parse(requiredString('publishedAt')).toUtc(),
+      publishedExpiresAt: json['publishedExpiresAt'] == null
+          ? null
+          : DateTime.parse(requiredString('publishedExpiresAt')).toUtc(),
+      sourceRemovedAt: json['sourceRemovedAt'] == null
+          ? null
+          : DateTime.parse(requiredString('sourceRemovedAt')).toUtc(),
     );
   }
 }
@@ -135,14 +227,37 @@ class TemporaryMediaSource {
 }
 
 class TemporaryMediaCopy {
-  const TemporaryMediaCopy({required this.fileId});
+  const TemporaryMediaCopy({
+    required this.fileId,
+    this.publishedAt,
+    this.expiresAt,
+    this.publicationAttempted,
+  });
   final String fileId;
+
+  /// False confirms the owned copy never reached publication; null means the
+  /// backend cannot determine whether it did. True includes uncertain attempts.
+  final bool? publicationAttempted;
+
+  /// Recovery metadata for a publication whose response was not journaled.
+  /// The backend must preserve these before removing its owned source copy.
+  final DateTime? publishedAt;
+  final DateTime? expiresAt;
 }
 
 class TemporaryMediaShare {
-  const TemporaryMediaShare({required this.permissionId, required this.url});
-  final String permissionId;
+  const TemporaryMediaShare({
+    required this.url,
+    this.permissionId,
+    this.publishedAt,
+    this.expiresAt,
+    this.cleanupSemantics = TemporaryMediaCleanupSemantics.permissionRevocation,
+  });
+  final String? permissionId;
   final String url;
+  final DateTime? publishedAt;
+  final DateTime? expiresAt;
+  final TemporaryMediaCleanupSemantics cleanupSemantics;
 }
 
 /// Implementations own app-created copies only, and reject a different scope.
@@ -162,17 +277,105 @@ abstract interface class TemporaryMediaBackend {
   Future<void> releaseCopy(TemporaryMediaLease lease, TemporaryMediaCopy copy);
 }
 
+/// Optional for legacy Drive adapters. Refresh must update the backend's cached
+/// [TemporaryMediaBackend.scopeId], which the final synchronous send guard reads.
+/// Native adapters must also recheck ownership/account identity on every action.
+abstract interface class TemporaryMediaBackendCapabilities {
+  String get backendId;
+  Future<TemporaryMediaBackendAvailability> refreshAvailability();
+}
+
+/// Consent belongs to this device, hosting account and disclosure version.
+/// Implementations must not infer it from synced library preferences.
+abstract interface class TemporaryMediaConsentBackend {
+  Future<bool> isSharingAccepted();
+  Future<void> acceptSharing();
+}
+
 class TemporaryMediaHostStatus {
   const TemporaryMediaHostStatus({
     required this.available,
     required this.activeLeases,
     required this.pendingCleanup,
     this.lastCleanupError,
-  });
+    this.backendId = 'googleDrive',
+    TemporaryMediaReadiness? readiness,
+    this.message,
+    this.accountScope,
+    this.cleanupSemantics = TemporaryMediaCleanupSemantics.permissionRevocation,
+    this.publishedSnapshots = 0,
+    this.publishedSnapshotsUnknownExpiry = 0,
+    this.latestPublishedExpiry,
+    this.sharingAccepted = true,
+  }) : _readiness = readiness;
   final bool available;
   final int activeLeases;
+
+  /// Source copies awaiting cleanup; this is not a count of revoked links.
   final int pendingCleanup;
   final String? lastCleanupError;
+  final String backendId;
+  final TemporaryMediaReadiness? _readiness;
+  TemporaryMediaReadiness get readiness =>
+      _readiness ??
+      (available
+          ? TemporaryMediaReadiness.ready
+          : TemporaryMediaReadiness.unavailable);
+  final String? message;
+  final String? accountScope;
+  final TemporaryMediaCleanupSemantics cleanupSemantics;
+
+  /// Known or possibly issued snapshots whose reported expiration has not
+  /// passed. This is retained even after the source has been removed.
+  final int publishedSnapshots;
+  final int publishedSnapshotsUnknownExpiry;
+  final DateTime? latestPublishedExpiry;
+  final bool sharingAccepted;
+
+  Map<String, Object?> toJson() => {
+    'available': available,
+    'activeLeases': activeLeases,
+    'pendingCleanup': pendingCleanup,
+    'backendId': backendId,
+    'readiness': readiness.name,
+    'cleanupSemantics': cleanupSemantics.name,
+    'publishedSnapshots': publishedSnapshots,
+    'publishedSnapshotsUnknownExpiry': publishedSnapshotsUnknownExpiry,
+    'sharingAccepted': sharingAccepted,
+    if (message != null) 'message': message,
+    if (accountScope != null) 'accountScope': accountScope,
+    if (lastCleanupError != null) 'lastCleanupError': lastCleanupError,
+    if (latestPublishedExpiry != null)
+      'latestPublishedExpiry': latestPublishedExpiry!.toIso8601String(),
+  };
+
+  factory TemporaryMediaHostStatus.fromJson(Map<String, Object?> json) =>
+      TemporaryMediaHostStatus(
+        available: json['available'] == true,
+        activeLeases: (json['activeLeases'] as num?)?.toInt() ?? 0,
+        pendingCleanup: (json['pendingCleanup'] as num?)?.toInt() ?? 0,
+        backendId: json['backendId'] as String? ?? 'googleDrive',
+        readiness: TemporaryMediaReadiness.values
+            .where((value) => value.name == json['readiness'])
+            .firstOrNull,
+        cleanupSemantics:
+            TemporaryMediaCleanupSemantics.values
+                .where((value) => value.name == json['cleanupSemantics'])
+                .firstOrNull ??
+            TemporaryMediaCleanupSemantics.permissionRevocation,
+        message: json['message'] as String?,
+        accountScope: json['accountScope'] as String?,
+        lastCleanupError: json['lastCleanupError'] as String?,
+        publishedSnapshots: (json['publishedSnapshots'] as num?)?.toInt() ?? 0,
+        publishedSnapshotsUnknownExpiry:
+            (json['publishedSnapshotsUnknownExpiry'] as num?)?.toInt() ?? 0,
+        latestPublishedExpiry: json['latestPublishedExpiry'] is String
+            ? DateTime.tryParse(
+                json['latestPublishedExpiry']! as String,
+              )?.toUtc()
+            : null,
+        sharingAccepted: json['sharingAccepted'] != false,
+      );
 }
 
 /// One request position, including the URL component of a timed keyframe.
@@ -288,17 +491,27 @@ typedef TemporaryMediaPoll =
     Future<Generation?> Function(TemporaryMediaLease lease);
 
 /// Durable ownership of temporary public media, shared by native and companion.
-/// The 24-hour orphan limit is enforced when connected, not by the host server.
+/// The orphan source-copy limit is enforced when connected. It is not a public
+/// access deadline: deferred publications can outlive the owned source copy.
 class TemporaryMediaHost {
   TemporaryMediaHost({
     required this.journal,
     required this.backend,
+    this.cleanupBackends = const {},
     DateTime Function()? clock,
     this.orphanLifetime = const Duration(hours: 24),
     this.onPublicUrl,
   }) : _clock = clock ?? DateTime.now;
   final TemporaryMediaLeaseJournal journal;
   final TemporaryMediaBackend backend;
+
+  /// Older hosts remain reachable for owned-lease cleanup only. New media is
+  /// always prepared with [backend], even when that backend is unavailable.
+  final Map<String, TemporaryMediaBackend> cleanupBackends;
+  String get backendId => _backendId(backend);
+  TemporaryMediaBackendAvailability? _availability;
+  bool _sharingAccepted = true;
+  bool _redactApplePublicationUrls = false;
   final Duration orphanLifetime;
   final void Function(String)? onPublicUrl;
   final DateTime Function() _clock;
@@ -311,17 +524,134 @@ class TemporaryMediaHost {
   final Map<String, Set<String>> _operationUrls = {};
   bool _suspended = false;
 
-  /// Call before changing Drive credentials; [releaseAll] drains preparations.
+  /// Call before changing active-host credentials; [releaseAll] drains work.
   void suspend() => _suspended = true;
   void resume() => _suspended = false;
 
   void _requirePreparingScope(String scope) {
-    if (_suspended || backend.scopeId != scope) {
+    if (_suspended ||
+        _availability?.available != true ||
+        _availability?.accountScope != scope ||
+        backend.scopeId != scope) {
       throw StateError(
-        'Google Drive sharing stopped. Reconnect Drive before generating with this media.',
+        'Media sharing stopped. Reconnect the same hosting account before generating.',
       );
     }
   }
+
+  static String _backendId(TemporaryMediaBackend value) =>
+      value is TemporaryMediaBackendCapabilities
+      ? (value as TemporaryMediaBackendCapabilities).backendId
+      : 'googleDrive';
+
+  TemporaryMediaBackend? _backendFor(TemporaryMediaLease lease) =>
+      lease.backendId == backendId ? backend : cleanupBackends[lease.backendId];
+
+  Future<TemporaryMediaBackendAvailability> _refreshBackend(
+    TemporaryMediaBackend target,
+  ) async {
+    final id = _backendId(target);
+    TemporaryMediaBackendAvailability value;
+    try {
+      if (target is TemporaryMediaBackendCapabilities) {
+        value = await (target as TemporaryMediaBackendCapabilities)
+            .refreshAvailability();
+        if (value.backendId != id ||
+            (value.available && value.accountScope != target.scopeId)) {
+          throw StateError(
+            'Hosting account changed during its readiness check.',
+          );
+        }
+      } else {
+        value = TemporaryMediaBackendAvailability(
+          backendId: id,
+          readiness: target.scopeId == null || target.scopeId!.isEmpty
+              ? TemporaryMediaReadiness.signedOut
+              : TemporaryMediaReadiness.ready,
+          accountScope: target.scopeId,
+          message: target.scopeId == null || target.scopeId!.isEmpty
+              ? 'Connect Google Drive to temporarily share this media, or provide a public HTTPS URL.'
+              : null,
+        );
+      }
+    } on Object {
+      value = TemporaryMediaBackendAvailability(
+        backendId: id,
+        readiness: TemporaryMediaReadiness.unavailable,
+        message: 'Media hosting could not be checked. Reconnect and try again.',
+        cleanupSemantics: identical(target, backend)
+            ? _availability?.cleanupSemantics ??
+                  TemporaryMediaCleanupSemantics.permissionRevocation
+            : TemporaryMediaCleanupSemantics.permissionRevocation,
+      );
+    }
+    if (value.cleanupSemantics ==
+        TemporaryMediaCleanupSemantics.deferredExpiry) {
+      _redactApplePublicationUrls = true;
+    }
+    if (identical(target, backend)) _availability = value;
+    return value;
+  }
+
+  Future<bool> _refreshConsent() async {
+    try {
+      _sharingAccepted =
+          backend is! TemporaryMediaConsentBackend ||
+          await (backend as TemporaryMediaConsentBackend).isSharingAccepted();
+    } on Object {
+      _sharingAccepted = false;
+    }
+    return _sharingAccepted;
+  }
+
+  Future<void> acceptSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  }) async {
+    final availability = await _refreshBackend(backend);
+    if (!availability.available ||
+        _suspended ||
+        expectedBackendId != backendId ||
+        expectedAccountScope.isEmpty ||
+        expectedAccountScope != availability.accountScope) {
+      throw StateError(
+        availability.message ??
+            'The hosting account changed. Review sharing again before continuing.',
+      );
+    }
+    final scope = availability.accountScope!;
+    if (backend case final TemporaryMediaConsentBackend consent) {
+      await consent.acceptSharing();
+    }
+    await _refreshBackend(backend);
+    _requirePreparingScope(scope);
+    if (!await _refreshConsent()) {
+      throw StateError('Media sharing consent could not be saved. Try again.');
+    }
+  }
+
+  Future<void> _requireConsent() async {
+    if (!await _refreshConsent()) {
+      throw StateError(
+        'Review and accept how reference copies are shared before generating.',
+      );
+    }
+  }
+
+  bool _hasPublishedSnapshot(TemporaryMediaLease lease) =>
+      lease.cleanupSemantics == TemporaryMediaCleanupSemantics.deferredExpiry &&
+      (lease.publicationAttemptedAt != null || lease.publishedAt != null) &&
+      (lease.publishedExpiresAt == null ||
+          lease.publishedExpiresAt!.isAfter(_now));
+
+  Future<void> _pruneExpiredSnapshots() => _change((items) {
+    items.removeWhere(
+      (_, lease) =>
+          lease.state == TemporaryMediaLeaseState.sourceRemoved &&
+          lease.publishedExpiresAt != null &&
+          !lease.publishedExpiresAt!.isAfter(_now),
+    );
+  });
 
   Set<String> get activePublicUrls => Set.unmodifiable(_publicUrls);
   Set<String> hostedUrlsFor(String operationId) =>
@@ -333,7 +663,16 @@ class TemporaryMediaHost {
     return text.replaceAllMapped(RegExp(r'''https?://[^\s"'<>]+'''), (match) {
       final value = match.group(0)!;
       final uri = Uri.tryParse(value);
-      if (_knownFileIds.any(value.contains) ||
+      final host = uri?.host.toLowerCase();
+      final applePublication =
+          _redactApplePublicationUrls &&
+          uri != null &&
+          (host == 'icloud-content.com' ||
+              host!.endsWith('.icloud-content.com') ||
+              ((host == 'icloud.com' || host == 'www.icloud.com') &&
+                  uri.pathSegments.firstOrNull == 'attachment'));
+      if (applePublication ||
+          _knownFileIds.any(value.contains) ||
           (uri != null &&
               (uri.pathSegments.any(_knownFileIds.contains) ||
                   uri.queryParametersAll.values.any(
@@ -368,10 +707,21 @@ class TemporaryMediaHost {
 
   Future<void> _load() async {
     _leases ??= {for (final lease in await journal.read()) lease.id: lease};
+    if (_leases!.values.any(
+      (lease) =>
+          lease.cleanupSemantics ==
+          TemporaryMediaCleanupSemantics.deferredExpiry,
+    )) {
+      _redactApplePublicationUrls = true;
+    }
     _knownFileIds.addAll(
       _leases!.values.map((lease) => lease.fileId).whereType<String>(),
     );
   }
+
+  /// Hydrates only local recovery identifiers for transcript redaction. This
+  /// must not depend on native account readiness or delay provider polling.
+  Future<void> loadRecoveryMetadata() => _serialized(_load);
 
   Future<List<TemporaryMediaLease>> _read() => _serialized(() async {
     await _load();
@@ -412,12 +762,15 @@ class TemporaryMediaHost {
         .where((slot) => !isPublicTemporaryMediaSource(slot.media.source))
         .toList();
     if (slots.isEmpty) return Map.of(input);
-    final scope = backend.scopeId;
-    if (scope == null || scope.isEmpty) {
+    final availability = await _refreshBackend(backend);
+    final scope = availability.accountScope;
+    if (!availability.available || scope == null || scope.isEmpty) {
       throw StateError(
-        'Connect Google Drive to temporarily share this media, or provide a public HTTPS URL.',
+        availability.message ??
+            'Media hosting is unavailable. Reconnect your hosting account or provide a public HTTPS URL.',
       );
     }
+    await _requireConsent();
     _requirePreparingScope(scope);
     final result = Map<String, Object?>.from(input);
     final prepared = <String, String>{};
@@ -427,27 +780,46 @@ class TemporaryMediaHost {
         final identity = source.retained == null
             ? source.source
             : jsonEncode([source.retained!.kind, source.retained!.value]);
+        // Preserve version-one Drive IDs so a resumed preparation finds its
+        // existing owned copy. Other backends have a separate namespace.
+        final hostingScope = backendId == 'googleDrive'
+            ? scope
+            : '$backendId\u0000$scope';
         final id =
-            'tm_${sha256.convert(utf8.encode('${record.localId}\u0000$scope\u0000${source.kind.name}\u0000$identity'))}';
+            'tm_${sha256.convert(utf8.encode('${record.localId}\u0000$hostingScope\u0000${source.kind.name}\u0000$identity'))}';
         if (prepared[id] != null) {
           slot.replaceIn(result, prepared[id]!);
           continue;
         }
         var lease = (await _read()).where((item) => item.id == id).firstOrNull;
-        if (lease?.state == TemporaryMediaLeaseState.cleanupPending) {
+        if (lease?.state == TemporaryMediaLeaseState.cleanupPending ||
+            lease?.state == TemporaryMediaLeaseState.sourceRemoved) {
           throw StateError(
-            'Temporary media cleanup is still pending. Try again after Drive reconnects.',
+            'This media copy is being cleaned up. Start a new generation after reconnecting.',
           );
         }
         lease ??= TemporaryMediaLease(
           id: id,
           operationId: record.localId,
           scopeId: scope,
+          backendId: backendId,
+          cleanupSemantics: availability.cleanupSemantics,
           provider: record.provider,
           model: record.model,
           createdAt: _now,
           updatedAt: _now,
         );
+        if (lease.cleanupSemantics ==
+            TemporaryMediaCleanupSemantics.deferredExpiry) {
+          // Some native backends copy and publish atomically in createCopy.
+          // Publication can succeed even when that response is lost, so record
+          // the possible exposure before either mutating backend operation.
+          lease = lease.copyWith(
+            publicationAttemptedAt: _now,
+            clearPublishedExpiry: true,
+            updatedAt: _now,
+          );
+        }
         final intent = lease;
         await _change((items) => items[id] = intent);
         final copies = await backend.findCopies(lease);
@@ -459,23 +831,35 @@ class TemporaryMediaHost {
         await _change((items) => items[id] = uploaded);
         _requirePreparingScope(scope);
         final share = await backend.shareCopy(lease, copy);
-        if (!isPublicTemporaryMediaSource(share.url)) {
-          throw StateError(
-            'The temporary media host returned an invalid public HTTPS URL.',
-          );
-        }
         _publicUrls.add(share.url);
         (_operationUrls[record.localId] ??= {}).add(share.url);
         onPublicUrl?.call(share.url);
         lease = lease.copyWith(
           state: TemporaryMediaLeaseState.prepared,
           permissionId: share.permissionId,
+          // Never downgrade a deferred backend's semantics if its response
+          // omitted optional capability metadata.
+          cleanupSemantics:
+              lease.cleanupSemantics ==
+                  TemporaryMediaCleanupSemantics.deferredExpiry
+              ? lease.cleanupSemantics
+              : share.cleanupSemantics,
+          publishedAt: share.publishedAt ?? _now,
+          publishedExpiresAt: share.expiresAt,
           updatedAt: _now,
           clearError: true,
         );
         final ready = lease;
         await _change((items) => items[id] = ready);
         _requirePreparingScope(scope);
+        if (!isPublicTemporaryMediaSource(share.url)) {
+          throw StateError(
+            'The temporary media host returned an invalid public HTTPS URL.',
+          );
+        }
+        if (share.expiresAt != null && !share.expiresAt!.isAfter(_now)) {
+          throw StateError('The published media link has already expired.');
+        }
         prepared[id] = share.url;
         slot.replaceIn(result, share.url);
       }
@@ -487,19 +871,26 @@ class TemporaryMediaHost {
   }
 
   Future<void> beforeSend(String operationId) async {
+    await _refreshBackend(backend);
+    await _requireConsent();
     await _change((items) {
       final owned = items.values
           .where((lease) => lease.operationId == operationId)
           .toList();
       if (_suspended ||
+          _availability?.available != true ||
           owned.any(
             (lease) =>
                 lease.state != TemporaryMediaLeaseState.prepared ||
-                lease.scopeId != backend.scopeId,
+                lease.backendId != backendId ||
+                lease.scopeId != backend.scopeId ||
+                lease.scopeId != _availability?.accountScope ||
+                (lease.publishedExpiresAt != null &&
+                    !lease.publishedExpiresAt!.isAfter(_now)),
           ) ||
           (owned.isEmpty && hostedUrlsFor(operationId).isNotEmpty)) {
         throw StateError(
-          'Temporary media sharing is no longer available. Reconnect Drive and try again.',
+          'Media sharing is no longer available. Reconnect the same hosting account and try again.',
         );
       }
       for (final lease in owned) {
@@ -521,14 +912,20 @@ class TemporaryMediaHost {
             .toList() ??
         const <TemporaryMediaLease>[];
     if (_suspended ||
+        !_sharingAccepted ||
+        _availability?.available != true ||
         owned.any(
           (lease) =>
               lease.state != TemporaryMediaLeaseState.submitting ||
-              lease.scopeId != backend.scopeId,
+              lease.backendId != backendId ||
+              lease.scopeId != backend.scopeId ||
+              lease.scopeId != _availability?.accountScope ||
+              (lease.publishedExpiresAt != null &&
+                  !lease.publishedExpiresAt!.isAfter(_now)),
         ) ||
         (owned.isEmpty && hostedUrlsFor(operationId).isNotEmpty)) {
       throw StateError(
-        'Temporary media sharing is no longer available. Reconnect Drive and try again.',
+        'Media sharing is no longer available. Reconnect the same hosting account and try again.',
       );
     }
   }
@@ -536,7 +933,8 @@ class TemporaryMediaHost {
   Future<void> accepted(Generation record) => _change((items) {
     for (final lease in items.values.toList()) {
       if (lease.operationId == record.localId &&
-          lease.state != TemporaryMediaLeaseState.cleanupPending) {
+          lease.state != TemporaryMediaLeaseState.cleanupPending &&
+          lease.state != TemporaryMediaLeaseState.sourceRemoved) {
         items[lease.id] = lease.copyWith(
           state: TemporaryMediaLeaseState.accepted,
           requestId: record.requestId,
@@ -557,53 +955,126 @@ class TemporaryMediaHost {
     await _releaseOperation(operationId);
   }
 
-  Future<void> _releaseOperation(String operationId) =>
-      _releasing[operationId] ??= _releaseClaimed(operationId).whenComplete(() {
-        _releasing.remove(operationId);
-      });
+  Future<void> _releaseOperation(String operationId, {String? backendId}) {
+    final key = operationId;
+    final inFlight = _releasing[key];
+    if (inFlight != null) {
+      // A scoped legacy cleanup and a terminal-job cleanup may overlap. Wait
+      // for the existing owner, then cover this caller's requested backend(s).
+      return inFlight.then(
+        (_) => _releaseOperation(operationId, backendId: backendId),
+      );
+    }
+    return _releasing[key] ??=
+        _releaseClaimed(operationId, backendId: backendId).whenComplete(() {
+          _releasing.remove(key);
+        });
+  }
 
-  Future<void> _releaseClaimed(String operationId) async {
+  Future<void> _releaseClaimed(String operationId, {String? backendId}) async {
     final leases = (await _read())
-        .where((item) => item.operationId == operationId)
+        .where(
+          (item) =>
+              item.operationId == operationId &&
+              (backendId == null || item.backendId == backendId),
+        )
         .toList();
     for (var lease in leases) {
+      if (lease.state == TemporaryMediaLeaseState.sourceRemoved) continue;
       lease = lease.copyWith(
         state: TemporaryMediaLeaseState.cleanupPending,
         updatedAt: _now,
       );
       final pending = lease;
       await _change((items) => items[lease.id] = pending);
-      if (backend.scopeId != lease.scopeId) continue;
       try {
-        final found = await backend.findCopies(lease);
+        final target = _backendFor(lease);
+        if (target == null || _backendId(target) != lease.backendId) {
+          throw StateError('The original media host is unavailable.');
+        }
+        final availability = await _refreshBackend(target);
+        if (!availability.available ||
+            availability.accountScope != lease.scopeId ||
+            target.scopeId != lease.scopeId) {
+          throw StateError('Reconnect the original hosting account.');
+        }
+        final found = await target.findCopies(lease);
         final copies = {
-          for (final copy in found) copy.fileId: copy,
           if (lease.fileId != null)
             lease.fileId!: TemporaryMediaCopy(fileId: lease.fileId!),
+          // Preserve recovered publication metadata over the fallback ID.
+          for (final copy in found) copy.fileId: copy,
         };
         for (final copy in copies.values) {
-          await backend.releaseCopy(lease, copy);
+          if (copy.publishedAt != null || copy.expiresAt != null) {
+            final expiry = copy.expiresAt;
+            lease = lease.copyWith(
+              publishedAt: copy.publishedAt,
+              publishedExpiresAt:
+                  expiry != null &&
+                      (lease.publishedExpiresAt == null ||
+                          expiry.isAfter(lease.publishedExpiresAt!))
+                  ? expiry
+                  : lease.publishedExpiresAt,
+              updatedAt: _now,
+            );
+          }
         }
-        await _change((items) => items.remove(lease.id));
+        final recovered = lease;
+        // Save recovered expiration before deleting the backend's receipt.
+        await _change((items) => items[lease.id] = recovered);
+        for (final copy in copies.values) {
+          if (target.scopeId != lease.scopeId) {
+            throw StateError('Hosting account changed during cleanup.');
+          }
+          await target.releaseCopy(lease, copy);
+        }
+        final confirmedUnpublished =
+            copies.isNotEmpty &&
+            copies.values.every((copy) => copy.publicationAttempted == false) &&
+            lease.publishedAt == null &&
+            lease.publishedExpiresAt == null;
+        if (!confirmedUnpublished && _hasPublishedSnapshot(lease)) {
+          final removed = lease.copyWith(
+            state: TemporaryMediaLeaseState.sourceRemoved,
+            sourceRemovedAt: _now,
+            updatedAt: _now,
+            clearError: true,
+          );
+          await _change((items) => items[lease.id] = removed);
+        } else {
+          await _change((items) => items.remove(lease.id));
+        }
       } on Object {
         final failed = lease.copyWith(
           updatedAt: _now,
           lastError:
-              'Temporary media is still shared. Reconnect Google Drive to retry cleanup.',
+              'Temporary source-copy cleanup is pending. Reconnect the original hosting account to retry.',
         );
         await _change((items) => items[lease.id] = failed);
       }
     }
+    await _pruneExpiredSnapshots();
   }
 
-  Future<void> releaseAll() async {
+  Future<void> releaseAll({String? backendId}) async {
+    final drainsActive = backendId == null || backendId == this.backendId;
     final operations = <String>{
-      ..._preparing.keys,
-      ...(await _read()).map((item) => item.operationId),
-      ..._preparing.keys,
+      if (drainsActive) ..._preparing.keys,
+      ...(await _read())
+          .where((item) => backendId == null || item.backendId == backendId)
+          .map((item) => item.operationId),
+      if (drainsActive) ..._preparing.keys,
     };
     for (final operation in operations) {
-      await release(operation);
+      if (drainsActive) {
+        try {
+          await _preparing[operation];
+        } on Object {
+          /* Recover owned copies below after an interrupted preparation. */
+        }
+      }
+      await _releaseOperation(operation, backendId: backendId);
     }
   }
 
@@ -612,10 +1083,12 @@ class TemporaryMediaHost {
     Set<String> activeOperations = const {},
     TemporaryMediaPoll? poll,
   }) async {
+    await _pruneExpiredSnapshots();
     final byId = {for (final record in records) record.localId: record};
     final leases = await _read();
     final checked = <String>{};
     for (final lease in leases) {
+      if (lease.state == TemporaryMediaLeaseState.sourceRemoved) continue;
       if (!checked.add(lease.operationId) ||
           activeOperations.contains(lease.operationId) ||
           _preparing.containsKey(lease.operationId)) {
@@ -645,7 +1118,13 @@ class TemporaryMediaHost {
         await release(lease.operationId);
         continue;
       }
-      if (backend.scopeId != lease.scopeId) continue;
+      final target = _backendFor(lease);
+      if (target == null) continue;
+      final availability = await _refreshBackend(target);
+      if (!availability.available ||
+          availability.accountScope != lease.scopeId) {
+        continue;
+      }
       if (poll != null && lease.pollingUrl != null) {
         try {
           record = await poll(lease);
@@ -673,14 +1152,43 @@ class TemporaryMediaHost {
   }
 
   Future<TemporaryMediaHostStatus> status() async {
+    final availability = await _refreshBackend(backend);
+    await _refreshConsent();
+    await _pruneExpiredSnapshots();
     final leases = await _read();
     final pending = leases
         .where((item) => item.state == TemporaryMediaLeaseState.cleanupPending)
         .toList();
+    final published = leases.where(_hasPublishedSnapshot).toList();
+    final expirations =
+        published
+            .map((lease) => lease.publishedExpiresAt)
+            .whereType<DateTime>()
+            .toList()
+          ..sort();
     return TemporaryMediaHostStatus(
-      available: !_suspended && backend.scopeId != null,
-      activeLeases: leases.length - pending.length,
+      available: !_suspended && availability.available,
+      backendId: backendId,
+      readiness: _suspended
+          ? TemporaryMediaReadiness.unavailable
+          : availability.readiness,
+      message: _suspended ? 'Media sharing is paused.' : availability.message,
+      accountScope: availability.accountScope,
+      cleanupSemantics: availability.cleanupSemantics,
+      sharingAccepted: _sharingAccepted,
+      activeLeases: leases
+          .where(
+            (lease) =>
+                lease.state != TemporaryMediaLeaseState.cleanupPending &&
+                lease.state != TemporaryMediaLeaseState.sourceRemoved,
+          )
+          .length,
       pendingCleanup: pending.length,
+      publishedSnapshots: published.length,
+      publishedSnapshotsUnknownExpiry: published
+          .where((lease) => lease.publishedExpiresAt == null)
+          .length,
+      latestPublishedExpiry: expirations.lastOrNull,
       lastCleanupError: pending
           .map((item) => item.lastError)
           .whereType<String>()

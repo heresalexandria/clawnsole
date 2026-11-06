@@ -21,6 +21,8 @@
 		A11E00000000000000000005 /* BackgroundDeliveryPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */; };
 		A11E00000000000000000007 /* CompletionNotificationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00000000000000000008 /* CompletionNotificationPlugin.swift */; };
 		A11E00000000000000000009 /* ShareSheetPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E0000000000000000000A /* ShareSheetPlugin.swift */; };
+		A11E0000000000000000000B /* ICloudReferenceHostingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E0000000000000000000C /* ICloudReferenceHostingPlugin.swift */; };
+		A11E0000000000000000000D /* ICloudReferenceHosting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E0000000000000000000E /* ICloudReferenceHosting.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -76,6 +78,8 @@
 		A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDeliveryPlugin.swift; sourceTree = "<group>"; };
 		A11E00000000000000000008 /* CompletionNotificationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionNotificationPlugin.swift; sourceTree = "<group>"; };
 		A11E0000000000000000000A /* ShareSheetPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheetPlugin.swift; sourceTree = "<group>"; };
+		A11E0000000000000000000C /* ICloudReferenceHostingPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ICloudReferenceHostingPlugin.swift; sourceTree = "<group>"; };
+		A11E0000000000000000000E /* ICloudReferenceHosting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../native/apple/ICloudReferenceHosting.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +158,8 @@
 				A11E00000000000000000006 /* BackgroundDeliveryPlugin.swift */,
 				A11E00000000000000000008 /* CompletionNotificationPlugin.swift */,
 				A11E0000000000000000000A /* ShareSheetPlugin.swift */,
+				A11E0000000000000000000C /* ICloudReferenceHostingPlugin.swift */,
+				A11E0000000000000000000E /* ICloudReferenceHosting.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -246,6 +252,9 @@
 						LastSwiftMigration = 1100;
 						SystemCapabilities = {
 							com.apple.AppAttest = {
+								enabled = 1;
+							};
+							com.apple.iCloud = {
 								enabled = 1;
 							};
 						};
@@ -423,6 +432,8 @@
 				A11E00000000000000000005 /* BackgroundDeliveryPlugin.swift in Sources */,
 				A11E00000000000000000007 /* CompletionNotificationPlugin.swift in Sources */,
 				A11E00000000000000000009 /* ShareSheetPlugin.swift in Sources */,
+				A11E0000000000000000000B /* ICloudReferenceHostingPlugin.swift in Sources */,
+				A11E0000000000000000000D /* ICloudReferenceHosting.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

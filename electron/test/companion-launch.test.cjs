@@ -22,6 +22,26 @@ test('bundled companion receives the signed media tool directory', () => {
     ),
   );
   assert.equal(argumentsList.at(-1), '--secure-bootstrap');
+  const helperIndex = argumentsList.indexOf('--icloud-host-helper');
+  assert.notEqual(helperIndex, -1);
+  assert.equal(
+    argumentsList[helperIndex + 1],
+    path.join(
+      '/Applications/Clawnsole.app/Contents/Resources',
+      'native-tools',
+      'clawnsole_icloud_host',
+    ),
+  );
+});
+
+test('native iCloud host is included and explicitly signed in the packaged app', () => {
+  const { build } = require('../package.json');
+  assert.ok(build.extraResources.some(({ from, to }) => (
+    from === 'dist/native-tools' && to === 'native-tools'
+  )));
+  assert.ok(build.mac.binaries.includes(
+    'Contents/Resources/native-tools/clawnsole_icloud_host',
+  ));
 });
 
 test('temporary media recovery stays in user data when the library moves', () => {

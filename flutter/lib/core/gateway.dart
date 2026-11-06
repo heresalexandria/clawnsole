@@ -53,6 +53,14 @@ abstract interface class TemporaryMediaHostingGateway {
   Future<TemporaryMediaHostStatus> temporaryMediaHostStatus();
 }
 
+/// Accepts the active backend's device/account-specific sharing disclosure.
+abstract interface class TemporaryMediaConsentGateway {
+  Future<void> acceptTemporaryMediaSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  });
+}
+
 /// Provider-aware operations implemented by the production gateways. Keeping
 /// this separate preserves compatibility with lightweight BFL-only test and
 /// embedder gateways while the app can route LTX, ArtCraft, and Atlas Cloud

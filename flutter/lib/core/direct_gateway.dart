@@ -44,6 +44,7 @@ class DirectGateway
         AppGateway,
         GenerationDeliveryGateway,
         TemporaryMediaHostingGateway,
+        TemporaryMediaConsentGateway,
         ProviderGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
@@ -103,6 +104,21 @@ class DirectGateway
     }
     await maintainTemporaryMedia();
     return host.status();
+  }
+
+  @override
+  Future<void> acceptTemporaryMediaSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  }) async {
+    final host = temporaryMediaHost;
+    if (host == null) {
+      throw StateError('iCloud reference sharing is unavailable.');
+    }
+    await host.acceptSharing(
+      expectedBackendId: expectedBackendId,
+      expectedAccountScope: expectedAccountScope,
+    );
   }
 
   Future<void> maintainTemporaryMedia({bool force = false}) async {
@@ -1151,7 +1167,7 @@ class DirectGateway
     Future<T> Function() body,
   ) async {
     try {
-      await temporaryMediaHost?.status();
+      await temporaryMediaHost?.loadRecoveryMetadata();
     } on Object {
       // A broken recovery journal must not prevent polling an accepted task.
     }
