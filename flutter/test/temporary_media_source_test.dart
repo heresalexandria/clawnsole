@@ -44,27 +44,19 @@ void main() {
     },
   );
 
-  test('data, file URLs and absolute paths use bounded staging', () async {
-    final source = File('${directory.path}/clip.mp4');
-    await source.writeAsBytes([1, 2, 3]);
-    for (final value in [
-      'data:video/mp4;base64,AQID',
-      source.uri.toString(),
-      source.path,
-    ]) {
-      final staged = await stageTemporaryMediaSource(
-        TemporaryMediaSource(
-          source: value,
-          label: 'clip.mp4',
-          kind: MediaReferenceKind.video,
-        ),
-        store,
-        directory: directory.path,
-      );
-      expect(staged.length, 3);
-      expect(await File(staged.path).readAsBytes(), [1, 2, 3]);
-      await staged.dispose();
-    }
+  test('imported inline bytes use bounded staging', () async {
+    final staged = await stageTemporaryMediaSource(
+      const TemporaryMediaSource(
+        source: 'data:video/mp4;base64,AQID',
+        label: 'clip.mp4',
+        kind: MediaReferenceKind.video,
+      ),
+      store,
+      directory: directory.path,
+    );
+    expect(staged.length, 3);
+    expect(await File(staged.path).readAsBytes(), [1, 2, 3]);
+    await staged.dispose();
     await expectLater(
       stageTemporaryMediaSource(
         const TemporaryMediaSource(
@@ -79,6 +71,33 @@ void main() {
       throwsA(isA<Exception>()),
     );
   });
+
+  test(
+    'existing files outside the asset store cannot become hosted references',
+    () async {
+      final outside = await Directory.systemTemp.createTemp('unowned-media.');
+      addTearDown(() => outside.delete(recursive: true));
+      final source = File('${outside.path}/private.mp4');
+      await source.writeAsBytes([1, 2, 3]);
+      for (final value in [source.path, source.uri.toString()]) {
+        await expectLater(
+          stageTemporaryMediaSource(
+            TemporaryMediaSource(
+              source: value,
+              label: 'clip.mp4',
+              kind: MediaReferenceKind.video,
+              contentType: 'video/mp4',
+            ),
+            store,
+            directory: directory.path,
+          ),
+          throwsStateError,
+        );
+        expect(await source.readAsBytes(), [1, 2, 3]);
+      }
+      expect(await directory.list().toList(), isEmpty);
+    },
+  );
 
   test('network and relative paths are never fetched or staged', () async {
     for (final value in [

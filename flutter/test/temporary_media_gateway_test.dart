@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clawnsole/core/apipod_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/direct_gateway.dart';
 import 'package:clawnsole/core/gateway.dart';
@@ -11,9 +12,11 @@ import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/native_gateway.dart';
+import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/temporary_media_host.dart';
+import 'package:clawnsole/core/temporary_media_source_io.dart';
 import 'package:clawnsole/core/web_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -97,6 +100,79 @@ void main() {
     );
   }
 
+  for (final surface in ['direct', 'native', 'companion']) {
+    test(
+      '$surface rejects renderer-supplied file paths before hosting or provider traffic',
+      () async {
+        final fixture = await _Fixture.create(surface, stageSources: true);
+        addTearDown(fixture.dispose);
+        final outside = await Directory.systemTemp.createTemp(
+          'unowned-renderer-media.',
+        );
+        addTearDown(() => outside.delete(recursive: true));
+        final file = File('${outside.path}/private.mp4');
+        await file.writeAsBytes([1, 2, 3]);
+        await (fixture.gateway as ProviderGateway).setProviderApiKey(
+          'apipod',
+          'fixture-key',
+        );
+        await fixture.accept();
+        for (final source in [file.path, file.uri.toString()]) {
+          final now = DateTime.now().toUtc();
+          await expectLater(
+            fixture.gateway.submit(
+              GenerationSubmission(
+                record: Generation(
+                  localId: 'unowned-${fixture.backend.stageAttempts}',
+                  provider: 'apipod',
+                  model: 'seedance-2.5-r2v',
+                  status: 'Submitting',
+                  prompt: 'Use the declared reference.',
+                  mode: VideoMode.i2v,
+                  config: const GenerationConfig(
+                    aspectRatio: '16:9',
+                    duration: 4,
+                    resolution: '480p',
+                    generateAudio: false,
+                    safetyTolerance: 2,
+                    draft: false,
+                    references: [
+                      MediaReferenceLabel(
+                        label: 'clip.mp4',
+                        kind: MediaReferenceKind.video,
+                        durationSeconds: 4,
+                      ),
+                    ],
+                  ),
+                  createdAt: now,
+                  updatedAt: now,
+                ),
+                input: {
+                  'mode': 'i2v',
+                  'prompt': 'Use the declared reference.',
+                  'duration': 4,
+                  'resolution': '480p',
+                  'reference_videos': [source],
+                },
+                autoFixReferenceVideos: false,
+              ),
+            ),
+            throwsA(
+              predicate(
+                (error) =>
+                    error.toString().contains('Import it into Clawnsole'),
+              ),
+            ),
+          );
+          expect(await file.readAsBytes(), [1, 2, 3]);
+          expect(fixture.backend.copies, isEmpty);
+          expect(fixture.providerRequests, 0);
+        }
+        expect(fixture.backend.stageAttempts, 2);
+      },
+    );
+  }
+
   for (final surface in ['native', 'companion']) {
     test(
       '$surface Google Drive disconnect preserves independent iCloud references',
@@ -157,11 +233,23 @@ void main() {
 class _Fixture {
   _Fixture(this.directory);
 
-  static Future<_Fixture> create(String surface) async {
+  static Future<_Fixture> create(
+    String surface, {
+    bool stageSources = false,
+  }) async {
     final fixture = _Fixture(
       await Directory.systemTemp.createTemp('hosting-gateway.'),
     );
     fixture.local = LocalDataStore(documentsDirectory: fixture.directory);
+    if (stageSources) {
+      fixture.backend.stage = (source) async {
+        final staged = await stageTemporaryMediaSource(source, fixture.local);
+        await staged.dispose();
+      };
+    }
+    final providerRouter = ProviderApiRouter(
+      apipod: ApipodApi(client: fixture.noNetwork),
+    );
     final hybrid = HybridDataStore(local: fixture.local);
     final vault = SettingsVaultDataStore(
       delegate: hybrid,
@@ -178,6 +266,7 @@ class _Fixture {
       final app = CompanionApp.hybrid(
         store: fixture.companionStore!,
         api: BflApi(client: fixture.noNetwork),
+        providerRouter: providerRouter,
         temporaryMediaHost: fixture.host,
         requestToken: 'fixture-local-session',
         allowedOrigin: fixture.base!.origin,
@@ -193,6 +282,7 @@ class _Fixture {
       fixture.native = NativeGateway(
         hybridStore: hybrid,
         settingsVaultStore: vault,
+        providerRouter: providerRouter,
         temporaryMediaHost: fixture.host,
         driveAuthorizer: fixture.authorizer,
         client: fixture.noNetwork,
@@ -202,6 +292,7 @@ class _Fixture {
     } else {
       fixture.gateway = DirectGateway(
         store: vault,
+        providerRouter: providerRouter,
         temporaryMediaHost: fixture.host,
         client: fixture.noNetwork,
       );
@@ -213,10 +304,11 @@ class _Fixture {
   final backend = _PublicationBackend();
   final journal = _Journal();
   final authorizer = _Authorizer();
-  final noNetwork = MockClient(
-    (request) async =>
-        throw StateError('Unexpected external request: ${request.url.host}'),
-  );
+  int providerRequests = 0;
+  late final noNetwork = MockClient((request) async {
+    providerRequests++;
+    throw StateError('Unexpected external request: ${request.url.host}');
+  });
   late LocalDataStore local;
   late TemporaryMediaHost host;
   late AppGateway gateway;
@@ -296,6 +388,8 @@ class _PublicationBackend
   final copies = <String, TemporaryMediaCopy>{};
   final expiry = DateTime.now().toUtc().add(const Duration(days: 30));
   int released = 0;
+  int stageAttempts = 0;
+  Future<void> Function(TemporaryMediaSource)? stage;
 
   @override
   Future<TemporaryMediaBackendAvailability> refreshAvailability() async {
@@ -323,11 +417,16 @@ class _PublicationBackend
   Future<TemporaryMediaCopy> createCopy(
     TemporaryMediaLease lease,
     TemporaryMediaSource source,
-  ) async => copies[lease.id] = TemporaryMediaCopy(
-    fileId: lease.id,
-    publishedAt: DateTime.now().toUtc(),
-    expiresAt: expiry,
-  );
+  ) async {
+    stageAttempts++;
+    await stage?.call(source);
+    return copies[lease.id] = TemporaryMediaCopy(
+      fileId: lease.id,
+      publishedAt: DateTime.now().toUtc(),
+      expiresAt: expiry,
+    );
+  }
+
   @override
   Future<TemporaryMediaShare> shareCopy(
     TemporaryMediaLease lease,

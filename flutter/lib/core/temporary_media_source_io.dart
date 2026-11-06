@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'asset_stream.dart';
 import 'durable_data_store.dart';
 import 'temporary_media_host.dart';
@@ -39,21 +37,9 @@ Future<StagedAsset> stageTemporaryMediaSource(
       maxBytes: maxBytes,
     );
   }
-  final uri = Uri.tryParse(value);
-  final file = uri?.scheme == 'file'
-      ? File.fromUri(uri!)
-      : value.isNotEmpty && (uri?.scheme.isEmpty == true || Platform.isWindows)
-      ? File(value)
-      : null;
-  if (file == null || !file.isAbsolute || !await file.exists()) {
-    throw StateError(
-      'The original media is unavailable. Restore it before generating.',
-    );
-  }
-  return stageAssetStream(
-    file.openRead(),
-    directory: directory,
-    expectedLength: await file.length(),
-    maxBytes: maxBytes,
+  // Renderer requests may name app-owned assets or carry imported bytes, but
+  // must never turn this privileged host into an arbitrary local-file reader.
+  throw StateError(
+    'The original media is unavailable. Import it into Clawnsole before generating.',
   );
 }
