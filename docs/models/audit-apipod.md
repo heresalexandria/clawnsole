@@ -84,15 +84,31 @@ types. Wan 3’s `enum: [-1]` supplements its explicit duration range with Auto.
 
 ## Media and workflows
 
-### iCloud Drive live verification: release blocker
+### iCloud Drive live verification
 
-**The production iCloud Drive reference route has not passed live generation
-verification. Keep the change unmerged until a fresh end-to-end provider test
-succeeds.** An earlier standalone iCloud Drive POC produced a valid Seedance
-result, but the current production-path attempts below failed. That historical
-success is not proof that new references are reliably reachable by APIPod.
+Fresh live tests on November 6, 2026 completed `seedance-2.5-r2v` generations
+using references published from a real iPhone and the macOS production gateway.
+Both outputs downloaded and decoded without errors. Both owned source copies
+were removed through the native cleanup API, with publication URLs erased from
+the native journals. Apple's reported snapshot expirations remain December 6;
+source cleanup does not prove immediate link revocation.
 
-On 2026-11-06 (UTC), all three attempts used `seedance-2.5-r2v` and received:
+| Successful test | Measured preparation | Verified result |
+| --- | --- | --- |
+| Real iPhone, production Swift service and product iCloud Drive container | Publication 6.794 s; anonymous download and SHA-256 verification 0.619 s; provider acceptance 1.484 s | Completed 4.041667 s H.264 video, 854×480, 97 frames, 1,692,359 bytes; local source cleanup 11.5 ms. |
+| macOS complete `DirectGateway` flow | Normalization, storage, hosting and submission 7.710 s total; native publication 4.480 s; link resolution and anonymous verification 0.466 s | Completed video retained in the asset store, 1,612,987 bytes; full decode passed; source cleanup 15 ms, zero active leases or pending cleanup. |
+
+The iPhone used an isolated diagnostic app running the exact production Swift
+source with `iCloud.app.clawnsole.clawnsole`. Its published reference was resolved
+and submitted through the production Dart resolver and APIPod adapter on the Mac.
+This verifies real-device publication, provider reachability and cleanup, but is
+not an installed Flutter Files/Photos-to-generation UI test. Method-channel
+wiring and native/backend integration have separate automated coverage. The
+diagnostic app was uninstalled without replacing the existing TestFlight app.
+
+These successful tests satisfy the live generation gate, but do not establish
+consistent delivery latency. Earlier attempts on November 6 (UTC), before these
+successful runs, all used `seedance-2.5-r2v` and received:
 “failed to resolve reference video duration for seedance billing; check that
 video_urls are reachable media files”. The quoted $0.5292 was an estimate, not a
 settled charge.
@@ -103,7 +119,8 @@ settled charge.
 | Fast-start MP4 control | 1,231,205 bytes; `moov` precedes `mdat`; all 97 decoded frames matched the original; anonymous GET took 16.097 s and matched SHA-256 | HTTP 400 after 8.14 s; no task accepted. |
 | Actual `DirectGateway` flow | Normalization, retained-asset storage, iCloud publication and provider submission all ran; normalized source was 719,668 bytes | HTTP 400 with the same error, saved as `Error` with no request ID. Native source cleanup completed; Apple's reported snapshot expiry was 2026-12-06. |
 
-The direct-URL resolver matched the earlier successful POC. Anonymous full GETs
+During those earlier failures, the direct-URL resolver matched the successful
+POC. Anonymous full GETs
 returned the expected bytes, and range GETs returned matching byte ranges.
 Several range requests took roughly 7–28 s to receive their first byte; the
 formerly successful URL and fast-start control also showed delays. HEAD probes
