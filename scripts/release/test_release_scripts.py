@@ -98,6 +98,21 @@ class ICloudProfileTest(unittest.TestCase):
             passed = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(passed.returncode, 0, passed.stderr)
 
+    def test_apple_service_wildcard_still_requires_exact_container_grants(self) -> None:
+        granted = dict(self.requested)
+        granted["com.apple.developer.icloud-services"] = "*"
+        verify_icloud_profile.validate({"Entitlements": granted}, self.requested)
+        for key in verify_icloud_profile.ICLOUD_KEYS[1:]:
+            for replacement in (None, "*", ["*"], ["iCloud.app.clawnsole.storagepoc"]):
+                with self.subTest(key=key, replacement=replacement):
+                    altered = dict(granted)
+                    if replacement is None:
+                        altered.pop(key)
+                    else:
+                        altered[key] = replacement
+                    with self.assertRaisesRegex(ValueError, "Regenerate the App Store profile"):
+                        verify_icloud_profile.validate({"Entitlements": altered}, self.requested)
+
 
 class ReleaseRepoTest(unittest.TestCase):
     def setUp(self) -> None:

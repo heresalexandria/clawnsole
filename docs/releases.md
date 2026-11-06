@@ -117,7 +117,11 @@ and replace the effective `IOS_PROVISIONING_PROFILE` secret with its base64 data
 The profile must grant `CloudDocuments` and include
 `iCloud.app.clawnsole.clawnsole` in both its iCloud-container and ubiquity-container
 entitlements. CI checks this coverage before archiving and fails with a profile
-refresh instruction when it is missing. A development profile refreshed by Xcode
+refresh instruction when it is missing. Apple can encode its iCloud-services
+allowlist as the scalar wildcard `*`; the preflight accepts that service grant
+while requiring both exact container associations. This follows Apple's
+[TN2415 entitlement wildcard guidance](https://developer.apple.com/library/archive/technotes/tn2415/).
+A development profile refreshed by Xcode
 does not update the release secret. This enables user-owned iCloud Documents;
 Clawnsole does not request the CloudKit service or use an app CloudKit database.
 

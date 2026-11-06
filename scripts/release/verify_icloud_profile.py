@@ -32,6 +32,12 @@ def validate(profile: dict, requested: dict) -> None:
         ):
             raise ValueError(f"Runner.entitlements must declare a nonempty {key} array.")
         values = granted.get(key)
+        # Apple-issued profiles can authorize all iCloud services with a scalar
+        # wildcard: https://developer.apple.com/library/archive/technotes/tn2415/
+        # Keep container grants exact: a wildcard service
+        # grant must not hide a missing/wrong product container association.
+        if key == "com.apple.developer.icloud-services" and values == "*":
+            continue
         if not isinstance(values, list) or not all(
             isinstance(value, str) for value in values
         ) or not set(required).issubset(values):
