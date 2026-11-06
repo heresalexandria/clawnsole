@@ -1529,6 +1529,19 @@ class _GoogleDriveSectionState extends State<_GoogleDriveSection> {
                 ),
             ],
           ),
+          if (widget.controller.temporaryMediaCleanupNotice
+              case final String cleanup) ...[
+            const SizedBox(height: 12),
+            Text(
+              cleanup,
+              key: const ValueKey('drive-temporary-media-cleanup'),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: context.colors.error,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _folder,

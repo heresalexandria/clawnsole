@@ -259,5 +259,12 @@ APIPod has its own provider entry and API key for its active video catalog:
 Seedance variants, Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, Muse, and motion
 control. Add the key in Providers on any platform. The desktop companion also
 supports `APIPOD_API_KEY` as a development fallback. Image, video, and audio
-inputs require publicly reachable URLs via Paste URL. See the
+inputs can use public HTTPS URLs on every platform. iOS and Electron macOS can
+publish reference copies through your iCloud Drive after you accept the sharing
+disclosure. Sign in to your Apple Account and enable iCloud Drive in system
+settings; no Google Drive connection is required. Originals stay private, but
+Apple's published links can remain accessible after the source copy is removed
+(the observed reported expiration was about 30 days). This uses user iCloud
+Drive, not a Clawnsole CloudKit database or media server. Android and Windows
+retain text generation and public-URL inputs. See the
 [APIPod contract and pricing audit](docs/models/audit-apipod.md).

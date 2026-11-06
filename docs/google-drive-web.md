@@ -10,6 +10,50 @@ Electron packages it with the loopback Dart companion, and `start_web` remains
 available as a local development harness. This does not change or remove the
 existing `docs/` website, splash page, privacy policy, or terms.
 
+## Temporary media sharing
+
+Providers such as APIPod fetch media from public HTTPS URLs. On iOS and
+Electron macOS, Clawnsole publishes a separate copy of imported images, videos,
+audio, keyframes or source videos through **your iCloud Drive**. Sign in to your
+Apple Account and enable iCloud Drive in system settings. This does not require
+a Google Drive connection, an app CloudKit database, or a Clawnsole media server.
+The temporary source uses user Drive storage; published-snapshot quota accounting
+has not been established. Existing libraries remain in Local or Google Drive.
+
+Create explains publication and requires consent tied to the current device,
+hosting account and disclosure version. Anyone with the published link can read
+the copy. **Deleting the source does not immediately disable that link.** Apple
+reported expiration dates about 30 days away during testing; Clawnsole does not
+promise immediate revocation or a caller-selected lifetime. Original files and
+library permissions are never changed.
+
+The gateway waits for iCloud upload, obtains the Foundation publication URL,
+resolves Apple's attachment page, and verifies the anonymous media bytes before
+submitting a paid job. The attachment-page resolver follows observed Apple
+website behavior and is undocumented; a changed or invalid response fails before
+submission. File-format, size and provider-model constraints still apply.
+
+A device-private recovery journal preserves copy ownership, account scope,
+provider job identifiers and reported publication expiration, never media bytes
+or public URLs. It survives library clearing and relocation. Completed or failed
+jobs trigger source cleanup; interrupted cleanup retries when the same account
+is available. Published-snapshot metadata remains after source removal until its
+reported expiration, and an ambiguous publication with unknown expiry remains
+visible. The 24-hour orphan source-cleanup policy does not revoke published
+snapshots. Paid requests with uncertain acceptance are not blindly resent.
+
+Public URLs and text generation remain supported on every platform. Android and
+Windows do not offer native iCloud reference publication. New references never
+silently fall back to Google Drive. Older Drive-hosting leases retain their
+original backend and account identifiers for cleanup: Clawnsole revokes their
+unlisted permissions and trashes owned copies when that account is available.
+Disconnecting Google Drive cleans only those legacy leases; it does not stop an
+iCloud-hosted generation. Google Drive continues to provide library and encrypted
+settings sync independently.
+
+Apple documents the [Foundation publication API](https://developer.apple.com/documentation/foundation/filemanager/url(forpublishingubiquitousitemat:expiration:)).
+Legacy Drive cleanup uses Google's [permissions API](https://developers.google.com/workspace/drive/api/reference/rest/v3/permissions).
+
 ## Drive files
 
 Clawnsole creates an app-marked folder using the narrow

@@ -17,10 +17,15 @@ import 'package:clawnsole/core/encrypted_file_secure_value_store.dart';
 import 'package:clawnsole/core/generation_status.dart';
 import 'package:clawnsole/core/generation_timing.dart';
 import 'package:clawnsole/core/google_drive.dart';
+import 'package:clawnsole/core/google_drive_media_backend.dart';
 import 'package:clawnsole/core/google_drive_asset_presenter_io.dart';
 import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/google_drive_upload_pump.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
+import 'package:clawnsole/core/icloud_drive_media_backend.dart';
+import 'package:clawnsole/core/icloud_reference_transport.dart';
+import 'package:clawnsole/core/icloud_reference_transport_io.dart';
+import 'package:clawnsole/core/secure_value_store.dart';
 import 'package:clawnsole/core/library_rules.dart';
 import 'package:clawnsole/core/library_file_io.dart';
 import 'package:clawnsole/core/models.dart';
@@ -38,6 +43,9 @@ import 'package:clawnsole/core/screenplay.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
+import 'package:clawnsole/core/temporary_media_host.dart';
+import 'package:clawnsole/core/temporary_media_host_io.dart';
+import 'package:clawnsole/core/temporary_media_source_io.dart';
 import 'package:http/http.dart' as http;
 
 Future<void> main(List<String> arguments) =>
@@ -138,9 +146,34 @@ Future<void> _serveCompanion(List<String> arguments) async {
     InternetAddress.loopbackIPv4,
     config.port,
   );
+  final hostingJournal =
+      config.mediaHostJournalFile ?? '${config.dataFile}.temporary-media.json';
+  final ICloudReferenceTransport icloudTransport =
+      Platform.isMacOS && config.icloudHostHelper != null
+      ? ProcessICloudReferenceTransport(
+          executable: config.icloudHostHelper!,
+          journalDirectory:
+              '${File(hostingJournal).parent.path}/icloud-reference-hosting',
+        )
+      : const UnavailableICloudReferenceTransport();
+  final legacyMediaBackend = GoogleDriveMediaBackend(
+    scopeId: () =>
+        hybrid.connection.isConnected ? hybrid.connection.folderId : null,
+    api: () => hybrid.mediaHostingDrive.connectedApi,
+    stageSource: (source) => stageTemporaryMediaSource(source, hybrid),
+  );
   final app = CompanionApp.hybrid(
     store: store,
     api: BflApi(),
+    temporaryMediaHost: TemporaryMediaHost(
+      journal: FileTemporaryMediaLeaseJournal(() async => File(hostingJournal)),
+      backend: ICloudDriveMediaBackend(
+        transport: icloudTransport,
+        consentStore: secureStore ?? const UnavailableSecureValueStore(),
+        stageSource: (source) => stageTemporaryMediaSource(source, hybrid),
+      ),
+      cleanupBackends: {'googleDrive': legacyMediaBackend},
+    ),
     fallbackApiKeys: <String, String>{
       'bfl': Platform.environment['BFL_API_KEY']?.trim() ?? '',
       'ltx': Platform.environment['LTX_API_KEY']?.trim() ?? '',
@@ -182,8 +215,12 @@ Future<void> _serveCompanion(List<String> arguments) async {
   stdout.writeln('Local data: ${config.dataFile}');
   if (config.webRoot != null) stdout.writeln('Web root: ${config.webRoot}');
   stdout.writeln('Press Ctrl+C to stop.');
-  await for (final request in server) {
-    unawaited(app.handle(request));
+  try {
+    await for (final request in server) {
+      unawaited(app.handle(request));
+    }
+  } finally {
+    await icloudTransport.close();
   }
 }
 
@@ -299,6 +336,8 @@ class CompanionConfig {
     required this.dataFile,
     this.webRoot,
     this.mediaToolsDir,
+    this.mediaHostJournalFile,
+    this.icloudHostHelper,
     this.secureBootstrap = false,
   });
 
@@ -306,6 +345,8 @@ class CompanionConfig {
   final String dataFile;
   final String? webRoot;
   final String? mediaToolsDir;
+  final String? mediaHostJournalFile;
+  final String? icloudHostHelper;
   final bool secureBootstrap;
 
   factory CompanionConfig.from(
@@ -316,6 +357,8 @@ class CompanionConfig {
     var dataFile = environment['CLAWNSOLE_FLUTTER_DATA_FILE']?.trim() ?? '';
     var webRoot = environment['CLAWNSOLE_WEB_ROOT']?.trim() ?? '';
     var mediaToolsDir = environment['CLAWNSOLE_MEDIA_TOOLS_DIR']?.trim() ?? '';
+    var mediaHostJournalFile = '';
+    var icloudHostHelper = '';
     var secureBootstrap = false;
     for (var index = 0; index < arguments.length; index += 1) {
       if (arguments[index] == '--port' && index + 1 < arguments.length) {
@@ -331,6 +374,12 @@ class CompanionConfig {
       } else if (arguments[index] == '--media-tools-dir' &&
           index + 1 < arguments.length) {
         mediaToolsDir = arguments[++index];
+      } else if (arguments[index] == '--media-host-journal' &&
+          index + 1 < arguments.length) {
+        mediaHostJournalFile = arguments[++index];
+      } else if (arguments[index] == '--icloud-host-helper' &&
+          index + 1 < arguments.length) {
+        icloudHostHelper = arguments[++index];
       }
     }
     if (dataFile.isEmpty) {
@@ -345,6 +394,12 @@ class CompanionConfig {
       mediaToolsDir: mediaToolsDir.isEmpty
           ? null
           : Directory(mediaToolsDir).absolute.path,
+      mediaHostJournalFile: mediaHostJournalFile.isEmpty
+          ? null
+          : File(mediaHostJournalFile).absolute.path,
+      icloudHostHelper: icloudHostHelper.isEmpty
+          ? null
+          : File(icloudHostHelper).absolute.path,
       secureBootstrap: secureBootstrap,
     );
   }
@@ -1028,6 +1083,7 @@ class CompanionApp {
     VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
+    TemporaryMediaHost? temporaryMediaHost,
   }) => CompanionApp.hybrid(
     store: CompanionHybridStore(HybridDataStore(local: store)),
     api: api,
@@ -1041,6 +1097,7 @@ class CompanionApp {
     videoCache: videoCache,
     thumbnailCache: thumbnailCache,
     referenceVideoNormalizer: referenceVideoNormalizer,
+    temporaryMediaHost: temporaryMediaHost,
   );
 
   CompanionApp.hybrid({
@@ -1057,6 +1114,7 @@ class CompanionApp {
     VideoCache? thumbnailCache,
     ReferenceVideoNormalizationService referenceVideoNormalizer =
         const DisabledReferenceVideoNormalizationService(),
+    TemporaryMediaHost? temporaryMediaHost,
   }) : _store = store,
        _providers = providerRouter ?? ProviderApiRouter(bfl: api),
        _rewrite = rewriteRouter ?? PromptRewriteRouter(),
@@ -1067,11 +1125,102 @@ class CompanionApp {
        _mediaClientFactory = mediaClientFactory ?? PublicMediaClient.new,
        _videoCache = videoCache,
        _thumbnailCache = thumbnailCache,
-       _referenceVideoNormalizer = referenceVideoNormalizer {
+       _referenceVideoNormalizer = referenceVideoNormalizer,
+       _temporaryMediaHost = temporaryMediaHost {
     _store.restageMissingResult ??= _restageMissingResult;
   }
 
   final CompanionHybridStore _store;
+  final TemporaryMediaHost? _temporaryMediaHost;
+  Future<void>? _hostingMaintenance;
+  DateTime? _lastHostingMaintenance;
+
+  Future<void> _maintainTemporaryMedia({bool force = false}) async {
+    final host = _temporaryMediaHost;
+    if (host == null) return;
+    if (_hostingMaintenance != null) return _hostingMaintenance;
+    final now = DateTime.now();
+    if (!force &&
+        _lastHostingMaintenance != null &&
+        now.difference(_lastHostingMaintenance!) <
+            const Duration(seconds: 30)) {
+      return;
+    }
+    _lastHostingMaintenance = now;
+    _hostingMaintenance = () async {
+      try {
+        final data = await _store.read();
+        await host.reconcile(
+          data.generations,
+          activeOperations: _submissionsInFlight,
+          poll: (lease) async {
+            final key = _activeKey(data, lease.provider);
+            if (key.isEmpty || lease.pollingUrl == null) return null;
+            final payload = await _providers.poll(
+              lease.provider,
+              key,
+              lease.pollingUrl!,
+            );
+            return Generation(
+              localId: lease.operationId,
+              provider: lease.provider,
+              model: lease.model,
+              status: normalizeGenerationStatus(payload['status']),
+              prompt: '',
+              mode: VideoMode.t2v,
+              config: const GenerationConfig(
+                aspectRatio: 'auto',
+                duration: 0,
+                resolution: 'hd',
+                generateAudio: false,
+                safetyTolerance: 2,
+                draft: false,
+              ),
+              createdAt: lease.createdAt,
+              updatedAt: now.toUtc(),
+              requestId: lease.requestId,
+              pollingUrl: lease.pollingUrl,
+            );
+          },
+        );
+      } on Object {
+        // Retain the independent journal for the next connected recovery pass.
+      }
+    }();
+    try {
+      await _hostingMaintenance;
+    } finally {
+      _hostingMaintenance = null;
+    }
+  }
+
+  Future<void> _releaseTemporaryMedia(String operationId) async {
+    try {
+      await _temporaryMediaHost?.release(operationId);
+    } on Object {
+      // Cleanup failures remain durable and visible through hosting status.
+    }
+  }
+
+  Future<Map<String, Object?>> _temporaryMediaStatus() async {
+    await _maintainTemporaryMedia();
+    final status = await _temporaryMediaHost?.status();
+    return {
+      'supported': _temporaryMediaHost != null,
+      ...(status ??
+              const TemporaryMediaHostStatus(
+                available: false,
+                activeLeases: 0,
+                pendingCleanup: 0,
+                backendId: 'iCloudDrive',
+                readiness: TemporaryMediaReadiness.unsupported,
+              ))
+          .toJson(),
+    };
+  }
+
+  String? _redactTemporaryMedia(String? value) =>
+      value == null ? null : _temporaryMediaHost?.redactText(value) ?? value;
 
   /// This process makes the renderer's provider calls, so it is the side
   /// that records them. The transcript lands in a sidecar file beside the
@@ -1141,6 +1290,30 @@ class CompanionApp {
       }
       if (request.method == 'POST' && path.startsWith('/vault/')) {
         return await _vaultAction(request, path.substring('/vault/'.length));
+      }
+      if (request.method == 'GET' && path == '/temporary-media/status') {
+        return await _json(
+          request.response,
+          200,
+          await _temporaryMediaStatus(),
+        );
+      }
+      if (request.method == 'POST' &&
+          path == '/temporary-media/accept-sharing') {
+        final body = await _bodyMap(request);
+        final host = _temporaryMediaHost;
+        if (host == null) {
+          throw StateError('iCloud reference sharing is unavailable.');
+        }
+        await host.acceptSharing(
+          expectedBackendId: body['expectedBackendId'] as String? ?? '',
+          expectedAccountScope: body['expectedAccountScope'] as String? ?? '',
+        );
+        return await _json(
+          request.response,
+          200,
+          await _temporaryMediaStatus(),
+        );
       }
       if (request.method == 'GET' && path == '/state') {
         return await _json(request.response, 200, await _snapshotPayload());
@@ -1240,16 +1413,42 @@ class CompanionApp {
         final body = await _bodyMap(request);
         final accessToken = body['accessToken']?.toString() ?? '';
         final folderName = body['folderName']?.toString() ?? '';
-        await _store.connectDrive(accessToken, folderName);
-        return await _json(request.response, 200, await _snapshotPayload());
+        if (_store.connection.isConnected) {
+          if (_temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.suspend();
+          }
+          await _temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
+        }
+        try {
+          await _store.connectDrive(accessToken, folderName);
+          if (_temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.resume();
+          }
+          await _maintainTemporaryMedia(force: true);
+          return await _json(request.response, 200, await _snapshotPayload());
+        } on Object {
+          if (_store.connection.isConnected &&
+              _temporaryMediaHost?.backendId == 'googleDrive') {
+            _temporaryMediaHost?.resume();
+          }
+          rethrow;
+        }
       }
       if (request.method == 'POST' && path == '/drive/disconnect') {
+        if (_temporaryMediaHost?.backendId == 'googleDrive') {
+          _temporaryMediaHost?.suspend();
+        }
+        await _temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
         await _store.disconnectDrive();
         return await _json(request.response, 200, await _snapshotPayload());
       }
       if (request.method == 'POST' && path == '/drive/refresh') {
         final body = await _bodyMap(request);
         await _store.refreshDrive(body['accessToken']?.toString() ?? '');
+        if (_temporaryMediaHost?.backendId == 'googleDrive') {
+          _temporaryMediaHost?.resume();
+        }
+        await _maintainTemporaryMedia(force: true);
         return await _json(request.response, 200, await _snapshotPayload());
       }
       if (request.method == 'POST' && path == '/drive/copy') {
@@ -1442,13 +1641,20 @@ class CompanionApp {
       });
     } on ProviderException catch (error) {
       return _json(request.response, error.status ?? 500, <String, Object?>{
-        'error': compactProviderResponse(error.message),
+        'error': _redactTemporaryMedia(compactProviderResponse(error.message)),
         if (error.details != null)
-          'details': sanitizeProviderDiagnosticValue(error.details),
+          'details': sanitizeProviderDiagnosticValue(
+            _temporaryMediaHost?.redactResponse({
+                  'error': error.details,
+                })['error'] ??
+                error.details,
+          ),
       });
     } on Object catch (error, stack) {
-      final message = compactProviderResponse(
-        error.toString().replaceFirst('Bad state: ', ''),
+      final message = _redactTemporaryMedia(
+        compactProviderResponse(
+          error.toString().replaceFirst('Bad state: ', ''),
+        ),
       );
       stderr.writeln(message);
       stderr.writeln(stack);
@@ -1611,7 +1817,16 @@ class CompanionApp {
   }
 
   Future<void> _stateAction(String action, Object? value) async {
-    if (action == 'clearAll') return _store.delete();
+    if (action == 'clearAll') {
+      _temporaryMediaHost?.suspend();
+      try {
+        await _temporaryMediaHost?.releaseAll();
+        await _store.delete();
+      } finally {
+        _temporaryMediaHost?.resume();
+      }
+      return;
+    }
     if (action == 'trimReferenceVideo') return _trimReferenceVideo(value);
     await _store.mutate<void>((current) async {
       StoredData next;
@@ -2357,6 +2572,7 @@ class CompanionApp {
     return <String, Object?>{
       ...snapshot.toJson(),
       'driveConnection': _store.connection.toJson(),
+      'temporaryMediaHostingSupported': _temporaryMediaHost != null,
       // Beside the connection rather than inside the library: this is what
       // this process is doing right now, not something to persist. The
       // renderer polls `/state` anyway, so its chips ride along for free.
@@ -2472,13 +2688,24 @@ class CompanionApp {
     String provider,
     ApiRequestPurpose purpose,
     Future<T> Function() body,
-  ) => ApiTranscriptScope.run(
-    body,
-    sink: _transcripts,
-    operationId: operationId ?? '',
-    provider: provider,
-    purpose: purpose,
-  );
+  ) async {
+    try {
+      await _temporaryMediaHost?.loadRecoveryMetadata();
+    } on Object {
+      // Journal failures must not prevent polling an accepted generation.
+    }
+    return ApiTranscriptScope.run(
+      body,
+      sink: _transcripts,
+      operationId: operationId ?? '',
+      provider: provider,
+      purpose: purpose,
+      privateMediaUrls:
+          _temporaryMediaHost?.hostedUrlsFor(operationId ?? '') ??
+          const <String>{},
+      redactPrivateMedia: _temporaryMediaHost?.redactText,
+    );
+  }
 
   Future<double?> _balanceSafely(
     String provider,
@@ -2514,7 +2741,11 @@ class CompanionApp {
     if (mode == 'draft_enhance' && input.containsKey('draft_task_id')) {
       return config;
     }
-    if (mode == 'i2v') {
+    if (mode == 'i2v' ||
+        input.containsKey('keyframes') ||
+        input.containsKey('reference_images') ||
+        input.containsKey('reference_videos') ||
+        input.containsKey('reference_audios')) {
       final rawFrames = input['keyframes'] as List<Object?>? ?? const [];
       final frames = <KeyframeLabel>[];
       for (var index = 0; index < (config.keyframes?.length ?? 0); index += 1) {
@@ -2569,7 +2800,7 @@ class CompanionApp {
           ),
         );
       }
-      return config.copyWith(keyframes: frames, references: references);
+      config = config.copyWith(keyframes: frames, references: references);
     }
     if (mode == 'v2v' ||
         mode == 'draft_enhance' ||
@@ -2750,7 +2981,23 @@ class CompanionApp {
         generation;
   }
 
-  Future<Generation> _submit(Map<String, Object?> body) async {
+  final Map<String, Future<Generation>> _submitting = {};
+
+  Future<Generation> _submit(Map<String, Object?> body) {
+    final rawRecord = body['record'];
+    final id = rawRecord is Map ? rawRecord['localId']?.toString() : null;
+    if (id == null || id.isEmpty) return _submitOnce(body);
+    final existing = _submitting[id];
+    if (existing != null) return existing;
+    late final Future<Generation> operation;
+    operation = _submitOnce(body).whenComplete(() {
+      if (identical(_submitting[id], operation)) _submitting.remove(id);
+    });
+    _submitting[id] = operation;
+    return operation;
+  }
+
+  Future<Generation> _submitOnce(Map<String, Object?> body) async {
     final input = body['input'];
     final rawRecord = body['record'];
     if (input is! Map<Object?, Object?> ||
@@ -2809,7 +3056,8 @@ class CompanionApp {
     final model = modelById(provider, generation.model);
     final referenceVideoProfile = model.referenceVideoCompatibilityProfile;
     final referenceImageProfile = model.referenceImageCompatibilityProfile;
-    if (autoFixReferenceVideos && !model.requiresPublicMediaUrls) {
+    if (autoFixReferenceVideos &&
+        (!model.requiresPublicMediaUrls || _temporaryMediaHost != null)) {
       final ReferenceImageNormalizationService imageNormalizer =
           _referenceVideoNormalizer is ReferenceImageNormalizationService
           ? _referenceVideoNormalizer as ReferenceImageNormalizationService
@@ -2821,6 +3069,7 @@ class CompanionApp {
         imageNormalizer: imageNormalizer,
         videoProfile: referenceVideoProfile,
         imageProfile: referenceImageProfile,
+        preservePublicUrls: model.requiresPublicMediaUrls,
       );
       cleanInput = prepared.input;
       generation = generation.copyWith(config: prepared.config);
@@ -2861,7 +3110,14 @@ class CompanionApp {
     );
     generation = await _upsert(generation);
     var mayHaveBeenSent = false;
+    var hostedMedia = false;
     try {
+      if (model.requiresPublicMediaUrls && _temporaryMediaHost != null) {
+        cleanInput = await _temporaryMediaHost.prepare(generation, cleanInput);
+        hostedMedia = _temporaryMediaHost
+            .hostedUrlsFor(generation.localId)
+            .isNotEmpty;
+      }
       final creditsBefore = await _balanceSafely(
         provider,
         key,
@@ -2882,6 +3138,9 @@ class CompanionApp {
           cleanInput,
           operationId: generation.localId,
           beforeSend: () async {
+            if (hostedMedia) {
+              await _temporaryMediaHost!.beforeSend(generation.localId);
+            }
             generation = await _upsert(
               generation.copyWith(
                 status: submissionUnknownStatus,
@@ -2890,6 +3149,9 @@ class CompanionApp {
                 updatedAt: DateTime.now().toUtc(),
               ),
             );
+            if (hostedMedia) {
+              _temporaryMediaHost!.assertCanSend(generation.localId);
+            }
             mayHaveBeenSent = true;
           },
         ),
@@ -2923,13 +3185,16 @@ class CompanionApp {
             ? null
             : creditsToUsd(receiptEstimate),
         lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(receipt),
+        lastProviderResponse: _redactTemporaryMedia(
+          compactProviderResponse(receipt),
+        ),
         lastProviderResponseAt: acceptedAt,
         updatedAt: acceptedAt,
       );
       // Keep the provider task recoverable even if the process exits or the
       // optional balance/cost refresh below loses connectivity.
       generation = await _upsert(generation);
+      if (hostedMedia) await _temporaryMediaHost!.accepted(generation);
       final liveAfter = await _balanceSafely(
         provider,
         key,
@@ -2960,13 +3225,18 @@ class CompanionApp {
       if (generation.canCheckStatus) return generation;
       final acceptanceUnknown =
           mayHaveBeenSent && !isDefinitiveSubmissionRejection(error);
+      if (!acceptanceUnknown && hostedMedia) {
+        await _releaseTemporaryMedia(generation.localId);
+      }
       generation = generation.copyWith(
         status: acceptanceUnknown ? submissionUnknownStatus : 'Error',
         error: acceptanceUnknown
             ? submissionUnknownMessage
-            : generationExceptionMessage(error),
+            : _redactTemporaryMedia(generationExceptionMessage(error))!,
         lastProviderStatusCode: providerHttpStatus(error),
-        lastProviderResponse: providerErrorResponse(error),
+        lastProviderResponse: _redactTemporaryMedia(
+          providerErrorResponse(error),
+        ),
         lastProviderResponseAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
@@ -3025,7 +3295,7 @@ class CompanionApp {
         owner: current,
       );
     } on Object catch (error) {
-      failure = generationExceptionMessage(error);
+      failure = _redactTemporaryMedia(generationExceptionMessage(error))!;
     }
     // Downloading never holds the library mutation queue. Merge only delivery
     // fields into the latest metadata after the bounded transfer finishes.
@@ -3108,6 +3378,10 @@ class CompanionApp {
         () => _providers.poll(current.provider, key, pollingUrl),
       );
       final reportedStatus = normalizeGenerationStatus(payload['status']);
+      if (reportedStatus == 'Ready' ||
+          isGenerationFailureStatus(reportedStatus)) {
+        await _releaseTemporaryMedia(current.localId);
+      }
       var status = reportedStatus;
       if (isGenerationFailureStatus(status) && current.hasDeliveredMedia) {
         // A provider expiring or forgetting a task whose film — or still-held
@@ -3160,7 +3434,9 @@ class CompanionApp {
                 : null,
             clearDeliveryExpiresAt: deliveryAvailability == null,
             deliveryExpired: false,
-            lastProviderResponse: compactProviderResponse(payload),
+            lastProviderResponse: _redactTemporaryMedia(
+              compactProviderResponse(payload),
+            ),
             lastProviderResponseAt: checkedAt,
             updatedAt: checkedAt,
           ),
@@ -3192,7 +3468,9 @@ class CompanionApp {
           retentionFailures = 0;
         } on Object catch (error) {
           retentionFailures += 1;
-          retentionError = generationExceptionMessage(error);
+          retentionError = _redactTemporaryMedia(
+            generationExceptionMessage(error),
+          )!;
         }
       }
       final failed = isGenerationFailureStatus(status);
@@ -3238,7 +3516,7 @@ class CompanionApp {
             (resultAsset != null ||
                 status != 'Ready' ||
                 retentionError == null),
-        error: failureMessage,
+        error: _redactTemporaryMedia(failureMessage),
         clearError: !failed,
         cost: realized.providerUnits,
         realizedCostUsd: realized.usd,
@@ -3249,7 +3527,9 @@ class CompanionApp {
         consecutiveCheckFailures: 0,
         clearLastCheckError: true,
         lastProviderStatusCode: 200,
-        lastProviderResponse: compactProviderResponse(payload),
+        lastProviderResponse: _redactTemporaryMedia(
+          compactProviderResponse(payload),
+        ),
         lastProviderResponseAt: checkedAt,
         updatedAt: checkedAt,
       );
@@ -3259,6 +3539,9 @@ class CompanionApp {
           : await _downloadRetainedResult(current);
       final payload = providerErrorPayload(error);
       final providerStatus = normalizeGenerationStatus(payload?['status']);
+      if (isGenerationFailureStatus(providerStatus)) {
+        await _releaseTemporaryMedia(current.localId);
+      }
       if (rescue.asset != null) {
         // The status check failed, but the film itself was still available at
         // the previously captured delivery link, so the generation completes.
@@ -3275,7 +3558,9 @@ class CompanionApp {
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactTemporaryMedia(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -3297,7 +3582,9 @@ class CompanionApp {
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactTemporaryMedia(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -3305,17 +3592,21 @@ class CompanionApp {
         next = current.copyWith(
           status: providerStatus,
           progress: normalizedProgress(payload['progress']),
-          error: providerNamedFailureMessage(
-            providerById(current.provider).name,
-            payload,
-            fallback: providerStatus,
+          error: _redactTemporaryMedia(
+            providerNamedFailureMessage(
+              providerById(current.provider).name,
+              payload,
+              fallback: providerStatus,
+            ),
           ),
           lastCheckedAt: checkedAt,
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: 0,
           clearLastCheckError: true,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactTemporaryMedia(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );
@@ -3324,17 +3615,21 @@ class CompanionApp {
           lastCheckedAt: checkedAt,
           statusCheckCount: current.statusCheckCount + 1,
           consecutiveCheckFailures: current.consecutiveCheckFailures + 1,
-          lastCheckError: generationExceptionMessage(error),
+          lastCheckError: _redactTemporaryMedia(
+            generationExceptionMessage(error),
+          )!,
           lastResultRetentionAttemptAt:
               !statusOnly && current.needsResultRetention ? checkedAt : null,
           resultRetentionFailures: !statusOnly && current.needsResultRetention
               ? current.resultRetentionFailures + 1
               : current.resultRetentionFailures,
           resultRetentionError: !statusOnly && current.needsResultRetention
-              ? generationExceptionMessage(error)
+              ? _redactTemporaryMedia(generationExceptionMessage(error))!
               : null,
           lastProviderStatusCode: providerHttpStatus(error),
-          lastProviderResponse: providerErrorResponse(error),
+          lastProviderResponse: _redactTemporaryMedia(
+            providerErrorResponse(error),
+          ),
           lastProviderResponseAt: checkedAt,
           updatedAt: checkedAt,
         );

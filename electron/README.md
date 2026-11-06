@@ -25,6 +25,21 @@ Set `CLAWNSOLE_ELECTRON_ARCH` to `arm64` or `x64`. A matching Dart companion is
 compiled on that machine, so each architecture should be built on its matching
 runner. The current release workflow ships Apple silicon and can add Intel later.
 
+Both commands compile the Foundation iCloud reference host with Xcode's Swift
+compiler. It is packaged at `Contents/Resources/native-tools/clawnsole_icloud_host`
+and explicitly included in Electron Builder's signed binaries. The Dart companion
+receives its absolute location through `--icloud-host-helper` and exchanges private
+JSON lines over stdin/stdout. Neither publication URLs nor source paths appear in
+helper command arguments or logs.
+
+On macOS, reference copies live in the signed-in user's iCloud Drive; this
+unsandboxed helper does not use an app CloudKit database or require a Developer ID
+provisioning profile. iCloud Drive must be enabled on the Mac. iOS instead uses the
+app's registered iCloud Documents container because the mobile sandbox cannot
+access the user's general Drive directory. This hosting path does not sync the
+Clawnsole library. Apple's published snapshots remain readable until their issued
+expiry even after the original temporary source is deleted.
+
 Desktop data lives at
 `~/Library/Application Support/Clawnsole/clawnsole.json`, with retained media in
 the adjacent `assets/` directory.

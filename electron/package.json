@@ -44,6 +44,10 @@
       {
         "from": "dist/media-tools",
         "to": "media-tools"
+      },
+      {
+        "from": "dist/native-tools",
+        "to": "native-tools"
       }
     ],
     "directories": {
@@ -56,6 +60,7 @@
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "gatekeeperAssess": false,
+      "binaries": ["Contents/Resources/native-tools/clawnsole_icloud_host"],
       "icon": "assets/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "target": [

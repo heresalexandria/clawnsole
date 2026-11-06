@@ -33,6 +33,7 @@ import '../core/reference_prompts.dart';
 import '../core/settings_vault_gateway.dart';
 import '../core/screenplay.dart';
 import '../core/shell_bridge.dart';
+import '../core/temporary_media_host.dart';
 import '../core/video_cache_gateway.dart';
 import 'busy_registry.dart';
 
@@ -1636,6 +1637,124 @@ class AppController extends ChangeNotifier {
 
   bool get requiresPublicMediaUrls =>
       selectedModelRoutes.any((model) => model.requiresPublicMediaUrls);
+
+  bool get canTemporarilyHostMedia =>
+      gateway is TemporaryMediaHostingGateway &&
+      (gateway as TemporaryMediaHostingGateway).supportsTemporaryMediaHosting &&
+      temporaryMediaHostingStatus?.available == true;
+
+  TemporaryMediaHostStatus? temporaryMediaHostingStatus;
+  Future<void>? _temporaryMediaStatusRefresh;
+
+  bool get refreshingTemporaryMediaHosting =>
+      _temporaryMediaStatusRefresh != null;
+
+  bool get needsMediaSharingConsent =>
+      needsTemporaryMediaHosting &&
+      canTemporarilyHostMedia &&
+      temporaryMediaHostingStatus?.sharingAccepted != true;
+
+  Future<void> refreshTemporaryMediaHostingStatus() {
+    if (_disposed || gateway is! TemporaryMediaHostingGateway) {
+      return Future.value();
+    }
+    return _temporaryMediaStatusRefresh ??= _refreshTemporaryMediaHosting()
+        .whenComplete(() => _temporaryMediaStatusRefresh = null);
+  }
+
+  Future<void> _refreshTemporaryMediaHosting() async {
+    try {
+      final value = await (gateway as TemporaryMediaHostingGateway)
+          .temporaryMediaHostStatus();
+      if (_disposed) return;
+      final previous = temporaryMediaHostingStatus;
+      temporaryMediaHostingStatus = value;
+      if (jsonEncode(previous?.toJson()) != jsonEncode(value.toJson())) {
+        notifyListeners();
+      }
+    } on Object {
+      if (_disposed) return;
+      final previous = temporaryMediaHostingStatus;
+      // Preserve cleanup evidence, but never treat stale availability/consent
+      // as permission to publish after a failed account refresh.
+      temporaryMediaHostingStatus = TemporaryMediaHostStatus(
+        available: false,
+        activeLeases: previous?.activeLeases ?? 0,
+        pendingCleanup: previous?.pendingCleanup ?? 0,
+        backendId: previous?.backendId ?? 'iCloudDrive',
+        readiness: TemporaryMediaReadiness.unavailable,
+        message:
+            'Could not check reference hosting. Recheck before generating, or use a public HTTPS URL.',
+        cleanupSemantics:
+            previous?.cleanupSemantics ??
+            TemporaryMediaCleanupSemantics.deferredExpiry,
+        lastCleanupError: previous?.lastCleanupError,
+        publishedSnapshots: previous?.publishedSnapshots ?? 0,
+        publishedSnapshotsUnknownExpiry:
+            previous?.publishedSnapshotsUnknownExpiry ?? 0,
+        latestPublishedExpiry: previous?.latestPublishedExpiry,
+        sharingAccepted: false,
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<bool> acceptTemporaryMediaSharing(
+    TemporaryMediaHostStatus shown,
+  ) async {
+    await refreshTemporaryMediaHostingStatus();
+    final current = temporaryMediaHostingStatus;
+    if (_disposed) return false;
+    if (shown.accountScope == null ||
+        !canTemporarilyHostMedia ||
+        current?.backendId != shown.backendId ||
+        current?.accountScope != shown.accountScope) {
+      showNotice(
+        'The reference hosting account changed. Review sharing for the current account before continuing.',
+      );
+      return false;
+    }
+    if (gateway is! TemporaryMediaConsentGateway) {
+      showNotice('Reference sharing cannot be enabled on this device.');
+      return false;
+    }
+    try {
+      await (gateway as TemporaryMediaConsentGateway)
+          .acceptTemporaryMediaSharing(
+            expectedBackendId: shown.backendId,
+            expectedAccountScope: shown.accountScope!,
+          );
+      await refreshTemporaryMediaHostingStatus();
+      return !_disposed &&
+          canTemporarilyHostMedia &&
+          temporaryMediaHostingStatus?.sharingAccepted == true &&
+          temporaryMediaHostingStatus?.accountScope == shown.accountScope;
+    } on Object catch (error) {
+      if (!_disposed) showErrorNotice(error);
+      return false;
+    }
+  }
+
+  String? get temporaryMediaCleanupNotice {
+    final status = temporaryMediaHostingStatus;
+    if (status == null || status.pendingCleanup == 0) return null;
+    return 'Cleanup is pending for ${status.pendingCleanup} temporary media source ${status.pendingCleanup == 1 ? 'copy' : 'copies'}. '
+        'Keep Clawnsole open and online with the original hosting account; cleanup will retry. Removing an iCloud source does not revoke its published link.';
+  }
+
+  String? get temporaryMediaPublicationNotice {
+    final status = temporaryMediaHostingStatus;
+    if (status == null || status.publishedSnapshots == 0) return null;
+    final count = status.publishedSnapshots;
+    final expiry = status.latestPublishedExpiry;
+    final expiryText = expiry == null
+        ? ''
+        : ' Latest reported expiry: ${expiry.toUtc().toIso8601String()}.';
+    final unknownText = status.publishedSnapshotsUnknownExpiry == 0
+        ? ''
+        : ' ${status.publishedSnapshotsUnknownExpiry} may have been published without a recorded expiry.';
+    return '$count iCloud reference ${count == 1 ? 'snapshot may' : 'snapshots may'} remain readable by anyone with the link, including after source cleanup.$expiryText$unknownText';
+  }
 
   /// Expose attachment affordances before a guided route has been selected.
   /// The actual route is resolved after each attachment changes the form.
@@ -4910,14 +5029,46 @@ class AppController extends ChangeNotifier {
             )
           : null);
 
+  final Map<String, Future<bool>> _referenceCacheChecks = {};
+  final Set<String> _cachedReferenceAssets = {};
+
+  /// The picker checks only visible Drive candidates, using the explicit
+  /// cache-only gateway. No login, network read, or media bytes are retained.
+  Future<bool> checkReferenceCandidateCache(ReferenceCandidate candidate) {
+    if (candidate.asset.kind != 'drive' ||
+        googleDriveConnected ||
+        referenceCandidatePublicUrl(candidate) != null ||
+        _mediaCacheGateway == null) {
+      return Future.value(false);
+    }
+    return _referenceCacheChecks.putIfAbsent(candidate.asset.value, () async {
+      try {
+        final bytes = await _mediaCacheGateway!.cachedAssetBytes(
+          candidate.asset,
+        );
+        final available = bytes?.isNotEmpty == true;
+        if (available) _cachedReferenceAssets.add(candidate.asset.value);
+        return available;
+      } on Object {
+        return false;
+      }
+    });
+  }
+
   String? referenceCandidateProblem(ReferenceCandidate candidate) {
     if (!referenceRequiresPublicMediaUrls(candidate.kind) ||
         referenceCandidatePublicUrl(candidate) != null) {
       return null;
     }
-    return '“${candidate.name}” has no available public HTTPS URL. '
-        '${selectedModel.selectionLabel} cannot read local or private Drive media. '
-        'Choose a hosted reference or paste its URL.';
+    if (candidate.asset.kind == 'local') return null;
+    if (candidate.asset.kind == 'drive') {
+      return googleDriveConnected ||
+              _cachedReferenceAssets.contains(candidate.asset.value)
+          ? null
+          : 'Connect Google Drive to load “${candidate.name}”, or choose a local file or public HTTPS URL.';
+    }
+    return '“${candidate.name}” has no available public HTTPS URL or retained file. '
+        'Choose a local file or paste a fresh public HTTPS URL.';
   }
 
   bool referenceRequiresPublicMediaUrls(MediaReferenceKind kind) =>
@@ -4974,6 +5125,19 @@ class AppController extends ChangeNotifier {
     Iterable<ReferenceCandidate> candidates,
   ) async {
     final tab = _draftTab;
+    final selectedCandidates = candidates
+        .where((item) => item.kind == kind)
+        .toList();
+    for (final candidate in selectedCandidates) {
+      if (candidate.asset.kind == 'drive' &&
+          !googleDriveConnected &&
+          _mediaCacheGateway != null &&
+          _inComposerTab(tab, () => referenceRequiresPublicMediaUrls(kind)) &&
+          referenceCandidatePublicUrl(candidate) == null) {
+        await checkReferenceCandidateCache(candidate);
+      }
+    }
+    if (_disposed) return;
     // Saved and generated candidates carry their measured duration, so the
     // seconds budget is decided here — before any media is read or hydrated.
     // Validate and append in order so only actual additions spend capacity.
@@ -4986,14 +5150,13 @@ class AppController extends ChangeNotifier {
     // when the media has to come down from Google Drive first.
     final hydrating = <(String, ReferenceCandidate)>[];
     _inComposerTab(tab, () {
-      for (final candidate in candidates.where((item) => item.kind == kind)) {
+      for (final candidate in selectedCandidates) {
         final sourceProblem = referenceCandidateProblem(candidate);
         if (sourceProblem != null) {
           refusals.add(sourceProblem);
           continue;
         }
         final publicSource = referenceCandidatePublicUrl(candidate);
-        final needsHostedSource = referenceRequiresPublicMediaUrls(kind);
         if (!candidate.generated &&
             form.references.any(
               (reference) => reference.savedReferenceId == candidate.id,
@@ -5040,11 +5203,14 @@ class AppController extends ChangeNotifier {
             ),
             savedReferenceId: candidate.generated ? null : candidate.id,
             durationSeconds: candidate.durationSeconds,
-            publicSourceExpiresAt: candidate.publicSourceExpiresAt,
+            publicSourceExpiresAt: publicSource == null
+                ? null
+                : candidate.publicSourceExpiresAt,
           ),
         ];
         added = true;
-        if (candidate.asset.isLocal && !needsHostedSource) {
+        if (candidate.asset.isLocal &&
+            (!referenceRequiresPublicMediaUrls(kind) || publicSource == null)) {
           hydrating.add((draftId, candidate));
           _hydratingReferenceDraftIds.add(draftId);
         }
@@ -5083,7 +5249,15 @@ class AppController extends ChangeNotifier {
                 // The media itself can still make a fresh preview frame.
               }
             }
-            final bytes = await gateway.readAsset(candidate.asset);
+            final bytes =
+                candidate.asset.kind == 'drive' && !googleDriveConnected
+                ? await _mediaCacheGateway?.cachedAssetBytes(candidate.asset)
+                : await gateway.readAsset(candidate.asset);
+            if (bytes == null || bytes.isEmpty) {
+              throw StateError(
+                'Connect Google Drive to load this media; it is not cached on this device.',
+              );
+            }
             _inComposerTab(
               tab,
               () => _hydrateReferenceDraft(
@@ -6191,10 +6365,6 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddFrame(role)) return;
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     // The pick belongs to the tab it was started from, however long the
     // picker sits open and whatever the director does meanwhile.
     final tab = activeComposerTab;
@@ -6269,10 +6439,6 @@ class AppController extends ChangeNotifier {
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
     if (!canAddReference(kind)) return;
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     final tab = activeComposerTab;
     _beginReferenceUpload('Waiting for ${kind.label.toLowerCase()} selection…');
     _inComposerTab(tab, () => _pendingPickerReferenceAdds += 1);
@@ -6306,10 +6472,6 @@ class AppController extends ChangeNotifier {
   }) async {
     if (picked.isEmpty) return;
     final target = tab ?? activeComposerTab;
-    if (_inComposerTab(target, () => requiresPublicMediaUrls)) {
-      showNotice(_inComposerTab(target, () => publicMediaUrlHint));
-      return;
-    }
     final attached = _inComposerTab(target, () {
       // A local pick carries no duration yet — the metadata loader reads it
       // once the tile mounts — so only the count budgets can be judged here.
@@ -6834,10 +6996,6 @@ class AppController extends ChangeNotifier {
   Future<void> pickVideo({
     MediaPickerSource source = MediaPickerSource.library,
   }) async {
-    if (requiresPublicMediaUrls) {
-      showNotice(publicMediaUrlHint);
-      return;
-    }
     final tab = activeComposerTab;
     try {
       final asset = await _pick(type: FileType.video, source: source);
@@ -6895,19 +7053,8 @@ class AppController extends ChangeNotifier {
     }
     final taskDraft =
         form.mode == VideoMode.draftEnhance && model.draftSourceIsTaskId;
-    if (model.requiresPublicMediaUrls && !taskDraft) {
-      final sources = <String>[
-        ...form.keyframes.map((frame) => frame.requestSource),
-        ...form.references.map((reference) => reference.requestSource),
-        if (form.videoAsset != null || form.videoUrl.trim().isNotEmpty)
-          form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
-        if (form.draftAsset != null || form.draftUrl.trim().isNotEmpty)
-          form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
-      ];
-      if (sources.any((source) => !_isPublicMediaUrl(source))) {
-        return publicMediaUrlHint;
-      }
-    }
+    final hostingProblem = temporaryMediaHostingProblem;
+    if (hostingProblem != null) return hostingProblem;
     if (form.mode == VideoMode.t2v && !model.modes.contains(VideoMode.t2v)) {
       if (model.supportsMediaReferences) {
         return 'Add at least one image, video, or audio reference for ${model.label}.';
@@ -6971,7 +7118,10 @@ class AppController extends ChangeNotifier {
             ? '${model.label} uses media references instead of keyframes.'
             : '${model.label} accepts up to $maximumKeyframes keyframes.';
       }
-      if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
+      if (form.keyframes.any(
+        (frame) =>
+            frame.requestSource.isEmpty && frame.retained?.isLocal != true,
+      )) {
         return 'Every keyframe needs an image or URL.';
       }
       if (form.keyframes.any(
@@ -7068,7 +7218,10 @@ class AppController extends ChangeNotifier {
             ? '${model.label} does not accept guidance keyframes.'
             : '${model.label} accepts up to $maximumKeyframes keyframes.';
       }
-      if (form.keyframes.any((frame) => frame.requestSource.isEmpty)) {
+      if (form.keyframes.any(
+        (frame) =>
+            frame.requestSource.isEmpty && frame.retained?.isLocal != true,
+      )) {
         return 'Every keyframe needs an image or URL.';
       }
       for (final kind in MediaReferenceKind.values) {
@@ -7166,9 +7319,105 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
-  String get publicMediaUrlHint =>
-      '${selectedModel.selectionLabel} requires public HTTPS media URLs. '
-      'Paste a hosted URL; local uploads and private library files are not supported.';
+  String get publicMediaUrlHint {
+    final status = temporaryMediaHostingStatus;
+    if (canTemporarilyHostMedia) {
+      return status?.cleanupSemantics ==
+              TemporaryMediaCleanupSemantics.deferredExpiry
+          ? 'Uploads and private library media can use your iCloud Drive for published reference links. Public HTTPS URLs also work.'
+          : 'Uploads and private library media can use temporary hosting links. Public HTTPS URLs also work.';
+    }
+    return switch (status?.readiness) {
+      TemporaryMediaReadiness.signedOut ||
+      TemporaryMediaReadiness.driveDisabled =>
+        '$iCloudReferenceSetupInstructions Then recheck, or paste a public HTTPS URL.',
+      TemporaryMediaReadiness.unsupported =>
+        'Uploading private references through iCloud Drive requires Clawnsole on iOS or macOS. On this device, paste a public HTTPS media URL.',
+      _ =>
+        status?.message ??
+            'Recheck reference hosting to use uploads or private library media, or paste a public HTTPS URL.',
+    };
+  }
+
+  String get iCloudReferenceSetupInstructions =>
+      defaultTargetPlatform == TargetPlatform.macOS
+      ? 'Open System Settings > Apple Account > iCloud > Drive, sign in if needed, and enable iCloud Drive.'
+      : 'Open Settings > Apple Account > iCloud > Drive, sign in if needed, and enable iCloud Drive for Clawnsole.';
+
+  static const temporaryMediaSharingDisclosure =
+      'Clawnsole copies references to your iCloud Drive and publishes links for the generation provider. Anyone with a link may read that snapshot until Apple’s reported expiry (about 30 days in our tests). Deleting the source copy or finishing a generation does not immediately revoke the link. Your original media stays unchanged. This permission applies to the current iCloud account on this device.';
+
+  String get mediaSharingDisclosure =>
+      temporaryMediaHostingStatus?.cleanupSemantics ==
+          TemporaryMediaCleanupSemantics.deferredExpiry
+      ? temporaryMediaSharingDisclosure
+      : 'Clawnsole uploads temporary copies that anyone with the link can read while the provider processes this generation. Your originals stay unchanged. Public access cleanup resumes when you reopen Clawnsole with the original hosting account.';
+
+  bool get _usesPublicMediaInputs =>
+      requiresPublicMediaUrls &&
+      !(form.mode == VideoMode.draftEnhance &&
+          selectedModel.draftSourceIsTaskId);
+
+  /// Local/private media can attach before hosting is ready. Only sending
+  /// them requires the privileged gateway's temporary hosting capability.
+  bool get needsTemporaryMediaHosting =>
+      _usesPublicMediaInputs &&
+      _composerMediaSources.any(
+        (value) =>
+            value.retained?.isLocal == true &&
+                !_isPublicMediaUrl(value.source) ||
+            value.source.startsWith('data:'),
+      );
+
+  bool get needsMediaHostingSetup =>
+      needsTemporaryMediaHosting && !canTemporarilyHostMedia;
+
+  Iterable<({String source, AssetReference? retained})>
+  get _composerMediaSources sync* {
+    for (final frame in form.keyframes) {
+      yield (source: frame.requestSource, retained: frame.retained);
+    }
+    for (final reference in form.references) {
+      final expired =
+          reference.publicSourceExpiresAt != null &&
+          !reference.publicSourceExpiresAt!.isAfter(DateTime.now().toUtc());
+      yield (
+        source: expired && reference.asset == null
+            ? ''
+            : reference.requestSource,
+        retained: reference.retained,
+      );
+    }
+    if (form.videoAsset != null || form.videoUrl.trim().isNotEmpty) {
+      yield (
+        source: form.videoAsset?.dataUrl ?? form.videoUrl.trim(),
+        retained: form.videoAsset?.retained,
+      );
+    }
+    if (form.draftAsset != null || form.draftUrl.trim().isNotEmpty) {
+      yield (
+        source: form.draftAsset?.dataUrl ?? form.draftUrl.trim(),
+        retained: form.draftAsset?.retained,
+      );
+    }
+  }
+
+  String? get temporaryMediaHostingProblem {
+    if (!_usesPublicMediaInputs) return null;
+    if (needsMediaHostingSetup) return publicMediaUrlHint;
+    for (final value in _composerMediaSources) {
+      if (_isPublicMediaUrl(value.source)) continue;
+      if (canTemporarilyHostMedia &&
+          (value.source.startsWith('data:') ||
+              value.retained?.isLocal == true)) {
+        continue;
+      }
+      if (value.source.isNotEmpty) {
+        return 'Use an uploaded file or a public HTTPS media URL for ${selectedModel.selectionLabel}.';
+      }
+    }
+    return null;
+  }
 
   bool _isPublicMediaUrl(String source) {
     try {
@@ -7182,13 +7431,17 @@ class AppController extends ChangeNotifier {
   String? _referenceSourceProblem() {
     for (final reference in form.references) {
       if (requiresPublicMediaUrls &&
+          reference.asset == null &&
+          !(canTemporarilyHostMedia && reference.retained?.isLocal == true) &&
           reference.publicSourceExpiresAt != null &&
           !reference.publicSourceExpiresAt!.isAfter(DateTime.now().toUtc())) {
         return 'The hosted URL for “${reference.label}” has expired. '
             'Choose a fresh hosted reference or paste a new URL.';
       }
     }
-    if (!form.references.any((item) => item.requestSource.isEmpty)) {
+    if (!form.references.any(
+      (item) => item.requestSource.isEmpty && item.retained?.isLocal != true,
+    )) {
       return null;
     }
     return form.references.any(
@@ -7464,6 +7717,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pollWorking({bool ignoreSchedule = false}) async {
+    unawaited(refreshTemporaryMediaHostingStatus());
     if (gateway is GenerationDeliveryGateway) {
       return _pollDeliveryStages(ignoreSchedule: ignoreSchedule);
     }
@@ -8113,6 +8367,7 @@ class AppController extends ChangeNotifier {
         restorePreferences: _preferenceRevision == preferenceRevision,
       );
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       await syncComposerWorkspace();
       showNotice('Google Drive connected and synced.');
     } on Object catch (error) {
@@ -8135,6 +8390,7 @@ class AppController extends ChangeNotifier {
         restorePreferences: _preferenceRevision == preferenceRevision,
       );
       showNotice('Drive disconnected on this device. Cloud files were kept.');
+      unawaited(refreshTemporaryMediaHostingStatus());
     } on Object catch (error) {
       showNotice(_message(error));
     } finally {
@@ -8176,6 +8432,7 @@ class AppController extends ChangeNotifier {
       }
       if (_disposed) return false;
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       return await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
@@ -8203,6 +8460,7 @@ class AppController extends ChangeNotifier {
     try {
       final value = await (gateway as GoogleDriveGateway).refreshGoogleDrive();
       _driveSessionSchedule.renewed();
+      unawaited(refreshTemporaryMediaHostingStatus());
       await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
@@ -8510,7 +8768,9 @@ class AppController extends ChangeNotifier {
     bool cacheOnly = false,
   }) async {
     Future<Uint8List?> read(AssetReference value) {
-      if (!cacheOnly || value.kind != 'drive') {
+      final offlineDrive =
+          gateway is GoogleDriveGateway && !googleDriveConnected;
+      if (value.kind != 'drive' || (!cacheOnly && !offlineDrive)) {
         return gateway.readAsset(value);
       }
       return _mediaCacheGateway?.cachedAssetBytes(value) ??
@@ -8690,7 +8950,8 @@ class AppController extends ChangeNotifier {
           // The original reference can regenerate its preview.
         }
       }
-      if (reference?.isLocal == true && !requiresHostedSources) {
+      if (reference?.isLocal == true &&
+          (!requiresHostedSources || publicSource == null)) {
         try {
           asset = await _retainedAsset(
             reference!,

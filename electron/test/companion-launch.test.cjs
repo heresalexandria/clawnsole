@@ -22,4 +22,37 @@ test('bundled companion receives the signed media tool directory', () => {
     ),
   );
   assert.equal(argumentsList.at(-1), '--secure-bootstrap');
+  const helperIndex = argumentsList.indexOf('--icloud-host-helper');
+  assert.notEqual(helperIndex, -1);
+  assert.equal(
+    argumentsList[helperIndex + 1],
+    path.join(
+      '/Applications/Clawnsole.app/Contents/Resources',
+      'native-tools',
+      'clawnsole_icloud_host',
+    ),
+  );
+});
+
+test('native iCloud host is included and explicitly signed in the packaged app', () => {
+  const { build } = require('../package.json');
+  assert.ok(build.extraResources.some(({ from, to }) => (
+    from === 'dist/native-tools' && to === 'native-tools'
+  )));
+  assert.ok(build.mac.binaries.includes(
+    'Contents/Resources/native-tools/clawnsole_icloud_host',
+  ));
+});
+
+test('temporary media recovery stays in user data when the library moves', () => {
+  const journal = '/Users/director/Library/Application Support/Clawnsole/temporary-media-leases.json';
+  const argumentsList = bundledCompanionArguments({
+    port: 8787,
+    dataFile: '/Volumes/Films/Clawnsole/data.json',
+    rendererDirectory: '/Applications/Clawnsole.app/Contents/Resources/renderer',
+    resourcesPath: '/Applications/Clawnsole.app/Contents/Resources',
+    mediaHostJournalFile: journal,
+  });
+  assert.equal(argumentsList[argumentsList.indexOf('--media-host-journal') + 1], journal);
+  assert.equal(argumentsList[argumentsList.indexOf('--data-file') + 1], '/Volumes/Films/Clawnsole/data.json');
 });

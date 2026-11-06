@@ -5,7 +5,9 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/apipod_model_contracts.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:clawnsole/core/media_cache_gateway.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/temporary_media_host.dart';
 import 'package:clawnsole/ui/references_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,7 @@ LocalSnapshot snapshot({
 AppController _controller(_Gateway gateway) => AppController(gateway: gateway)
   ..snapshot = gateway.snapshot
   ..loading = false
+  ..temporaryMediaHostingStatus = gateway.hostingStatus
   ..selectedProviderId = 'apipod'
   ..selectedModelId = 'seedance-2.5-r2v';
 
@@ -230,44 +233,90 @@ void main() {
   );
 
   test(
-    'private, unsafe and expired references give a reason before any read',
+    'retained local references attach even when hosted provenance expired',
     () async {
       for (final reference in [
         saved(),
         saved(url: 'https://127.0.0.1/private.mp4'),
         saved(url: hosted, expires: DateTime.utc(2000)),
-        saved(
-          asset: const AssetReference(
-            kind: 'drive',
-            value: 'private-file-id',
-            label: 'Motion',
-          ),
-        ),
       ]) {
-        final gateway = _Gateway(snapshot(references: [reference]));
+        final gateway = _Gateway(snapshot(references: [reference]))
+          ..allowReads = true;
         final app = _controller(gateway);
         addTearDown(app.dispose);
         final candidate = app.savedReferenceCandidate(reference);
-        expect(
-          app.referenceCandidateProblem(candidate),
-          contains('no available public HTTPS URL'),
-        );
+        expect(app.referenceCandidateProblem(candidate), isNull);
         await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
-        expect(app.form.references, isEmpty);
-        expect(app.notice, contains('paste its URL'));
-        expect(gateway.reads, 0);
+        expect(
+          app.form.references.single.requestSource,
+          startsWith('data:video/'),
+        );
+        expect(app.form.references.single.publicSourceExpiresAt, isNull);
+        expect(gateway.reads, 1);
+        expect(app.validate(), contains('Apple Account > iCloud > Drive'));
+        gateway.hostingStatus = _readyHosting;
+        await app.refreshTemporaryMediaHostingStatus();
+        app.updateForm((form) => form.prompt = 'Follow the camera.');
+        expect(app.validate(), isNull);
+        expect(gateway.reads, 1);
       }
-      final gateway = _Gateway(
-        snapshot(generations: [generation(expires: DateTime.utc(2000))]),
+    },
+  );
+
+  test(
+    'private Drive references explain connection requirement before reading',
+    () async {
+      final reference = saved(
+        asset: const AssetReference(
+          kind: 'drive',
+          value: 'private-file-id',
+          label: 'Motion',
+        ),
       );
+      final gateway = _Gateway(snapshot(references: [reference]));
       final app = _controller(gateway);
       addTearDown(app.dispose);
+      final candidate = app.savedReferenceCandidate(reference);
       expect(
-        app.referenceCandidatePublicUrl(
-          app.generatedReferenceCandidates(MediaReferenceKind.video).single,
-        ),
-        isNull,
+        app.referenceCandidateProblem(candidate),
+        contains('Connect Google Drive'),
       );
+      await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
+      expect(app.form.references, isEmpty);
+      expect(gateway.reads, 0);
+    },
+  );
+
+  test(
+    'cached private Drive references attach offline without a network read',
+    () async {
+      final reference = saved(
+        asset: const AssetReference(
+          kind: 'drive',
+          value: 'cached-file',
+          label: 'Motion',
+          contentType: 'video/mp4',
+        ),
+      );
+      final gateway = _Gateway(snapshot(references: [reference]))
+        ..cachedBytes = Uint8List.fromList([1, 2, 3]);
+      final app = _controller(gateway);
+      addTearDown(app.dispose);
+      final candidate = app.savedReferenceCandidate(reference);
+      expect(await app.checkReferenceCandidateCache(candidate), isTrue);
+      expect(app.referenceCandidateProblem(candidate), isNull);
+      await app.addReferenceCandidates(MediaReferenceKind.video, [candidate]);
+      expect(
+        app.form.references.single.requestSource,
+        startsWith('data:video/'),
+      );
+      expect(gateway.reads, 0);
+      expect(app.validate(), contains('Apple Account > iCloud > Drive'));
+      gateway.hostingStatus = _readyHosting;
+      await app.refreshTemporaryMediaHostingStatus();
+      app.updateForm((form) => form.prompt = 'Follow the camera.');
+      expect(app.validate(), isNull);
+      expect(gateway.reads, 0);
     },
   );
 
@@ -326,7 +375,11 @@ void main() {
           id: 'private',
           name: 'Private clip',
           kind: MediaReferenceKind.video,
-          asset: retained,
+          asset: const AssetReference(
+            kind: 'drive',
+            value: 'private-file',
+            label: 'Private clip',
+          ),
           createdAt: now,
           updatedAt: now,
           durationSeconds: 4,
@@ -366,7 +419,17 @@ void main() {
           find.byKey(const ValueKey('reference-picker-public-url-hint')),
           findsOneWidget,
         );
-        expect(find.text('Public HTTPS URL required'), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(
+                find.byKey(const ValueKey('reference-picker-public-url-hint')),
+              )
+              .data,
+          contains('Settings > Apple Account > iCloud > Drive'),
+        );
+        // Google Drive is still needed to retrieve this uncached source;
+        // it is independent of iCloud hosting for an attached reference.
+        expect(find.text('Connect Google Drive'), findsOneWidget);
         expect(
           tester
               .widget<InkWell>(
@@ -388,7 +451,10 @@ void main() {
               )
               .first,
         );
-        await tester.tapAt(tester.getTopLeft(card) + const Offset(20, 20));
+        expect(tester.widget<InkWell>(card).onTap, isNotNull);
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
+        await tester.tap(card);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add 1'));
         await tester.pumpAndSettle();
@@ -404,10 +470,41 @@ void main() {
   );
 }
 
-class _Gateway implements AppGateway {
+const _readyHosting = TemporaryMediaHostStatus(
+  available: true,
+  activeLeases: 0,
+  pendingCleanup: 0,
+  backendId: 'iCloudDrive',
+  readiness: TemporaryMediaReadiness.ready,
+  accountScope: 'opaque-apple-account',
+  cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+  sharingAccepted: true,
+);
+
+class _Gateway
+    implements AppGateway, MediaCacheGateway, TemporaryMediaHostingGateway {
   _Gateway(this.snapshot, {this.usesCompanion = false});
   LocalSnapshot snapshot;
+  TemporaryMediaHostStatus hostingStatus = const TemporaryMediaHostStatus(
+    available: false,
+    activeLeases: 0,
+    pendingCleanup: 0,
+    backendId: 'iCloudDrive',
+    readiness: TemporaryMediaReadiness.signedOut,
+    cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+    sharingAccepted: false,
+  );
+  @override
+  bool get supportsTemporaryMediaHosting => true;
+  @override
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async =>
+      hostingStatus;
   int reads = 0;
+  Uint8List? cachedBytes;
+  @override
+  Future<Uint8List?> cachedAssetBytes(AssetReference reference) async =>
+      cachedBytes;
+  bool allowReads = false;
   Completer<double>? creditGate;
   final creditStarted = Completer<void>();
   final submissions = <GenerationSubmission>[];
@@ -437,6 +534,7 @@ class _Gateway implements AppGateway {
   @override
   Future<Uint8List> readAsset(AssetReference reference) async {
     reads++;
+    if (allowReads) return Uint8List.fromList([1, 2, 3]);
     throw StateError('No hydration expected');
   }
 

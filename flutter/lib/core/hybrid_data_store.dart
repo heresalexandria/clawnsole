@@ -84,6 +84,8 @@ class HybridDataStore
 
   bool get isDriveConnected => _drive.connection.isConnected;
 
+  GoogleDriveStore get mediaHostingDrive => _drive;
+
   Future<StoredData> connect(String accessToken, String folderName) async {
     final local = _asLocal(await _local.read());
     final connected = await _drive.connect(accessToken, folderName);

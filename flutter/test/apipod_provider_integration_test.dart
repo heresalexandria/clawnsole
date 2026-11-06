@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clawnsole/core/api_transcript.dart';
+import 'package:clawnsole/core/temporary_media_host.dart';
+import 'package:clawnsole/core/temporary_media_host_io.dart';
+
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/apipod_api.dart';
 import 'package:clawnsole/core/gateway.dart';
@@ -273,6 +277,140 @@ void main() {
     }
 
     test(
+      '$surface temporarily hosts imported media and revokes after restart',
+      () async {
+        final fixture = await _ApipodFixture.create(
+          companion: companion,
+          isIos: isIos,
+          hosting: true,
+        );
+        addTearDown(fixture.dispose);
+        await fixture.provider.setProviderApiKey('apipod', _key);
+        fixture.expectedModel = 'seedance-2.5-r2v';
+        final pending = await fixture.gateway.submit(
+          _localReferenceSubmission(),
+        );
+        expect(pending.status, 'Pending');
+        expect(fixture.hostBackend.copies, hasLength(3));
+        expect(
+          fixture.hostBackend.createdKinds,
+          containsAll(MediaReferenceKind.values),
+        );
+        for (final media in pending.config.references!) {
+          expect(media.source!.kind, 'local');
+          expect(media.publicSourceUrl, isNull);
+        }
+        expect(
+          jsonEncode(pending.toJson()),
+          isNot(contains('drive.google.com')),
+        );
+        final payload = fixture.submittedPayload!;
+        for (final field in ['image_urls', 'video_urls', 'audio_urls']) {
+          expect(
+            (payload[field] as List).single,
+            startsWith('https://drive.google.com/'),
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        final transcript = await (fixture.gateway as ApiTranscriptGateway)
+            .readApiRequests(pending.localId);
+        expect(
+          renderTranscript(transcript),
+          isNot(contains('drive.google.com')),
+        );
+        expect(renderTranscript(transcript), contains('temporary media URL'));
+        final journalText = await File(
+          '${fixture.directory.path}/leases.json',
+        ).readAsString();
+        expect(journalText, isNot(contains('drive.google.com')));
+        expect(journalText, isNot(contains('base64')));
+        await fixture.restart();
+        final restored = (await fixture.gateway.load()).generations.single;
+        expect(fixture.hostBackend.copies, hasLength(3));
+        fixture.queueStatus = 'completed';
+        final completed = await fixture.delivery.pollStatus(restored);
+        expect(completed.status, 'Ready');
+        expect(fixture.hostBackend.copies, isEmpty);
+        expect(fixture.hostBackend.released, 3);
+        expect((await fixture.host.status()).activeLeases, 0);
+        expect(fixture.submitCount, 1);
+      },
+    );
+
+    test(
+      '$surface requests Drive before a paid local-media submission',
+      () async {
+        final fixture = await _ApipodFixture.create(
+          companion: companion,
+          isIos: isIos,
+          hosting: true,
+        );
+        addTearDown(fixture.dispose);
+        fixture.hostBackend.connected = false;
+        await fixture.provider.setProviderApiKey('apipod', _key);
+        fixture.expectedModel = 'seedance-2.5-r2v';
+        await expectLater(
+          fixture.gateway.submit(_localReferenceSubmission()),
+          throwsA(
+            predicate(
+              (error) => error.toString().contains('Connect Google Drive'),
+            ),
+          ),
+        );
+        expect(fixture.submitCount, 0);
+        expect(fixture.hostBackend.copies, isEmpty);
+      },
+    );
+
+    test(
+      '$surface cleans deleted-history jobs without restoring history',
+      () async {
+        final fixture = await _ApipodFixture.create(
+          companion: companion,
+          isIos: isIos,
+          hosting: true,
+        );
+        addTearDown(fixture.dispose);
+        await fixture.provider.setProviderApiKey('apipod', _key);
+        fixture.expectedModel = 'seedance-2.5-r2v';
+        final pending = await fixture.gateway.submit(
+          _localReferenceSubmission(),
+        );
+        await fixture.gateway.clearHistory();
+        expect(fixture.hostBackend.copies, hasLength(3));
+        await fixture.restart();
+        fixture.queueStatus = 'completed';
+        await (fixture.gateway as TemporaryMediaHostingGateway)
+            .temporaryMediaHostStatus();
+        expect(fixture.hostBackend.copies, isEmpty);
+        expect((await fixture.gateway.load()).generations, isEmpty);
+        expect(fixture.submitCount, 1);
+        expect(pending.canCheckStatus, isTrue);
+      },
+    );
+
+    test(
+      '$surface joins concurrent submissions of the same hosted operation',
+      () async {
+        final fixture = await _ApipodFixture.create(
+          companion: companion,
+          isIos: isIos,
+          hosting: true,
+        );
+        addTearDown(fixture.dispose);
+        await fixture.provider.setProviderApiKey('apipod', _key);
+        fixture.expectedModel = 'seedance-2.5-r2v';
+        final records = await Future.wait([
+          fixture.gateway.submit(_localReferenceSubmission()),
+          fixture.gateway.submit(_localReferenceSubmission()),
+        ]);
+        expect(records.map((record) => record.requestId).toSet(), {_requestId});
+        expect(fixture.submitCount, 1);
+        expect(fixture.hostBackend.copies, hasLength(3));
+      },
+    );
+
+    test(
       '$surface APIPod uncertain submission is persisted and never resent',
       () async {
         final fixture = await _ApipodFixture.create(
@@ -295,6 +433,20 @@ void main() {
       },
     );
   }
+}
+
+GenerationSubmission _localReferenceSubmission() {
+  final original = _referenceSubmission('seedance-2.5-r2v');
+  return GenerationSubmission(
+    record: original.record,
+    input: {
+      ...original.input,
+      'reference_images': ['data:image/png;base64,AQID'],
+      'reference_videos': ['data:video/mp4;base64,AQID'],
+      'reference_audios': ['data:audio/mpeg;base64,AQID'],
+    },
+    autoFixReferenceVideos: false,
+  );
 }
 
 GenerationSubmission _submission() => GenerationSubmission(
@@ -467,16 +619,18 @@ class _UnexpectedNormalizer
 }
 
 class _ApipodFixture {
-  _ApipodFixture(this.directory, this.companion, this.isIos);
+  _ApipodFixture(this.directory, this.companion, this.isIos, this.hosting);
 
   static Future<_ApipodFixture> create({
     required bool companion,
     bool isIos = false,
+    bool hosting = false,
   }) async {
     final fixture = _ApipodFixture(
       await Directory.systemTemp.createTemp('clawnsole-apipod-integration.'),
       companion,
       isIos,
+      hosting,
     );
     fixture.client = MockClient(fixture.handleProviderRequest);
     await fixture.open();
@@ -486,6 +640,9 @@ class _ApipodFixture {
   final Directory directory;
   final bool companion;
   final bool isIos;
+  final bool hosting;
+  final hostBackend = _HostBackend();
+  late TemporaryMediaHost host;
   final normalizer = _UnexpectedNormalizer();
   String expectedModel = _model;
   Map<String, dynamic>? submittedPayload;
@@ -575,6 +732,13 @@ class _ApipodFixture {
     final hybrid = HybridDataStore(local: local);
     final vault = SettingsVaultDataStore(delegate: hybrid, secureStore: secure);
     final router = ProviderApiRouter(apipod: ApipodApi(client: client));
+    host = TemporaryMediaHost(
+      journal: FileTemporaryMediaLeaseJournal(
+        () async => File('${directory.path}/leases.json'),
+      ),
+      backend: hostBackend,
+    );
+    hostBackend.store = local;
     if (companion) {
       companionStore = CompanionHybridStore(hybrid, vault: vault);
       final app = CompanionApp.hybrid(
@@ -582,6 +746,7 @@ class _ApipodFixture {
         api: BflApi(client: client),
         providerRouter: router,
         referenceVideoNormalizer: normalizer,
+        temporaryMediaHost: hosting ? host : null,
       );
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       subscription = server!.listen(app.handle);
@@ -598,6 +763,7 @@ class _ApipodFixture {
         client: client,
         isIos: isIos,
         referenceVideoNormalizer: normalizer,
+        temporaryMediaHost: hosting ? host : null,
       );
       gateway = native!;
     }
@@ -625,5 +791,47 @@ class _ApipodFixture {
     await close();
     client.close();
     await directory.delete(recursive: true);
+  }
+}
+
+class _HostBackend implements TemporaryMediaBackend {
+  bool connected = true;
+  late LocalDataStore store;
+  final copies = <String, TemporaryMediaCopy>{};
+  final createdKinds = <MediaReferenceKind>[];
+  int released = 0;
+  @override
+  String? get scopeId => connected ? 'private-drive-library' : null;
+  @override
+  Future<List<TemporaryMediaCopy>> findCopies(
+    TemporaryMediaLease lease,
+  ) async => copies[lease.id] == null ? [] : [copies[lease.id]!];
+  @override
+  Future<TemporaryMediaCopy> createCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaSource source,
+  ) async {
+    expect(source.retained, isNotNull);
+    expect(await store.readAsset(source.retained!), [1, 2, 3]);
+    createdKinds.add(source.kind);
+    return copies[lease.id] = TemporaryMediaCopy(
+      fileId: 'staging-${source.kind.name}',
+    );
+  }
+
+  @override
+  Future<TemporaryMediaShare> shareCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaCopy copy,
+  ) async => TemporaryMediaShare(
+    permissionId: 'anyone',
+    url: 'https://drive.google.com/uc?export=download&id=${copy.fileId}',
+  );
+  @override
+  Future<void> releaseCopy(
+    TemporaryMediaLease lease,
+    TemporaryMediaCopy copy,
+  ) async {
+    if (copies.remove(lease.id) != null) released++;
   }
 }

@@ -12,6 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import subprocess
 import sys
 import tempfile
@@ -23,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bump_version
 import prepare_release
 import verify_prepared
+import verify_icloud_profile
 
 
 PATCHED_PATHS = (
@@ -50,6 +52,66 @@ def git(root: Path, *args: str) -> str:
         text=True,
     )
     return result.stdout.strip()
+
+
+class ICloudProfileTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.requested = {
+            "com.apple.developer.icloud-services": ["CloudDocuments"],
+            "com.apple.developer.icloud-container-identifiers": ["iCloud.app.clawnsole.clawnsole"],
+            "com.apple.developer.ubiquity-container-identifiers": ["iCloud.app.clawnsole.clawnsole"],
+        }
+
+    def test_current_profile_passes_and_old_or_wrong_profiles_fail(self) -> None:
+        verify_icloud_profile.validate({"Entitlements": self.requested}, self.requested)
+        for key in verify_icloud_profile.ICLOUD_KEYS:
+            for replacement in (None, [], ["CloudKit"], ["iCloud.app.clawnsole.storagepoc"],
+                                "iCloud.app.clawnsole.clawnsole", ["iCloud.app.clawnsole.clawnsole.extra"]):
+                with self.subTest(key=key, replacement=replacement):
+                    granted = dict(self.requested)
+                    if replacement is None:
+                        granted.pop(key)
+                    else:
+                        granted[key] = replacement
+                    with self.assertRaisesRegex(ValueError, "Regenerate the App Store profile"):
+                        verify_icloud_profile.validate({"Entitlements": granted}, self.requested)
+
+    def test_cli_rejects_stale_profile_without_printing_private_profile_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile_path = root / "profile.plist"
+            entitlement_path = root / "Runner.entitlements"
+            private_value = "private-profile-payload-must-not-appear"
+            profile_path.write_bytes(plistlib.dumps({
+                "Name": private_value,
+                "DeveloperCertificates": [private_value.encode()],
+                "Entitlements": {},
+            }))
+            entitlement_path.write_bytes(plistlib.dumps(self.requested))
+            command = [sys.executable, str(Path(verify_icloud_profile.__file__)),
+                       "--profile-plist", str(profile_path), "--entitlements", str(entitlement_path)]
+            failed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(failed.returncode, 1)
+            self.assertIn("IOS_PROVISIONING_PROFILE", failed.stderr)
+            self.assertNotIn(private_value, failed.stdout + failed.stderr)
+            profile_path.write_bytes(plistlib.dumps({"Entitlements": self.requested}))
+            passed = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+
+    def test_apple_service_wildcard_still_requires_exact_container_grants(self) -> None:
+        granted = dict(self.requested)
+        granted["com.apple.developer.icloud-services"] = "*"
+        verify_icloud_profile.validate({"Entitlements": granted}, self.requested)
+        for key in verify_icloud_profile.ICLOUD_KEYS[1:]:
+            for replacement in (None, "*", ["*"], ["iCloud.app.clawnsole.storagepoc"]):
+                with self.subTest(key=key, replacement=replacement):
+                    altered = dict(granted)
+                    if replacement is None:
+                        altered.pop(key)
+                    else:
+                        altered[key] = replacement
+                    with self.assertRaisesRegex(ValueError, "Regenerate the App Store profile"):
+                        verify_icloud_profile.validate({"Entitlements": altered}, self.requested)
 
 
 class ReleaseRepoTest(unittest.TestCase):

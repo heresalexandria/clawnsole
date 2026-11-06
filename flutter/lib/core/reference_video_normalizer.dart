@@ -265,6 +265,43 @@ Object? _replaceKeyframeImageSource(Object? value, String source) {
   return source;
 }
 
+typedef _NormalizedSources = ({List<String> sources, Set<int> changedIndexes});
+
+Future<_NormalizedSources> _prepareReferenceSources(
+  List<String> sources, {
+  required bool preservePublicUrls,
+  required Future<_NormalizedSources> Function(List<String>) normalize,
+}) async {
+  final indexes = <int>[];
+  for (var index = 0; index < sources.length; index++) {
+    if (preservePublicUrls) {
+      try {
+        validatedProviderUrl(sources[index]);
+        continue;
+      } on ProviderException {
+        // Only local uploads need compatibility preparation and hosting.
+      }
+    }
+    indexes.add(index);
+  }
+  if (indexes.isEmpty) {
+    return (sources: List.of(sources), changedIndexes: <int>{});
+  }
+  final prepared = await normalize([
+    for (final index in indexes) sources[index],
+  ]);
+  final result = List<String>.of(sources);
+  for (var index = 0; index < indexes.length; index++) {
+    result[indexes[index]] = prepared.sources[index];
+  }
+  return (
+    sources: result,
+    changedIndexes: {
+      for (final index in prepared.changedIndexes) indexes[index],
+    },
+  );
+}
+
 /// Normalizes visual guidance before provider mapping. Changed derivatives
 /// deliberately drop retained pointers so persistence saves the compatible
 /// derivative while leaving saved references and generated originals intact.
@@ -276,6 +313,7 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   ReferenceVideoCompatibilityProfile? videoProfile,
   ReferenceImageCompatibilityProfile imageProfile =
       const ReferenceImageCompatibilityProfile(),
+  bool preservePublicUrls = false,
 }) async {
   var nextInput = input;
   var nextConfig = config;
@@ -283,9 +321,16 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   final rawFrames = input['keyframes'];
   if (rawFrames is List<Object?> && rawFrames.isNotEmpty) {
     final frameSources = rawFrames.map(_keyframeImageSource).toList();
-    final prepared = await imageNormalizer.normalizeImages(
+    final prepared = await _prepareReferenceSources(
       frameSources,
-      profile: imageProfile,
+      preservePublicUrls: preservePublicUrls,
+      normalize: (sources) async {
+        final result = await imageNormalizer.normalizeImages(
+          sources,
+          profile: imageProfile,
+        );
+        return (sources: result.sources, changedIndexes: result.changedIndexes);
+      },
     );
     if (prepared.changedIndexes.isNotEmpty) {
       nextInput = Map<String, Object?>.of(nextInput)
@@ -316,9 +361,16 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
   final rawImages = input['reference_images'];
   if (rawImages is List<Object?> && rawImages.isNotEmpty) {
     final sources = rawImages.map((source) => source.toString()).toList();
-    final prepared = await imageNormalizer.normalizeImages(
+    final prepared = await _prepareReferenceSources(
       sources,
-      profile: imageProfile,
+      preservePublicUrls: preservePublicUrls,
+      normalize: (sources) async {
+        final result = await imageNormalizer.normalizeImages(
+          sources,
+          profile: imageProfile,
+        );
+        return (sources: result.sources, changedIndexes: result.changedIndexes);
+      },
     );
     if (prepared.changedIndexes.isNotEmpty) {
       nextInput = Map<String, Object?>.of(nextInput)
@@ -345,9 +397,16 @@ Future<PreparedGenerationReferences> prepareGenerationReferences({
       rawVideos is List<Object?> &&
       rawVideos.isNotEmpty) {
     final sources = rawVideos.map((source) => source.toString()).toList();
-    final prepared = await videoNormalizer.normalize(
+    final prepared = await _prepareReferenceSources(
       sources,
-      profile: videoProfile,
+      preservePublicUrls: preservePublicUrls,
+      normalize: (sources) async {
+        final result = await videoNormalizer.normalize(
+          sources,
+          profile: videoProfile,
+        );
+        return (sources: result.sources, changedIndexes: result.changedIndexes);
+      },
     );
     if (prepared.changedIndexes.isNotEmpty) {
       nextInput = Map<String, Object?>.of(nextInput)

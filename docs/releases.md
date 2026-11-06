@@ -110,6 +110,21 @@ its secrets to pull-request refs.
 | `APP_STORE_CONNECT_ISSUER_ID` | App Store Connect API issuer UUID |
 | `APP_STORE_CONNECT_API_KEY_P8` | raw contents of the API key's downloaded `AuthKey_*.p8` file |
 
+iOS release signing uses the supplied App Store profile with manual signing;
+the workflow does not regenerate it. After changing app capabilities, regenerate
+that profile in Apple Developer, retaining the existing distribution certificate,
+and replace the effective `IOS_PROVISIONING_PROFILE` secret with its base64 data.
+The profile must grant `CloudDocuments` and include
+`iCloud.app.clawnsole.clawnsole` in both its iCloud-container and ubiquity-container
+entitlements. CI checks this coverage before archiving and fails with a profile
+refresh instruction when it is missing. Apple can encode its iCloud-services
+allowlist as the scalar wildcard `*`; the preflight accepts that service grant
+while requiring both exact container associations. This follows Apple's
+[TN2415 entitlement wildcard guidance](https://developer.apple.com/library/archive/technotes/tn2415/).
+A development profile refreshed by Xcode
+does not update the release secret. This enables user-owned iCloud Documents;
+Clawnsole does not request the CloudKit service or use an app CloudKit database.
+
 The existing `APPLE_TEAM_ID` secret is shared by macOS notarization and iOS
 signing and must remain `KMZ785G889`. Generate the App Store Connect team API key
 with the `Developer` role, which is sufficient to upload builds without giving

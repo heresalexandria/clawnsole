@@ -22,9 +22,13 @@ import 'google_drive.dart';
 import 'google_drive_asset_presenter_io.dart';
 import 'google_drive_auth.dart';
 import 'google_drive_store.dart';
+import 'google_drive_media_backend.dart';
 import 'google_drive_upload_pump.dart';
 import 'generation_status.dart';
 import 'hybrid_data_store.dart';
+import 'icloud_drive_media_backend.dart';
+import 'icloud_reference_transport.dart';
+import 'icloud_reference_transport_native.dart';
 import 'local_data_store.dart';
 import 'media_cache_gateway.dart';
 import 'media_share.dart';
@@ -40,6 +44,9 @@ import 'settings_vault_gateway.dart';
 import 'settings_vault_remote.dart';
 import 'video_cache.dart';
 import 'video_cache_gateway.dart';
+import 'temporary_media_host.dart';
+import 'temporary_media_host_io.dart';
+import 'temporary_media_source_io.dart';
 
 const _configuredIosReviewApiKey = String.fromEnvironment(
   'CLAWNSOLE_IOS_REVIEW_BFL_API_KEY',
@@ -123,6 +130,7 @@ class NativeGateway extends DirectGateway
     SettingsVaultRemote? settingsVaultRemote,
     SettingsVaultCodec? settingsVaultCodec,
     SettingsVaultDataStore? settingsVaultStore,
+    TemporaryMediaHost? temporaryMediaHost,
     ReferenceVideoNormalizationService? referenceVideoNormalizer,
   }) {
     final localStore = store ?? (hybridStore == null ? LocalDataStore() : null);
@@ -154,15 +162,22 @@ class NativeGateway extends DirectGateway
             ),
           ),
         );
+    final deviceSecrets =
+        secureValueStore ??
+        (store != null || hybridStore != null
+            ? MemorySecureValueStore()
+            : FlutterSecureValueStore());
+    final legacyMediaBackend = GoogleDriveMediaBackend(
+      scopeId: () =>
+          hybrid.connection.isConnected ? hybrid.connection.folderId : null,
+      api: () => hybrid.mediaHostingDrive.connectedApi,
+      stageSource: (source) => stageTemporaryMediaSource(source, hybrid),
+    );
     final vault =
         settingsVaultStore ??
         SettingsVaultDataStore(
           delegate: hybrid,
-          secureStore:
-              secureValueStore ??
-              (store != null || hybridStore != null
-                  ? MemorySecureValueStore()
-                  : FlutterSecureValueStore()),
+          secureStore: deviceSecrets,
           remote: settingsVaultRemote,
           codec: settingsVaultCodec,
         );
@@ -170,6 +185,25 @@ class NativeGateway extends DirectGateway
       hybrid: hybrid,
       localStore: localStore,
       vault: vault,
+      temporaryMediaHost:
+          temporaryMediaHost ??
+          (localStore == null
+              ? null
+              : TemporaryMediaHost(
+                  journal: FileTemporaryMediaLeaseJournal(
+                    () async =>
+                        File(await localStore.mediaHostingJournalPath()),
+                  ),
+                  backend: ICloudDriveMediaBackend(
+                    transport: (isIos ?? Platform.isIOS)
+                        ? const NativeICloudReferenceTransport()
+                        : const UnavailableICloudReferenceTransport(),
+                    consentStore: deviceSecrets,
+                    stageSource: (source) =>
+                        stageTemporaryMediaSource(source, hybrid),
+                  ),
+                  cleanupBackends: {'googleDrive': legacyMediaBackend},
+                )),
       videoCache: videoCache,
       thumbnailCache: thumbnailCache,
       driveAuthorizer: driveAuthorizer ?? createGoogleDriveAuthorizer(),
@@ -212,6 +246,7 @@ class NativeGateway extends DirectGateway
     required VideoCache videoCache,
     required VideoCache thumbnailCache,
     required GoogleDriveAuthorizer driveAuthorizer,
+    required TemporaryMediaHost? temporaryMediaHost,
     LocalDataStore? localStore,
     BflApi? api,
     http.Client? client,
@@ -273,6 +308,7 @@ class NativeGateway extends DirectGateway
        _isMobile = isMobile ?? isIos ?? (Platform.isIOS || Platform.isAndroid),
        super(
          store: vault,
+         temporaryMediaHost: temporaryMediaHost,
          api: api,
          client: client,
          providerRouter: providerRouter,
@@ -506,14 +542,39 @@ class NativeGateway extends DirectGateway
 
   @override
   Future<LocalSnapshot> connectGoogleDrive(String folderName) async {
-    final token = await _driveAuthorizer.authorize();
-    _resumeDeferredDriveUploads(await _hybrid.connect(token, folderName));
-    await _vault.connectRemote(token, _hybrid.connection.folderId);
-    return load();
+    // An explicit connection can select another account or library. Revoke
+    // copies while the previous account is still reachable.
+    if (_hybrid.connection.isConnected) {
+      if (temporaryMediaHost?.backendId == 'googleDrive') {
+        temporaryMediaHost?.suspend();
+      }
+      await temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
+    }
+    try {
+      final token = await _driveAuthorizer.authorize();
+      _resumeDeferredDriveUploads(await _hybrid.connect(token, folderName));
+      await _vault.connectRemote(token, _hybrid.connection.folderId);
+      if (temporaryMediaHost?.backendId == 'googleDrive') {
+        temporaryMediaHost?.resume();
+      }
+      await maintainTemporaryMedia(force: true);
+      return await load();
+    } on Object {
+      // Cancelling authorization can leave the previous session intact.
+      if (_hybrid.connection.isConnected &&
+          temporaryMediaHost?.backendId == 'googleDrive') {
+        temporaryMediaHost?.resume();
+      }
+      rethrow;
+    }
   }
 
   @override
   Future<LocalSnapshot> disconnectGoogleDrive() async {
+    if (temporaryMediaHost?.backendId == 'googleDrive') {
+      temporaryMediaHost?.suspend();
+    }
+    await temporaryMediaHost?.releaseAll(backendId: 'googleDrive');
     await _vault.disconnectRemote();
     await _hybrid.disconnect();
     await _driveAuthorizer.disconnect();
@@ -527,6 +588,10 @@ class NativeGateway extends DirectGateway
       await _hybrid.connect(token, googleDriveConnection.folderName),
     );
     await _vault.connectRemote(token, _hybrid.connection.folderId);
+    if (temporaryMediaHost?.backendId == 'googleDrive') {
+      temporaryMediaHost?.resume();
+    }
+    await maintainTemporaryMedia(force: true);
     return load();
   }
 
@@ -546,6 +611,10 @@ class NativeGateway extends DirectGateway
         await _hybrid.connect(token, connection.folderName),
       );
       await _vault.connectRemote(token, _hybrid.connection.folderId);
+      if (temporaryMediaHost?.backendId == 'googleDrive') {
+        temporaryMediaHost?.resume();
+      }
+      await maintainTemporaryMedia(force: true);
       return await load();
     } on Object {
       return null;

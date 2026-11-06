@@ -143,6 +143,11 @@ class LocalDataStore
   /// The directory currently holding the data file and its assets.
   Future<String> dataDirectoryPath() async => (await _file()).parent.path;
 
+  /// Recovery metadata stays on this device even if its library is relocated
+  /// or cleared. It contains identifiers only, never public URLs or media.
+  Future<String> mediaHostingJournalPath() async =>
+      '${(await _defaultRoot()).path}/temporary-media-leases.json';
+
   /// Whether [directory] already holds a Clawnsole data file.
   Future<bool> hasLibraryAt(String directory) => File(
     '${Directory(directory).absolute.path}${Platform.pathSeparator}$dataFileName',

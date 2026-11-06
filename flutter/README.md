@@ -206,6 +206,16 @@ encrypted settings vault.
 
 ## Build targets
 
+iCloud reference hosting on iOS requires the iCloud Documents capability and
+the registered `iCloud.app.clawnsole.clawnsole` container for the production App
+ID. Development and distribution profiles must include that association before
+signing. `Runner.entitlements` enables only `CloudDocuments`; no CloudKit database
+or key-value storage is used. The native service is shared with Electron's macOS
+helper, while Android and Windows report this storage option as unavailable.
+The simulator can verify unavailable-account behavior, but upload/publication
+requires a signed-in physical Apple device. Continue using the root iOS release
+entry point below; no provider credentials are needed for this capability.
+
 ```bash
 ./scripts/build_web
 ./scripts/build_ios
@@ -320,6 +330,18 @@ APIPod supports all 103 active video routes audited on 2026-11-05, including
 Seedance variants and the Veo, Kling, Wan, Grok, MiniMax, Gemini Omni, and Muse
 families. Controls follow each route’s live schema, including source-video
 editing/extensions and two-stage Seedance draft rendering. Media inputs require
-public HTTPS URLs; local uploads are unavailable. The adapter uses the
+public HTTPS URLs. Imported images, videos, audio, keyframes, and source videos
+can be published from user iCloud Drive on iOS and Electron macOS; originals
+remain private. Apple Account sign-in and iCloud Drive must be enabled in system
+settings. Create requires device/account-specific consent: anyone with the link
+can download the published copy, and source cleanup does not immediately revoke
+it. Apple reported expirations around 30 days in the POC. The native gateway and
+desktop companion retain recovery metadata and retry source cleanup; they use
+no app CloudKit database or Clawnsole media server. The Apple attachment-page
+resolver is undocumented and fails closed before paid submission if its response
+cannot be validated. Existing public URLs bypass hosting and normalization on
+all platforms, including Android and Windows. Legacy Google Drive hosting leases
+remain recoverable for cleanup, but new references never fall back to Google
+Drive. The adapter uses the
 settings-vault key or companion `APIPOD_API_KEY` fallback.
 See [the APIPod audit](../docs/models/audit-apipod.md) for coverage and pricing.

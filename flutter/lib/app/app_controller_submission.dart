@@ -81,6 +81,10 @@ extension AppControllerSubmission on AppController {
       );
       return;
     }
+    if (needsMediaSharingConsent) {
+      showNotice('Review and allow reference sharing before generating.');
+      return;
+    }
     if (!canUseDefaultStorage) {
       showNotice(
         'Connect Google Drive before generating to your Drive library.',
@@ -106,7 +110,9 @@ extension AppControllerSubmission on AppController {
     final quoteInput = _providerEstimateInput();
     final fallbackEstimate = currentEstimate;
     final normalizeReferences =
-        autoFixReferenceVideos && !model.requiresPublicMediaUrls;
+        autoFixReferenceVideos &&
+        (!model.requiresPublicMediaUrls || needsTemporaryMediaHosting);
+    final usesTemporaryHosting = needsTemporaryMediaHosting;
     final checksVisualReferences =
         normalizeReferences &&
         (form.keyframes.isNotEmpty ||
@@ -157,6 +163,19 @@ extension AppControllerSubmission on AppController {
     submitting = true;
     notifyListeners();
     try {
+      if (usesTemporaryHosting) {
+        await refreshTemporaryMediaHostingStatus();
+        if (_disposed) return;
+        if (!canTemporarilyHostMedia ||
+            temporaryMediaHostingStatus?.sharingAccepted != true) {
+          showNotice(
+            canTemporarilyHostMedia
+                ? 'The hosting account needs your sharing permission before generating.'
+                : publicMediaUrlHint,
+          );
+          return;
+        }
+      }
       if (!await _hydrateComposerMedia(tab)) {
         if (!_disposed) {
           showNotice(
@@ -228,6 +247,7 @@ extension AppControllerSubmission on AppController {
         // Released before any recovery read below: once the call is over the
         // durable record — receipt, uncertainty, or failure — is the truth.
         _submissionsInFlight.remove(operationId);
+        unawaited(refreshTemporaryMediaHostingStatus());
       }
       // The provider has answered: the key stops reading SUBMITTING in the
       // same frame the receipt lands, not after the housekeeping below.

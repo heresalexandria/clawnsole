@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ELECTRON_DIRECTORY="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+REPOSITORY_ROOT="$(cd "$ELECTRON_DIRECTORY/.." && pwd)"
+DESTINATION="$ELECTRON_DIRECTORY/dist/native-tools"
+ARCHITECTURE="${CLAWNSOLE_ELECTRON_ARCH:-$(uname -m)}"
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "The iCloud reference host is built on macOS." >&2
+  exit 1
+fi
+
+case "$ARCHITECTURE" in
+  arm64) ARCHITECTURES=(arm64) ;;
+  x64|x86_64) ARCHITECTURES=(x86_64) ;;
+  universal) ARCHITECTURES=(arm64 x86_64) ;;
+  *) echo "CLAWNSOLE_ELECTRON_ARCH must be arm64, x64, or universal." >&2; exit 1 ;;
+esac
+
+mkdir -p "$DESTINATION"
+BUILD_DIRECTORY="$(mktemp -d "${TMPDIR:-/tmp}/clawnsole-icloud-host.XXXXXX")"
+trap 'rm -rf "$BUILD_DIRECTORY"' EXIT
+SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+SLICES=()
+for ARCH in "${ARCHITECTURES[@]}"; do
+  SLICE="$BUILD_DIRECTORY/clawnsole_icloud_host-$ARCH"
+  xcrun --sdk macosx swiftc -swift-version 5 -O -whole-module-optimization \
+    -parse-as-library -sdk "$SDK_PATH" -target "$ARCH-apple-macos12.0" \
+    "$REPOSITORY_ROOT/native/apple/ICloudReferenceHosting.swift" \
+    "$REPOSITORY_ROOT/native/apple/ICloudReferenceHostMain.swift" \
+    -o "$SLICE"
+  SLICES+=("$SLICE")
+done
+
+EXECUTABLE="$DESTINATION/clawnsole_icloud_host"
+if [[ ${#SLICES[@]} -eq 1 ]]; then
+  cp "${SLICES[0]}" "$EXECUTABLE"
+else
+  xcrun lipo -create "${SLICES[@]}" -output "$EXECUTABLE"
+fi
+chmod 755 "$EXECUTABLE"
+# This development signature also makes both universal slices executable.
+# Electron Builder replaces it with the app's Developer ID for a signed build.
+codesign --force --sign - "$EXECUTABLE"
+codesign --verify --strict "$EXECUTABLE"
+echo "Prepared the native iCloud reference host."

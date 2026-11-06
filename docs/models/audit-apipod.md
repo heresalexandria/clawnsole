@@ -84,10 +84,108 @@ types. Wan 3’s `enum: [-1]` supplements its explicit duration range with Auto.
 
 ## Media and workflows
 
+### iCloud Drive live verification
+
+Fresh live tests on November 6, 2026 completed `seedance-2.5-r2v` generations
+using references published from a real iPhone and the macOS production gateway.
+Both outputs downloaded and decoded without errors. Both owned source copies
+were removed through the native cleanup API, with publication URLs erased from
+the native journals. Apple's reported snapshot expirations remain December 6;
+source cleanup does not prove immediate link revocation.
+
+| Successful test | Measured preparation | Verified result |
+| --- | --- | --- |
+| Real iPhone, production Swift service and product iCloud Drive container | Publication 6.794 s; anonymous download and SHA-256 verification 0.619 s; provider acceptance 1.484 s | Completed 4.041667 s H.264 video, 854×480, 97 frames, 1,692,359 bytes; local source cleanup 11.5 ms. |
+| macOS complete `DirectGateway` flow | Normalization, storage, hosting and submission 7.710 s total; native publication 4.480 s; link resolution and anonymous verification 0.466 s | Completed video retained in the asset store, 1,612,987 bytes; full decode passed; source cleanup 15 ms, zero active leases or pending cleanup. |
+
+The iPhone used an isolated diagnostic app running the exact production Swift
+source with `iCloud.app.clawnsole.clawnsole`. Its published reference was resolved
+and submitted through the production Dart resolver and APIPod adapter on the Mac.
+This verifies real-device publication, provider reachability and cleanup, but is
+not an installed Flutter Files/Photos-to-generation UI test. Method-channel
+wiring and native/backend integration have separate automated coverage. The
+diagnostic app was uninstalled without replacing the existing TestFlight app.
+
+These successful tests satisfy the live generation gate, but do not establish
+consistent delivery latency. Earlier attempts on November 6 (UTC), before these
+successful runs, all used `seedance-2.5-r2v` and received:
+“failed to resolve reference video duration for seedance billing; check that
+video_urls are reachable media files”. The quoted $0.5292 was an estimate, not a
+settled charge.
+
+| Attempt | Verified local/hosting evidence | Provider result |
+| --- | --- | --- |
+| Original video through the production hosting backend | 1,252,662 bytes; readiness and consent verified; preparation took 14.880 s; anonymous GET took 1.254 s and matched SHA-256 | Rejected after 8.21 s. This harness did not record HTTP status or an accepted task ID. |
+| Fast-start MP4 control | 1,231,205 bytes; `moov` precedes `mdat`; all 97 decoded frames matched the original; anonymous GET took 16.097 s and matched SHA-256 | HTTP 400 after 8.14 s; no task accepted. |
+| Actual `DirectGateway` flow | Normalization, retained-asset storage, iCloud publication and provider submission all ran; normalized source was 719,668 bytes | HTTP 400 with the same error, saved as `Error` with no request ID. Native source cleanup completed; Apple's reported snapshot expiry was 2026-12-06. |
+
+During those earlier failures, the direct-URL resolver matched the successful
+POC. Anonymous full GETs
+returned the expected bytes, and range GETs returned matching byte ranges.
+Several range requests took roughly 7–28 s to receive their first byte; the
+formerly successful URL and fast-start control also showed delays. HEAD probes
+returned HTTP 501. These observations make a provider fetch timeout plausible,
+but neither APIPod's internal fetch deadline nor provider-region reachability
+has been verified. They do not establish the cause, a reliable workaround, or
+that moving MP4 metadata alone fixes the problem.
+
+Automated verification is separate: 52 focused Flutter 3.47 tests passed for
+hosting lifecycle, journal migration, source cleanup versus snapshot expiry,
+account-bound consent, direct/native/companion wiring, saved-reference attachment,
+and process timeout/crash/restart behavior. The corresponding owned-file analyzer
+check passed. These tests use local fakes and do not replace live provider
+verification. Source removal also does not prove that Apple's published snapshot
+is no longer readable.
+
+### Reference hosting design
+
 Media inputs require publicly reachable HTTPS URLs. The documented API has no
-API-key upload endpoint; local files and base64 data are rejected before paid
-submission, and hosted inputs bypass local normalization. Keys remain in native
-settings storage or the desktop companion, never in the Flutter web renderer.
+API-key upload endpoint. iOS and Electron macOS publish copies of imported or
+private library media through the user's iCloud Drive. The source copy uses user
+Drive storage; this route creates no app CloudKit database and operates no
+Clawnsole media server. It does not move the user's existing local or Google
+Drive library. Android and Windows continue to support text generation and
+public-URL inputs; no unsupported local-hosting fallback is attempted.
+
+The device must be signed in to an Apple Account with iCloud Drive enabled.
+Clawnsole checks readiness and requires sharing consent scoped to this device,
+Apple account and disclosure version before publication. The native gateway or
+companion creates only separately owned reference copies, waits for upload,
+resolves Apple's attachment page and verifies anonymous media bytes before paid
+submission. Existing public HTTPS inputs bypass staging and normalization;
+local inputs retain normal compatibility fixes. Keys and publication operations
+remain outside the Flutter web renderer.
+
+Foundation's publication API is documented, but the attachment-page resolver
+needed to obtain the direct media URL follows Apple's observed website behavior
+and is not a supported direct-download API. Invalid or changed responses stop
+submission with an actionable error. File-format, size and model limits still
+apply; one successful reference generation does not verify every model or asset.
+
+**Source deletion does not immediately revoke the published snapshot.** Anyone
+with its link can retain access after processing and cleanup. Apple reported
+expiration dates around 30 days in the diagnostic tests; these were not tests of
+a full 30-day lifetime. The recovery journal distinguishes pending source cleanup
+from published snapshots, retains expiration metadata without public URLs, and
+reconciles interrupted work without blindly repeating paid submissions. An
+account change prevents mutation of another account's copies and requires new
+consent. Snapshot quota accounting is not established by the storage tests.
+
+### Google Drive diagnostic and legacy cleanup
+
+On 2026-11-05, two Google Drive copies of the same nonprivate video passed
+anonymous full-download/SHA256 checks and APIPod's duration-based pricing probe
+($0.5292 each). Seedance 2.5 nevertheless failed both tasks during upstream asset
+review with a TOS downloader HTTP 502. One used Drive's `webContentLink`; the
+other used its verified final `drive.usercontent.google.com` URL. No usage/cost
+was reported. This established a downstream fetch failure, not its cause or
+permanence. Both permissions were revoked and copies trashed successfully.
+
+Google Drive is therefore not used for new reference hosting. Existing hosting
+journals migrate with explicit backend ownership, allowing old Drive copies to
+be cleaned up through the original connected account. Disconnecting Google Drive
+cleans only its legacy leases and does not suspend independent iCloud references.
+Library sync and the encrypted settings vault continue to use Google Drive.
 
 The official [Seedance web/API guide](https://www.apipod.ai/blog/alors-on-danse-ai-seedance-2-5)
 distinguishes local uploads in its web playground from publicly reachable media
@@ -96,8 +194,9 @@ with a browser session and `/auth/refresh`. On 2026-11-05 an empty multipart
 request using the working API key returned HTTP 401, “Invalid or expired token”;
 no media bytes were uploaded. No supported API-key upload endpoint was found in
 the official API index. A local Files/Photos import therefore cannot be made
-provider-readable merely by preserving its local path; Clawnsole offers a
-public-URL attachment instead of silently uploading to an unrelated host.
+provider-readable merely by preserving its local path. Clawnsole offers either
+a public-URL attachment or explicitly disclosed publication through user iCloud
+Drive on supported Apple platforms. See [temporary media sharing](../google-drive-web.md#temporary-media-sharing).
 
 Seedance edits and extensions use the source-video editor. The source is sent
 first in `video_urls`; reference prompt numbering accounts for that position.

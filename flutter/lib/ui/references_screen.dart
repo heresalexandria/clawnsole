@@ -2570,8 +2570,7 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
             )) ...[
               const SizedBox(height: 12),
               Text(
-                '${widget.controller.selectedModel.selectionLabel} needs an available public HTTPS URL. '
-                'Hosted originals can be reused. Local-only files and private Drive files cannot be added; paste a hosted URL instead.',
+                widget.controller.publicMediaUrlHint,
                 key: const ValueKey('reference-picker-public-url-hint'),
                 style: TextStyle(color: context.colors.onSurfaceVariant),
               ),
@@ -2658,25 +2657,32 @@ class _ReferencePickerDialogState extends State<_ReferencePickerDialog> {
                               ),
                           itemBuilder: (context, index) {
                             final item = values[index];
-                            final active = selected.containsKey(item.id);
-                            final problem = widget.controller
-                                .referenceCandidateProblem(item);
-                            final enabled =
-                                active ||
-                                (problem == null &&
-                                    selected.length < widget.maximum);
-                            return _ReferenceCandidateCard(
-                              controller: widget.controller,
-                              item: item,
-                              active: active,
-                              enabled: enabled,
-                              unavailableReason: problem,
-                              onTap: () => _toggle(item),
-                              onThumbnail: item.kind == MediaReferenceKind.video
-                                  ? (bytes) => _cacheThumbnail(item, bytes)
-                                  : null,
-                              onDuration: (seconds) =>
-                                  _rememberDuration(item, seconds),
+                            return FutureBuilder<bool>(
+                              future: widget.controller
+                                  .checkReferenceCandidateCache(item),
+                              builder: (context, _) {
+                                final active = selected.containsKey(item.id);
+                                final problem = widget.controller
+                                    .referenceCandidateProblem(item);
+                                final enabled =
+                                    active ||
+                                    (problem == null &&
+                                        selected.length < widget.maximum);
+                                return _ReferenceCandidateCard(
+                                  controller: widget.controller,
+                                  item: item,
+                                  active: active,
+                                  enabled: enabled,
+                                  unavailableReason: problem,
+                                  onTap: () => _toggle(item),
+                                  onThumbnail:
+                                      item.kind == MediaReferenceKind.video
+                                      ? (bytes) => _cacheThumbnail(item, bytes)
+                                      : null,
+                                  onDuration: (seconds) =>
+                                      _rememberDuration(item, seconds),
+                                );
+                              },
                             );
                           },
                         );
@@ -2898,7 +2904,9 @@ class _ReferenceCandidateCard extends StatelessWidget {
                         Text(
                           unavailableReason == null
                               ? details
-                              : 'Public HTTPS URL required',
+                              : item.asset.kind == 'drive'
+                              ? 'Connect Google Drive'
+                              : 'Media unavailable',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

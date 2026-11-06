@@ -19,6 +19,7 @@ import 'prompt_rewrite.dart';
 import 'settings_vault_gateway.dart';
 import 'settings_vault_shell.dart';
 import 'video_cache_gateway.dart';
+import 'temporary_media_host.dart';
 
 Uri _configuredBaseUrl(Uri? override) {
   if (override != null) return override;
@@ -47,6 +48,8 @@ class WebGateway
         GenerationPreviewGateway,
         MediaPreviewGateway,
         GoogleDriveGateway,
+        TemporaryMediaHostingGateway,
+        TemporaryMediaConsentGateway,
         SettingsVaultGateway,
         DataLocationGateway,
         MediaCacheGateway,
@@ -99,6 +102,36 @@ class WebGateway
     );
   }
 
+  bool _supportsTemporaryMediaHosting = false;
+  @override
+  bool get supportsTemporaryMediaHosting => _supportsTemporaryMediaHosting;
+
+  @override
+  Future<TemporaryMediaHostStatus> temporaryMediaHostStatus() async {
+    final payload = _map(
+      await _read(await _client.get(_url('/temporary-media/status'))),
+    );
+    _supportsTemporaryMediaHosting = payload['supported'] == true;
+    return TemporaryMediaHostStatus.fromJson(payload);
+  }
+
+  @override
+  Future<void> acceptTemporaryMediaSharing({
+    required String expectedBackendId,
+    required String expectedAccountScope,
+  }) async {
+    await _read(
+      await _client.post(
+        _url('/temporary-media/accept-sharing'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'expectedBackendId': expectedBackendId,
+          'expectedAccountScope': expectedAccountScope,
+        }),
+      ),
+    );
+  }
+
   @override
   SettingsVaultStatus get settingsVaultStatus => _settingsVaultStatus;
 
@@ -132,6 +165,8 @@ class WebGateway
 
   Future<LocalSnapshot> _snapshot(http.Response response) async {
     final payload = _map(await _read(response));
+    _supportsTemporaryMediaHosting =
+        payload['temporaryMediaHostingSupported'] == true;
     final rawDrive = payload['driveConnection'];
     if (rawDrive is Map<Object?, Object?>) {
       _driveConnection = GoogleDriveConnection.fromJson(

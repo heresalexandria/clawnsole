@@ -457,6 +457,10 @@ jobs:
             exit 1
           fi
 
+          python3 scripts/release/verify_icloud_profile.py \
+            --profile-plist "$profile_plist" \
+            --entitlements flutter/ios/Runner/Runner.entitlements
+
           installed_profile="$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
           mkdir -p "$(dirname "$installed_profile")"
           cp "$profile" "$installed_profile"

@@ -26,6 +26,50 @@ void main() {
     headers: const <String, String>{'content-type': 'application/json'},
   );
 
+  test(
+    'temporary media status is delegated to the companion without credentials or media URLs',
+    () async {
+      final requests = <http.Request>[];
+      final gateway = WebGateway(
+        baseUrl: Uri.parse('http://127.0.0.1:8787'),
+        client: MockClient((request) async {
+          requests.add(request);
+          if (request.url.path == '/state') {
+            return json(
+              jsonEncode({
+                ...empty.toJson(),
+                'temporaryMediaHostingSupported': true,
+              }),
+            );
+          }
+          expect(request.url.path, '/temporary-media/status');
+          return json(
+            jsonEncode({
+              'supported': true,
+              'available': false,
+              'activeLeases': 1,
+              'pendingCleanup': 2,
+              'lastCleanupError': 'Reconnect Google Drive',
+            }),
+          );
+        }),
+      );
+      expect(gateway.supportsTemporaryMediaHosting, isFalse);
+      await gateway.load();
+      expect(gateway.supportsTemporaryMediaHosting, isTrue);
+      final status = await gateway.temporaryMediaHostStatus();
+      expect(status.available, isFalse);
+      expect(status.activeLeases, 1);
+      expect(status.pendingCleanup, 2);
+      expect(status.lastCleanupError, 'Reconnect Google Drive');
+      for (final request in requests) {
+        expect(request.method, 'GET');
+        expect(request.headers.containsKey('authorization'), isFalse);
+        expect(request.body, isEmpty);
+      }
+    },
+  );
+
   test('the renderer adopts the companion queue from /state', () async {
     var notifications = 0;
     final gateway = WebGateway(
