@@ -3,6 +3,102 @@ part of 'app_controller.dart';
 /// A Generate activation captures one independent operation. The lock covers
 /// preparation and acceptance only: an identical later activation is a new job.
 extension AppControllerSubmission on AppController {
+  Future<void> _retryGenerationCaptured(
+    Generation item, {
+    Future<bool> Function(GenerationRetryConfirmation)? confirm,
+  }) async {
+    if (_disposed || !_retryingGenerationIds.add(item.localId)) return;
+    try {
+      final original =
+          generations
+              .where((entry) => entry.localId == item.localId)
+              .firstOrNull ??
+          item;
+      if (!original.isFailed ||
+          original.hasDeliveredMedia ||
+          original.isSubmissionUnknown) {
+        showNotice('Only a failed generation can be retried.');
+        return;
+      }
+      if (!canReuse(original)) {
+        showNotice('The model used by this generation is no longer available.');
+        return;
+      }
+      if (submitting) {
+        showNotice('Wait for the current submission before retrying.');
+        return;
+      }
+      // A retry owns its recipe without opening, replacing, or later reading
+      // the user's active composer. Its new localId also owns fresh host leases.
+      final tab = ComposerTab(
+        id: _uid(),
+        providerId: original.provider,
+        modelId: original.model,
+        title: original.title,
+      );
+      _adoptGenerationFolder(tab, original);
+      showNotice('Preparing retry and restoring its references…');
+      await _restoreGenerationSettings(
+        original,
+        includePrompt: true,
+        cacheOnly: true,
+        persistDraft: false,
+        forRetry: true,
+        tab: tab,
+      );
+      if (_disposed) return;
+      if (original.storage == LibraryStorage.drive && !googleDriveConnected) {
+        await resumeGoogleDrive();
+        if (_disposed) return;
+      }
+      if (_inComposerTab(tab, () => needsTemporaryMediaHosting)) {
+        await refreshTemporaryMediaHostingStatus();
+        if (_disposed) return;
+        if (_inComposerTab(tab, () => needsMediaHostingSetup)) {
+          showNotice(_inComposerTab(tab, () => publicMediaUrlHint));
+          return;
+        }
+      }
+      final confirmation = _inComposerTab(
+        tab,
+        () => (
+          provider: selectedProvider,
+          needsMediaSharingConsent: needsMediaSharingConsent,
+          requiresProviderRetentionAcknowledgement:
+              requiresProviderRetentionAcknowledgement,
+        ),
+      );
+      var acknowledged = false;
+      if (confirmation.needsMediaSharingConsent ||
+          confirmation.requiresProviderRetentionAcknowledgement) {
+        if (confirm == null) {
+          showNotice(
+            'Review reference sharing and provider warnings before retrying.',
+          );
+          return;
+        }
+        if (!await confirm(confirmation) || _disposed) return;
+        acknowledged = confirmation.requiresProviderRetentionAcknowledgement;
+      }
+      if (submitting) {
+        showNotice('Wait for the current submission before retrying.');
+        return;
+      }
+      await _inComposerTab(
+        tab,
+        () => _submitCaptured(
+          providerRetentionRiskAcknowledged: acknowledged,
+          destinationStorage: original.storage,
+          useSavedReferences: false,
+        ),
+      );
+    } on Object catch (error) {
+      if (!_disposed) showErrorNotice(error);
+    } finally {
+      _retryingGenerationIds.remove(item.localId);
+    }
+  }
+
   /// Independent recipe for an in-flight submission or a recovered rewrite.
   ComposerTab _copyComposerTab(ComposerTab source, {String? id}) {
     final tab = ComposerTab(
@@ -61,6 +157,8 @@ extension AppControllerSubmission on AppController {
 
   Future<void> _submitCaptured({
     required bool providerRetentionRiskAcknowledged,
+    LibraryStorage? destinationStorage,
+    bool useSavedReferences = true,
   }) async {
     if (submitting || _disposed) return;
     // A keystroke's deferred reference casting must be in
@@ -85,7 +183,14 @@ extension AppControllerSubmission on AppController {
       showNotice('Review and allow reference sharing before generating.');
       return;
     }
-    if (!canUseDefaultStorage) {
+    final storage = destinationStorage ?? effectiveStorage;
+    if (storage == LibraryStorage.local && !supportsLocalLibrary) {
+      showNotice(
+        'This device cannot save to the original local library. Reuse the settings to choose a new destination.',
+      );
+      return;
+    }
+    if (storage == LibraryStorage.drive && !googleDriveConnected) {
       showNotice(
         'Connect Google Drive before generating to your Drive library.',
       );
@@ -95,7 +200,8 @@ extension AppControllerSubmission on AppController {
 
     // Capture every recipe and routing choice before the first await, including
     // before hydration of a restored draft. Editing/switching tabs is still safe.
-    final tab = _copyComposerTab(activeComposerTab);
+    final fromComposer = identical(_draftTab, activeComposerTab);
+    final tab = _copyComposerTab(_draftTab);
     _rememberGenerationPreferences(tab);
     _flushGenerationPreferencesSave();
     final provider = selectedProvider;
@@ -137,7 +243,10 @@ extension AppControllerSubmission on AppController {
           ? 'Enhance saved FLUX 3 draft'
           : prompt,
       mode: form.mode,
-      config: currentConfig,
+      config: _composerConfig(
+        storage: storage,
+        useSavedReferences: useSavedReferences,
+      ),
       createdAt: now,
       updatedAt: now,
       estimatedCreditsMin:
@@ -149,7 +258,9 @@ extension AppControllerSubmission on AppController {
       estimateBasis: fallbackEstimate.basis,
       quotedCostUsdMin: fallbackEstimate.quotedMinimumUsd,
       quotedCostUsdMax: fallbackEstimate.quotedMaximumUsd,
-      folderId: selectedGenerationFolderId,
+      folderId: storage == LibraryStorage.drive
+          ? tab.driveFolderId
+          : tab.localFolderId,
       title: tab.title,
       rewriteOfLocalId: tab.rewriteSummary == null
           ? null
@@ -158,7 +269,7 @@ extension AppControllerSubmission on AppController {
       aestheticReferenceId: aestheticText == null ? null : aestheticBase?.id,
       aestheticTitle: aestheticText == null ? null : aestheticBase?.title,
       aestheticText: aestheticText,
-      storage: effectiveStorage,
+      storage: storage,
     );
     submitting = true;
     notifyListeners();
@@ -324,10 +435,17 @@ extension AppControllerSubmission on AppController {
         );
         _replaceInMemory(pending);
       }
-      if (_isVisualReferenceCompatibilityError(message)) {
+      if (_inComposerTab(
+        tab,
+        () => _isVisualReferenceCompatibilityError(message),
+      )) {
         showNotice(
           '$message Turn on Normalize visual references and try again.',
-          action: AppNoticeAction.retryWithVisualNormalization,
+          // The existing notice action submits the active composer. A retry
+          // must never send that unrelated draft as its compatibility fix.
+          action: fromComposer
+              ? AppNoticeAction.retryWithVisualNormalization
+              : null,
         );
       } else {
         showNotice(message);

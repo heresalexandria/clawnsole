@@ -8,6 +8,7 @@ import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/generation_preferences.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/models.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -496,36 +497,46 @@ void main() {
 
   test(
     'slider edits coalesce durable writes and prompt edits do not write defaults',
-    () async {
-      final gateway = _PreferencesGateway();
-      final controller = await _controller(gateway: gateway);
-      controller.updateForm((form) => form.durationSeconds = 10);
-      controller.updateForm((form) => form.durationSeconds = 12);
-      controller.updateForm((form) => form.durationSeconds = 14);
-      expect(gateway.preferenceWrites, 0);
+    () {
+      fakeAsync((async) {
+        final gateway = _PreferencesGateway();
+        final controller = AppController(gateway: gateway);
+        addTearDown(controller.dispose);
+        var initialized = false;
+        unawaited(controller.initialize().then((_) => initialized = true));
+        async.flushMicrotasks();
+        expect(initialized, isTrue);
+        controller.updateForm((form) => form.durationSeconds = 10);
+        controller.updateForm((form) => form.durationSeconds = 12);
+        controller.updateForm((form) => form.durationSeconds = 14);
+        expect(gateway.preferenceWrites, 0);
 
-      await Future<void>.delayed(
-        AppController.composerTabsSaveDebounce +
-            const Duration(milliseconds: 50),
-      );
-      expect(gateway.preferenceWrites, 1);
-      expect(
-        gateway
-            .snapshot
-            .preferences
-            .generationPreferences[generationPreferenceKey(
-              'bfl',
-              'flux-3-video',
-            )]
-            ?.durationSeconds,
-        14,
-      );
-      controller.updateForm((form) => form.prompt = 'Only a story edit.');
-      await Future<void>.delayed(
-        AppController.composerTabsSaveDebounce +
-            const Duration(milliseconds: 50),
-      );
-      expect(gateway.preferenceWrites, 1);
+        // Exercise the debounce boundary and its queued write without relying
+        // on a short wall-clock margin while the full suite runs in parallel.
+        async.elapse(
+          AppController.composerTabsSaveDebounce -
+              const Duration(milliseconds: 1),
+        );
+        expect(gateway.preferenceWrites, 0);
+        async.elapse(const Duration(milliseconds: 1));
+        async.flushMicrotasks();
+        expect(gateway.preferenceWrites, 1);
+        expect(
+          gateway
+              .snapshot
+              .preferences
+              .generationPreferences[generationPreferenceKey(
+                'bfl',
+                'flux-3-video',
+              )]
+              ?.durationSeconds,
+          14,
+        );
+        controller.updateForm((form) => form.prompt = 'Only a story edit.');
+        async.elapse(AppController.composerTabsSaveDebounce);
+        async.flushMicrotasks();
+        expect(gateway.preferenceWrites, 1);
+      });
     },
   );
 

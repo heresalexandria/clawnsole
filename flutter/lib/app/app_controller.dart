@@ -63,6 +63,12 @@ typedef FilePickerInvocation =
 typedef ReferencePreviewLoader =
     Future<Uint8List?> Function(PickedAsset asset, String source);
 
+typedef GenerationRetryConfirmation = ({
+  VideoProviderDefinition provider,
+  bool needsMediaSharingConsent,
+  bool requiresProviderRetentionAcknowledgement,
+});
+
 Future<FilePickerResult?> _pickFiles({
   required FileType type,
   required bool allowMultiple,
@@ -735,6 +741,7 @@ class AppController extends ChangeNotifier {
   Future<void> _referenceWorkQueue = Future<void>.value();
   final Set<String> _hydratingReferenceDraftIds = <String>{};
   bool _refreshingDriveLibrary = false;
+  Future<bool>? _driveResumeFuture;
   int _driveRefreshTick = 0;
   bool _reconcilingGenerationWork = false;
   bool _recoveringBackgroundDeliveries = false;
@@ -756,6 +763,7 @@ class AppController extends ChangeNotifier {
   /// from Recent work or to accuse a live request of an unconfirmed charge,
   /// so [_apply] overlays these copies onto every snapshot it adopts.
   final Map<String, Generation> _submissionsInFlight = <String, Generation>{};
+  final Set<String> _retryingGenerationIds = <String>{};
   final Map<String, Generation> _queuedRetentions = <String, Generation>{};
   final Set<String> _activeRetentions = <String>{};
   final Set<String> _referencePreviewWrites = <String>{};
@@ -2527,7 +2535,14 @@ class AppController extends ChangeNotifier {
     return saved?.asset ?? retained;
   }
 
-  GenerationConfig get currentConfig {
+  GenerationConfig get currentConfig => _composerConfig();
+
+  GenerationConfig _composerConfig({
+    LibraryStorage? storage,
+    bool useSavedReferences = true,
+  }) {
+    AssetReference? retained(String? id, AssetReference? asset) =>
+        useSavedReferences ? _linkedRetainedAsset(id, asset) : asset;
     final orderedFrames = _orderedFrames();
     final upscaling = form.mode == VideoMode.upscale;
     final retainsGuidance =
@@ -2571,7 +2586,7 @@ class AppController extends ChangeNotifier {
                         : null,
                     referenceId: frame.savedReferenceId,
                     source:
-                        _linkedRetainedAsset(
+                        retained(
                           frame.savedReferenceId,
                           frame.asset?.retained ?? frame.retained,
                         ) ??
@@ -2589,14 +2604,14 @@ class AppController extends ChangeNotifier {
                     promptName: referencePromptName(item),
                     referenceId: item.savedReferenceId,
                     source:
-                        _linkedRetainedAsset(
+                        retained(
                           item.savedReferenceId,
                           item.asset?.retained ?? item.retained,
                         ) ??
                         _reference(null, item.source, item.label),
                     thumbnailAsset: _previewForStorage(
                       item.thumbnailAsset ?? item.asset?.thumbnailAsset,
-                      effectiveStorage,
+                      storage ?? effectiveStorage,
                     ),
                     durationSeconds: item.durationSeconds,
                     publicSourceUrl: _usablePublicSource(
@@ -2650,7 +2665,7 @@ class AppController extends ChangeNotifier {
           form.mode == VideoMode.v2v || form.mode == VideoMode.upscale
           ? _previewForStorage(
               form.videoAsset?.thumbnailAsset,
-              effectiveStorage,
+              storage ?? effectiveStorage,
             )
           : null,
       upscaleFactor: form.upscaleFactor,
@@ -2669,7 +2684,9 @@ class AppController extends ChangeNotifier {
       providerPrices[selectedProviderId] ?? const <ProviderModelPrice>[],
       form.videoMetadata,
     );
-    if (_liveEstimateRevision == _estimateRevision && _liveEstimate != null) {
+    if (identical(_draftTab, activeComposerTab) &&
+        _liveEstimateRevision == _estimateRevision &&
+        _liveEstimate != null) {
       return _liveEstimate!.withPricingContext(fallback);
     }
     return fallback;
@@ -7617,6 +7634,11 @@ class AppController extends ChangeNotifier {
         providerRetentionRiskAcknowledged: providerRetentionRiskAcknowledged,
       );
 
+  Future<void> retryGeneration(
+    Generation item, {
+    Future<bool> Function(GenerationRetryConfirmation)? confirm,
+  }) => _retryGenerationCaptured(item, confirm: confirm);
+
   void _replaceInMemory(Generation generation) {
     final current = snapshot;
     if (current == null) return;
@@ -8050,8 +8072,10 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  Future<void> acknowledgeProviderRetentionRisk() async {
-    final provider = selectedProvider;
+  Future<void> acknowledgeProviderRetentionRisk({String? providerId}) async {
+    final provider = providerId == null
+        ? selectedProvider
+        : providerById(providerId);
     if (!provider.resultDelivery.keepOpenRecommended) return;
     if (gateway is! ProviderRetentionAcknowledgementGateway) {
       throw StateError(
@@ -8411,14 +8435,19 @@ class AppController extends ChangeNotifier {
     expectedPreferenceRevision ??= _preferenceRevision;
     if (_disposed ||
         gateway is! GoogleDriveGateway ||
-        googleDriveBusy ||
         _driveSessionSchedule.isSuspended) {
       return false;
     }
+    final resuming = _driveResumeFuture;
+    if (resuming != null) return resuming;
+    if (googleDriveBusy) return false;
     if ((!force && googleDriveConnected) ||
         !googleDriveConnection.isConfigured) {
       return false;
     }
+    final completion = Completer<bool>();
+    _driveResumeFuture = completion.future;
+    var resumed = false;
     googleDriveBusy = true;
     final snapshotRevision = _snapshotRevision;
     notifyListeners();
@@ -8433,13 +8462,14 @@ class AppController extends ChangeNotifier {
       if (_disposed) return false;
       _driveSessionSchedule.renewed();
       unawaited(refreshTemporaryMediaHostingStatus());
-      return await _applySnapshotRead(
+      resumed = await _applySnapshotRead(
         value,
         startedAtRevision: snapshotRevision,
         reloadIfSuperseded: true,
         restorePreferences: restorePreferences,
         expectedPreferenceRevision: expectedPreferenceRevision,
       );
+      return resumed;
     } on Object {
       // The resume contract never throws, but a quiet startup must survive
       // an unexpected error without surfacing a notice.
@@ -8447,6 +8477,8 @@ class AppController extends ChangeNotifier {
       return false;
     } finally {
       googleDriveBusy = false;
+      _driveResumeFuture = null;
+      completion.complete(resumed);
       if (!_disposed) notifyListeners();
     }
   }
@@ -8767,14 +8799,41 @@ class AppController extends ChangeNotifier {
     AssetReference? thumbnailAsset,
     bool cacheOnly = false,
   }) async {
-    Future<Uint8List?> read(AssetReference value) {
-      final offlineDrive =
-          gateway is GoogleDriveGateway && !googleDriveConnected;
-      if (value.kind != 'drive' || (!cacheOnly && !offlineDrive)) {
-        return gateway.readAsset(value);
+    var attemptedDriveRenewal = false;
+    Future<bool> renewDrive({bool force = false}) async {
+      if (attemptedDriveRenewal ||
+          gateway is! GoogleDriveGateway ||
+          !googleDriveConnection.isConfigured ||
+          _driveSessionSchedule.isSuspended) {
+        return false;
       }
-      return _mediaCacheGateway?.cachedAssetBytes(value) ??
-          Future<Uint8List?>.value();
+      attemptedDriveRenewal = true;
+      return await resumeGoogleDrive(force: force) && googleDriveConnected;
+    }
+
+    Future<Uint8List?> read(AssetReference value) async {
+      if (value.kind != 'drive') return gateway.readAsset(value);
+      try {
+        final cached = await _mediaCacheGateway?.cachedAssetBytes(value);
+        if (cached?.isNotEmpty == true) return cached;
+      } on Object {
+        if (cacheOnly) rethrow;
+        // An unavailable cache does not prevent an explicit library read.
+      }
+      // Startup restoration stays local, and explicit sign-out must never
+      // trigger authentication or a private Drive download behind the user.
+      if (cacheOnly || _driveSessionSchedule.isSuspended) return null;
+      if (gateway is GoogleDriveGateway && !googleDriveConnected) {
+        if (!await renewDrive()) return null;
+      }
+      try {
+        return await gateway.readAsset(value);
+      } on Object {
+        // The first read can discover an expired token while the connection
+        // still looks active. Renew once and retry this idempotent read.
+        if (await renewDrive(force: true)) return gateway.readAsset(value);
+        rethrow;
+      }
     }
 
     Uint8List? thumbnailBytes;
@@ -8851,6 +8910,7 @@ class AppController extends ChangeNotifier {
     bool includePrompt = false,
     bool cacheOnly = false,
     bool persistDraft = true,
+    bool forRetry = false,
     ComposerTab? tab,
   }) async {
     final target = tab ?? activeComposerTab;
@@ -8873,7 +8933,9 @@ class AppController extends ChangeNotifier {
         kind: MediaReferenceKind.image,
         asset: storedReference,
       );
-      final reference = saved?.asset ?? storedReference;
+      final reference = forRetry
+          ? storedReference ?? saved?.asset
+          : saved?.asset ?? storedReference;
       PickedAsset? asset;
       if (reference?.isLocal == true) {
         try {
@@ -8919,16 +8981,21 @@ class AppController extends ChangeNotifier {
         kind: media.kind,
         asset: storedReference,
       );
-      final reference = saved?.asset ?? storedReference;
+      final reference = forRetry
+          ? storedReference ?? saved?.asset
+          : saved?.asset ?? storedReference;
       final savedCandidate = saved == null
           ? null
           : savedReferenceCandidate(saved);
+      // Temporary hosting URLs live only in the provider input, not this
+      // config. Preserve recorded public provenance, but don't substitute a
+      // saved reference's newer URL for the retry's recorded private media.
       final publicSource =
           _usablePublicSource(
             media.publicSourceUrl,
             expiresAt: media.publicSourceExpiresAt,
           ) ??
-          (savedCandidate == null
+          (savedCandidate == null || (forRetry && storedReference != null)
               ? null
               : referenceCandidatePublicUrl(savedCandidate)) ??
           (storedReference?.kind == 'remote'
@@ -8989,7 +9056,9 @@ class AppController extends ChangeNotifier {
       kind: MediaReferenceKind.video,
       asset: item.config.source,
     );
-    final durableSource = savedSource?.asset ?? item.config.source;
+    final durableSource = forRetry
+        ? item.config.source ?? savedSource?.asset
+        : savedSource?.asset ?? item.config.source;
     if ((item.mode == VideoMode.v2v ||
             item.mode == VideoMode.draftEnhance ||
             item.mode == VideoMode.upscale) &&

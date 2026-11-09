@@ -13,6 +13,7 @@ import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_detail_modal.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_submission.dart';
 import 'generation_provenance.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
@@ -1201,8 +1202,17 @@ class _GenerationCardState extends State<GenerationCard> {
                                           'generation',
                                           item.localId,
                                         ),
+                                        busyLabel:
+                                            item.isFailed &&
+                                                !item.hasDeliveredMedia
+                                            ? 'Retrying…'
+                                            : 'Loading…',
                                         onPressed: () => _busy(
-                                          () => widget.controller.reuse(item),
+                                          () => reuseOrRetryGeneration(
+                                            context,
+                                            widget.controller,
+                                            item,
+                                          ),
                                         ),
                                         icon: const Icon(
                                           Icons.replay_rounded,

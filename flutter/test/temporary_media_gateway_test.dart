@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:clawnsole/app/app_controller.dart';
 import 'package:clawnsole/core/apipod_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
 import 'package:clawnsole/core/direct_gateway.dart';
@@ -20,6 +21,7 @@ import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/temporary_media_host.dart';
 import 'package:clawnsole/core/temporary_media_source_io.dart';
 import 'package:clawnsole/core/web_gateway.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -177,6 +179,223 @@ void main() {
   }
 
   for (final surface in ['native', 'companion']) {
+    for (final cleanedLease in [false, true]) {
+      test(
+        '$surface retries a persisted Drive generation after restart with ${cleanedLease ? 'cleaned lease and changed saved references' : 'no old hosting lease'}',
+        () async {
+          final fixture = await _Fixture.create(surface, publishToDrive: true);
+          addTearDown(fixture.dispose);
+          fixture.acceptProviderSubmission = true;
+          await (fixture.gateway as ProviderGateway).setProviderApiKey(
+            'apipod',
+            'fixture-key',
+          );
+          final oldTime = DateTime.utc(2026, 11, 8);
+          if (cleanedLease) {
+            // The new host has not loaded its journal yet. These are the
+            // cleanup receipts left by the previous app process.
+            fixture.journal.leases = [
+              TemporaryMediaLease(
+                id: 'old-cleaned-copy',
+                operationId: 'previous-failed-generation',
+                scopeId: fixture.backend.account!,
+                backendId: 'iCloudDrive',
+                cleanupSemantics: TemporaryMediaCleanupSemantics.deferredExpiry,
+                provider: 'apipod',
+                model: 'seedance-2.5-r2v',
+                state: TemporaryMediaLeaseState.sourceRemoved,
+                createdAt: oldTime,
+                updatedAt: oldTime,
+                publicationAttemptedAt: oldTime,
+                publishedExpiresAt: fixture.backend.expiry,
+                sourceRemovedAt: oldTime,
+              ),
+            ];
+          }
+          final retained = <AssetReference>[
+            for (var index = 0; index < 2; index++)
+              await fixture.drive!.writeAsset(
+                Uint8List.fromList([1 + index, 2 + index, 3 + index]),
+                label: 'motion-$index.mp4',
+                contentType: 'video/mp4',
+              ),
+          ];
+          final changedSavedReferences = <SavedReference>[
+            if (cleanedLease)
+              for (var index = 0; index < 2; index++)
+                SavedReference(
+                  id: 'saved-motion-$index',
+                  name: 'Updated library motion $index',
+                  kind: MediaReferenceKind.video,
+                  asset: await fixture.drive!.writeAsset(
+                    Uint8List.fromList([9, 8, 7, 6, 5 + index]),
+                    label: 'library-source-$index.mov',
+                    contentType: 'video/quicktime',
+                  ),
+                  durationSeconds: 8,
+                  storage: LibraryStorage.drive,
+                  createdAt: oldTime,
+                  updatedAt: oldTime.add(const Duration(hours: 1)),
+                ),
+          ];
+          final failed = Generation(
+            localId: 'previous-failed-generation',
+            provider: 'apipod',
+            model: 'seedance-2.5-r2v',
+            status: 'Error',
+            error: 'The saved video file is missing.',
+            prompt: 'Keep the original camera movement and the second subject.',
+            mode: VideoMode.i2v,
+            config: GenerationConfig(
+              aspectRatio: '9:16',
+              duration: 6,
+              resolution: 'hd',
+              generateAudio: true,
+              safetyTolerance: 2,
+              draft: false,
+              references: [
+                for (final entry in retained.indexed)
+                  MediaReferenceLabel(
+                    label: entry.$2.label,
+                    kind: MediaReferenceKind.video,
+                    promptName: 'Video ${entry.$1 + 1}',
+                    referenceId: 'saved-motion-${entry.$1}',
+                    source: entry.$2,
+                    durationSeconds: 2,
+                  ),
+              ],
+            ),
+            folderId: 'original-drive-folder',
+            storage: LibraryStorage.drive,
+            createdAt: oldTime,
+            updatedAt: oldTime,
+          );
+          final diskRecord = StoredData.fromJson(
+            jsonDecode(StoredData(generations: [failed]).encode())
+                as Map<String, Object?>,
+          ).generations.single;
+          await fixture.hybrid.write(
+            (await fixture.hybrid.read()).copyWith(
+              generations: [diskRecord],
+              savedReferences: changedSavedReferences,
+              folders: [
+                LibraryFolder(
+                  id: 'original-drive-folder',
+                  name: 'Original scene',
+                  storage: LibraryStorage.drive,
+                  createdAt: oldTime,
+                ),
+              ],
+            ),
+          );
+          await fixture.accept();
+          final hostedBytes = <List<int>>[];
+          fixture.backend.stage = (source) async {
+            expect(source.retained!.kind, 'drive');
+            final staged = await stageTemporaryMediaSource(
+              source,
+              fixture.hybrid,
+            );
+            try {
+              final expected = retained[hostedBytes.length];
+              expect(source.retained!.value, expected.value);
+              expect(staged.length, expected.bytes);
+              expect(staged.sha256, expected.sha256);
+              hostedBytes.add(await File(staged.path).readAsBytes());
+            } finally {
+              await staged.dispose();
+            }
+          };
+          final controller = AppController(gateway: fixture.gateway)
+            ..snapshot = await fixture.gateway.load()
+            ..loading = false
+            ..autoFixReferenceVideos = false;
+          addTearDown(controller.dispose);
+          controller.updateForm((form) {
+            form.prompt = 'Unrelated work still being edited.';
+            form.durationSeconds = 12;
+            form.resolution = 'sd';
+          });
+          final activeTab = controller.activeComposerTab;
+          final activeProvider = controller.selectedProviderId;
+          final activeModel = controller.selectedModelId;
+          final activeResolution = controller.form.resolution;
+          final tabCount = controller.composerTabs.length;
+          var confirmations = 0;
+          await controller.retryGeneration(
+            controller.generations.single,
+            confirm: (confirmation) async {
+              confirmations++;
+              expect(confirmation.provider.id, 'apipod');
+              return true;
+            },
+          );
+          expect(confirmations, 0, reason: 'Sharing was already accepted.');
+          expect(
+            fixture.providerSubmissions,
+            hasLength(1),
+            reason: controller.notice,
+          );
+          expect(fixture.providerSubmissions.single['prompt'], failed.prompt);
+          expect(fixture.providerSubmissions.single['model'], failed.model);
+          expect(fixture.providerSubmissions.single['duration'], 6);
+          expect(fixture.providerSubmissions.single['aspect_ratio'], '9:16');
+          expect(hostedBytes, [
+            [1, 2, 3],
+            [2, 3, 4],
+          ]);
+          expect(fixture.backend.stageAttempts, 2);
+          expect(fixture.backend.copies, hasLength(2));
+          expect(controller.activeComposerTab, same(activeTab));
+          expect(controller.composerTabs, hasLength(tabCount));
+          expect(controller.form.prompt, 'Unrelated work still being edited.');
+          expect(controller.form.durationSeconds, 12);
+          expect(controller.form.resolution, activeResolution);
+          expect(controller.selectedProviderId, activeProvider);
+          expect(controller.selectedModelId, activeModel);
+          final persisted = await fixture.local.read();
+          final original = persisted.generations.singleWhere(
+            (item) => item.localId == failed.localId,
+          );
+          expect(original.status, 'Error');
+          expect(original.requestId, isNull);
+          final retried = persisted.generations.singleWhere(
+            (item) => item.localId != failed.localId,
+          );
+          expect(retried.status, 'Pending');
+          expect(retried.requestId, 'accepted-task');
+          expect(retried.prompt, failed.prompt);
+          expect(retried.config.aspectRatio, '9:16');
+          expect(retried.config.duration, 6);
+          expect(retried.config.resolution, 'hd');
+          expect(retried.config.generateAudio, isTrue);
+          expect(retried.folderId, 'original-drive-folder');
+          expect(retried.storage, LibraryStorage.drive);
+          expect(
+            retried.config.references!.map((item) => item.source!.value),
+            retained.map((item) => item.value),
+          );
+          expect(
+            retried.config.references!.map((item) => item.durationSeconds),
+            [2, 2],
+          );
+          expect(retried.config.references!.map((item) => item.promptName), [
+            'Video 1',
+            'Video 2',
+          ]);
+          expect(
+            fixture.journal.leases
+                .where((lease) => lease.operationId == retried.localId)
+                .map((lease) => lease.state),
+            [
+              TemporaryMediaLeaseState.accepted,
+              TemporaryMediaLeaseState.accepted,
+            ],
+          );
+        },
+      );
+    }
+
     test(
       '$surface hosts imported references after Drive moves their staged files',
       () async {
@@ -423,6 +642,19 @@ class _Fixture {
   late final noNetwork = MockClient((request) async {
     providerRequests++;
     if (acceptProviderSubmission &&
+        request.method == 'GET' &&
+        request.url.path == '/v1/account/status') {
+      return http.Response('{"code":200,"data":{}}', 200);
+    }
+    if (acceptProviderSubmission &&
+        request.method == 'POST' &&
+        request.url.path == '/v1/pricing/estimate') {
+      return http.Response(
+        '{"code":200,"data":{"price":1,"currency":"USD"}}',
+        200,
+      );
+    }
+    if (acceptProviderSubmission &&
         request.method == 'POST' &&
         request.url.path == '/v1/videos/generations') {
       providerSubmissions.add(
@@ -553,12 +785,24 @@ class _PublishingDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
       label: label,
       contentType: contentType,
       bytes: bytes.length,
+      sha256: sha256.convert(bytes).toString(),
     );
   }
 
   @override
   Future<Uint8List> readAsset(AssetReference reference) async =>
       assets[reference.value]!;
+
+  @override
+  Future<GoogleDriveByteStream> readAssetStream(
+    AssetReference reference,
+  ) async {
+    final bytes = await readAsset(reference);
+    return GoogleDriveByteStream(
+      Stream<List<int>>.value(bytes),
+      contentLength: bytes.length,
+    );
+  }
 
   @override
   Future<Uri?> adoptPublishedAsset(

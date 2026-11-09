@@ -14,6 +14,7 @@ import 'formatters.dart';
 import 'generation_detail_modal.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_submission.dart';
 import 'generation_provenance.dart';
 import 'hardware.dart';
 import 'motion_isolate.dart';
@@ -567,7 +568,7 @@ class GenerationActionsMenu extends StatelessWidget {
                   controller.busy.run(
                     'generation',
                     item.localId,
-                    () => controller.reuse(item),
+                    () => reuseOrRetryGeneration(context, controller, item),
                   ),
                 );
               case _DenseGenerationAction.extend:
@@ -691,7 +692,8 @@ String _denseGenerationActionLabel(
   _DenseGenerationAction.visibility => item.hidden ? 'Unhide' : 'Hide',
   _DenseGenerationAction.save => item.isImage ? 'Save image' : 'Save video',
   _DenseGenerationAction.enhance => 'Enhance',
-  _DenseGenerationAction.reuse => item.isFailed ? 'Retry generation' : 'Reuse',
+  _DenseGenerationAction.reuse =>
+    item.isFailed && !item.hasDeliveredMedia ? 'Retry generation' : 'Reuse',
   _DenseGenerationAction.extend => 'Extend',
   _DenseGenerationAction.rewrite => 'AI Rewrite',
   _DenseGenerationAction.copyToDrive => 'Copy to Drive',
