@@ -14,16 +14,25 @@ Future<StagedAsset> stageTemporaryMediaSource(
     throw StateError('Public HTTPS media does not need temporary hosting.');
   }
   final retained = source.retained;
-  if (retained?.isLocal == true) {
-    return stageAssetStream(
-      await store.openAssetRead(retained!),
-      directory: directory,
-      expectedLength: retained.bytes,
-      expectedSha256: retained.sha256,
-      maxBytes: maxBytes,
-    );
-  }
   final value = source.source.trim();
+  if (retained?.isLocal == true) {
+    try {
+      return await stageAssetStream(
+        await store.openAssetRead(retained!),
+        directory: directory,
+        expectedLength: retained.bytes,
+        expectedSha256: retained.sha256,
+        maxBytes: maxBytes,
+      );
+    } on Object {
+      // A background Drive upload can move this staged file into its cache
+      // after the submission captured the local reference. The submitted
+      // inline media remains a complete source even when that file is gone;
+      // its retained size/checksum below still require identical bytes.
+      // Await staging above so a lazy file stream failure takes this path too.
+      if (!value.startsWith('data:')) rethrow;
+    }
+  }
   if (value.startsWith('data:')) {
     // Reject clearly oversized inline payloads before decoding a second copy.
     if (value.length > maxBytes * 4 + 4096) {
@@ -33,7 +42,8 @@ Future<StagedAsset> stageTemporaryMediaSource(
     return stageAssetStream(
       Stream.value(bytes),
       directory: directory,
-      expectedLength: bytes.length,
+      expectedLength: retained?.bytes ?? bytes.length,
+      expectedSha256: retained?.sha256,
       maxBytes: maxBytes,
     );
   }

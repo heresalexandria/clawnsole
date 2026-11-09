@@ -49,6 +49,14 @@ bounded 8 MiB fallback.
 Provider-required base64 references and byte-oriented user exports are separate
 paths and are not made fully streaming by this change.
 
+Reference hosting can overlap a background Drive upload. If that upload moves
+an input into the Drive cache before hosting opens its staged file, hosting
+falls back to the submission's imported bytes, with the same size and checksum
+checks. The hybrid store remembers published asset IDs within the current Drive
+folder so later submission and receipt writes cannot restore obsolete local
+references. This applies to native Flutter and the Electron companion; no
+additional provider generation is submitted to recover the reference.
+
 ## Remote fetch and renderer boundaries
 
 The process-owned media client accepts public HTTPS GET/HEAD requests. It rejects

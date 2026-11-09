@@ -168,6 +168,180 @@ void main() {
     },
   );
 
+  test(
+    'a late receipt keeps published input assets without another pass',
+    () async {
+      final (hybrid, local, drive) = await connectedHybrid();
+      final staged = await hybrid.writeAsset(
+        Uint8List.fromList([1, 2, 3]),
+        label: 'reference.mp4',
+        contentType: 'video/mp4',
+        storage: LibraryStorage.drive,
+      );
+      final submitting = Generation(
+        localId: 'hosted-generation',
+        provider: 'apipod',
+        model: 'seedance-2.5-r2v',
+        status: 'Submitting',
+        prompt: 'Follow the reference.',
+        mode: VideoMode.i2v,
+        config: GenerationConfig(
+          aspectRatio: '16:9',
+          duration: 5,
+          resolution: 'hd',
+          generateAudio: false,
+          safetyTolerance: 2,
+          draft: false,
+          references: [
+            MediaReferenceLabel(
+              label: 'reference.mp4',
+              kind: MediaReferenceKind.video,
+              source: staged,
+            ),
+          ],
+        ),
+        createdAt: now,
+        updatedAt: now,
+        storage: LibraryStorage.drive,
+      );
+      final snapshot = StoredData(
+        generations: [submitting],
+        savedReferences: [
+          reference(
+            'stays-local',
+            storage: LibraryStorage.local,
+            asset: staged,
+          ),
+        ],
+      );
+      await hybrid.write(snapshot);
+      await runDriveUploadPass(
+        hybrid: hybrid,
+        read: hybrid.read,
+        write: hybrid.write,
+      );
+      final published = (await hybrid.read())
+          .generations
+          .single
+          .config
+          .references!
+          .single
+          .source!;
+      expect(published.kind, 'drive');
+      // The provider receipt still carries the config captured before hosting.
+      // No second upload pass gets a chance to repair this write.
+      await hybrid.write(
+        snapshot.copyWith(
+          generations: [
+            submitting.copyWith(
+              status: 'Pending',
+              requestId: 'accepted-task',
+              updatedAt: DateTime.now().toUtc(),
+            ),
+          ],
+        ),
+      );
+      final saved = await hybrid.read();
+      expect(saved.generations.single.requestId, 'accepted-task');
+      expect(
+        saved.generations.single.config.references!.single.source,
+        published,
+      );
+      expect(saved.savedReferences.single.asset, staged);
+      expect(
+        local.data.generations.single.config.references!.single.source,
+        published,
+      );
+      expect(drive.assets, hasLength(1));
+      expect(HybridDataStore.pendingDriveUploads(saved), isEmpty);
+    },
+  );
+
+  test('replayed publication also protects a later stale write', () async {
+    final (hybrid, local, drive) = await connectedHybrid();
+    const staged = AssetReference(
+      kind: 'local',
+      value: 'already-moved',
+      label: 'reference.mp4',
+    );
+    const published = AssetReference(
+      kind: 'drive',
+      value: 'published-before-retry',
+      label: 'reference.mp4',
+    );
+    final snapshot = StoredData(
+      savedReferences: [reference('motion', asset: staged)],
+    );
+    final pass = await hybrid.uploadQueuedDriveAssets(
+      snapshot,
+      published: {staged.value: published},
+    );
+    expect(pass.replacements[staged.value], published);
+    expect(local.assets, isEmpty);
+    await hybrid.write(snapshot);
+    expect((await hybrid.read()).savedReferences.single.asset, published);
+    expect(
+      drive.assets,
+      isEmpty,
+      reason: 'the published file is not uploaded again',
+    );
+  });
+
+  test(
+    'publication aliases survive reconnect only to the same Drive folder',
+    () async {
+      final (hybrid, _, drive) = await connectedHybrid();
+      final staged = await hybrid.writeAsset(
+        Uint8List.fromList([1, 2, 3]),
+        label: 'reference.mp4',
+        contentType: 'video/mp4',
+        storage: LibraryStorage.drive,
+      );
+      final snapshot = StoredData(
+        savedReferences: [reference('motion', asset: staged)],
+      );
+      final pass = await hybrid.uploadQueuedDriveAssets(snapshot);
+      final published = pass.replacements[staged.value]!;
+      await hybrid.disconnect();
+      await hybrid.connect('renewed-token', 'Clawnsole');
+      await hybrid.write(snapshot);
+      expect((await hybrid.read()).savedReferences.single.asset, published);
+
+      await hybrid.disconnect();
+      drive.folderId = 'different-account-folder';
+      drive.data = const StoredData();
+      await hybrid.connect('another-account-token', 'Clawnsole');
+      await hybrid.write(snapshot);
+      expect((await hybrid.read()).savedReferences.single.asset, staged);
+    },
+  );
+
+  for (final allLibraries in [false, true]) {
+    test(
+      '${allLibraries ? 'all' : 'Drive'} library wipe forgets publication aliases',
+      () async {
+        final (hybrid, _, _) = await connectedHybrid();
+        final staged = await hybrid.writeAsset(
+          Uint8List.fromList([1, 2, 3]),
+          label: 'reference.mp4',
+          contentType: 'video/mp4',
+          storage: LibraryStorage.drive,
+        );
+        final snapshot = StoredData(
+          savedReferences: [reference('motion', asset: staged)],
+        );
+        await hybrid.uploadQueuedDriveAssets(snapshot);
+        if (allLibraries) {
+          await hybrid.delete();
+        } else {
+          await hybrid.deleteDriveLibrary();
+        }
+        await hybrid.write(snapshot);
+        expect((await hybrid.read()).savedReferences.single.asset, staged);
+      },
+    );
+  }
+
   test('clearing the local library keeps not-yet-published bytes', () async {
     final (hybrid, local, _) = await connectedHybrid();
     final staged = await hybrid.writeAsset(
@@ -569,6 +743,7 @@ class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
   StoredData data;
   final Map<String, Uint8List> assets = <String, Uint8List>{};
   int _assetCounter = 0;
+  String folderId = 'drive-root';
   GoogleDriveConnection _memoryConnection = const GoogleDriveConnection(
     state: GoogleDriveConnectionState.disconnected,
   );
@@ -581,9 +756,23 @@ class _MemoryDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
     _memoryConnection = GoogleDriveConnection(
       state: GoogleDriveConnectionState.connected,
       folderName: folderName,
-      folderId: 'drive-root',
+      folderId: folderId,
     );
     return data;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    _memoryConnection = GoogleDriveConnection(
+      state: GoogleDriveConnectionState.disconnected,
+      folderId: folderId,
+    );
+  }
+
+  @override
+  Future<void> delete() async {
+    data = const StoredData();
+    assets.clear();
   }
 
   @override

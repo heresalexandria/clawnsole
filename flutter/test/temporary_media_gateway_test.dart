@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:clawnsole/core/apipod_api.dart';
 import 'package:clawnsole/core/bfl_api.dart';
@@ -8,6 +9,7 @@ import 'package:clawnsole/core/direct_gateway.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/google_drive.dart';
 import 'package:clawnsole/core/google_drive_auth_base.dart';
+import 'package:clawnsole/core/google_drive_store.dart';
 import 'package:clawnsole/core/hybrid_data_store.dart';
 import 'package:clawnsole/core/local_data_store_io.dart';
 import 'package:clawnsole/core/models.dart';
@@ -23,6 +25,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import '../tool/clawnsole_companion.dart';
+import 'support/memory_asset_streaming.dart';
 
 void main() {
   for (final surface in ['direct', 'native', 'companion']) {
@@ -175,6 +178,108 @@ void main() {
 
   for (final surface in ['native', 'companion']) {
     test(
+      '$surface hosts imported references after Drive moves their staged files',
+      () async {
+        final fixture = await _Fixture.create(surface, publishToDrive: true);
+        addTearDown(fixture.dispose);
+        fixture.acceptProviderSubmission = true;
+        await (fixture.gateway as ProviderGateway).setProviderApiKey(
+          'apipod',
+          'fixture-key',
+        );
+        await fixture.accept();
+        final stagedBytes = <List<int>>[];
+        fixture.backend.stage = (source) async {
+          // The host has captured both local references. Run the real upload
+          // pass before it opens either file, including the cache adoption
+          // rename that invalidates that captured local path.
+          if (stagedBytes.isEmpty) {
+            expect(await fixture.flushDriveUploads(), isTrue);
+            expect(fixture.drive!.adopted, hasLength(2));
+          }
+          expect(source.retained?.kind, 'local');
+          expect(
+            await File.fromUri(
+              await fixture.local.assetUri(source.retained!),
+            ).exists(),
+            isFalse,
+          );
+          final staged = await stageTemporaryMediaSource(
+            source,
+            fixture.hybrid,
+          );
+          try {
+            stagedBytes.add(await File(staged.path).readAsBytes());
+          } finally {
+            await staged.dispose();
+          }
+        };
+        final now = DateTime.now().toUtc();
+        final accepted = await fixture.gateway.submit(
+          GenerationSubmission(
+            record: Generation(
+              localId: 'drive-hosting-race',
+              provider: 'apipod',
+              model: 'seedance-2.5-r2v',
+              status: 'Submitting',
+              prompt: 'Use both motion references.',
+              mode: VideoMode.i2v,
+              config: const GenerationConfig(
+                aspectRatio: '16:9',
+                duration: 4,
+                resolution: 'hd',
+                generateAudio: false,
+                safetyTolerance: 2,
+                draft: false,
+                references: [
+                  MediaReferenceLabel(
+                    label: 'first.mp4',
+                    kind: MediaReferenceKind.video,
+                    durationSeconds: 2,
+                  ),
+                  MediaReferenceLabel(
+                    label: 'second.mp4',
+                    kind: MediaReferenceKind.video,
+                    durationSeconds: 2,
+                  ),
+                ],
+              ),
+              createdAt: now,
+              updatedAt: now,
+              storage: LibraryStorage.drive,
+            ),
+            input: {
+              'mode': 'i2v',
+              'prompt': 'Use both motion references.',
+              'duration': 4,
+              'resolution': 'hd',
+              'reference_videos': [
+                'data:video/mp4;base64,AQID',
+                'data:video/mp4;base64,BAUG',
+              ],
+            },
+            autoFixReferenceVideos: false,
+          ),
+        );
+        expect(stagedBytes, [
+          [1, 2, 3],
+          [4, 5, 6],
+        ]);
+        expect(fixture.providerSubmissions, hasLength(1));
+        expect(fixture.providerSubmissions.single['video_urls'], hasLength(2));
+        expect(accepted.requestId, 'accepted-task');
+        expect(accepted.status, 'Pending');
+        final saved = (await fixture.local.read()).generations.single;
+        expect(saved.requestId, 'accepted-task');
+        expect(
+          saved.config.references!.map((reference) => reference.source!.kind),
+          everyElement('drive'),
+        );
+        expect(fixture.drive!.assets, hasLength(2));
+      },
+    );
+
+    test(
       '$surface Google Drive disconnect preserves independent iCloud references',
       () async {
         final fixture = await _Fixture.create(surface);
@@ -236,6 +341,7 @@ class _Fixture {
   static Future<_Fixture> create(
     String surface, {
     bool stageSources = false,
+    bool publishToDrive = false,
   }) async {
     final fixture = _Fixture(
       await Directory.systemTemp.createTemp('hosting-gateway.'),
@@ -250,7 +356,14 @@ class _Fixture {
     final providerRouter = ProviderApiRouter(
       apipod: ApipodApi(client: fixture.noNetwork),
     );
-    final hybrid = HybridDataStore(local: fixture.local);
+    if (publishToDrive) {
+      fixture.drive = _PublishingDriveStore(fixture.directory);
+    }
+    final hybrid = fixture.hybrid = HybridDataStore(
+      local: fixture.local,
+      drive: fixture.drive,
+    );
+    if (publishToDrive) await hybrid.connect('fixture-token', 'Clawnsole');
     final vault = SettingsVaultDataStore(
       delegate: hybrid,
       secureStore: MemorySecureValueStore(),
@@ -305,11 +418,29 @@ class _Fixture {
   final journal = _Journal();
   final authorizer = _Authorizer();
   int providerRequests = 0;
+  bool acceptProviderSubmission = false;
+  final providerSubmissions = <Map<String, Object?>>[];
   late final noNetwork = MockClient((request) async {
     providerRequests++;
+    if (acceptProviderSubmission &&
+        request.method == 'POST' &&
+        request.url.path == '/v1/videos/generations') {
+      providerSubmissions.add(
+        (jsonDecode(request.body) as Map).cast<String, Object?>(),
+      );
+      return http.Response(
+        jsonEncode({
+          'code': 200,
+          'data': {'task_id': 'accepted-task'},
+        }),
+        200,
+      );
+    }
     throw StateError('Unexpected external request: ${request.url.host}');
   });
   late LocalDataStore local;
+  late HybridDataStore hybrid;
+  _PublishingDriveStore? drive;
   late TemporaryMediaHost host;
   late AppGateway gateway;
   NativeGateway? native;
@@ -323,6 +454,9 @@ class _Fixture {
       gateway as TemporaryMediaHostingGateway;
   TemporaryMediaConsentGateway get consent =>
       gateway as TemporaryMediaConsentGateway;
+
+  Future<bool> flushDriveUploads() =>
+      companionStore?.flushDriveUploads() ?? native!.flushDriveUploads();
 
   Future<void> accept() async {
     final status = await hosting.temporaryMediaHostStatus();
@@ -371,6 +505,78 @@ class _Fixture {
     noNetwork.close();
     await directory.delete(recursive: true);
   }
+}
+
+class _PublishingDriveStore extends GoogleDriveStore with MemoryAssetStreaming {
+  _PublishingDriveStore(this.directory);
+
+  final Directory directory;
+  StoredData data = const StoredData();
+  final assets = <String, Uint8List>{};
+  final adopted = <String>[];
+  GoogleDriveConnection _connection = const GoogleDriveConnection(
+    state: GoogleDriveConnectionState.disconnected,
+  );
+
+  @override
+  GoogleDriveConnection get connection => _connection;
+
+  @override
+  Future<StoredData> connect(String accessToken, String folderName) async {
+    _connection = GoogleDriveConnection(
+      state: GoogleDriveConnectionState.connected,
+      folderName: folderName,
+      folderId: 'fixture-drive-root',
+    );
+    return data;
+  }
+
+  @override
+  Future<StoredData> read() async => data;
+
+  @override
+  Future<void> write(StoredData value) async =>
+      data = googleDrivePortableData(value);
+
+  @override
+  Future<AssetReference> writeAsset(
+    Uint8List bytes, {
+    required String label,
+    required String contentType,
+    LibraryStorage storage = LibraryStorage.drive,
+  }) async {
+    final id = 'published-${assets.length}';
+    assets[id] = bytes;
+    return AssetReference(
+      kind: 'drive',
+      value: id,
+      label: label,
+      contentType: contentType,
+      bytes: bytes.length,
+    );
+  }
+
+  @override
+  Future<Uint8List> readAsset(AssetReference reference) async =>
+      assets[reference.value]!;
+
+  @override
+  Future<Uri?> adoptPublishedAsset(
+    AssetReference reference,
+    Uri localFile,
+  ) async {
+    final target = File('${directory.path}/cached-${reference.value}.mp4');
+    await File.fromUri(localFile).rename(target.path);
+    adopted.add(reference.value);
+    return target.uri;
+  }
+
+  @override
+  Future<StoredData> repairMissingCachedAssets(StoredData value) async => value;
+
+  @override
+  Future<StorageStats> stats(int records) async =>
+      StorageStats(path: 'fixture-drive', bytes: 0, records: records);
 }
 
 class _PublicationBackend
