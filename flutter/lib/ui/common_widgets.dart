@@ -19,6 +19,7 @@ import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generated_video_preview_cache.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_submission.dart';
 import 'generation_video.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
@@ -3095,10 +3096,19 @@ class ActivityCard extends StatelessWidget {
                                         'generation',
                                         item.localId,
                                       ),
+                                      busyLabel:
+                                          item.isFailed &&
+                                              !item.hasDeliveredMedia
+                                          ? 'Retrying…'
+                                          : 'Loading…',
                                       onPressed: () => controller.busy.run(
                                         'generation',
                                         item.localId,
-                                        () => controller.reuse(item),
+                                        () => reuseOrRetryGeneration(
+                                          context,
+                                          controller,
+                                          item,
+                                        ),
                                       ),
                                       icon: const Icon(
                                         Icons.replay_rounded,

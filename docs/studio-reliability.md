@@ -20,6 +20,22 @@ or pricing requests. Editing the draft or switching tabs during preflight cannot
 change the captured generation. ArtCraft's idempotency token derives from the
 operation's unique local ID, never from the inputs.
 
+**Retry** on a failed generation restores its recorded recipe and submits a new
+attempt after the usual reference-sharing and provider-retention confirmations.
+It preserves the failed record, original storage destination and folder, and
+does not open or replace an active composer draft. Repeated clicks while that
+retry is being prepared share one activation; a later deliberate retry is a new
+attempt. **Reuse** on completed generations still opens an editable draft.
+
+Retry reads retained Drive references from cache first, silently resumes an
+existing Drive authorization when needed, and renews a failed authenticated read
+once. Explicit sign-out remains respected. For providers requiring public media,
+private retained inputs get new temporary iCloud copies owned by the new attempt;
+old cleaned-up host leases are not reused. Recorded public reference URLs remain
+usable until their known expiry, without requiring iCloud on other platforms.
+Unavailable originals stop preparation with a visible notice before a provider
+submission. Startup draft restoration stays cache-only.
+
 Immediately before a chargeable provider POST, the gateways persist an uncertain
 acceptance state. A lost response or interrupted process cannot honestly prove
 that the provider rejected the request. Those jobs say **Submission unknown**,

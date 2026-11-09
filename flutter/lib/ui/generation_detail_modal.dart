@@ -17,6 +17,7 @@ import 'common_widgets.dart';
 import 'formatters.dart';
 import 'generation_error_thumbnail.dart';
 import 'generation_loading_placeholder.dart';
+import 'generation_submission.dart';
 import 'generation_view_widgets.dart';
 import 'inline_video.dart';
 import 'library_folders.dart';
@@ -701,21 +702,31 @@ class _GenerationDetailModalState extends State<_GenerationDetailModal> {
                 label: const Text('Save'),
               ),
             if (_controller.canReuse(item))
-              OutlinedButton.icon(
+              BusyOutlinedButton.icon(
                 key: const ValueKey('detail-reuse'),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(88, 44),
                   padding: const EdgeInsets.symmetric(horizontal: 15),
                 ),
-                onPressed: () => _leaveFor(
-                  () => unawaited(
-                    _controller.busy.run(
-                      'generation',
-                      item.localId,
-                      () => _controller.reuse(item),
+                busyLabel: item.isFailed && !item.hasDeliveredMedia
+                    ? 'Retrying…'
+                    : 'Loading…',
+                onPressed: () async {
+                  // The dialog's context is disposed as it closes. The
+                  // navigator survives and can present the retry warnings.
+                  final navigator = Navigator.of(context);
+                  final controller = _controller;
+                  navigator.pop();
+                  await controller.busy.run(
+                    'generation',
+                    item.localId,
+                    () => reuseOrRetryGeneration(
+                      navigator.context,
+                      controller,
+                      item,
                     ),
-                  ),
-                ),
+                  );
+                },
                 icon: const Icon(Icons.replay_rounded, size: 16),
                 label: Text(
                   item.isFailed && !item.hasDeliveredMedia ? 'Retry' : 'Reuse',
