@@ -71,6 +71,41 @@ class HybridDataStore
   StoredData? _lastLocal;
   StoredData? _lastRemote;
 
+  // A submission can outlive the background pass that publishes its inputs.
+  // Keep the exact replacements so its later receipt/status write cannot put
+  // an obsolete staged id back after the original moved into the media cache.
+  final Map<String, AssetReference> _publishedDriveAssets = {};
+  String? _publishedDriveFolderId;
+
+  void _usePublishedDriveScope() {
+    final folderId = _drive.connection.folderId;
+    if (folderId == _publishedDriveFolderId) return;
+    _publishedDriveAssets.clear();
+    _publishedDriveFolderId = folderId;
+  }
+
+  void _rememberPublishedDriveAsset(
+    String stagedId,
+    AssetReference published,
+    String? folderId,
+  ) {
+    if (!isDriveConnected ||
+        folderId == null ||
+        folderId != _drive.connection.folderId) {
+      return;
+    }
+    _usePublishedDriveScope();
+    _publishedDriveAssets[stagedId] = published;
+  }
+
+  StoredData _withPublishedDriveAssets(StoredData data) {
+    if (!isDriveConnected ||
+        _publishedDriveFolderId != _drive.connection.folderId) {
+      return data;
+    }
+    return applyDriveAssetReplacements(data, _publishedDriveAssets);
+  }
+
   GoogleDriveConnection get connection {
     final current = _drive.connection;
     if (current.folderName.isNotEmpty || _lastLocal == null) return current;
@@ -89,6 +124,7 @@ class HybridDataStore
   Future<StoredData> connect(String accessToken, String folderName) async {
     final local = _asLocal(await _local.read());
     final connected = await _drive.connect(accessToken, folderName);
+    _usePublishedDriveScope();
     final remote = _asDrive(await _repairCachedDriveAssets(connected));
     _lastLocal = local;
     _lastRemote = remote;
@@ -317,6 +353,7 @@ class HybridDataStore
 
   @override
   Future<void> write(StoredData data) async {
+    data = _withPublishedDriveAssets(data);
     final local = _localPartition(data);
     final remote = _drivePartition(data);
     final base = data.driveSyncBase ?? _lastRemote;
@@ -510,6 +547,7 @@ class HybridDataStore
     void Function(String message)? log,
   }) async {
     if (!isDriveConnected) return const DriveUploadPassResult.empty();
+    final folderId = _drive.connection.folderId;
     final replacements = <String, AssetReference>{};
     final staged = <String, AssetReference>{};
     final missing = <String, AssetReference>{};
@@ -519,6 +557,7 @@ class HybridDataStore
       if (already != null) {
         replacements[entry.key] = already;
         staged[entry.key] = entry.value;
+        _rememberPublishedDriveAsset(entry.key, already, folderId);
         continue;
       }
       final Stream<List<int>> source;
@@ -535,6 +574,11 @@ class HybridDataStore
           contentType: entry.value.contentType ?? 'application/octet-stream',
           expectedLength: entry.value.bytes,
           expectedSha256: entry.value.sha256,
+        );
+        _rememberPublishedDriveAsset(
+          entry.key,
+          replacements[entry.key]!,
+          folderId,
         );
         staged[entry.key] = entry.value;
       } on Object catch (error) {
@@ -692,6 +736,7 @@ class HybridDataStore
   Future<void> delete() async {
     if (isDriveConnected) await _drive.delete();
     await _local.delete();
+    _publishedDriveAssets.clear();
     _lastLocal = const StoredData();
     _lastRemote = isDriveConnected ? const StoredData() : null;
   }
@@ -727,6 +772,7 @@ class HybridDataStore
       throw StateError('Connect Google Drive before deleting its library.');
     }
     await _drive.delete();
+    _publishedDriveAssets.clear();
     _lastRemote = const StoredData();
     final current = await _local.read();
     await _local.write(
