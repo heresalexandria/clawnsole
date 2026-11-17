@@ -211,6 +211,17 @@ sudo apt install clang cmake ninja-build pkg-config dpkg-dev libgtk-3-dev \
 ./scripts/build_linux
 ```
 
+CI pins Flutter 3.47.0. On ARM64, that release has native Dart and engine
+artifacts but no prepackaged Linux SDK archive. Bootstrap its official source
+checkout before running the scripts above:
+
+```bash
+git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git ~/flutter-3.47.0
+export PATH="$HOME/flutter-3.47.0/bin:$PATH"
+flutter config --enable-linux-desktop --no-analytics
+flutter precache --linux
+```
+
 Build on the target architecture: x64 hosts produce x64 packages and ARM64 hosts
 produce ARM64 packages. `build_linux` writes the Flutter bundle under
 `build/linux/<architecture>/release/bundle` and versioned `.deb` and `.tar.gz`
