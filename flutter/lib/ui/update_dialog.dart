@@ -186,6 +186,8 @@ class _VersionDialogState extends State<_VersionDialog> {
                             ? 'This development build updates from source with git rather than replacing itself.'
                             : defaultTargetPlatform == TargetPlatform.windows
                             ? 'Download the new ZIP from the GitHub release, extract it, and replace your Clawnsole folder. Your library is stored separately and is not touched.'
+                            : defaultTargetPlatform == TargetPlatform.linux
+                            ? 'Install the new Linux package, or extract the new archive and replace your Clawnsole folder. Your library is stored separately and is not touched.'
                             : 'This build can open the GitHub release for a manual update.',
                         style: TextStyle(
                           fontSize: 12.5,

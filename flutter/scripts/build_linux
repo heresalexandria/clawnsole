@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_linux_common.sh"
+
+if [[ "${1:-}" == --help ]]; then
+  echo "Usage: ./flutter/scripts/build_linux [additional flutter build linux arguments]"
+  echo "Builds on Linux x64/ARM64 and packages a tar.gz and .deb in"
+  echo "flutter/build/linux/packages. Release CI uses Ubuntu 24.04."
+  echo "Requires Flutter, clang, cmake, ninja-build, pkg-config, libgtk-3-dev,"
+  echo "libsecret-1-dev, libmpv-dev, libepoxy-dev, ffmpeg, and dpkg-dev."
+  echo "Dart defines are rejected. Optional Google desktop OAuth comes from"
+  echo "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID / CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET."
+  exit 0
+fi
+
+for argument in "$@"; do
+  case "$argument" in
+    --dart-define | --dart-define=* | --dart-define-from-file | --dart-define-from-file=*)
+      echo "Linux release builds do not accept Dart defines." >&2
+      exit 1
+      ;;
+    --target-platform | --target-platform=*)
+      echo "Linux release builds use the host architecture." >&2
+      exit 1
+      ;;
+  esac
+done
+
+unset DART_DEFINES
+export CLAWNSOLE_MOBILE_TEST_BUILD=false
+print_heading "Linux release build"
+prepare_linux
+require_command dpkg-deb
+require_command dpkg-shlibdeps
+linux_oauth_arguments
+flutter build linux --release --target-platform "linux-$LINUX_ARCH" \
+  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
+  "${LINUX_OAUTH_ARGUMENTS[@]}" \
+  --dart-define=INCLUDE_IOS_TEST_KEYS=false \
+  --dart-define=CLAWNSOLE_MOBILE_TEST_BUILD=false \
+  "$@"
+
+"$FLUTTER_DIRECTORY/scripts/package_linux"

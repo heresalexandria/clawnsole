@@ -6,6 +6,15 @@ import 'provider_catalog.dart';
 import 'reference_video_normalizer.dart';
 
 ReferenceVideoToolBackend nativeReferenceVideoToolBackend() {
+  if (Platform.isLinux) {
+    // Linux packages depend on the distribution's FFmpeg, keeping codec and
+    // security updates with the system package manager on both architectures.
+    return ProcessReferenceVideoToolBackend(
+      ffmpegPath: 'ffmpeg',
+      ffprobePath: 'ffprobe',
+      h264EncoderAttempts: referenceVideoEncoderAttemptsForPlatform('linux'),
+    );
+  }
   if (Platform.isWindows) {
     final directory = Directory(
       '${File(Platform.resolvedExecutable).parent.path}'
@@ -43,6 +52,9 @@ List<ReferenceVideoEncoderAttempt> referenceVideoEncoderAttemptsForPlatform(
   'windows' => const <ReferenceVideoEncoderAttempt>[
     ReferenceVideoEncoderAttempt(encoder: 'h264_mf'),
     ReferenceVideoEncoderAttempt(encoder: 'libopenh264'),
+  ],
+  'linux' => const <ReferenceVideoEncoderAttempt>[
+    ReferenceVideoEncoderAttempt(encoder: 'libx264'),
   ],
   _ => throw UnsupportedError(
     'Reference video repair is not available on $operatingSystem.',

@@ -2,7 +2,7 @@
 
 Clawnsole makes the release decision on the PR, bumps the shared app version
 once, and builds every required target from that exact release commit. The tag
-is created only after both desktop builds exist and App Store Connect accepts
+is created only after all desktop builds exist and App Store Connect accepts
 the iOS upload.
 
 ```text
@@ -10,8 +10,9 @@ PR labelled minor -> merge -> bump Flutter and Electron together
                               |-> advance /models catalog_version
                               `-> dispatch exact commit from main
                                   |-> build signed iOS IPA -> upload to App Store Connect
-                                  |-> build macOS DMG + updater ZIP ─┐
-                                  |-> build Windows x64 ZIP ─────────┤
+                                  |-> build macOS DMG + updater ZIP
+                                  |-> build Windows x64 ZIP
+                                  |-> build Linux x64/ARM64 DEB + tar.gz
                                   `-> checksum -> publish desktop GitHub release
 ```
 
@@ -32,8 +33,8 @@ the iOS bundle version only moves forward:
   `main`'s newest version before building. A superseded or re-run stale
   dispatch skips instead of rebuilding an old bundle version.
 - A newer release cancels a superseded release's still-running macOS, Windows,
-  and iOS builds. Publishing is serialized, never cancelled, so a release is
-  not torn down half-published.
+  Linux, and iOS builds. Publishing is serialized, never cancelled, so a
+  release is not torn down half-published.
 - Uploading a build number App Store Connect has already accepted (the exact
   same number) is treated as already-complete with a warning — re-runs after a
   desktop failure and locally uploaded prepared builds do not fail the
@@ -57,7 +58,7 @@ row above. It marks the new release version in `/models` `test_versions` and
 builds the mobile review profile: ArtCraft Seedance 1.5 Pro, 480p, 5 seconds,
 plus keyless Apple Intelligence image and image-sequence generation on
 supported iOS devices. Android exposes only the ArtCraft route. It does not
-affect the synchronized macOS or Windows build of that release.
+affect the synchronized macOS, Windows, or Linux build of that release.
 
 The labels are created in repository setup and can be repaired at any time by
 running **Create release labels** from the Actions page. The Pull request
@@ -95,8 +96,9 @@ GitHub reports a workflow started by a merged pull request as
 `refs/pull/<number>/merge`, even when a job checks out a commit from `main`.
 The merge-triggered run therefore prepares the version and dispatches a second
 run whose workflow ref is `main`. That trusted run verifies the supplied commit
-is in `main` before using it, then starts macOS, Windows, and iOS together. This
-keeps the App Store Connect environment restricted to `main` without exposing
+is in `main` before using it, then starts macOS, Windows, Linux, and iOS
+together. This keeps the App Store Connect environment restricted to `main`
+without exposing
 its secrets to pull-request refs.
 
 | secret | value |
@@ -173,13 +175,21 @@ verification before it uploads any desktop artifact.
 ## What is published
 
 GitHub releases contain the notarized macOS application, its updater metadata,
-and the unsigned native Windows x64 build. Release assets can include:
+the unsigned native Windows x64 build, and native Linux x64 and ARM64 packages.
+Release assets can include:
 
 - `Clawnsole-<version>-mac-arm64.dmg`
 - `Clawnsole-mac-arm64.dmg` (stable alias used by the README's latest-download link)
 - `Clawnsole-<version>-mac-arm64.zip`
 - `Clawnsole-<version>-windows-x64.zip`
 - `Clawnsole-windows-x64.zip` (stable alias used by latest-download links)
+- `Clawnsole-<version>-linux-x64.deb`
+- `Clawnsole-<version>-linux-arm64.deb`
+- `Clawnsole-<version>-linux-x64.tar.gz`
+- `Clawnsole-<version>-linux-arm64.tar.gz`
+- `Clawnsole-linux-x64.deb`, `Clawnsole-linux-arm64.deb`,
+  `Clawnsole-linux-x64.tar.gz`, and `Clawnsole-linux-arm64.tar.gz`
+  (stable aliases used by the site and README)
 - `SHA256SUMS.txt`
 
 The macOS ZIP is the Electron updater asset. Artifact naming, architecture
@@ -217,3 +227,30 @@ under the user's `AppData`. The intended next step is an installer with code sig
 through Azure Trusted Signing for the executable and installer or an MSIX
 package, which removes the SmartScreen prompt and makes in-place updates
 possible.
+
+### Linux packages
+
+Linux is a native Flutter app on x64 and ARM64. Each architecture builds on a
+matching Linux runner and produces both a `.deb` and a `.tar.gz` from the same
+release bundle. The release waits for both architectures and includes every
+versioned asset and stable alias in `SHA256SUMS.txt`.
+
+`./flutter/scripts/build_linux` produces packages in
+`flutter/build/linux/packages`. The `.deb` installs the app under
+`/opt/clawnsole`, the `clawnsole` command under `/usr/bin`, and a desktop-menu
+entry. It declares GTK, libsecret, libmpv, FFmpeg, and D-Bus runtime dependencies
+and recommends GNOME Keyring.
+The archive keeps the application and its Flutter libraries/assets together;
+its system dependencies must be installed separately. Linux uses distro media
+libraries instead of bundling a private FFmpeg build.
+
+PR checks build and smoke-test both native architectures, including the packaged
+application's startup under a virtual display. Local smoke validation uses
+`./flutter/scripts/smoke_linux` after `build_linux`. See
+[Linux setup](../flutter/README.md#linux) for the supported distributions and
+runtime requirements.
+
+Updates are manual: close the app and install the newer `.deb`, or replace the
+extracted application folder. History and retained media remain in the separate
+XDG Documents `Clawnsole/` directory or the location selected in Settings.
+Provider keys and Drive tokens remain in the desktop Secret Service keyring.

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_linux_common.sh"
+
+if [[ "${1:-}" == --help ]]; then
+  echo "Usage: ./flutter/scripts/package_linux"
+  echo "Packages the current architecture's existing release bundle as tar.gz/.deb."
+  exit 0
+fi
+
+require_linux
+require_command dpkg-deb
+require_command dpkg-shlibdeps
+require_command python3
+
+bundle="$FLUTTER_DIRECTORY/build/linux/$LINUX_ARCH/release/bundle"
+for file in Clawnsole lib/libapp.so lib/libflutter_linux_gtk.so data/icudtl.dat; do
+  if [[ ! -f "$bundle/$file" ]]; then
+    echo "Linux release bundle is incomplete: missing $bundle/$file" >&2
+    exit 1
+  fi
+done
+[[ -x "$bundle/Clawnsole" && -d "$bundle/data/flutter_assets" ]] || {
+  echo "Linux release bundle has no executable or Flutter assets." >&2
+  exit 1
+}
+
+version="$(python3 "$REPOSITORY_ROOT/scripts/release/bump_version.py" --show)"
+output="$FLUTTER_DIRECTORY/build/linux/packages"
+mkdir -p "$output"
+stage="$(mktemp -d "$FLUTTER_DIRECTORY/build/linux/package.XXXXXX")"
+trap 'rm -rf "$stage"' EXIT
+
+# Preserve permissions and symlinks. Both packages carry the whole Flutter
+# bundle; moving only the executable would leave its engine and assets behind.
+mkdir -p "$stage/archive/Clawnsole"
+cp -a "$bundle/." "$stage/archive/Clawnsole/"
+cp "$FLUTTER_DIRECTORY/linux/package.README.txt" "$stage/archive/Clawnsole/README.txt"
+cp "$REPOSITORY_ROOT/LICENSE" "$stage/archive/Clawnsole/LICENSE"
+cp "$FLUTTER_DIRECTORY/assets/icon.png" "$stage/archive/Clawnsole/icon.png"
+tar -czf "$output/Clawnsole-$version-linux-$LINUX_ARCH.tar.gz" \
+  -C "$stage/archive" Clawnsole
+
+package="$stage/deb"
+mkdir -p "$package/opt/clawnsole" "$package/usr/bin" \
+  "$package/usr/share/applications" \
+  "$package/usr/share/icons/hicolor/256x256/apps" \
+  "$package/usr/share/doc/clawnsole" "$package/DEBIAN"
+cp -a "$stage/archive/Clawnsole/." "$package/opt/clawnsole/"
+ln -s /opt/clawnsole/Clawnsole "$package/usr/bin/clawnsole"
+cp "$FLUTTER_DIRECTORY/linux/app.clawnsole.clawnsole.desktop" \
+  "$package/usr/share/applications/"
+cp "$FLUTTER_DIRECTORY/assets/icon.png" \
+  "$package/usr/share/icons/hicolor/256x256/apps/app.clawnsole.clawnsole.png"
+cp "$REPOSITORY_ROOT/LICENSE" "$package/usr/share/doc/clawnsole/copyright"
+
+# Derive ABI requirements from every ELF object, including plugins. In
+# particular libmpv.so.1 and libmpv.so.2 are not interchangeable: a guessed
+# "libmpv1 | libmpv2" dependency would install an app that cannot launch.
+mkdir -p "$stage/debian"
+cat > "$stage/debian/control" <<CONTROL
+Source: clawnsole
+Section: video
+Priority: optional
+Maintainer: heresalexandria <70348962+heresalexandria@users.noreply.github.com>
+
+Package: clawnsole
+Architecture: $DEBIAN_ARCH
+Description: Local-first multi-provider AI video generation
+CONTROL
+binaries=("-e$package/opt/clawnsole/Clawnsole")
+while IFS= read -r -d '' library; do
+  binaries+=("-e$library")
+done < <(find "$package/opt/clawnsole/lib" -type f -name '*.so*' -print0)
+dependencies="$(cd "$stage" && dpkg-shlibdeps --ignore-missing-info -O \
+  "-l$package/opt/clawnsole/lib" "${binaries[@]}" \
+  | sed -n 's/^shlibs:Depends=//p')"
+if [[ -z "$dependencies" ]]; then
+  echo "Could not determine the Linux package's shared-library dependencies." >&2
+  exit 1
+fi
+installed_size="$(du -sk "$package" | cut -f1)"
+cat > "$package/DEBIAN/control" <<CONTROL
+Package: clawnsole
+Version: $version
+Section: video
+Priority: optional
+Architecture: $DEBIAN_ARCH
+Maintainer: heresalexandria <70348962+heresalexandria@users.noreply.github.com>
+Installed-Size: $installed_size
+Depends: $dependencies, ffmpeg, xdg-user-dirs, xdg-utils, default-dbus-session-bus | dbus-session-bus
+Recommends: gnome-keyring
+Homepage: https://clawnsole.app/
+Description: Local-first multi-provider AI video generation
+ Create and organize AI video using your own provider accounts.
+ Requires a graphical desktop session with an unlocked Secret Service keyring.
+CONTROL
+chmod 0755 "$package/DEBIAN"
+dpkg-deb --build --root-owner-group "$package" \
+  "$output/Clawnsole-$version-linux-$LINUX_ARCH.deb"
+echo "Linux packages: $output/Clawnsole-$version-linux-$LINUX_ARCH.{tar.gz,deb}"

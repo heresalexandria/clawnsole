@@ -7,14 +7,11 @@ import '../core/models.dart';
 import 'video_probe.dart';
 
 Future<VideoSourceMetadata?> loadVideoMetadata(Uri uri) async {
-  // Windows registers media_kit as its video_player backend (main.dart), so
-  // the player probe works there too. Only Linux has no backend; it goes
-  // straight to the MP4 box parse. Without the probe, any video over the
-  // parse's size cap would dead-end into an unreadable duration.
-  if (!Platform.isLinux) {
-    final playerMetadata = await _loadWithVideoPlayer(uri);
-    if (playerMetadata != null) return playerMetadata;
-  }
+  // Windows and Linux register media_kit as their video_player backend in
+  // main.dart. Probe the player first, including videos over the MP4 fallback's
+  // size cap and non-MP4 formats supported by the native player.
+  final playerMetadata = await _loadWithVideoPlayer(uri);
+  if (playerMetadata != null) return playerMetadata;
   try {
     return parseMp4Metadata(await _readMp4Bytes(uri));
   } on Object {

@@ -1174,6 +1174,7 @@ void main() {
     final backend = ProcessReferenceVideoToolBackend(
       ffmpegPath: '$toolsDirectory${Platform.pathSeparator}ffmpeg',
       ffprobePath: '$toolsDirectory${Platform.pathSeparator}ffprobe',
+      h264Encoder: Platform.isLinux ? 'libx264' : 'h264_videotoolbox',
     );
     final sourceFile = File('${temporary.path}/source.mov');
     final generated = await backend.runFfmpeg(<String>[
@@ -1191,9 +1192,8 @@ void main() {
       '-t',
       '0.5',
       '-c:v',
-      'h264_videotoolbox',
-      '-allow_sw',
-      '1',
+      Platform.isLinux ? 'libx264' : 'h264_videotoolbox',
+      if (!Platform.isLinux) ...['-allow_sw', '1'],
       '-pix_fmt',
       'yuv420p',
       '-c:a',

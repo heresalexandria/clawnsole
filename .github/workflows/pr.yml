@@ -24,6 +24,7 @@ jobs:
       electron: ${{ steps.paths.outputs.electron }}
       macos: ${{ steps.paths.outputs.macos }}
       windows: ${{ steps.paths.outputs.windows }}
+      linux: ${{ steps.paths.outputs.linux }}
       release_scripts: ${{ steps.paths.outputs.release_scripts }}
     steps:
       - uses: actions/checkout@v7
@@ -41,6 +42,7 @@ jobs:
           electron=false
           macos=false
           windows=false
+          linux=false
           release_scripts=false
 
           while IFS= read -r path; do
@@ -49,6 +51,7 @@ jobs:
                 flutter=true
                 macos=true
                 windows=true
+                linux=true
                 ;;
               electron/*)
                 electron=true
@@ -65,6 +68,7 @@ jobs:
                 electron=true
                 macos=true
                 windows=true
+                linux=true
                 release_scripts=true
                 ;;
               scripts/release/*)
@@ -73,6 +77,7 @@ jobs:
               .github/workflows/release.yml|claw.png|icon.png|scripts/prepare_platform_icons|scripts/render_platform_icon.swift)
                 macos=true
                 windows=true
+                linux=true
                 ;;
               docs/models/*)
                 site=true
@@ -90,6 +95,7 @@ jobs:
                 electron=true
                 macos=true
                 windows=true
+                linux=true
                 ;;
             esac
           done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
@@ -100,6 +106,7 @@ jobs:
             echo "electron=$electron"
             echo "macos=$macos"
             echo "windows=$windows"
+            echo "linux=$linux"
             echo "release_scripts=$release_scripts"
           } >> "$GITHUB_OUTPUT"
 
@@ -251,3 +258,70 @@ jobs:
             throw "Clawnsole exited during the Windows smoke test with code $($process.ExitCode)."
           }
           Stop-Process -Id $process.Id
+
+  linux-package:
+    name: Linux ${{ matrix.arch }} package check
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        if: matrix.arch == 'x64'
+        with:
+          channel: stable
+          flutter-version: 3.47.0
+          architecture: x64
+          cache: true
+      - name: Set up pinned Flutter SDK on ARM64
+        if: matrix.arch == 'arm64'
+        # Flutter publishes the ARM64 Dart/engine artifacts but no matching
+        # Linux ARM64 SDK archive. Bootstrap the exact same release from source.
+        run: |
+          sdk="$RUNNER_TEMP/flutter-3.47.0"
+          git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git "$sdk"
+          test "$(git -C "$sdk" rev-parse HEAD)" = 4cf24164269a5ebf0c16a028a00727d0e77bbb05
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+          "$sdk/bin/flutter" config --enable-linux-desktop --no-analytics
+          "$sdk/bin/flutter" precache --linux
+      - name: Install Linux build and smoke-test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libsecret-1-dev libmpv-dev libepoxy-dev ffmpeg \
+            dpkg-dev xvfb xauth dbus-x11 gnome-keyring xdg-user-dirs xdg-utils
+      - name: Build Linux desktop packages
+        env:
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_ID }}
+          CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET }}
+        run: ./flutter/scripts/build_linux
+      - name: Exercise Linux media tools
+        working-directory: flutter
+        env:
+          CLAWNSOLE_TEST_MEDIA_TOOLS_DIR: /usr/bin
+        run: >-
+          flutter test test/ffmpeg_video_frame_loader_test.dart
+          test/reference_video_normalizer_test.dart
+      - name: Install and smoke-test the Debian package
+        run: |
+          sudo apt-get install -y ./flutter/build/linux/packages/*.deb
+          ./flutter/scripts/smoke_linux /opt/clawnsole
+      - name: Extract and smoke-test the archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/linux-archive"
+          tar -xzf flutter/build/linux/packages/*.tar.gz -C "$RUNNER_TEMP/linux-archive"
+          ./flutter/scripts/smoke_linux "$RUNNER_TEMP/linux-archive/Clawnsole"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}-packages
+          path: flutter/build/linux/packages/*
+          retention-days: 7
+          if-no-files-found: error

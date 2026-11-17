@@ -19,7 +19,7 @@ the element selector, Prev, and Next sit directly below the editor, followed by
 the suggestion tags.
 The Enter / Tab hint sits directly above the text entry area. The expanded editor
 includes the same controls, and the shared Flutter implementation serves native
-Windows, iOS/Android, and the macOS Electron renderer.
+Windows and Linux, iOS/Android, and the macOS Electron renderer.
 
 The format is saved per draft. It formats scene headings, character cues,
 action, dialogue, parentheticals, and transitions using the bundled Courier

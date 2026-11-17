@@ -1,8 +1,9 @@
 # Clawnsole for Flutter
 
 This directory is the canonical Clawnsole implementation for iOS, Android,
-native Windows, and the Electron macOS renderer. Flutter web is retained as the
-internal Electron renderer and local companion-backed development harness, not
+native Windows and Linux, and the Electron macOS renderer. Flutter web is
+retained as the internal Electron renderer and local companion-backed
+development harness, not
 as a standalone hosted product. Product behavior belongs here; Electron owns
 only macOS desktop lifecycle, packaging, and self-update.
 
@@ -113,6 +114,7 @@ and keep Flutter attached for hot reload:
 ./scripts/start_android
 ./scripts/start_macos
 ./scripts/start_windows
+./scripts/start_linux
 ```
 
 `start_web` starts the loopback companion, waits for its health check, opens
@@ -123,11 +125,13 @@ running Android emulator or launches the first configured Android AVD.
 opens the thin Electron shell.
 `start_windows` runs the native Flutter desktop app and must be invoked on a
 Windows machine with Visual Studio's Desktop development with C++ workload.
+`start_linux` runs the native Flutter desktop app on Linux; see the Linux
+dependencies below.
 
 Optional Google Drive support is shared by every surface. Configure the
 platform OAuth client before launching:
 
-- macOS Electron and native Windows:
+- macOS Electron, native Windows, and native Linux:
   `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID` (and the optional installed-app client
   secret)
 - Android: `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`, using the registered
@@ -157,6 +161,75 @@ flutter run -d android
 Android release builds require your own signing configuration before store
 distribution. iOS device/archive builds require an Apple development team and
 the usual Xcode signing setup.
+
+## Linux
+
+Native x64 and ARM64 Linux builds target Ubuntu 24.04 or later. Download the
+package that matches `uname -m`: `x86_64` uses x64, and `aarch64` uses ARM64.
+
+| Architecture | Debian/Ubuntu package | Archive |
+|---|---|---|
+| x64 | [Clawnsole-linux-x64.deb](https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.deb) | [Clawnsole-linux-x64.tar.gz](https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.tar.gz) |
+| ARM64 | [Clawnsole-linux-arm64.deb](https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.deb) | [Clawnsole-linux-arm64.tar.gz](https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.tar.gz) |
+
+Install the downloaded package with APT so its dependencies are installed too:
+
+```bash
+# Use Clawnsole-linux-arm64.deb on ARM64.
+sudo apt install ./Clawnsole-linux-x64.deb
+```
+
+Launch **Clawnsole** from the desktop application menu. Linux needs a graphical
+desktop with a running Secret Service keyring, such as GNOME Keyring, for
+provider credentials and Google Drive tokens. Unlock the keyring when signing
+in to the desktop. The app uses libmpv for video playback and system FFmpeg
+and FFprobe for reference conversion, trimming, metadata, and thumbnails.
+The `.deb` declares the media dependencies and recommends GNOME Keyring.
+
+The archive is an alternative for compatible distributions. Install GTK 3,
+libsecret, libmpv2, FFmpeg/FFprobe, `xdg-user-dirs`, `xdg-utils`, and a Secret
+Service keyring using your distribution's package manager, extract the entire archive, and run the
+included `Clawnsole` executable. Keep its `lib/` and `data/` directories together.
+The archive is not a fully static binary, so distributions older than Ubuntu
+24.04's system libraries are not supported. Release assets are covered by the
+release's `SHA256SUMS.txt`.
+
+The library stays in `Clawnsole/` inside the XDG Documents directory, usually
+`~/Documents/Clawnsole`, or the folder selected in Settings. Installing a newer
+`.deb` or replacing the extracted application folder preserves that library.
+Linux uses the same Desktop OAuth configuration as Windows for optional Drive
+sync. Apple Intelligence and iCloud reference hosting remain Apple-specific.
+
+To build from source on Ubuntu 24.04 or later, install the native toolchain:
+
+```bash
+sudo apt update
+sudo apt install clang cmake ninja-build pkg-config dpkg-dev libgtk-3-dev \
+  libsecret-1-dev libmpv-dev libepoxy-dev ffmpeg gnome-keyring \
+  xdg-user-dirs xdg-utils
+./scripts/start_linux
+./scripts/build_linux
+```
+
+CI pins Flutter 3.47.0. On ARM64, that release has native Dart and engine
+artifacts but no prepackaged Linux SDK archive. Bootstrap its official source
+checkout before running the scripts above:
+
+```bash
+git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git ~/flutter-3.47.0
+export PATH="$HOME/flutter-3.47.0/bin:$PATH"
+flutter config --enable-linux-desktop --no-analytics
+flutter precache --linux
+```
+
+Build on the target architecture: x64 hosts produce x64 packages and ARM64 hosts
+produce ARM64 packages. `build_linux` writes the Flutter bundle under
+`build/linux/<architecture>/release/bundle` and versioned `.deb` and `.tar.gz`
+packages under `build/linux/packages`. CI builds and smoke-tests both
+architectures. Optional OAuth values come from
+`CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID` and
+`CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET`; release builds reject caller-supplied
+Dart defines and never compile provider credentials.
 
 ## Develop the internal web renderer
 
@@ -211,7 +284,7 @@ the registered `iCloud.app.clawnsole.clawnsole` container for the production App
 ID. Development and distribution profiles must include that association before
 signing. `Runner.entitlements` enables only `CloudDocuments`; no CloudKit database
 or key-value storage is used. The native service is shared with Electron's macOS
-helper, while Android and Windows report this storage option as unavailable.
+helper, while Android, Windows, and Linux report this storage option as unavailable.
 The simulator can verify unavailable-account behavior, but upload/publication
 requires a signed-in physical Apple device. Continue using the root iOS release
 entry point below; no provider credentials are needed for this capability.
@@ -222,6 +295,7 @@ entry point below; no provider credentials are needed for this capability.
 ./scripts/build_android
 ./scripts/build_macos
 ./scripts/build_windows
+./scripts/build_linux
 ```
 
 - `build_web` creates `build/web` and compiles the companion into the standalone
@@ -254,7 +328,7 @@ entry point below; no provider credentials are needed for this capability.
   ordinary `BFL_API_KEY`, `LTX_API_KEY`, `ARTCRAFT_KEY`, and
   `ATLAS_CLOUD_KEY` names act as development/App Review fallbacks. The script
   passes credentials only to the iOS compiler when the opt-in is true;
-  Android, macOS, Windows, and the internal renderer build do not receive
+  Android, macOS, Windows, Linux, and the internal renderer build do not receive
   these legacy keys.
 - A release PR may also carry `mobile-test`. Release automation compiles only
   `ARTCRAFT_TEST_KEY` into its iOS build with
@@ -278,6 +352,9 @@ entry point below; no provider credentials are needed for this capability.
   credential variables so API keys cannot be compiled into the executable. Its
   Drive refresh token is stored with the operating-system-backed secure storage
   plugin.
+- `build_linux` creates native x64 or ARM64 `.deb` and `.tar.gz` packages under
+  `build/linux/packages`. It uses the system media libraries and Secret Service
+  keyring and applies the same provider-credential exclusion as Windows.
 
 All build scripts accept extra Flutter build arguments such as `--build-name`
 and `--build-number`.

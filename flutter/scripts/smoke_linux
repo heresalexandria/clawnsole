@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Verify a real installed/extracted Linux bundle without touching user data."""
+
+import argparse
+import ctypes
+import ctypes.util
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import shutil
+import signal
+import subprocess
+import tempfile
+import time
+
+
+def run(*arguments, **kwargs):
+    return subprocess.run(arguments, check=True, timeout=30, **kwargs)
+
+
+def verify_media(directory):
+    video = directory / "smoke.mp4"
+    run("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+        "color=c=blue:s=64x64:r=10", "-t", "1", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", str(video))
+    result = run("ffprobe", "-v", "error", "-show_streams", "-of", "json",
+                 str(video), capture_output=True, text=True)
+    streams = json.loads(result.stdout)["streams"]
+    assert any(stream.get("codec_name") == "h264" for stream in streams), \
+        "FFmpeg did not produce a playable H.264 reference"
+    thumbnail = directory / "thumbnail.jpg"
+    run("ffmpeg", "-nostdin", "-v", "error", "-i", str(video), "-frames:v",
+        "1", str(thumbnail))
+    assert thumbnail.stat().st_size > 0, "FFmpeg did not produce a thumbnail"
+
+    # Exercise the same system libmpv used by the media_kit plugin. Loading its
+    # shared object alone would not prove that its codec stack can decode video.
+    library = ctypes.util.find_library("mpv")
+    assert library, "The system libmpv playback library is unavailable"
+    mpv = ctypes.CDLL(library)
+    mpv.mpv_create.restype = ctypes.c_void_p
+    mpv.mpv_initialize.argtypes = [ctypes.c_void_p]
+    mpv.mpv_set_option_string.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                         ctypes.c_char_p]
+    mpv.mpv_command.argtypes = [ctypes.c_void_p,
+                               ctypes.POINTER(ctypes.c_char_p)]
+    mpv.mpv_get_property.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                    ctypes.c_int, ctypes.c_void_p]
+    mpv.mpv_terminate_destroy.argtypes = [ctypes.c_void_p]
+    handle = mpv.mpv_create()
+    assert handle, "libmpv could not create a player"
+    try:
+        for key, value in ((b"vo", b"null"), (b"ao", b"null"),
+                           (b"keep-open", b"yes")):
+            assert mpv.mpv_set_option_string(handle, key, value) == 0
+        assert mpv.mpv_initialize(handle) == 0, "libmpv initialization failed"
+        command = (ctypes.c_char_p * 3)(b"loadfile", os.fsencode(video), None)
+        assert mpv.mpv_command(handle, command) == 0, "libmpv could not open video"
+        deadline = time.monotonic() + 10
+        width = ctypes.c_int64()
+        while time.monotonic() < deadline:
+            # MPV_FORMAT_INT64 = 4; width only appears after video decoding starts.
+            if mpv.mpv_get_property(handle, b"width", 4, ctypes.byref(width)) == 0:
+                assert width.value == 64, "libmpv decoded unexpected dimensions"
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("libmpv never decoded the smoke video")
+    finally:
+        mpv.mpv_terminate_destroy(handle)
+
+
+def verify_app(bundle, directory):
+    executable = bundle / "Clawnsole"
+    assert executable.is_file() and os.access(executable, os.X_OK), \
+        f"Missing Linux executable: {executable}"
+    for binary in [executable, *sorted((bundle / "lib").glob("*.so*"))]:
+        dependencies = subprocess.run(["ldd", str(binary)], capture_output=True,
+                                      text=True, timeout=10)
+        assert "not found" not in dependencies.stdout + dependencies.stderr, \
+            f"Unresolved shared library for {binary}:\n{dependencies.stdout}"
+
+    profile = directory / "profile"
+    environment = os.environ.copy()
+    for variable, folder in (("XDG_CONFIG_HOME", "config"),
+                             ("XDG_DATA_HOME", "data"),
+                             ("XDG_CACHE_HOME", "cache"),
+                             ("XDG_RUNTIME_DIR", "runtime")):
+        destination = profile / folder
+        destination.mkdir(parents=True, mode=0o700)
+        environment[variable] = str(destination)
+    documents = profile / "documents"
+    documents.mkdir()
+    (profile / "config" / "user-dirs.dirs").write_text(
+        f'XDG_DOCUMENTS_DIR="{documents}"\n')
+    environment.update(CLAWNSOLE_LINUX_SMOKE="1", LIBGL_ALWAYS_SOFTWARE="1",
+                       GDK_BACKEND="x11")
+    # Always create our own session bus, keyring and display. The app's ordinary
+    # single-instance registration cannot attach to an existing user's process.
+    command = ["dbus-run-session", "--", "bash", "-e", "-c",
+               'printf "\\n" | gnome-keyring-daemon --unlock --components=secrets; '
+               'exec xvfb-run -a "$@"', "clawnsole-smoke", str(executable)]
+    log = directory / "startup.log"
+    process = None
+    try:
+        with log.open("w") as output:
+            process = subprocess.Popen(command, cwd=bundle, env=environment,
+                                       stdout=output, stderr=subprocess.STDOUT,
+                                       start_new_session=True)
+            deadline = time.monotonic() + 40
+            first_frame_at = None
+            while time.monotonic() < deadline:
+                contents = log.read_text(errors="replace")
+                if process.poll() is not None:
+                    raise RuntimeError(f"Clawnsole exited early: {process.returncode}")
+                if re.search(r"Unhandled Exception|MissingPluginException|"
+                             r"ERROR:flutter/runtime/dart_vm_initializer", contents):
+                    raise RuntimeError("Clawnsole reported a Dart startup failure")
+                if "CLAWNSOLE_LINUX_FIRST_FRAME" in contents:
+                    first_frame_at = first_frame_at or time.monotonic()
+                    if time.monotonic() - first_frame_at >= 5:
+                        return
+                time.sleep(0.25)
+            raise RuntimeError("Clawnsole never rendered its first Flutter frame")
+    except BaseException:
+        if log.exists():
+            print(log.read_text(errors="replace"), flush=True)
+        raise
+    finally:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    architecture = "arm64" if platform.machine() in ("aarch64", "arm64") else "x64"
+    default = Path(__file__).resolve().parents[1] / "build/linux" / architecture \
+        / "release/bundle"
+    parser.add_argument("bundle", nargs="?", type=Path, default=default)
+    arguments = parser.parse_args()
+    if platform.system() != "Linux":
+        parser.error("The Linux smoke test must run on Linux")
+    for command in ("ldd", "ffmpeg", "ffprobe", "dbus-run-session", "xvfb-run",
+                    "xauth", "gnome-keyring-daemon", "xdg-user-dir"):
+        if not shutil.which(command):
+            parser.error(f"Required smoke-test command is missing: {command}")
+    with tempfile.TemporaryDirectory(prefix="clawnsole-linux-smoke-") as temporary:
+        directory = Path(temporary)
+        verify_media(directory)
+        verify_app(arguments.bundle.resolve(), directory)
+    print("Linux smoke passed: H.264 encode/probe/thumbnail, libmpv decode, "
+          "shared libraries, and packaged Flutter first frame.")
+
+
+if __name__ == "__main__":
+    main()

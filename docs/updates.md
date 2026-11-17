@@ -8,8 +8,11 @@ for Updates…** or from the version beside the wordmark in the app's top bar.
 Native Windows builds send available updates to the GitHub release for a manual
 download, and the dialog spells out the steps: download the new ZIP, extract
 it, and replace the `Clawnsole` folder — the library lives outside that folder
-and is not touched. Development builds explain that they update through git
-instead of replacing themselves.
+and is not touched. Native Linux builds also open the release: install the newer
+`.deb` or replace the extracted archive's app folder. Linux history stays in
+the separate XDG Documents `Clawnsole/` directory or the location selected in
+Settings, and keys remain in the desktop keyring. Development builds explain
+that they update through git instead of replacing themselves.
 
 When the platform's release source successfully reports a newer **major**
 version, Clawnsole blocks continued use until the update begins. macOS uses the
@@ -26,8 +29,8 @@ therefore decoupled from GitHub release timing.
 
 The Flutter top bar always shows the running version. On viewports at least 900
 pixels wide, a newer release adds an animated blue-purple **Update Available**
-chip beside the version. Packaged macOS can install from that chip; Windows and
-development builds open the update dialog and release link. Compact
+chip beside the version. Packaged macOS can install from that chip; Windows,
+Linux, and development builds open the update dialog and release link. Compact
 viewports and native mobile apps keep the header uncluttered and flash an update
 notification instead. iOS leaves installation to the App Store.
 Opening the version dialog re-checks immediately outside store-managed builds;
@@ -42,7 +45,7 @@ shell's persisted 24-hour throttle, while other surfaces query on the shared
 Where the shell can install in place, the dialog's primary action is
 **Download and install <version>** uses the same verified pipeline as the system
 menu, not a link to GitHub. It falls back to a release link only when there is
-no self-updating shell, including native Windows, and says
+no self-updating shell, including native Windows and Linux, and says
 so plainly when an unpackaged development build declines to replace itself.
 
 ## Renderer bridge

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'video_frame_loader_io.dart'
     if (dart.library.html) 'video_frame_loader_web.dart'
     as platform;
@@ -13,6 +15,11 @@ typedef VideoFrameLoader =
 typedef SizedVideoFrameLoader =
     Future<Uint8List?> Function(Uri uri, Duration position, {int maxWidth});
 
+/// Replaces native frame extraction in widget tests. Process-backed decoders
+/// cannot run inside the widget binding's fake async zone.
+@visibleForTesting
+SizedVideoFrameLoader? debugVideoFrameLoaderOverride;
+
 /// Reads one JPEG frame at [position], scaled so the image is at most
 /// [maxWidth] wide. The default matches the filmstrip thumbnails; callers
 /// that hand frames to a model ask for more detail than that.
@@ -20,4 +27,8 @@ Future<Uint8List?> loadVideoFrame(
   Uri uri,
   Duration position, {
   int maxWidth = 180,
-}) => platform.loadVideoFrame(uri, position, maxWidth: maxWidth);
+}) => (debugVideoFrameLoaderOverride ?? platform.loadVideoFrame)(
+  uri,
+  position,
+  maxWidth: maxWidth,
+);

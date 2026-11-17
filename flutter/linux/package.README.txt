@@ -1,0 +1,26 @@
+Clawnsole for Linux
+
+The release is built on Ubuntu 24.04 LTS for x64 or ARM64. Use the matching
+architecture. Older Linux distributions are not supported by these binaries.
+
+Ubuntu/Debian desktop installation (recommended):
+  sudo apt install ./Clawnsole-VERSION-linux-ARCH.deb
+Then open Clawnsole from your application menu, or run: clawnsole
+
+Archive installation:
+  sudo apt install libgtk-3-0t64 libsecret-1-0 libmpv2 ffmpeg gnome-keyring xdg-user-dirs xdg-utils
+  tar -xzf Clawnsole-VERSION-linux-ARCH.tar.gz
+  ./Clawnsole/Clawnsole
+Keep the entire extracted directory together, including its lib/ and data/.
+The archive uses the host's libraries; it is not a self-contained AppImage.
+
+Clawnsole uses the desktop Secret Service (such as GNOME Keyring) to protect
+stored credentials. Run in a graphical desktop session with an unlocked keyring.
+FFmpeg/ffprobe provide video thumbnails and reference-video normalization;
+libmpv provides video playback. Provider API keys are entered in the app.
+
+Updates are installed manually using the new .deb or extracted archive.
+Your library is stored separately from the application directory.
+
+Source, license, and release checksums:
+  https://github.com/heresalexandria/clawnsole
