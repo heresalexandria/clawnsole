@@ -373,11 +373,23 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
       - uses: subosito/flutter-action@v2
+        if: matrix.arch == 'x64'
         with:
           channel: stable
           flutter-version: 3.47.0
-          architecture: ${{ matrix.arch }}
+          architecture: x64
           cache: true
+      - name: Set up pinned Flutter SDK on ARM64
+        if: matrix.arch == 'arm64'
+        # Flutter publishes the ARM64 Dart/engine artifacts but no matching
+        # Linux ARM64 SDK archive. Bootstrap the exact same release from source.
+        run: |
+          sdk="$RUNNER_TEMP/flutter-3.47.0"
+          git clone --depth 1 --branch 3.47.0 https://github.com/flutter/flutter.git "$sdk"
+          test "$(git -C "$sdk" rev-parse HEAD)" = 4cf24164269a5ebf0c16a028a00727d0e77bbb05
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+          "$sdk/bin/flutter" config --enable-linux-desktop --no-analytics
+          "$sdk/bin/flutter" precache --linux
       - name: Install Linux build and smoke-test dependencies
         run: |
           sudo apt-get update
