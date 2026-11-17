@@ -53,6 +53,7 @@ dependencies:
   fc_native_video_thumbnail: ^2.2.0
   video_player_media_kit: ^2.0.0
   media_kit_libs_windows_video: ^1.0.11
+  media_kit_libs_linux: ^1.2.1
   reference_video_tools:
     path: packages/reference_video_tools
   flutter_svg: ^2.3.0

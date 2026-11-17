@@ -114,7 +114,7 @@ this credential.
 
 ## Update checks and external links
 
-The macOS, Windows, iOS, and Android builds ask GitHub's public releases
+The macOS, Windows, Linux, iOS, and Android builds ask GitHub's public releases
 API whether a newer Clawnsole version exists once per app launch, every 24 hours
 while running, and when you manually check where that action is available. That
 request carries no provider API key, prompt, media, or history. GitHub receives
@@ -130,7 +130,7 @@ destination site's policy.
 The splash page at `https://clawnsole.app/` uses Google Analytics to understand
 visits and interactions, evaluate site performance, and decide what to improve.
 The Analytics tag is not present on the privacy policy, terms of use, or
-installed macOS, Windows, iOS, and Android apps.
+installed macOS, Windows, Linux, iOS, and Android apps.
 
 The splash page uses the time zone reported by your browser through JavaScript's
 `Intl.DateTimeFormat` API as a best-effort estimate of whether you are in the

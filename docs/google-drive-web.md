@@ -1,8 +1,9 @@
 # Google Drive and encrypted settings sync
 
 Clawnsole can connect the same app-owned Drive folder from Electron macOS,
-native Windows, iOS, and Android. The installed apps keep a local library and
-show Local and Drive items together with explicit provenance and filters.
+native Windows and Linux, iOS, and Android. The installed apps keep a local
+library and show Local and Drive items together with explicit provenance and
+filters.
 
 The public, standalone browser app has been retired because provider APIs do
 not consistently allow browser CORS. Flutter web remains an internal renderer:
@@ -42,8 +43,8 @@ reported expiration, and an ambiguous publication with unknown expiry remains
 visible. The 24-hour orphan source-cleanup policy does not revoke published
 snapshots. Paid requests with uncertain acceptance are not blindly resent.
 
-Public URLs and text generation remain supported on every platform. Android and
-Windows do not offer native iCloud reference publication. New references never
+Public URLs and text generation remain supported on every platform. Android,
+Windows, and Linux do not offer native iCloud reference publication. New references never
 silently fall back to Google Drive. Older Drive-hosting leases retain their
 original backend and account identifiers for cleanup: Clawnsole revokes their
 unlisted permissions and trashes owned copies when that account is available.
@@ -71,8 +72,9 @@ The settings vault uses a random data-encryption key and XChaCha20-Poly1305.
 A one-time sync passphrase on each new device derives the key that unlocks that
 random key; neither the passphrase nor a verifier is stored. A recovery code is
 shown once during setup. The unlocked vault key is cached only in platform
-secure storage: iOS Keychain, Windows secure storage, or Electron `safeStorage`
-on macOS. Changing the passphrase does not invalidate already unlocked devices.
+secure storage: iOS Keychain, Windows secure storage, Linux Secret Service, or
+Electron `safeStorage` on macOS. Changing the passphrase does not invalidate
+already unlocked devices.
 
 Disconnecting Drive leaves local credentials and the encrypted Drive files in
 place. **Forget cached unlock** removes only that device's remembered vault key.
@@ -224,7 +226,7 @@ stuck saying it is not on Drive.
    `https://clawnsole.app/`, `https://clawnsole.app/privacy/`, and
    `https://clawnsole.app/tos/`.
 3. Configure the installed-app clients:
-   - **macOS Electron and Windows:** a Desktop app client exposed as
+   - **macOS Electron, Windows, and Linux:** a Desktop app client exposed as
      `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID`. The optional installed-app client
      secret may be supplied as `CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET`.
    - **iOS:** register bundle ID `app.clawnsole.clawnsole`, create an iOS client,
@@ -233,9 +235,10 @@ stuck saying it is not on Drive.
      fingerprints, then set the matching web client ID as
      `CLAWNSOLE_GOOGLE_ANDROID_SERVER_CLIENT_ID`.
 
-macOS and Windows use system-browser OAuth with a loopback redirect and PKCE.
-The mobile Google SDK manages its native session. The macOS refresh token is
-encrypted with Electron `safeStorage`; Windows uses OS-backed secure storage.
+macOS, Windows, and Linux use system-browser OAuth with a loopback redirect and
+PKCE. The mobile Google SDK manages its native session. The macOS refresh token is
+encrypted with Electron `safeStorage`; Windows uses OS-backed secure storage,
+and Linux uses the desktop Secret Service keyring.
 
 For release workflows, configure `GOOGLE_DESKTOP_OAUTH_CLIENT_ID` and, only
 when required, `GOOGLE_DESKTOP_OAUTH_CLIENT_SECRET`. iOS signing and its OAuth

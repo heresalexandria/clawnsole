@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Clawnsole
+Comment=Local-first multi-provider AI video generation
+Exec=clawnsole
+Icon=app.clawnsole.clawnsole
+Terminal=false
+Categories=AudioVideo;Video;Graphics;
+StartupWMClass=app.clawnsole.clawnsole
+StartupNotify=true

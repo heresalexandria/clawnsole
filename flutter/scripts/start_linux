@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_linux_common.sh"
+
+if [[ "${1:-}" == --help ]]; then
+  echo "Usage: ./flutter/scripts/start_linux [additional flutter run arguments]"
+  echo "Requires Linux x64/ARM64, Flutter, GTK 3, libsecret, libmpv, and FFmpeg."
+  echo "Optional Drive OAuth uses CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID and"
+  echo "CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_SECRET."
+  exit 0
+fi
+
+print_heading "Linux desktop"
+prepare_linux
+linux_oauth_arguments
+flutter run -d linux \
+  "${CLAWNSOLE_SITE_BUILD_ARGUMENT[@]}" \
+  "${LINUX_OAUTH_ARGUMENTS[@]}" \
+  "$@"

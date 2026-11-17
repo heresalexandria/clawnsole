@@ -10,6 +10,19 @@
   <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-mac-arm64.dmg"><strong>Download the latest macOS build (Apple silicon)</strong></a>
   ·
   <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-windows-x64.zip"><strong>Download the latest Windows build (x64)</strong></a>
+  ·
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.deb"><strong>Linux x64 (.deb)</strong></a>
+  ·
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.deb"><strong>Linux ARM64 (.deb)</strong></a>
+</p>
+
+<p align="center">
+  Linux archives:
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.tar.gz">x64 (.tar.gz)</a>
+  ·
+  <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.tar.gz">ARM64 (.tar.gz)</a>
+  ·
+  <a href="flutter/README.md#linux">Linux installation help</a>
 </p>
 
 <p align="center">
@@ -78,7 +91,7 @@ and optional Google Drive sync keep work organized wherever you create.
 - Uncapped compact history with retained media files and granular clear controls
 - OS-secure API-key storage with no database, `localStorage`, or IndexedDB
   history in installed builds
-- Optional Google Drive history/media sync across macOS, Windows, iOS, and
+- Optional Google Drive history/media sync across macOS, Windows, Linux, iOS, and
   Android, plus passphrase-encrypted provider-key and preference sync with a
   one-time recovery code
 - A Providers desk for per-provider keys, console/docs links, live Atlas Cloud,
@@ -93,10 +106,10 @@ and optional Google Drive sync keep work organized wherever you create.
 
 ## One studio, every screen
 
-The same Clawnsole workflow runs on iOS, Android, macOS, and Windows.
-Flutter owns all product behavior, including the native Windows app. Electron
-is only the macOS lifecycle and self-update shell around Flutter's web build and
-local Dart companion. Flutter web remains the internal Electron renderer and a
+The same Clawnsole workflow runs on iOS, Android, macOS, Windows, and Linux.
+Flutter owns all product behavior, including the native Windows and Linux
+apps. Electron is only the macOS lifecycle and self-update shell around
+Flutter's web build and local Dart companion. Flutter web remains the internal Electron renderer and a
 local development harness; the standalone hosted app has been retired. The old
 root Next.js implementation has also been removed.
 
@@ -106,6 +119,7 @@ root Next.js implementation has also been removed.
 ./flutter/scripts/start_android
 ./flutter/scripts/start_macos
 ./flutter/scripts/start_windows
+./flutter/scripts/start_linux
 
 # internal companion-backed renderer development
 ./flutter/scripts/start_web
@@ -118,6 +132,7 @@ The matching deployable builds are:
 ./flutter/scripts/build_android
 ./flutter/scripts/build_macos
 ./flutter/scripts/build_windows
+./flutter/scripts/build_linux
 
 # internal Electron renderer/companion build
 ./flutter/scripts/build_web
@@ -126,14 +141,20 @@ The matching deployable builds are:
 See [Flutter setup](flutter/README.md) and [macOS desktop packaging](electron/README.md).
 Windows scripts run on Windows with Visual Studio and its Desktop development
 with C++ workload installed.
+Linux builds target x64 and ARM64 on Ubuntu 24.04 or later, with `.deb` packages
+and `.tar.gz` archives. The `.deb` installs media dependencies; a running desktop
+Secret Service keyring keeps provider keys and Drive tokens secure. See the
+[Linux setup and install instructions](flutter/README.md#linux).
 
 ## Persistence
 
 Clawnsole has no database. Native mobile apps store `clawnsole.json` inside
 their application sandbox; native Windows stores it in
 `%LOCALAPPDATA%\Clawnsole` (a library that already lives in
-`Documents\Clawnsole` keeps being used). Electron's companion stores the same
-compact schema in a local file, with retained inputs and videos in an adjacent
+`Documents\Clawnsole` keeps being used). Linux stores the library in `Clawnsole/`
+inside the user's XDG Documents directory (usually `~/Documents/Clawnsole`).
+Electron's companion stores the same compact schema in a local file, with
+retained inputs and videos in an adjacent
 `assets/` directory. Every write replaces the file atomically and keeps the
 previous copy beside it as `clawnsole.json.bak`, which is read back
 automatically if the main file is ever missing or damaged. Desktop installs can
@@ -181,15 +202,17 @@ See [Google Drive and encrypted settings sync](docs/google-drive-web.md).
 - `flutter/tool/clawnsole_companion.dart`: loopback web/API/media companion
 - `electron/`: macOS shell, packaging, checksum-verified GitHub updater
 - `flutter/windows/`: native Windows runner and product metadata
-- `.github/workflows/`: PR checks plus parallel iOS, macOS, and Windows releases
+- `flutter/linux/`: native Linux runner, launcher, and package metadata
+- `.github/workflows/`: PR checks plus parallel iOS, macOS, Windows, and Linux releases
 
 ## Releases and desktop updates
 
 Merging a PR with exactly one of `major`, `minor`, `patch`, or `no-release`
-drives parallel iOS, macOS, and Windows release builds from one synchronized
+drives parallel iOS, macOS, Windows, and Linux release builds from one synchronized
 release commit. macOS is signed and notarized; Windows is currently distributed
-as an unsigned x64 ZIP. iOS is signed on an ephemeral GitHub-hosted Mac and
-uploaded directly to App Store Connect. The IPA is never stored as an Actions
+as an unsigned x64 ZIP. Linux ships x64 and ARM64 `.deb` packages and `.tar.gz`
+archives, all covered by `SHA256SUMS.txt`. iOS is signed on an ephemeral
+GitHub-hosted Mac and uploaded directly to App Store Connect. The IPA is never stored as an Actions
 artifact or attached to the GitHub release, and the workflow does not wait for
 Apple's asynchronous processing or review. A manual dispatch can cut a release,
 retry the current synchronized version, or omit iOS when that exact build is
@@ -201,8 +224,9 @@ App Store; the other surfaces read GitHub Releases. Packaged Electron builds
 also expose **Clawnsole → Check for Updates…**; an accepted update downloads the
 architecture-matched ZIP, verifies `SHA256SUMS.txt`, replaces the installed app
 with rollback, and reopens it. Windows updates open the GitHub release for a
-manual download, while iOS remains under normal App Store distribution
-semantics.
+manual download. Linux updates also open the release: install the newer `.deb`
+or replace the extracted app folder; the library stays separate. iOS remains
+under normal App Store distribution semantics.
 
 See [release setup](docs/releases.md) and [desktop updates](docs/updates.md).
 

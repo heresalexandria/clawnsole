@@ -25,7 +25,7 @@ const _androidServerClientId = String.fromEnvironment(
 const _refreshTokenKey = 'clawnsole.googleDrive.refreshToken.v1';
 
 GoogleDriveAuthorizer createPlatformGoogleDriveAuthorizer() =>
-    Platform.isWindows
+    (Platform.isWindows || Platform.isLinux)
     ? DesktopGoogleDriveAuthorizer()
     : (Platform.isAndroid || Platform.isIOS)
     ? _MobileGoogleDriveAuthorizer()
@@ -118,7 +118,7 @@ class DesktopGoogleDriveAuthorizer implements GoogleDriveAuthorizer {
 
   @override
   String get unavailableMessage =>
-      'Configure CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID to enable Drive on Windows.';
+      'Configure CLAWNSOLE_GOOGLE_DESKTOP_CLIENT_ID to enable Drive on this desktop.';
 
   @override
   Future<String> authorize() async {

@@ -30,16 +30,17 @@ These instructions apply to the whole repository.
 
 ## Supported surfaces
 
-Clawnsole is one Flutter product delivered through four installed targets:
+Clawnsole is one Flutter product delivered through five installed targets:
 
 - `flutter/`: the canonical UI, provider contracts, pricing, persistence, and
-  platform gateways for iOS, Android, native Windows, and the internal web
-  renderer used by Electron.
+  platform gateways for iOS, Android, native Windows and Linux, and the internal
+  web renderer used by Electron.
 - `electron/`: a thin macOS shell around the compiled Flutter web app and Dart
   companion. It owns desktop lifecycle, packaging, and self-update only.
 
 Flutter web is an internal renderer/development harness, not a standalone
-hosted product. iOS, Android, native Windows, and Electron macOS are supported.
+hosted product. iOS, Android, native Windows and Linux, and Electron macOS are
+supported.
 Treat functional changes as cross-platform by default. A platform exception
 must be required by the platform and documented in the change.
 
@@ -51,6 +52,8 @@ desktop entry points live beside the other Flutter scripts:
 ./flutter/scripts/build_macos
 ./flutter/scripts/start_windows
 ./flutter/scripts/build_windows
+./flutter/scripts/start_linux
+./flutter/scripts/build_linux
 ```
 
 ## Architecture and reuse
@@ -104,14 +107,16 @@ desktop entry points live beside the other Flutter scripts:
   and always forces `INCLUDE_IOS_TEST_KEYS=false`.
   CI supplies only the iOS client ID. Never ship iOS with provider-specific keys
   or bypass this entry point with a direct `flutter build ipa` invocation.
-- macOS updater asset names, Windows download asset names, GitHub Actions output
-  names, and Electron Builder's `artifactName` form one tested contract.
+- macOS updater asset names, Windows and Linux download asset names, GitHub
+  Actions output names, and Electron Builder's `artifactName` form one tested
+  contract.
 - Published macOS bundles must be Developer ID signed, notarized, stapled, and
   pass Gatekeeper plus strict signature verification before upload.
 - Every published release must contain `SHA256SUMS.txt`. The desktop updater
   refuses unverified downloads.
-- `.github/workflows/release.yml` builds signed iOS, signed/notarized macOS, and
-  unsigned Windows x64 in parallel. The iOS job uploads its IPA directly to App
+- `.github/workflows/release.yml` builds signed iOS, signed/notarized macOS,
+  unsigned Windows x64, and native Linux x64/ARM64 in parallel. Linux ships
+  `.deb` and `.tar.gz` packages. The iOS job uploads its IPA directly to App
   Store Connect and never stores it as an Actions artifact or GitHub Release
   asset. It stops after upload acceptance and does not poll Apple's processing,
   TestFlight, review, or release state. Android release jobs can be added later
@@ -140,8 +145,10 @@ npm test
 For lifecycle or packaging changes, also exercise
 `flutter/scripts/start_macos` and `flutter/scripts/build_macos`. Exercise
 `flutter/scripts/build_windows` and smoke-test `Clawnsole.exe` on Windows for
-Windows runner or packaging changes. For native Flutter changes, run the
-matching simulator script and a debug or release build.
+Windows runner or packaging changes. For Linux runner or packaging changes,
+exercise `flutter/scripts/build_linux` and `flutter/scripts/smoke_linux` on both
+x64 and ARM64 Linux (CI supplies both runners). For native Flutter changes, run
+the matching simulator script and a debug or release build.
 
 Do not edit or commit generated output such as `electron/dist/`,
 `flutter/build/`, native dependency caches, or local Clawnsole data files.

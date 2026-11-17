@@ -46,7 +46,7 @@
     >
     <title>Clawnsole | Your providers. Your devices. One library.</title>
     <link rel="icon" href="assets/favicon.png" type="image/png">
-    <link rel="stylesheet" href="assets/site.css?v=value-props">
+    <link rel="stylesheet" href="assets/site.css?v=linux-downloads">
     <script>
       try {
         const theme = localStorage.getItem('clawnsole-site-theme');
@@ -66,7 +66,7 @@
         "image": "https://clawnsole.app/assets/clawnsole-app-icon.png",
         "sameAs": "https://github.com/heresalexandria/clawnsole",
         "applicationCategory": "MultimediaApplication",
-        "operatingSystem": "macOS, Windows, iOS, Android",
+        "operatingSystem": "macOS, Windows, Linux, iOS, Android",
         "description": "Generate AI video across providers and models in one workspace, with a unified generation and reference library, screenplay authoring, and optional Google Drive sync across devices.",
         "featureList": [
           "Text-to-video and image-to-video generation across multiple providers",
@@ -162,6 +162,9 @@
               >
                 Download for Windows
               </a>
+              <a class="button button-secondary" href="#linux-downloads">
+                Download for Linux
+              </a>
               <a
                 class="button button-secondary"
                 href="https://github.com/heresalexandria/clawnsole"
@@ -172,7 +175,7 @@
             <a class="text-link" href="privacy/">Read the privacy policy <span aria-hidden="true">→</span></a>
           </div>
           <p class="download-note">
-            Latest stable release · macOS: Apple silicon, signed and notarized · Windows: x64, unsigned
+            Latest stable release · macOS: Apple silicon, signed and notarized · Windows: x64, unsigned · Linux: x64 and ARM64
           </p>
         </div>
 
@@ -273,7 +276,7 @@
           <p>
             Start on one device and pick up your library on another. Connect
             Google Drive to sync saved generations, references, folders, and
-            tags across macOS, Windows, iOS, and Android. Prefer to keep work
+            tags across macOS, Windows, Linux, iOS, and Android. Prefer to keep work
             local? The connection is entirely optional.
           </p>
         </div>
@@ -417,7 +420,32 @@
               Download for Windows
             </a>
           </div>
-          <p>macOS requires Apple silicon. Windows requires x64 and is currently unsigned. Provider usage is billed by the service you connect.</p>
+          <div class="linux-downloads" id="linux-downloads">
+            <h3>Linux · Ubuntu 24.04 or later</h3>
+            <div class="download-buttons">
+              <a
+                class="button button-secondary"
+                href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.deb"
+              >
+                Linux x64 (.deb)
+              </a>
+              <a
+                class="button button-secondary"
+                href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.deb"
+              >
+                Linux ARM64 (.deb)
+              </a>
+            </div>
+            <p>
+              Archives:
+              <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-x64.tar.gz">Linux x64 (.tar.gz)</a>
+              ·
+              <a href="https://github.com/heresalexandria/clawnsole/releases/latest/download/Clawnsole-linux-arm64.tar.gz">Linux ARM64 (.tar.gz)</a>
+              ·
+              <a href="https://github.com/heresalexandria/clawnsole/blob/main/flutter/README.md#linux">Installation help</a>
+            </p>
+          </div>
+          <p>macOS requires Apple silicon. Windows requires x64 and is currently unsigned. Linux packages install the required media libraries; a desktop keyring stores your keys. Provider usage is billed by the service you connect.</p>
         </div>
       </section>
     </main>

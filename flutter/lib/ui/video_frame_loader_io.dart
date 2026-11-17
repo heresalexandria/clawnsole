@@ -5,12 +5,21 @@ import 'dart:typed_data';
 import 'package:fc_native_video_thumbnail/fc_native_video_thumbnail.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
+import '../core/ffmpeg_video_frame_loader.dart';
+
 Future<Uint8List?> loadVideoFrame(
   Uri uri,
   Duration position, {
   int maxWidth = 180,
 }) async {
   if (Platform.isWindows) return _loadWindowsVideoFrame(uri, maxWidth);
+  if (Platform.isLinux) {
+    return const FfmpegVideoFrameLoader().load(
+      uri,
+      position,
+      maxWidth: maxWidth,
+    );
+  }
   final source = uri.scheme == 'file' ? uri.toFilePath() : uri.toString();
   return VideoThumbnail.thumbnailData(
     video: source,
