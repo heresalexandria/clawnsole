@@ -60,12 +60,18 @@ void main() {
   );
 
   test('rewrite providers expose ids, consoles, and effort vocabularies', () {
-    expect(rewriteProviderIds, <String>['openai', 'anthropic']);
+    expect(rewriteProviderIds, <String>[
+      'openai',
+      'anthropic',
+      'custom-rewrite',
+    ]);
     expect(RewriteProvider.byId('openai'), RewriteProvider.openai);
     expect(RewriteProvider.byId('anthropic'), RewriteProvider.anthropic);
     expect(RewriteProvider.byId('bfl'), isNull);
     expect(RewriteProvider.byId(null), isNull);
-    for (final provider in RewriteProvider.values) {
+    for (final provider in RewriteProvider.values.where(
+      (provider) => provider != RewriteProvider.custom,
+    )) {
       expect(provider.consoleUrl, startsWith('https://'));
       expect(provider.effortLevels, contains(provider.defaultEffort));
       expect(

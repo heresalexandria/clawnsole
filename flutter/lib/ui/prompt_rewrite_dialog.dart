@@ -67,6 +67,7 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
   final TextEditingController _direction = TextEditingController();
   final TextEditingController _customModel = TextEditingController();
   final TextEditingController _key = TextEditingController();
+  final TextEditingController _endpoint = TextEditingController();
   final Map<String, List<RewriteModel>> _models =
       <String, List<RewriteModel>>{};
 
@@ -153,6 +154,7 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
     _key
       ..removeListener(_onTextChanged)
       ..dispose();
+    _endpoint.dispose();
     _customModel.dispose();
     super.dispose();
   }
@@ -210,7 +212,11 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
           // An id the live listing does turn out to carry stops reading as a
           // hand-typed model.
           final typed = _customModel.text.trim();
-          if (listed.any((model) => model.id == typed)) _modelSelection = typed;
+          if (typed.isEmpty && provider == RewriteProvider.custom) {
+            _modelSelection = listed.first.id;
+          } else if (listed.any((model) => model.id == typed)) {
+            _modelSelection = typed;
+          }
         } else if (!listed.any((model) => model.id == _modelSelection)) {
           // A listing that dropped the remembered id keeps the director's
           // choice usable as a custom entry instead of silently losing it.
@@ -258,7 +264,11 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
     });
     final provider = _keyProvider;
     try {
-      await widget.controller.saveRewriteKey(provider, _key.text);
+      await widget.controller.saveRewriteKey(
+        provider,
+        _key.text,
+        endpoint: provider == RewriteProvider.custom ? _endpoint.text : null,
+      );
       if (!mounted) return;
       setState(() {
         _savingKey = false;
@@ -608,8 +618,9 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Text(
-                'AI Rewrite asks an OpenAI or Anthropic model to revise your '
-                'prompt, so it needs one of their API keys. The key is kept '
+                'AI Rewrite asks your chosen model to revise your prompt. '
+                'Use OpenAI, Anthropic, or a custom OpenAI-compatible endpoint. '
+                'The key is kept '
                 'in the encrypted settings vault with your provider keys and '
                 'syncs with them.',
                 style: TextStyle(
@@ -632,6 +643,7 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
                         selected: candidate == provider,
                         onTap: () => setState(() {
                           _keyProvider = candidate;
+                          _key.clear();
                           _keyError = null;
                         }),
                       ),
@@ -639,6 +651,22 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
                     .toList(),
               ),
               const SizedBox(height: 14),
+              if (provider == RewriteProvider.custom) ...<Widget>[
+                TextField(
+                  key: const ValueKey('rewrite-endpoint-field'),
+                  controller: _endpoint,
+                  enabled: !_savingKey,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  keyboardType: TextInputType.url,
+                  decoration: const InputDecoration(
+                    labelText: 'API base URL',
+                    hintText: 'https://openrouter.ai/api/v1',
+                    helperText: 'OpenAI-compatible Chat Completions',
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
               TextField(
                 key: const ValueKey('rewrite-key-field'),
                 controller: _key,
@@ -663,16 +691,17 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
                 ),
               ),
               const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: const ValueKey('rewrite-key-get'),
-                  onPressed: () =>
-                      unawaited(launchUrl(Uri.parse(provider.consoleUrl))),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 15),
-                  label: Text('Get a ${provider.name} key'),
+              if (provider.consoleUrl.isNotEmpty)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('rewrite-key-get'),
+                    onPressed: () =>
+                        unawaited(launchUrl(Uri.parse(provider.consoleUrl))),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                    label: Text('Get a ${provider.name} key'),
+                  ),
                 ),
-              ),
               if (_keyError != null) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(
@@ -710,7 +739,11 @@ class _PromptRewriteDialogState extends State<_PromptRewriteDialog> {
                     Text('Checking…'),
                   ],
                 )
-              : const Text('Verify & save'),
+              : Text(
+                  provider == RewriteProvider.custom
+                      ? 'Save connection'
+                      : 'Verify & save',
+                ),
         ),
       ],
     );

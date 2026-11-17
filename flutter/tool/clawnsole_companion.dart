@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'package:clawnsole/core/rewrite_connection.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -2539,6 +2542,13 @@ class CompanionApp {
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      rewriteEndpoints: <String, String>{
+        if (RewriteConnection.tryFromCredential(
+              _activeKey(data, RewriteProvider.custom.id),
+            )
+            case final connection?)
+          RewriteProvider.custom.id: connection.endpoint.toString(),
+      },
       connectedRewriteProviders: rewriteProviderIds
           .where((provider) => _activeKey(data, provider).isNotEmpty)
           .toSet(),

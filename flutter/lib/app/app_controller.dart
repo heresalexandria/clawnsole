@@ -26,6 +26,7 @@ import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
 import '../core/pricing.dart';
 import '../core/prompt_rewrite.dart';
+import '../core/rewrite_connection.dart';
 import '../core/provider_catalog.dart';
 import '../core/provider_manifest.dart';
 import '../core/provider_model_selection.dart';
@@ -670,6 +671,7 @@ class AppController extends ChangeNotifier {
   /// Live model listings per rewrite provider, fetched on demand.
   final Map<String, List<RewriteModel>> rewriteModels =
       <String, List<RewriteModel>>{};
+  final Map<String, String> rewriteModelEndpoints = <String, String>{};
 
   /// The direction an AI Rewrite replaced in place, kept one notice tap
   /// away until the director moves on.
@@ -3081,6 +3083,7 @@ class AppController extends ChangeNotifier {
             hasApiKey: value.hasApiKey,
             connectedProviders: value.connectedProviders,
             connectedRewriteProviders: value.connectedRewriteProviders,
+            rewriteEndpoints: value.rewriteEndpoints,
             availableProviders: value.availableProviders,
             providerRetentionAcknowledgements:
                 value.providerRetentionAcknowledgements,
@@ -3270,6 +3273,7 @@ class AppController extends ChangeNotifier {
       hasApiKey: value.hasApiKey,
       connectedProviders: value.connectedProviders,
       connectedRewriteProviders: value.connectedRewriteProviders,
+      rewriteEndpoints: value.rewriteEndpoints,
       availableProviders: value.availableProviders,
       providerRetentionAcknowledgements:
           value.providerRetentionAcknowledgements,
@@ -7669,6 +7673,7 @@ class AppController extends ChangeNotifier {
       hasApiKey: current.hasApiKey,
       connectedProviders: current.connectedProviders,
       connectedRewriteProviders: current.connectedRewriteProviders,
+      rewriteEndpoints: current.rewriteEndpoints,
       availableProviders: current.availableProviders,
       providerRetentionAcknowledgements:
           current.providerRetentionAcknowledgements,

@@ -734,7 +734,7 @@ character counter in the Direction header opens the same dialog for the
 draft in front (no frames — nothing has rendered yet), rewriting the
 direction in place with *Undo* on the notice. Both entry points are always
 present: without a saved key the dialog opens on a first-run step (pick
-OpenAI or Anthropic, paste the key, *Verify & save*, *Get a key* link) and
+OpenAI, Anthropic, or Custom, enter the connection, and save) and
 carries straight on once the key verifies. The director picks the vendor
 (when both have keys; the row is hidden when there is one), the model (a live listing with the vendor's newest
 chat models first, a curated fallback when the listing is unavailable, and a
@@ -759,6 +759,26 @@ settings sync, so a key saved on one device follows to the others. On desktop th
 sees them: the companion holds the key and makes the vendor call; native
 builds call the vendor directly. The last-used vendor, model, and effort are
 remembered per vendor in preferences.
+
+**Custom (OpenAI-compatible)** accepts an API base URL and a separate key in
+Settings or the first-run dialog. For OpenRouter, use
+`https://openrouter.ai/api/v1` and select a catalog model or type its full model
+id (for example `openai/gpt-5.2`). A full `/chat/completions` URL is also
+accepted. Clawnsole preserves base paths, sends requests to `chat/completions`,
+and reads `models` when available; endpoints without a models route can still
+use manual model ids. Use a model with image input for finished-film rewrites.
+Custom requests ask for JSON in the instructions and validate the returned
+prompt, without requiring vendor-specific reasoning or structured-output
+parameters. See the [OpenRouter API reference](https://openrouter.ai/docs/api/reference/overview).
+
+The custom base URL and key are saved atomically as a versioned credential in
+the existing encrypted vault. Built-in OpenAI and Anthropic keys keep their
+existing endpoints and format. Only the base URL appears in snapshots; the
+custom key remains beside the native/companion HTTP client. Changing a
+connection requires entering its key and refreshes its model catalog. URL
+credentials, queries, fragments, and HTTP redirects are rejected. See
+[local endpoint networking](local-endpoint-networking.md) for local HTTP,
+Tailscale, and device permission behavior.
 
 ### The Settings desk
 

@@ -742,12 +742,16 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
         for (final provider in RewriteProvider.values)
           provider.id: TextEditingController(),
       };
+  late final TextEditingController _endpoint = TextEditingController(
+    text: widget.controller.rewriteEndpointFor(RewriteProvider.custom),
+  );
   final Set<String> _visibleKeys = <String>{};
   final Set<String> _busyProviders = <String>{};
   final Map<String, _RewriteKeyResult> _results = <String, _RewriteKeyResult>{};
 
   @override
   void dispose() {
+    _endpoint.dispose();
     for (final controller in _keys.values) {
       controller.dispose();
     }
@@ -761,10 +765,16 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
       _results.remove(provider.id);
     });
     try {
-      await widget.controller.saveRewriteKey(provider, candidate);
+      await widget.controller.saveRewriteKey(
+        provider,
+        candidate,
+        endpoint: provider == RewriteProvider.custom ? _endpoint.text : null,
+      );
       if (!mounted) return;
       _keys[provider.id]!.clear();
-      _results[provider.id] = const _RewriteKeyResult('Connected');
+      _results[provider.id] = _RewriteKeyResult(
+        provider == RewriteProvider.custom ? 'Connection saved' : 'Connected',
+      );
     } on PromptRewriteException catch (error) {
       _results[provider.id] = _RewriteKeyResult(error.message, failed: true);
     } on Object catch (error) {
@@ -837,6 +847,9 @@ class _AiRewriteCardState extends State<_AiRewriteCard> {
               provider: provider,
               connected: connected.contains(provider.id),
               keyController: _keys[provider.id]!,
+              endpointController: provider == RewriteProvider.custom
+                  ? _endpoint
+                  : null,
               keyVisible: _visibleKeys.contains(provider.id),
               busy: _busyProviders.contains(provider.id),
               result: _results[provider.id],
@@ -873,11 +886,13 @@ class _RewriteProviderKey extends StatelessWidget {
     required this.onSave,
     required this.onRemove,
     this.result,
+    this.endpointController,
   });
 
   final RewriteProvider provider;
   final bool connected;
   final TextEditingController keyController;
+  final TextEditingController? endpointController;
   final bool keyVisible;
   final bool busy;
   final _RewriteKeyResult? result;
@@ -891,6 +906,24 @@ class _RewriteProviderKey extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        if (endpointController != null) ...<Widget>[
+          TextField(
+            key: const ValueKey('rewrite-endpoint-custom-rewrite'),
+            controller: endpointController,
+            enabled: !busy,
+            autocorrect: false,
+            enableSuggestions: false,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'API base URL',
+              hintText: 'https://openrouter.ai/api/v1',
+              helperText:
+                  'OpenAI-compatible Chat Completions. Choose a model when rewriting.',
+              helperMaxLines: 3,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         TextField(
           key: ValueKey('rewrite-key-${provider.id}'),
           controller: keyController,
@@ -937,7 +970,13 @@ class _RewriteProviderKey extends StatelessWidget {
               key: ValueKey('rewrite-key-save-${provider.id}'),
               onPressed: busy ? null : onSave,
               busyLabel: connected ? 'Replacing…' : 'Verifying…',
-              child: Text(connected ? 'Replace key' : 'Verify & save'),
+              child: Text(
+                provider == RewriteProvider.custom
+                    ? 'Save connection'
+                    : connected
+                    ? 'Replace key'
+                    : 'Verify & save',
+              ),
             ),
             if (connected)
               BusyTextButton(
@@ -949,11 +988,12 @@ class _RewriteProviderKey extends StatelessWidget {
                   style: TextStyle(color: context.colors.error),
                 ),
               ),
-            TextButton(
-              onPressed: () =>
-                  unawaited(launchUrl(Uri.parse(provider.consoleUrl))),
-              child: const Text('Get a key ↗'),
-            ),
+            if (provider.consoleUrl.isNotEmpty)
+              TextButton(
+                onPressed: () =>
+                    unawaited(launchUrl(Uri.parse(provider.consoleUrl))),
+                child: const Text('Get a key ↗'),
+              ),
           ],
         ),
       ],

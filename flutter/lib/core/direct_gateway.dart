@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'rewrite_connection.dart';
+
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -350,6 +353,13 @@ class DirectGateway
       preferences: data.preferences,
       hasApiKey: connected.contains('bfl'),
       connectedProviders: connected,
+      rewriteEndpoints: <String, String>{
+        if (RewriteConnection.tryFromCredential(
+              activeApiKey(RewriteProvider.custom.id, data)?.value ?? '',
+            )
+            case final connection?)
+          RewriteProvider.custom.id: connection.endpoint.toString(),
+      },
       connectedRewriteProviders: rewriteProviderIds
           .where((provider) => activeApiKey(provider, data) != null)
           .toSet(),
