@@ -36,10 +36,12 @@ import 'package:clawnsole/core/prompt_rewrite.dart';
 import 'package:clawnsole/core/prompt_rewrite_router.dart';
 import 'package:clawnsole/core/provider_api.dart';
 import 'package:clawnsole/core/provider_catalog.dart';
+import 'package:clawnsole/core/provider_configuration.dart';
 import 'package:clawnsole/core/provider_submission.dart';
 import 'package:clawnsole/core/provider_manifest.dart';
 import 'package:clawnsole/core/reference_video_normalizer.dart';
 import 'package:clawnsole/core/screenplay.dart';
+import 'package:clawnsole/core/stream_discard.dart';
 import 'package:clawnsole/core/settings_vault.dart';
 import 'package:clawnsole/core/settings_vault_data_store.dart';
 import 'package:clawnsole/core/video_cache.dart';
@@ -1370,6 +1372,19 @@ class CompanionApp {
           'ok': true,
         });
       }
+      if (request.method == 'POST' &&
+          path == '/providers/verify-configuration') {
+        final body = await _bodyMap(request);
+        final configuration = body['configuration'];
+        if (configuration is! Map<String, Object?>) {
+          throw const FormatException('Invalid provider configuration.');
+        }
+        final account = await _providers.verifyConfiguration(
+          body['provider']?.toString() ?? '',
+          configuration,
+        );
+        return await _json(request.response, 200, account.toJson());
+      }
       if (request.method == 'POST' && path == '/rewrite/models') {
         final body = await _bodyMap(request);
         final provider = body['provider']?.toString() ?? '';
@@ -1862,8 +1877,12 @@ class CompanionApp {
         final map = value is Map<Object?, Object?>
             ? value.map((key, child) => MapEntry(key.toString(), child))
             : <String, Object?>{};
+        final preferences = AppPreferences.fromJson(map);
+        for (final entry in preferences.providerConfigurations.entries) {
+          validateProviderConfiguration(entry.key, entry.value);
+        }
         next = current.copyWith(
-          preferences: AppPreferences.fromJson(map).copyWith(
+          preferences: preferences.copyWith(
             providerRetentionAcknowledgements:
                 current.providerRetentionAcknowledgements,
           ),
@@ -2529,7 +2548,14 @@ class CompanionApp {
       }
     }
     final connected = videoProviders
-        .where((provider) => _activeKey(data, provider.id).isNotEmpty)
+        .where(
+          (provider) => provider.requiresConfiguration
+              ? providerConfigurationReady(
+                  provider.id,
+                  data.preferences.providerConfigurations[provider.id],
+                )
+              : _activeKey(data, provider.id).isNotEmpty,
+        )
         .map((provider) => provider.id)
         .toSet();
     return LocalSnapshot(
@@ -2836,14 +2862,38 @@ class CompanionApp {
           owner.localId,
           owner.provider,
           ApiRequestPurpose.result,
-          () => _retainResultBytes(source, label, storage),
+          () => _retainResultBytes(source, label, storage, owner: owner),
         );
 
   Future<AssetReference?> _retainResultBytes(
     String source,
     String label,
-    LibraryStorage storage,
-  ) async {
+    LibraryStorage storage, {
+    Generation? owner,
+  }) async {
+    final response = owner == null
+        ? null
+        : await _providers.downloadResult(
+            owner.provider,
+            source,
+            owner.pollingUrl ?? '',
+          );
+    if (response != null) {
+      final String contentType;
+      try {
+        contentType = passiveMediaContentType(response.headers['content-type']);
+      } on Object {
+        await discardStream(response.stream);
+        rethrow;
+      }
+      return _store.writeAssetStream(
+        await validatedPassiveMediaStream(response.stream),
+        label: label,
+        contentType: contentType,
+        storage: storage,
+        expectedLength: response.contentLength,
+      );
+    }
     final target = validatedProviderUrl(source);
     final client = recordingProviderClient(_mediaClientFactory());
     try {
@@ -3044,7 +3094,7 @@ class CompanionApp {
       );
     }
     final key = _activeKey(data, provider);
-    if (key.isEmpty) {
+    if (key.isEmpty && providerById(provider).requiresApiKey) {
       throw StateError(
         'Add a ${providerById(provider).name} API key before generating.',
       );
@@ -3137,6 +3187,8 @@ class CompanionApp {
           generation.model,
           cleanInput,
           operationId: generation.localId,
+          configuration:
+              data.preferences.providerConfigurations[provider] ?? const {},
           beforeSend: () async {
             if (hostedMedia) {
               await _temporaryMediaHost!.beforeSend(generation.localId);
@@ -3363,7 +3415,7 @@ class CompanionApp {
       );
     }
     final key = _activeKey(data, current.provider);
-    if (key.isEmpty) {
+    if (key.isEmpty && providerById(current.provider).requiresApiKey) {
       throw StateError(
         'The saved ${providerById(current.provider).name} API key is missing.',
       );
@@ -3393,7 +3445,7 @@ class CompanionApp {
       // Fresh links come only from a payload that itself reported ready — a
       // failure payload must never have an incidental URL mistaken for one.
       final resultUrl = reportedStatus == 'Ready'
-          ? findResultUrl(result, draft: false)
+          ? _providers.resultUrl(current.provider, result)
           : null;
       final draftUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: true)
@@ -3682,7 +3734,14 @@ class CompanionApp {
       .firstOrNull;
 
   String? _resultFallbackUrl(StoredData data, String assetId) {
-    final url = _resultOwner(data, assetId)?.resultUrl?.trim();
+    final owner = _resultOwner(data, assetId);
+    if (owner != null &&
+        providerById(
+          owner.provider,
+        ).resultDelivery.requiresRetentionForPlayback) {
+      return null;
+    }
+    final url = owner?.resultUrl?.trim();
     return url == null || url.isEmpty ? null : url;
   }
 

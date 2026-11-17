@@ -88,6 +88,14 @@ abstract interface class ProviderRetentionAcknowledgementGateway {
   Future<LocalSnapshot> acknowledgeProviderRetentionRisk(String provider);
 }
 
+/// Tests a user-owned workflow server without exposing it to the renderer.
+abstract interface class ProviderConfigurationGateway {
+  Future<ProviderAccountStatus> verifyProviderConfiguration(
+    String provider,
+    Map<String, Object?> configuration,
+  );
+}
+
 /// Device-local persistence for the last complete remote provider catalog.
 ///
 /// This stays separate from [AppGateway] so lightweight embedders and tests can

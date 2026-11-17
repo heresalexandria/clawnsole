@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "comfyui",
+  "adapter": "comfyui",
+  "name": "ComfyUI",
+  "description": "Run your own image and video workflows on a local, LAN, or Tailscale server.",
+  "console_url": "https://www.comfy.org/",
+  "docs_url": "https://docs.comfy.org/",
+  "pricing_url": "https://www.comfy.org/",
+  "pricing_source": "Your hardware \u00b7 no Clawnsole provider charge",
+  "requires_api_key": false,
+  "requires_configuration": true,
+  "result_delivery": {
+    "requires_retention_for_playback": true
+  },
+  "models": [
+    "models/comfyui/video.yaml",
+    "models/comfyui/image.yaml"
+  ]
+}

@@ -1568,6 +1568,7 @@ class AppPreferences {
     this.localThumbnailCacheMb = defaultLocalThumbnailCacheMb,
     this.autoFixReferenceVideos = defaultAutoFixReferenceVideos,
     this.themeMode = AppThemeMode.system,
+    this.providerConfigurations = const <String, Map<String, Object?>>{},
     this.rewriteProvider,
     this.rewriteModels = const <String, String>{},
     this.rewriteEfforts = const <String, String>{},
@@ -1614,6 +1615,9 @@ class AppPreferences {
   final bool autoFixReferenceVideos;
 
   final AppThemeMode themeMode;
+
+  /// Versioned provider-owned connection/workflow settings, without credentials.
+  final Map<String, Map<String, Object?>> providerConfigurations;
 
   /// The AI Rewrite provider chosen last; null until the first rewrite.
   final String? rewriteProvider;
@@ -1663,6 +1667,7 @@ class AppPreferences {
     int? localThumbnailCacheMb,
     bool? autoFixReferenceVideos,
     AppThemeMode? themeMode,
+    Map<String, Map<String, Object?>>? providerConfigurations,
     String? rewriteProvider,
     bool clearRewriteProvider = false,
     Map<String, String>? rewriteModels,
@@ -1699,6 +1704,8 @@ class AppPreferences {
     autoFixReferenceVideos:
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
     themeMode: themeMode ?? this.themeMode,
+    providerConfigurations:
+        providerConfigurations ?? this.providerConfigurations,
     rewriteProvider: clearRewriteProvider
         ? null
         : rewriteProvider ?? this.rewriteProvider,
@@ -1733,6 +1740,8 @@ class AppPreferences {
     'localThumbnailCacheMb': localThumbnailCacheMb,
     'autoFixReferenceVideos': autoFixReferenceVideos,
     'themeMode': themeMode.name,
+    if (providerConfigurations.isNotEmpty)
+      'providerConfigurations': providerConfigurations,
     if (rewriteProvider != null) 'rewriteProvider': rewriteProvider,
     if (rewriteModels.isNotEmpty)
       'rewriteModels': _sortedStringMap(rewriteModels),
@@ -1842,6 +1851,14 @@ class AppPreferences {
         _ => defaultAutoFixReferenceVideos,
       },
       themeMode: AppThemeMode.parse(json['themeMode']),
+      providerConfigurations: {
+        if (json['providerConfigurations'] case final Map configurations)
+          for (final entry in configurations.entries)
+            if (entry.key is String && entry.value is Map)
+              entry.key as String: Map<String, Object?>.from(
+                entry.value as Map,
+              ),
+      },
       rewriteProvider: switch (json['rewriteProvider']) {
         final String value when value.trim().isNotEmpty => value.trim(),
         _ => null,

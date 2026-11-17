@@ -1,4 +1,5 @@
 import 'models.dart';
+import 'comfyui_catalog.dart';
 import 'apipod_catalog.dart' as apipod_catalog;
 import 'fal_catalog.dart' as fal_catalog;
 import 'runway_pricing.dart';
@@ -537,6 +538,7 @@ class VideoProviderDefinition {
     this.pricingSource = 'Published rate card',
     this.supportsLivePricing = false,
     this.requiresApiKey = true,
+    this.requiresConfiguration = false,
     this.isLocal = false,
     this.resultDelivery = const ProviderResultDelivery(),
     this.progressReporting = ProviderProgressReporting.none,
@@ -553,6 +555,7 @@ class VideoProviderDefinition {
   final bool supportsLivePricing;
   final List<VideoModelDefinition> models;
   final bool requiresApiKey;
+  final bool requiresConfiguration;
   final bool isLocal;
   final ProviderResultDelivery resultDelivery;
   final ProviderProgressReporting progressReporting;
@@ -576,10 +579,12 @@ class ProviderResultDelivery {
   const ProviderResultDelivery({
     this.availability,
     this.keepOpenRecommended = false,
+    this.requiresRetentionForPlayback = false,
   });
 
   final Duration? availability;
   final bool keepOpenRecommended;
+  final bool requiresRetentionForPlayback;
 }
 
 class _ArtCraftModel extends VideoModelDefinition {
@@ -4070,6 +4075,7 @@ const Set<String> remoteProviderIds = <String>{
   'runway',
   'krea',
   'fal',
+  'comfyui',
 };
 
 const bundledVideoProviders = <VideoProviderDefinition>[
@@ -4078,6 +4084,7 @@ const bundledVideoProviders = <VideoProviderDefinition>[
   _artCraftProvider,
   _atlasProvider,
   _bflProvider,
+  comfyUiProvider,
   fal_catalog.falProvider,
   _kreaProvider,
   _ltxProvider,
@@ -4118,6 +4125,7 @@ List<VideoProviderDefinition> mobileTestProviderCatalog(
       pricingSource: provider.pricingSource,
       supportsLivePricing: provider.supportsLivePricing,
       requiresApiKey: provider.requiresApiKey,
+      requiresConfiguration: provider.requiresConfiguration,
       isLocal: provider.isLocal,
       resultDelivery: provider.resultDelivery,
       progressReporting: provider.progressReporting,

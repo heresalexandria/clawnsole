@@ -6,6 +6,8 @@ const EXTERNAL_HOSTS = new Set([
   "dashboard.bfl.ai",
   "docs.ltx.io",
   "console.ltx.io",
+  "www.comfy.org",
+  "docs.comfy.org",
   "developer.apple.com",
   "app.getartcraft.com",
   "app.runwayml.com",

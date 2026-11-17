@@ -20,6 +20,7 @@ const supportedProviderAdapters = <String>{
   'artcraft',
   'atlas',
   'bfl',
+  'comfyui',
   'fal',
   'krea',
   'ltx',
@@ -416,10 +417,20 @@ VideoProviderDefinition _parseProvider(
       fallback: bundled?.supportsLivePricing ?? false,
     ),
     requiresApiKey: _boolean(manifest, 'requires_api_key', fallback: true),
+    requiresConfiguration: _boolean(
+      manifest,
+      'requires_configuration',
+      fallback: bundled?.requiresConfiguration ?? false,
+    ),
     isLocal: _boolean(manifest, 'is_local'),
     resultDelivery: ProviderResultDelivery(
       availability: seconds == null ? null : Duration(seconds: seconds),
       keepOpenRecommended: _boolean(delivery, 'keep_open_recommended'),
+      requiresRetentionForPlayback: _boolean(
+        delivery,
+        'requires_retention_for_playback',
+        fallback: bundled?.resultDelivery.requiresRetentionForPlayback ?? false,
+      ),
     ),
     progressReporting: _progress(manifest['progress_reporting']),
     models: List<VideoModelDefinition>.unmodifiable(models),

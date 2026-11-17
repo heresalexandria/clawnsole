@@ -12,6 +12,7 @@ import '../core/pricing.dart';
 import '../core/provider_catalog.dart';
 import 'busy_button.dart';
 import 'common_widgets.dart';
+import 'comfyui_setup.dart';
 import 'hardware.dart';
 
 class ProvidersScreen extends StatefulWidget {
@@ -279,7 +280,9 @@ class _ProviderCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     Text(
-                      !provider.requiresApiKey
+                      provider.requiresConfiguration
+                          ? (connected ? 'Server configured' : 'Setup required')
+                          : !provider.requiresApiKey
                           ? (controller.localGenerationAvailable
                                 ? 'Ready on this device'
                                 : 'Needs iOS 18.4 and Apple Intelligence')
@@ -292,6 +295,7 @@ class _ProviderCard extends StatelessWidget {
                         color:
                             connected ||
                                 (!provider.requiresApiKey &&
+                                    !provider.requiresConfiguration &&
                                     controller.localGenerationAvailable)
                             ? context.colors.primary
                             : context.colors.onSurfaceVariant,
@@ -344,7 +348,19 @@ class _ProviderCard extends StatelessWidget {
             label: Text(selected ? 'Selected for Create' : 'Use in Create'),
           ),
           const SizedBox(height: 12),
-          if (!provider.requiresApiKey) ...<Widget>[
+          if (provider.requiresConfiguration) ...<Widget>[
+            OutlinedButton.icon(
+              key: const ValueKey('comfyui-configure'),
+              onPressed: () => showComfyUiSetup(context, controller),
+              icon: const Icon(Icons.settings_ethernet_rounded),
+              label: const Text('Configure server & workflows'),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Import your working ComfyUI API graph. Connect over localhost, LAN, or Tailscale; no provider API key needed.',
+              style: TextStyle(fontSize: 11.5),
+            ),
+          ] else if (!provider.requiresApiKey) ...<Widget>[
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
