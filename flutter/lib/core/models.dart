@@ -2349,6 +2349,7 @@ class LocalSnapshot {
     this.savedReferences = const <SavedReference>[],
     this.settingsVault = const SettingsVaultStatus.unavailable(),
     this.connectedRewriteProviders = const <String>{},
+    this.rewriteEndpoints = const <String, String>{},
   });
 
   final List<Generation> generations;
@@ -2362,8 +2363,11 @@ class LocalSnapshot {
   final List<SavedReference> savedReferences;
   final SettingsVaultStatus settingsVault;
 
-  /// AI Rewrite providers (`openai`, `anthropic`) with a usable key.
+  /// AI Rewrite providers with a saved credential.
   final Set<String> connectedRewriteProviders;
+
+  /// Nonsecret API bases for custom rewrite connections. Keys stay in the vault.
+  final Map<String, String> rewriteEndpoints;
 
   LocalSnapshot copyWith({
     List<Generation>? generations,
@@ -2377,6 +2381,7 @@ class LocalSnapshot {
     List<SavedReference>? savedReferences,
     SettingsVaultStatus? settingsVault,
     Set<String>? connectedRewriteProviders,
+    Map<String, String>? rewriteEndpoints,
   }) => LocalSnapshot(
     generations: generations ?? this.generations,
     preferences: preferences ?? this.preferences,
@@ -2392,6 +2397,7 @@ class LocalSnapshot {
     settingsVault: settingsVault ?? this.settingsVault,
     connectedRewriteProviders:
         connectedRewriteProviders ?? this.connectedRewriteProviders,
+    rewriteEndpoints: rewriteEndpoints ?? this.rewriteEndpoints,
   );
 
   bool hasApiKeyFor(String provider) =>
@@ -2410,6 +2416,7 @@ class LocalSnapshot {
     'settingsVault': settingsVault.toJson(),
     'storage': storage.toJson(),
     'connectedRewriteProviders': connectedRewriteProviders.toList()..sort(),
+    if (rewriteEndpoints.isNotEmpty) 'rewriteEndpoints': rewriteEndpoints,
   };
 
   factory LocalSnapshot.fromJson(Map<String, Object?> json) => LocalSnapshot(
@@ -2467,6 +2474,7 @@ class LocalSnapshot {
         (key, value) => MapEntry(key.toString(), value),
       ),
     ),
+    rewriteEndpoints: _stringMap(json['rewriteEndpoints']),
     connectedRewriteProviders:
         (json['connectedRewriteProviders'] as List<Object?>? ??
                 const <Object?>[])

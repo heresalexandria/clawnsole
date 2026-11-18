@@ -1,11 +1,11 @@
 /// Provider-neutral contract for AI Rewrite.
 ///
 /// AI Rewrite sends sampled frames of a finished film, the prompt that made
-/// it, and the director's change notes to a multimodal LLM (OpenAI or
-/// Anthropic) and gets back one revised prompt as structured JSON. This
+/// it, and the director's change notes to a multimodal LLM (OpenAI,
+/// Anthropic, or an OpenAI-compatible endpoint) and gets back one revised prompt as structured JSON. This
 /// module owns the request/response shapes, the provider registry, the
 /// instructions both providers receive, and the output schema. The HTTP
-/// clients live in `openai_rewrite_api.dart` and `anthropic_rewrite_api.dart`;
+/// clients live in the provider-specific `*_rewrite_api.dart` modules;
 /// gateways dispatch through `prompt_rewrite_router.dart`.
 ///
 /// Keys for these providers are ordinary vault credentials keyed by
@@ -16,10 +16,15 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 /// Credential ids of every rewrite provider, in display order.
-const List<String> rewriteProviderIds = <String>['openai', 'anthropic'];
+const List<String> rewriteProviderIds = <String>[
+  'openai',
+  'anthropic',
+  'custom-rewrite',
+];
 
 /// The vendors that can rewrite prompts. Effort levels are each vendor's own
-/// vocabulary so the request carries them through untouched.
+/// vocabulary so the request carries them through untouched. Custom endpoints
+/// use only the common Chat Completions fields.
 enum RewriteProvider {
   openai(
     id: 'openai',
@@ -38,6 +43,15 @@ enum RewriteProvider {
     effortLevels: <String>['low', 'medium', 'high', 'xhigh', 'max'],
     defaultEffort: 'high',
     defaultModelId: 'claude-opus-5',
+  ),
+  custom(
+    id: 'custom-rewrite',
+    name: 'Custom (OpenAI-compatible)',
+    consoleUrl: '',
+    keyHint: 'Your endpoint API key',
+    effortLevels: <String>[],
+    defaultEffort: '',
+    defaultModelId: '',
   );
 
   const RewriteProvider({
@@ -82,6 +96,7 @@ enum RewriteProvider {
         supportsThinking: false,
       ),
     ],
+    RewriteProvider.custom => const <RewriteModel>[],
     RewriteProvider.anthropic => const <RewriteModel>[
       RewriteModel(id: 'claude-opus-5', label: 'Claude Opus 5'),
       RewriteModel(id: 'claude-fable-5-1', label: 'Claude Fable 5.1'),
@@ -629,8 +644,9 @@ Iterable<String> _jsonCandidates(String source) sync* {
   if (start >= 0 && end > start) yield source.substring(start, end + 1);
 }
 
-/// One vendor's HTTP client. The key is a per-call argument so a single
-/// instance serves every saved credential.
+/// One vendor's HTTP client. The credential is a per-call argument so a
+/// single instance serves every saved connection. Built-in providers accept
+/// a plain key; the custom adapter accepts a versioned endpoint/key credential.
 abstract interface class PromptRewriteApi {
   /// Lists models usable for rewriting (multimodal chat models), newest
   /// first. Throws [PromptRewriteException] on an unauthorized key.

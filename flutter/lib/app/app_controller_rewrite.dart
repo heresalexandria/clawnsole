@@ -2,8 +2,8 @@ part of 'app_controller.dart';
 
 /// AI Rewrite: the controller half of the feature.
 ///
-/// Keys live beside the video-provider credentials (vault ids `openai` and
-/// `anthropic`), the LLM call runs through [PromptRewriteGateway] so the key
+/// Keys live beside the video-provider credentials (vault ids `openai`,
+/// `anthropic`, and `custom-rewrite`), the LLM call runs through [PromptRewriteGateway] so the key
 /// never enters the renderer, and the result opens a new composer tab seeded
 /// from the film it rewrote.
 extension AiRewriteController on AppController {
@@ -137,7 +137,13 @@ extension AiRewriteController on AppController {
 
   /// The remembered model for [provider], falling back to its default.
   String rewriteModelFor(RewriteProvider provider) =>
-      rewriteModelIds[provider.id] ?? provider.defaultModelId;
+      rewriteModelIds[provider.id] ??
+      (provider == RewriteProvider.custom
+          ? rewriteModels[provider.id]?.firstOrNull?.id ?? ''
+          : provider.defaultModelId);
+
+  String rewriteEndpointFor(RewriteProvider provider) =>
+      snapshot?.rewriteEndpoints[provider.id] ?? '';
 
   /// The remembered effort for [provider], falling back to its default.
   String rewriteEffortFor(RewriteProvider provider) =>
@@ -150,12 +156,19 @@ extension AiRewriteController on AppController {
     RewriteProvider provider, {
     bool refresh = false,
   }) async {
+    final endpoint = rewriteEndpointFor(provider);
     final cached = rewriteModels[provider.id];
-    if (cached != null && !refresh) return cached;
+    if (cached != null &&
+        !refresh &&
+        (provider != RewriteProvider.custom ||
+            rewriteModelEndpoints[provider.id] == endpoint)) {
+      return cached;
+    }
     if (gateway case final PromptRewriteGateway rewriteGateway) {
       try {
         final listed = await rewriteGateway.listRewriteModels(provider.id);
-        if (listed.isNotEmpty) {
+        if (listed.isNotEmpty && rewriteEndpointFor(provider) == endpoint) {
+          rewriteModelEndpoints[provider.id] = endpoint;
           rewriteModels[provider.id] = listed;
           notifyListeners();
           return listed;
@@ -199,8 +212,13 @@ extension AiRewriteController on AppController {
     );
   }
 
-  /// Verifies [key] against the vendor (a models listing) and saves it.
-  Future<void> saveRewriteKey(RewriteProvider provider, String key) async {
+  /// Checks the connection with a models listing and saves its credential.
+  /// Custom services without a models route remain usable with manual ids.
+  Future<void> saveRewriteKey(
+    RewriteProvider provider,
+    String key, {
+    String? endpoint,
+  }) async {
     final clean = key.trim();
     if (clean.isEmpty) {
       throw const PromptRewriteException(
@@ -214,17 +232,38 @@ extension AiRewriteController on AppController {
         failure: PromptRewriteFailure.other,
       );
     }
+    final credential = provider == RewriteProvider.custom
+        ? RewriteConnection(
+            endpoint: endpoint ?? '',
+            apiKey: clean,
+          ).toCredential()
+        : clean;
+    final endpointChanged =
+        provider == RewriteProvider.custom &&
+        rewriteEndpointFor(provider) !=
+            RewriteConnection.fromCredential(credential).endpoint.toString();
     final listed = await (gateway as PromptRewriteGateway).listRewriteModels(
       provider.id,
-      candidateKey: clean,
+      candidateKey: credential,
     );
-    if (listed.isNotEmpty) rewriteModels[provider.id] = listed;
     _apply(
-      await (gateway as ProviderGateway).setProviderApiKey(provider.id, clean),
+      await (gateway as ProviderGateway).setProviderApiKey(
+        provider.id,
+        credential,
+      ),
     );
+    rewriteModels[provider.id] = listed;
+    rewriteModelEndpoints[provider.id] = rewriteEndpointFor(provider);
+    if (endpointChanged) {
+      rewriteModelIds.remove(provider.id);
+      rewriteEfforts.remove(provider.id);
+      await _savePreferences(_preferences());
+    }
     await _retryPendingSettingsVaultSync();
     showNotice(
-      settingsVaultStatus.isReady
+      provider == RewriteProvider.custom
+          ? 'Custom AI Rewrite connection saved.'
+          : settingsVaultStatus.isReady
           ? '${provider.name} key verified and encrypted sync is up to date.'
           : '${provider.name} key verified and saved locally.',
     );
@@ -241,6 +280,7 @@ extension AiRewriteController on AppController {
     _apply(await (gateway as ProviderGateway).clearProviderApiKey(provider.id));
     await _retryPendingSettingsVaultSync();
     rewriteModels.remove(provider.id);
+    rewriteModelEndpoints.remove(provider.id);
     showNotice('${provider.name} access removed from this device.');
   }
 }

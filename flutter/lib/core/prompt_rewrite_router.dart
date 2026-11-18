@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import 'anthropic_rewrite_api.dart';
+import 'compatible_rewrite_api.dart';
 import 'openai_rewrite_api.dart';
 import 'prompt_rewrite.dart';
 
@@ -16,6 +17,7 @@ class PromptRewriteRouter {
            apis ??
            <String, PromptRewriteApi>{
              RewriteProvider.openai.id: OpenAiRewriteApi(client: client),
+             RewriteProvider.custom.id: CompatibleRewriteApi(client: client),
              RewriteProvider.anthropic.id: AnthropicRewriteApi(client: client),
            };
 

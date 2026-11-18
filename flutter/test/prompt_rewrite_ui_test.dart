@@ -7,6 +7,7 @@ import 'package:clawnsole/app/app_theme.dart';
 import 'package:clawnsole/core/gateway.dart';
 import 'package:clawnsole/core/models.dart';
 import 'package:clawnsole/core/prompt_rewrite.dart';
+import 'package:clawnsole/core/rewrite_connection.dart';
 import 'package:clawnsole/ui/common_widgets.dart';
 import 'package:clawnsole/ui/create_screen.dart';
 import 'package:clawnsole/ui/generation_view_widgets.dart';
@@ -112,6 +113,103 @@ void main() {
     expect(find.byKey(const ValueKey('rewrite-key-field')), findsNothing);
     expect(find.byKey(const ValueKey('rewrite-direction')), findsOneWidget);
     expect(find.text('Claude Opus 5'), findsOneWidget);
+    await _expireNotice(tester);
+  });
+
+  testWidgets('custom first-run setup accepts an endpoint and manual model', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1400, 1600));
+    final gateway = _gateway(connectedRewriteProviders: const <String>{});
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    await _openDialog(tester, controller);
+    await tester.tap(
+      find.byKey(const ValueKey('rewrite-key-provider-custom-rewrite')),
+    );
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-endpoint-field')),
+      'https://custom.test/api/v2',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-key-field')),
+      'sk-custom',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('rewrite-key-save')));
+    await tester.pumpAndSettle();
+    final saved = RewriteConnection.fromCredential(
+      gateway.savedKeys['custom-rewrite']!,
+    );
+    expect(saved.endpoint.toString(), 'https://custom.test/api/v2/');
+    expect(saved.apiKey, 'sk-custom');
+    expect(find.byKey(const ValueKey('rewrite-key-field')), findsNothing);
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-custom-model')),
+      'vendor/my-model',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('rewrite-direction')),
+      'Make it warmer',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('rewrite-submit')));
+    await tester.pumpAndSettle();
+    expect(gateway.rewriteRequests.single.modelId, 'vendor/my-model');
+    expect(gateway.rewriteRequests.single.providerId, 'custom-rewrite');
+    expect(gateway.rewriteRequests.single.effort, isNull);
+    await _expireNotice(tester);
+  });
+
+  testWidgets('Settings saves and replaces the custom endpoint with its key', (
+    tester,
+  ) async {
+    await _sized(tester, const Size(1000, 2400));
+    final gateway = _gateway(
+      connectedRewriteProviders: const <String>{'openai'},
+    );
+    final controller = _controller(gateway);
+    addTearDown(controller.dispose);
+    await _pumpScreen(tester, SettingsScreen(controller: controller));
+    await openSettingsTab(tester, SettingsTab.aiRewrite);
+    final endpoint = find.byKey(
+      const ValueKey('rewrite-endpoint-custom-rewrite'),
+    );
+    await tester.ensureVisible(endpoint);
+    await tester.enterText(endpoint, 'https://custom.test/v1');
+    final key = find.byKey(const ValueKey('rewrite-key-custom-rewrite'));
+    await tester.enterText(key, 'sk-first');
+    await tester.tap(
+      find.byKey(const ValueKey('rewrite-key-save-custom-rewrite')),
+    );
+    await tester.pumpAndSettle();
+    expect(gateway.savedKeys.keys, <String>['custom-rewrite']);
+    controller.rewriteModels['custom-rewrite'] = const <RewriteModel>[
+      RewriteModel(id: 'stale', label: 'Stale'),
+    ];
+    await controller.rememberRewriteChoice(
+      provider: RewriteProvider.custom,
+      modelId: 'old-host/model',
+    );
+    await tester.enterText(endpoint, 'https://replacement.test/v2');
+    await tester.enterText(key, 'sk-second');
+    await tester.tap(
+      find.byKey(const ValueKey('rewrite-key-save-custom-rewrite')),
+    );
+    await tester.pumpAndSettle();
+    final saved = RewriteConnection.fromCredential(
+      gateway.savedKeys['custom-rewrite']!,
+    );
+    expect(saved.endpoint.host, 'replacement.test');
+    expect(saved.apiKey, 'sk-second');
+    expect(controller.rewriteModels['custom-rewrite'], isEmpty);
+    expect(controller.rewriteModelIds, isNot(contains('custom-rewrite')));
+    expect(
+      gateway.snapshot.preferences.rewriteModels,
+      isNot(contains('custom-rewrite')),
+    );
+    expect(controller.connectedRewriteProviders, contains('openai'));
     await _expireNotice(tester);
   });
 
@@ -995,6 +1093,11 @@ class _RewriteGateway
   Future<LocalSnapshot> setProviderApiKey(String provider, String value) async {
     savedKeys[provider] = value;
     return snapshot = snapshot.copyWith(
+      rewriteEndpoints: <String, String>{
+        ...snapshot.rewriteEndpoints,
+        if (provider == RewriteProvider.custom.id)
+          provider: RewriteConnection.fromCredential(value).endpoint.toString(),
+      },
       connectedRewriteProviders: <String>{
         ...snapshot.connectedRewriteProviders,
         provider,

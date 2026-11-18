@@ -69,7 +69,7 @@ and optional Google Drive sync keep work organized wherever you create.
   other devices (and the ones closed here); nothing ever syncs into the tab
   you are typing in
 - AI Rewrite: a finished film's frames, prompt, and your change notes go to
-  the OpenAI or Anthropic model you pick (vendor, model, effort) and the
+  the OpenAI, Anthropic, or custom OpenAI-compatible model you pick and the
   revised prompt opens in a new tab with the film's full recipe; a wand on
   the Direction box rewrites a draft in place with Undo. Keys are asked for
   on first use, kept in the encrypted vault, and synced with your other keys

@@ -55,6 +55,9 @@
       "output": "dist/release"
     },
     "mac": {
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "Clawnsole connects to local AI servers you configure to rewrite prompts and generate media."
+      },
       "category": "public.app-category.graphics-design",
       "extendInfo": {
         "NSLocalNetworkUsageDescription": "Clawnsole connects to local AI servers you configure to rewrite prompts and generate media."

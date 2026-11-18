@@ -43,6 +43,8 @@
 	<string>Clawnsole connects to local AI servers you configure to rewrite prompts and generate media.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Clawnsole lets you choose images and videos from your Photos library as generation inputs or references for any provider.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Clawnsole connects to local AI servers you configure to rewrite prompts and generate media.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clawnsole adds the generated images and videos you choose to save to your Photos library.</string>
 	<key>NSCameraUsageDescription</key>
