@@ -39,6 +39,8 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Clawnsole connects to local AI servers you configure to rewrite prompts and generate media.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Clawnsole lets you choose images and videos from your Photos library as generation inputs or references for any provider.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

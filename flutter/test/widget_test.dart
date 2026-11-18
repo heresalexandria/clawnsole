@@ -6789,7 +6789,7 @@ void main() {
       );
       expect(
         tester.widget<Text>(balance).data,
-        provider.isLocal ? provider.name : '${provider.name} ↗',
+        !provider.requiresApiKey ? provider.name : '${provider.name} ↗',
       );
       // The footer readout shows the whole name as a segment display
       // would spell it.

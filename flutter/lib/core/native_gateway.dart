@@ -1070,6 +1070,14 @@ class NativeGateway extends DirectGateway
   @override
   Future<bool> shareMedia(Generation item) async {
     if (!supportsShareSheet) return false;
+    if (providerById(
+          item.provider,
+        ).resultDelivery.requiresRetentionForPlayback &&
+        item.resultAsset == null) {
+      throw StateError(
+        'This media is still saving from your server. Keep the server online and try again after it is saved.',
+      );
+    }
     if (item.resultAsset == null && item.resultUrl == null) {
       throw StateError('This media is not available.');
     }
@@ -1119,10 +1127,23 @@ class NativeGateway extends DirectGateway
   /// asset first, then the provider link while it is still live.
   Future<Uint8List> _generationMediaBytes(Generation item) async {
     final asset = item.resultAsset;
+    final mustRetain = providerById(
+      item.provider,
+    ).resultDelivery.requiresRetentionForPlayback;
+    if (asset == null && mustRetain) {
+      throw StateError(
+        'This media is still saving from your server. Try again after it is saved.',
+      );
+    }
     if (asset == null) return downloadMedia(item.resultUrl!);
     try {
       return await readAsset(asset);
     } on Object {
+      if (mustRetain) {
+        throw StateError(
+          'The saved media is not available on this device yet. Wait for its library transfer and try again.',
+        );
+      }
       if (item.resultUrl == null) rethrow;
       return await downloadMedia(item.resultUrl!);
     }

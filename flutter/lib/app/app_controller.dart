@@ -12,6 +12,7 @@ import '../core/async_value_cache.dart';
 import '../core/background_activity.dart';
 import '../core/bfl_api.dart';
 import '../core/composer_tabs.dart';
+import '../core/comfyui_settings.dart';
 import '../core/aesthetic_reference.dart';
 import '../core/create_defaults.dart';
 import '../core/data_location.dart';
@@ -24,9 +25,11 @@ import '../core/google_drive_upload_pump.dart';
 import '../core/library_rules.dart' as library_rules;
 import '../core/media_cache_gateway.dart';
 import '../core/models.dart';
+import '../core/media_share.dart';
 import '../core/pricing.dart';
 import '../core/prompt_rewrite.dart';
 import '../core/provider_catalog.dart';
+import '../core/provider_configuration.dart';
 import '../core/provider_manifest.dart';
 import '../core/provider_model_selection.dart';
 import '../core/reference_prompts.dart';
@@ -1784,6 +1787,16 @@ class AppController extends ChangeNotifier {
       !selectedModel.supportsOrderedMiddleFrames && form.usesTimedKeyframes;
   bool get requiresFixedDuration =>
       !selectedModel.supportsOrderedMiddleFrames && form.requiresFixedDuration;
+  bool providerModelNeedsConfiguration(String provider, String model) =>
+      providerById(provider).requiresConfiguration &&
+      !configuredProviderModels(
+        provider,
+        snapshot?.preferences.providerConfigurations[provider],
+      ).contains(model);
+
+  bool _canAccessProviderJob(String provider) =>
+      !providerById(provider).requiresApiKey || hasApiKeyFor(provider);
+
   bool get hasApiKey => hasApiKeyFor(selectedProviderId);
   bool hasApiKeyFor(String provider) =>
       snapshot?.hasApiKeyFor(provider) ?? false;
@@ -1810,7 +1823,7 @@ class AppController extends ChangeNotifier {
       _pendingWorkCache = current.generations.any(
         (item) =>
             ((item.isWorking || item.needsResultRetention) &&
-                hasApiKeyFor(item.provider)) ||
+                _canAccessProviderJob(item.provider)) ||
             (gateway is GenerationDeliveryGateway &&
                 item.needsResultRetention &&
                 item.resultUrl != null),
@@ -2771,6 +2784,40 @@ class AppController extends ChangeNotifier {
   /// Whether any delivered film could be picked as a draft to enhance.
   bool get hasDraftEnhanceCandidates => generations.any(canEnhance);
 
+  ComfyUiSettings get comfyUiSettings => ComfyUiSettings.fromJson(
+    snapshot?.preferences.providerConfigurations['comfyui'],
+  );
+
+  Future<void> saveComfyUiSettings(ComfyUiSettings settings) async {
+    settings.validate();
+    final target = gateway;
+    if (target is! ProviderConfigurationGateway) {
+      throw StateError('ComfyUI configuration is unavailable in this gateway.');
+    }
+    final account = await (target as ProviderConfigurationGateway)
+        .verifyProviderConfiguration('comfyui', settings.toJson());
+    await _savePreferences(
+      _preferences().copyWith(
+        providerConfigurations: {
+          ...?snapshot?.preferences.providerConfigurations,
+          'comfyui': settings.toJson(),
+        },
+      ),
+    );
+    providerAccounts['comfyui'] = account;
+    notifyListeners();
+  }
+
+  Future<void> removeComfyUiSettings() async {
+    final configurations = {...?snapshot?.preferences.providerConfigurations}
+      ..remove('comfyui');
+    await _savePreferences(
+      _preferences().copyWith(providerConfigurations: configurations),
+    );
+    providerAccounts.remove('comfyui');
+    notifyListeners();
+  }
+
   Future<void> setThemeMode(AppThemeMode value) async {
     if (value == themeMode) return;
     themeMode = value;
@@ -3075,6 +3122,7 @@ class AppController extends ChangeNotifier {
             folders: value.folders,
             savedReferences: value.savedReferences,
             preferences: _preferences().copyWith(
+              providerConfigurations: value.preferences.providerConfigurations,
               providerRetentionAcknowledgements:
                   value.preferences.providerRetentionAcknowledgements,
             ),
@@ -5000,7 +5048,11 @@ class AppController extends ChangeNotifier {
       .firstOrNull;
 
   String? _generationReferenceUrl(Generation? item) =>
-      item == null || item.deliveryExpired
+      item == null ||
+          item.deliveryExpired ||
+          providerById(
+            item.provider,
+          ).resultDelivery.requiresRetentionForPlayback
       ? null
       : _usablePublicSource(item.resultUrl, expiresAt: item.deliveryExpiresAt);
 
@@ -5100,7 +5152,11 @@ class AppController extends ChangeNotifier {
           (item) =>
               !item.hidden &&
               item.isReady &&
-              (item.resultAsset != null || item.resultUrl != null) &&
+              (item.resultAsset != null ||
+                  (!providerById(
+                        item.provider,
+                      ).resultDelivery.requiresRetentionForPlayback &&
+                      item.resultUrl != null)) &&
               (kind == MediaReferenceKind.image ? item.isImage : !item.isImage),
         )
         .map((item) {
@@ -5591,6 +5647,8 @@ class AppController extends ChangeNotifier {
         autoFixReferenceVideos ?? this.autoFixReferenceVideos,
     createDefaults: createDefaults ?? this.createDefaults,
     themeMode: themeMode ?? this.themeMode,
+    providerConfigurations:
+        snapshot?.preferences.providerConfigurations ?? const {},
     rewriteProvider: rewriteProviderId,
     rewriteModels: Map<String, String>.of(rewriteModelIds),
     rewriteEfforts: Map<String, String>.of(rewriteEfforts),
@@ -5699,7 +5757,16 @@ class AppController extends ChangeNotifier {
     );
     _rememberGenerationPreferences(_draftTab, onlyIfAbsent: true);
     selectedProviderId = provider.id;
-    selectedModelId = provider.defaultModel.id;
+    final configured = configuredProviderModels(
+      provider.id,
+      snapshot?.preferences.providerConfigurations[provider.id],
+    );
+    selectedModelId =
+        provider.models
+            .where((model) => configured.contains(model.id))
+            .firstOrNull
+            ?.id ??
+        provider.defaultModel.id;
     _selectCompatibleModel();
     if (generationPreferenceKey(selectedProviderId, selectedModelId) !=
         previousKey) {
@@ -7060,6 +7127,9 @@ class AppController extends ChangeNotifier {
   String? validate() {
     final provider = selectedProvider;
     final model = selectedModel;
+    if (providerModelNeedsConfiguration(provider.id, model.id)) {
+      return 'Configure this workflow in Providers before generating.';
+    }
     if (provider.requiresApiKey && !hasApiKey) {
       return 'Add your ${provider.name} API key before generating.';
     }
@@ -7743,7 +7813,12 @@ class AppController extends ChangeNotifier {
     if (gateway is GenerationDeliveryGateway) {
       return _pollDeliveryStages(ignoreSchedule: ignoreSchedule);
     }
-    if (!hasAnyApiKey) return;
+    if (!hasAnyApiKey &&
+        !generations.any(
+          (item) => item.canCheckStatus && _canAccessProviderJob(item.provider),
+        )) {
+      return;
+    }
     if (_polling) {
       // A pass blocked behind an in-flight poll must not silently drop a
       // foreground-return reconcile: that in-flight request may be a stale
@@ -7758,7 +7833,7 @@ class AppController extends ChangeNotifier {
       if (!item.canCheckStatus || _statusChecks.contains(item.localId)) {
         return false;
       }
-      if (!hasApiKeyFor(item.provider)) return false;
+      if (!_canAccessProviderJob(item.provider)) return false;
       final due = ignoreSchedule || item.isStatusCheckDue(now);
       final needsRetention =
           (ignoreSchedule
@@ -9565,40 +9640,47 @@ class AppController extends ChangeNotifier {
     if (item.resultAsset == null && item.resultUrl == null) {
       throw StateError('This media is not available.');
     }
+    final mustRetain = providerById(
+      item.provider,
+    ).resultDelivery.requiresRetentionForPlayback;
     late Uint8List bytes;
     if (item.resultAsset == null) {
+      if (mustRetain) {
+        throw StateError(
+          'This media is still saving from your server. Keep the server online and try again after it is saved.',
+        );
+      }
       bytes = await gateway.downloadMedia(item.resultUrl!);
     } else {
       try {
         bytes = await gateway.readAsset(item.resultAsset!);
       } on Object {
+        if (mustRetain) {
+          throw StateError(
+            'The saved media is not available on this device yet. Wait for its library transfer and try again.',
+          );
+        }
         if (item.resultUrl == null) rethrow;
         bytes = await gateway.downloadMedia(item.resultUrl!);
       }
     }
-    final baseName =
-        'clawnsole-${item.createdAt.toIso8601String().substring(0, 10)}-'
-        '${item.localId.substring(0, item.localId.length.clamp(0, 6))}';
+    final fileName = generationMediaFileName(item);
     final contentType =
         item.resultAsset?.contentType ??
         (item.isImage ? 'image/png' : 'video/mp4');
-    final extension = item.isImage ? 'png' : 'mp4';
+    final extension = fileName.split('.').last;
     final noun = item.isImage ? 'Image' : 'Video';
     if (destination == VideoSaveDestination.photos) {
-      await gateway.saveMediaToPhotoLibrary(
-        bytes,
-        '$baseName.$extension',
-        contentType,
-      );
+      await gateway.saveMediaToPhotoLibrary(bytes, fileName, contentType);
       showNotice('$noun saved to Photos.');
       return null;
     }
     final location = await FilePicker.saveFile(
       dialogTitle: 'Save Clawnsole ${noun.toLowerCase()}',
-      fileName: '$baseName.$extension',
+      fileName: fileName,
       bytes: bytes,
       type: item.isImage ? FileType.image : FileType.custom,
-      allowedExtensions: item.isImage ? null : const <String>['mp4'],
+      allowedExtensions: item.isImage ? null : <String>[extension],
     );
     if (location == null) {
       showNotice(
@@ -9634,6 +9716,11 @@ class AppController extends ChangeNotifier {
       } on Object {
         if (item.resultUrl == null) rethrow;
       }
+    }
+    if (providerById(
+      item.provider,
+    ).resultDelivery.requiresRetentionForPlayback) {
+      return null;
     }
     return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
   }
@@ -9676,6 +9763,11 @@ class AppController extends ChangeNotifier {
     if (asset != null && asset.kind == 'drive' && cacheGateway != null) {
       final cached = await cacheGateway.cachedVideoAssetUri(asset);
       if (cached != null) return cached;
+      if (providerById(
+        item.provider,
+      ).resultDelivery.requiresRetentionForPlayback) {
+        return null;
+      }
       return item.resultUrl == null ? null : gateway.mediaUri(item.resultUrl!);
     }
     return generationMediaUri(item);

@@ -1,4 +1,6 @@
 import 'provider_submission.dart';
+import 'comfyui_api.dart';
+import 'comfyui_settings.dart';
 import 'apipod_api.dart';
 import 'artcraft_api.dart';
 import 'atlas_cloud_api.dart';
@@ -9,6 +11,7 @@ import 'ltx_api.dart';
 import 'models.dart';
 import 'provider_catalog.dart';
 import 'runway_api.dart';
+import 'package:http/http.dart' as http;
 
 class ProviderApiRouter {
   ProviderApiRouter({
@@ -20,6 +23,7 @@ class ProviderApiRouter {
     RunwayApi? runway,
     KreaApi? krea,
     FalApi? fal,
+    ComfyUiApi? comfyui,
   }) : apipod = apipod ?? ApipodApi(),
        bfl = bfl ?? BflApi(),
        ltx = ltx ?? LtxApi(),
@@ -27,7 +31,8 @@ class ProviderApiRouter {
        atlas = atlas ?? AtlasCloudApi(),
        runway = runway ?? RunwayApi(),
        krea = krea ?? KreaApi(),
-       fal = fal ?? FalApi();
+       fal = fal ?? FalApi(),
+       comfyui = comfyui ?? ComfyUiApi();
 
   final ApipodApi apipod;
   final BflApi bfl;
@@ -37,6 +42,32 @@ class ProviderApiRouter {
   final RunwayApi runway;
   final KreaApi krea;
   final FalApi fal;
+  final ComfyUiApi comfyui;
+
+  Future<ProviderAccountStatus> verifyConfiguration(
+    String provider,
+    Map<String, Object?> configuration,
+  ) => switch (_adapter(provider)) {
+    'comfyui' => comfyui.verify(ComfyUiSettings.fromJson(configuration)),
+    _ => throw const ProviderException(
+      'This provider does not accept workflow configuration.',
+    ),
+  };
+
+  /// Provider-owned delivery routes may allow a private network address. All
+  /// other providers continue through the gateway's public media policy.
+  Future<http.StreamedResponse?> downloadResult(
+    String provider,
+    String source,
+    String pollingUrl,
+  ) async => providerByIdForRouting(provider)?.adapter == 'comfyui'
+      ? comfyui.downloadResult(source, pollingUrl)
+      : null;
+
+  String? resultUrl(String provider, Object? result) =>
+      _adapter(provider) == 'comfyui' && result is Map
+      ? result['sample'] as String?
+      : findResultUrl(result, draft: false);
 
   String _adapter(String provider) {
     final definition = providerByIdForRouting(provider);
@@ -72,7 +103,14 @@ class ProviderApiRouter {
     Map<String, Object?> input, {
     BeforeGenerationSend? beforeSend,
     String? operationId,
+    Map<String, Object?> configuration = const {},
   }) => switch (_adapter(provider)) {
+    'comfyui' => comfyui.submit(
+      ComfyUiSettings.fromJson(configuration),
+      model,
+      input,
+      beforeSend: beforeSend,
+    ),
     'apipod' => apipod.submit(
       key,
       model,
@@ -103,6 +141,7 @@ class ProviderApiRouter {
     String key,
     String pollingUrl,
   ) => switch (_adapter(provider)) {
+    'comfyui' => comfyui.poll(pollingUrl),
     'apipod' => apipod.poll(key, pollingUrl),
     'ltx' => ltx.poll(key, pollingUrl),
     'artcraft' => artcraft.poll(key, pollingUrl),
@@ -123,7 +162,10 @@ class ProviderApiRouter {
         'runway' => runway.listVideoModels(),
         'krea' => krea.listVideoModels(),
         'fal' => fal.listVideoModels(key),
-        'apipod' || 'bfl' || 'ltx' => Future<List<ProviderModelPrice>>.value(
+        'comfyui' ||
+        'apipod' ||
+        'bfl' ||
+        'ltx' => Future<List<ProviderModelPrice>>.value(
           publishedProviderPrices(provider),
         ),
         final adapter => throw ProviderException(

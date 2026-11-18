@@ -5288,6 +5288,10 @@ class _ComposerFooter extends StatelessWidget {
     final localUnavailable =
         controller.selectedProvider.isLocal &&
         !controller.localGenerationAvailable;
+    final needsConfiguration = controller.providerModelNeedsConfiguration(
+      controller.selectedProviderId,
+      controller.selectedModelId,
+    );
     final needsKey =
         controller.selectedProvider.requiresApiKey && !controller.hasApiKey;
     // The footer speaks only when something stands between the studio and
@@ -5318,7 +5322,7 @@ class _ComposerFooter extends StatelessWidget {
               ),
             ],
           )
-        : needsKey
+        : needsKey || needsConfiguration
         // The status line is where a new studio looks first when Generate
         // does nothing; make it the way in, not just a verdict.
         ? Row(
@@ -5337,7 +5341,9 @@ class _ComposerFooter extends StatelessWidget {
                       unawaited(controller.navigate(AppSection.providers)),
                   borderRadius: BorderRadius.circular(6),
                   child: Text(
-                    'API key needed · Open Providers',
+                    needsConfiguration
+                        ? 'Workflow setup needed · Open Providers'
+                        : 'API key needed · Open Providers',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(

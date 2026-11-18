@@ -35,6 +35,7 @@ class WebGateway
         AppGateway,
         GenerationDeliveryGateway,
         ProviderGateway,
+        ProviderConfigurationGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
         ComposerTabsGateway,
@@ -587,6 +588,25 @@ class WebGateway
   @override
   Future<LocalSnapshot> acknowledgeProviderRetentionRisk(String provider) =>
       _action('acknowledgeProviderRetentionRisk', provider);
+
+  @override
+  Future<ProviderAccountStatus> verifyProviderConfiguration(
+    String provider,
+    Map<String, Object?> configuration,
+  ) async => ProviderAccountStatus.fromJson(
+    _map(
+      await _read(
+        await _client.post(
+          _url('/providers/verify-configuration'),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'provider': provider,
+            'configuration': configuration,
+          }),
+        ),
+      ),
+    ),
+  );
 
   @override
   Future<double> verifyKey([String? candidate]) async {

@@ -23,6 +23,7 @@ import 'prompt_rewrite.dart';
 import 'prompt_rewrite_router.dart';
 import 'provider_api.dart';
 import 'provider_catalog.dart';
+import 'provider_configuration.dart';
 import 'provider_submission.dart';
 import 'reference_video_normalizer.dart';
 import 'settings_vault_gateway.dart';
@@ -46,6 +47,7 @@ class DirectGateway
         TemporaryMediaHostingGateway,
         TemporaryMediaConsentGateway,
         ProviderGateway,
+        ProviderConfigurationGateway,
         ProviderRetentionAcknowledgementGateway,
         ProviderCatalogCacheGateway,
         ComposerTabsGateway,
@@ -338,6 +340,11 @@ class DirectGateway
           (provider) =>
               (availableProviders.contains(provider.id) ||
                   availableProviders.contains(provider.adapter)) &&
+              (!provider.requiresConfiguration ||
+                  providerConfigurationReady(
+                    provider.id,
+                    data.preferences.providerConfigurations[provider.id],
+                  )) &&
               (!provider.requiresApiKey ||
                   activeApiKey(provider.id, data) != null),
         )
@@ -489,6 +496,12 @@ class DirectGateway
   }
 
   @override
+  Future<ProviderAccountStatus> verifyProviderConfiguration(
+    String provider,
+    Map<String, Object?> configuration,
+  ) => _providers.verifyConfiguration(provider, configuration);
+
+  @override
   Future<LocalSnapshot> setApiKey(String value) async {
     return setProviderApiKey('bfl', value);
   }
@@ -575,6 +588,9 @@ class DirectGateway
 
   @override
   Future<LocalSnapshot> setPreferences(AppPreferences preferences) async {
+    for (final entry in preferences.providerConfigurations.entries) {
+      validateProviderConfiguration(entry.key, entry.value);
+    }
     final current = await _store.read();
     final next = current.copyWith(
       // Warning choices are changed through their dedicated acknowledgement
@@ -1362,7 +1378,7 @@ class DirectGateway
     }
     final credential = activeApiKey(provider, data);
     final key = credential?.value ?? '';
-    if (key.isEmpty) {
+    if (key.isEmpty && providerDefinition.requiresApiKey) {
       throw StateError(
         'Add a ${providerById(provider).name} API key before generating.',
       );
@@ -1446,6 +1462,8 @@ class DirectGateway
           record.model,
           input,
           operationId: record.localId,
+          configuration:
+              data.preferences.providerConfigurations[provider] ?? const {},
           beforeSend: () async {
             if (usesTemporaryHosting) {
               await temporaryMediaHost!.beforeSend(record.localId);
@@ -1598,6 +1616,30 @@ class DirectGateway
     String url,
     Generation generation,
   ) async {
+    final providerResponse = await _providers.downloadResult(
+      generation.provider,
+      url,
+      generation.pollingUrl ?? '',
+    );
+    if (providerResponse != null) {
+      final String contentType;
+      try {
+        contentType = passiveMediaContentType(
+          providerResponse.headers['content-type'],
+        );
+      } on Object {
+        await discardStream(providerResponse.stream);
+        rethrow;
+      }
+      return _store.writeAssetStream(
+        await validatedPassiveMediaStream(providerResponse.stream),
+        label:
+            'clawnsole-${generation.localId}.${generation.isImage ? 'png' : 'mp4'}',
+        contentType: contentType,
+        storage: generation.storage,
+        expectedLength: providerResponse.contentLength,
+      );
+    }
     // A platform background transfer service outlives suspension: once the
     // download starts, the OS finishes it even if the process is frozen or
     // terminated, and the recovery pass imports it on the next return. The
@@ -1916,7 +1958,7 @@ class DirectGateway
     try {
       credential = activeApiKey(generation.provider, await _store.read());
       final key = credential?.value ?? '';
-      if (key.isEmpty) {
+      if (key.isEmpty && providerById(generation.provider).requiresApiKey) {
         throw StateError(
           'The saved ${providerById(generation.provider).name} API key is missing.',
         );
@@ -1946,7 +1988,7 @@ class DirectGateway
       // Fresh links come only from a payload that itself reported ready — a
       // failure payload must never have an incidental URL mistaken for one.
       final resultUrl = reportedStatus == 'Ready'
-          ? findResultUrl(result, draft: false)
+          ? _providers.resultUrl(generation.provider, result)
           : null;
       final draftUrl = reportedStatus == 'Ready'
           ? findResultUrl(result, draft: true)

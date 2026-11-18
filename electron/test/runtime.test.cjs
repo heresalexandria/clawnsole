@@ -107,7 +107,7 @@ test("external navigation is HTTPS-only and explicitly allowlisted", () => {
 });
 
 test("every provider catalog link is allowlisted for desktop", () => {
-  const catalog = ["provider_catalog.dart", "fal_catalog.dart"]
+  const catalog = ["provider_catalog.dart", "fal_catalog.dart", "comfyui_catalog.dart"]
     .map((file) => fs.readFileSync(
       path.join(__dirname, "..", "..", "flutter", "lib", "core", file),
       "utf8",

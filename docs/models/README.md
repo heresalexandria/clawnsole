@@ -122,7 +122,7 @@ derive them from output durations or reference counts.
 
 A provider manifest also declares an `adapter`. A catalog update can add a new
 provider ID without an app release when it uses a wire adapter already present
-in that app build: `apple-local`, `apipod`, `artcraft`, `atlas`, `bfl`, `fal`, `krea`,
+in that app build: `apple-local`, `apipod`, `artcraft`, `atlas`, `bfl`, `comfyui`, `fal`, `krea`,
 `ltx`, or `runway`. `apple-local` is implemented only by the native iOS app. A genuinely
 new API protocol still requires an app release that implements its adapter;
 older builds safely ignore providers whose adapter they do not understand.
@@ -181,3 +181,12 @@ image alongside a source video for motion-transfer routes.
 routes that only accept hosted media. `requires_start_frame_when_using_frames`
 requires a first frame before a positional last frame; both default to false
 and are preserved by the bundled fallback when omitted remotely.
+
+## ComfyUI provider
+
+The self-hosted `comfyui` adapter exposes image and video workflow slots. It uses
+`requires_configuration: true` instead of an API-key requirement, and
+`result_delivery.requires_retention_for_playback: true` keeps private server
+URLs out of browser/native-player fallback paths. Older apps ignore this unknown
+adapter; new builds use the same configuration, queue, and retention protocol
+on native Flutter and the Electron companion. See [ComfyUI setup](../comfyui.md).

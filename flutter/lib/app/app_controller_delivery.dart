@@ -7,7 +7,8 @@ extension _AppControllerDelivery on AppController {
     final now = DateTime.now().toUtc();
     for (final item in generations) {
       if (item.resultUrl != null &&
-          (item.resultRetentionFailures == 0 || !hasApiKeyFor(item.provider)) &&
+          (item.resultRetentionFailures == 0 ||
+              !_canAccessProviderJob(item.provider)) &&
           (ignoreSchedule
               ? item.needsResultRetention
               : item.isResultRetentionDue(now))) {
@@ -21,7 +22,7 @@ extension _AppControllerDelivery on AppController {
     _pollAgainIgnoringSchedule = false;
     final working = generations.where((item) {
       if (!item.canCheckStatus ||
-          !hasApiKeyFor(item.provider) ||
+          !_canAccessProviderJob(item.provider) ||
           _statusChecks.contains(item.localId) ||
           _queuedRetentions.containsKey(item.localId) ||
           _activeRetentions.contains(item.localId)) {
@@ -42,7 +43,7 @@ extension _AppControllerDelivery on AppController {
         if (_disposed) break;
         final item = _currentGeneration(original.localId);
         if (item == null ||
-            !hasApiKeyFor(item.provider) ||
+            !_canAccessProviderJob(item.provider) ||
             !_statusChecks.add(item.localId)) {
           continue;
         }

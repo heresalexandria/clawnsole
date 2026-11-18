@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "comfyui-video",
+  "label": "Video workflow",
+  "description": "An imported API workflow, such as your installed H3 or LTX graph.",
+  "generation_notice": "Your imported workflow selects the model and controls rendering. Output controls affect only inputs you mapped with workflow placeholders. Keep the server running until the result is saved.",
+  "modes": [
+    "t2v"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16"
+  ],
+  "resolutions": [
+    {
+      "id": "hd",
+      "label": "768 px",
+      "detail": "Long edge; mapped dimensions align to 64 px"
+    },
+    {
+      "id": "fhd",
+      "label": "1024 px",
+      "detail": "Long edge; mapped dimensions align to 64 px"
+    }
+  ],
+  "min_duration": 1,
+  "max_duration": 20,
+  "duration_step": 1,
+  "max_keyframes": 0,
+  "usd_per_second": 0,
+  "supports_audio": false,
+  "supports_seed": true,
+  "output_kind": "video"
+}
