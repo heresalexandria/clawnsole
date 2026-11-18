@@ -1,6 +1,6 @@
 {
   "name": "clawnsole-electron",
-  "version": "0.67.0",
+  "version": "0.68.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -59,9 +59,6 @@
         "NSLocalNetworkUsageDescription": "Clawnsole connects to local AI servers you configure to rewrite prompts and generate media."
       },
       "category": "public.app-category.graphics-design",
-      "extendInfo": {
-        "NSLocalNetworkUsageDescription": "Clawnsole connects to local AI servers you configure to rewrite prompts and generate media."
-      },
       "hardenedRuntime": true,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
